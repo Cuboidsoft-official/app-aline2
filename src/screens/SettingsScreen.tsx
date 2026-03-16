@@ -182,7 +182,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
     <TouchableOpacity
      style={styles.item}
-     onPress={() => navigation.navigate("VendorDashboard")}
+     onPress={() => navigation.navigate("SellerDashboardScreen")}
     >
      <Text style={styles.text}>Seller dashboard</Text>
      <Icon name="chevron-forward" size={20}/>

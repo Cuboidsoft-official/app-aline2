@@ -22,6 +22,9 @@ import BlockedUsersScreen from './src/screens/BlockedUsersScreen';
 import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
 import DeleteAccountScreen from './src/screens/DeleteAccountScreen';
 import SellerRegistration from './src/screens/SellerRegistration';
+import SellerDashboardScreen from './src/screens/SellerDashboardScreen';
+import AddServiceScreen from './src/screens/AddServiceScreen';
+import SellerSettingsScreen from './src/screens/SellerSettingsScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
 
@@ -64,9 +67,10 @@ export default function App() {
           <Stack.Screen name="NotificationSettingsScreen" component={NotificationSettingsScreen} />
           <Stack.Screen name="DeleteAccountScreen" component={DeleteAccountScreen} />
           <Stack.Screen name="SellerRegistration" component={SellerRegistration} />
-
+          <Stack.Screen name="SellerDashboardScreen" component={SellerDashboardScreen} />
+          <Stack.Screen name="AddServiceScreen" component={AddServiceScreen} />
+          <Stack.Screen name="SellerSettingsScreen" component={SellerSettingsScreen} />
         </Stack.Navigator>
-
       </NavigationContainer>
     </GestureHandlerRootView>
   );
