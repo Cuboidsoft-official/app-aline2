@@ -17,6 +17,11 @@ import CreatePostScreen from './src/screens/CreatePostScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import ChatDetailsScreen from './src/screens/ChatDetailsScreen';
 import AllChatsScreen from './src/screens/AllChatsScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
+import BlockedUsersScreen from './src/screens/BlockedUsersScreen';
+import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
+import DeleteAccountScreen from './src/screens/DeleteAccountScreen';
+import SellerRegistration from './src/screens/SellerRegistration';
 
 import BottomTabs from './src/navigation/BottomTabs';
 
@@ -54,6 +59,11 @@ export default function App() {
           <Stack.Screen name="ChatScreen" component={ChatScreen} />
           <Stack.Screen name="ChatDetailsScreen" component={ChatDetailsScreen} />
           <Stack.Screen name="AllChatsScreen" component={AllChatsScreen} />
+          <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
+          <Stack.Screen name="BlockedUsersScreen" component={BlockedUsersScreen} />
+          <Stack.Screen name="NotificationSettingsScreen" component={NotificationSettingsScreen} />
+          <Stack.Screen name="DeleteAccountScreen" component={DeleteAccountScreen} />
+          <Stack.Screen name="SellerRegistration" component={SellerRegistration} />
 
         </Stack.Navigator>
 

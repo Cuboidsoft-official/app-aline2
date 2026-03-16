@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
 View,
 Text,
@@ -13,31 +13,86 @@ SafeAreaView,
 StatusBar
 } from "react-native";
 
+import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
+import { socket } from "../socket";
 
 const ChatScreen = ({ navigation, route }) => {
 
-const { userId } = route.params || {};
+const { userId, conversationId } = route.params || {};
 
 const [user, setUser] = useState(null);
 const [text, setText] = useState("");
 const [showTools, setShowTools] = useState(false);
+const [messages, setMessages] = useState([]);
 
-const [messages, setMessages] = useState([
-{ id: "1", message: "Hello 👋", sender: "other" },
-{ id: "2", message: "Hi bro", sender: "me" }
-]);
 
 useEffect(() => {
+
+console.log("USER:", userId);
+console.log("CONVERSATION:", conversationId);
 
 if (userId) {
  fetchUser();
 }
 
-}, [userId]);
+if (conversationId) {
+ fetchMessages();
+ socket.emit("joinConversation", conversationId);
+}
 
+socket.emit("userOnline", userId);
+
+}, [userId, conversationId]);
+
+
+
+/* SCREEN FOCUS → MESSAGES RELOAD */
+useFocusEffect(
+useCallback(() => {
+
+ if (conversationId) {
+
+  fetchMessages();
+
+ }
+
+}, [conversationId])
+);
+
+
+
+/* REALTIME MESSAGE LISTENER */
+useEffect(() => {
+
+socket.on("receiveMessage", (message) => {
+
+ console.log("Realtime message:", message);
+
+ setMessages(prev => {
+
+  const exists = prev.find(m => m._id === message._id);
+
+  if (exists) return prev;
+
+  return [...prev, message];
+
+ });
+
+});
+
+return () => {
+
+ socket.off("receiveMessage");
+
+};
+
+}, []);
+
+
+// FETCH USER
 const fetchUser = async () => {
 
 try {
@@ -58,24 +113,93 @@ console.log("User fetch error:", err?.response?.data || err);
 
 };
 
-const sendMessage = () => {
+
+// FETCH MESSAGES
+const fetchMessages = async () => {
+
+try {
+
+const token = await AsyncStorage.getItem("token");
+
+const res = await API.get(`/message/${conversationId}`, {
+headers: { Authorization: `Bearer ${token}` }
+});
+
+console.log("MESSAGES:", res.data);
+
+if (res?.data?.messages) {
+
+console.log("Setting messages:", res.data.messages);
+
+setMessages(res.data.messages);
+
+}
+} catch (err) {
+
+console.log("Fetch messages error:", err?.response?.data || err);
+
+}
+
+};
+
+
+// SEND MESSAGE
+const sendMessage = async () => {
 
 if (!text.trim()) return;
 
-const newMsg = {
-id: Date.now().toString(),
-message: text,
-sender: "me"
-};
+try {
 
-setMessages(prev => [...prev, newMsg]);
+const token = await AsyncStorage.getItem("token");
+
+console.log("Sending message:", {
+conversationId,
+text
+});
+
+const res = await API.post(
+"/message/send",
+{
+conversationId,
+text,
+messageType: "text"
+},
+{
+headers: { Authorization: `Bearer ${token}` }
+}
+);
+
+console.log("SEND RESPONSE:", res.data);
+
+if (res?.data?.message) {
+
+setMessages(prev => [...prev, res.data.message]);
+
+socket.emit("sendMessage", {
+conversationId,
+message: res.data.message
+});
+
+}
+
 setText("");
 
+} catch (err) {
+
+console.log("Send message error:", err?.response?.data || err);
+
+}
+
 };
 
+
+// RENDER MESSAGE
 const renderMessage = ({ item }) => {
 
-const isMine = item.sender === "me";
+const isMine =
+item.sender === "me" ||
+item.senderId === userId ||
+item?.sender === userId;
 
 return (
 
@@ -93,9 +217,20 @@ isMine ? styles.myMessage : styles.otherMessage
 ]}
 >
 
+{item.messageType === "gif" ? (
+
+<Image
+source={{ uri: item.text }}
+style={{ width: 200, height: 200, borderRadius: 10 }}
+/>
+
+) : (
+
 <Text style={styles.messageText}>
-{item.message}
+{item.text || item.message || item.content}
 </Text>
+
+)}
 
 </View>
 
@@ -105,13 +240,15 @@ isMine ? styles.myMessage : styles.otherMessage
 
 };
 
+
 const tools = [
 { id: "1", name: "Camera", icon: "camera" },
 { id: "2", name: "Gallery", icon: "image" },
 { id: "3", name: "Location", icon: "location" },
 { id: "4", name: "Contact", icon: "person" },
 { id: "5", name: "Document", icon: "document" },
-{ id: "6", name: "Audio", icon: "musical-notes" }
+{ id: "6", name: "Audio", icon: "musical-notes" },
+{ id: "7", name: "GIF", icon: "happy" }
 ];
 
 return (
@@ -120,15 +257,12 @@ return (
 
 <StatusBar backgroundColor="#7b3fe4" barStyle="light-content" />
 
-{/* HEADER */}
 
 <View style={styles.header}>
 
 <TouchableOpacity onPress={() => navigation.goBack()}>
 <Icon name="arrow-back" size={24} color="#fff" />
 </TouchableOpacity>
-
-{/* USER INFO */}
 
 <TouchableOpacity
 style={styles.userInfo}
@@ -159,8 +293,6 @@ online
 
 </TouchableOpacity>
 
-{/* HEADER ICONS */}
-
 <View style={styles.headerIcons}>
 
 <TouchableOpacity style={{ marginRight: 15 }}>
@@ -179,7 +311,6 @@ online
 
 </View>
 
-{/* CHAT AREA */}
 
 <ImageBackground
 source={{
@@ -192,7 +323,8 @@ resizeMode="cover"
 
 <FlatList
 data={messages}
-keyExtractor={(item) => item.id}
+extraData={messages}
+keyExtractor={(item,index)=>item._id || item.id || index.toString()}
 renderItem={renderMessage}
 contentContainerStyle={{ padding: 12 }}
 showsVerticalScrollIndicator={false}
@@ -200,7 +332,6 @@ showsVerticalScrollIndicator={false}
 
 </ImageBackground>
 
-{/* TOOLBOX */}
 
 <Modal visible={showTools} transparent animationType="slide">
 
@@ -239,7 +370,6 @@ renderItem={({ item }) => (
 
 </Modal>
 
-{/* INPUT */}
 
 <View style={styles.inputContainer}>
 

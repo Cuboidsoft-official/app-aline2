@@ -16,7 +16,6 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { Modal } from "react-native";
 import { API } from "../api/api";
 
-
 const ProfileScreen = ({navigation}: any) => {
 
  const [user, setUser] = useState(null);
@@ -25,7 +24,6 @@ const ProfileScreen = ({navigation}: any) => {
  const [activeTab, setActiveTab] = useState("posts");
  const [menuVisible, setMenuVisible] = useState(false);
  const [isPrivate, setIsPrivate] = useState(false);
-
 
  useEffect(() => {
   fetchProfile();
@@ -43,8 +41,6 @@ const ProfileScreen = ({navigation}: any) => {
     }
    });
 
-   console.log("PROFILE DATA:", res.data);
-
    setUser(res.data.user);
    setPosts(res.data.posts || []);
 
@@ -56,8 +52,6 @@ const ProfileScreen = ({navigation}: any) => {
 
  };
 
-
- // ⭐ TOGGLE PRIVATE PROFILE
  const togglePrivateProfile = async () => {
 
   try{
@@ -121,45 +115,60 @@ const ProfileScreen = ({navigation}: any) => {
 
  return (
 
-
-
-
   <View style={styles.container}>
 
+   {/* TOP HEADER */}
 
    <View style={styles.topHeader}>
 
-         <TouchableOpacity onPress={() => navigation.goBack()}>
-         <Icon name="arrow-back" size={26} color="#000" />
-         </TouchableOpacity>
+    <TouchableOpacity onPress={() => navigation.goBack()}>
+     <Icon name="arrow-back" size={26} color="#000" />
+    </TouchableOpacity>
 
-         <Text
-          numberOfLines={1}
-          ellipsizeMode="tail"
-          style={styles.headerUsername}
-         >
-          {user?.name || "User Name"}
-         </Text>
+    <Text
+     numberOfLines={1}
+     ellipsizeMode="tail"
+     style={styles.headerUsername}
+    >
+     {user?.name || "User Name"}
+    </Text>
 
-         <TouchableOpacity onPress={() => setMenuVisible(true)}>
-          <Icon name="menu" size={28} color="#000" />
-         </TouchableOpacity>
+    <TouchableOpacity onPress={() => navigation.navigate("SettingsScreen")}>
+     <Icon name="menu" size={28} color="#000" />
+    </TouchableOpacity>
 
-     </View>
+   </View>
 
-   {/* HEADER */}
+   {/* PROFILE HEADER */}
 
    <View style={styles.header}>
 
-    <Image
-     source={{
-      uri:
-       user?.profilePic
-        ? user.profilePic
-        : "https://cdn-icons-png.flaticon.com/512/149/149071.png"
-     }}
-     style={styles.profilePic}
-    />
+    <View style={styles.profileCenter}>
+
+     <Image
+      source={{
+       uri:
+        user?.profilePic
+         ? user.profilePic
+         : "https://cdn-icons-png.flaticon.com/512/149/149071.png"
+      }}
+      style={styles.profilePic}
+     />
+
+     <Text style={styles.profileName}>
+      {user?.name || "User Name"}
+     </Text>
+
+     <View style={styles.verifiedBadge}>
+      <Icon name="checkmark-circle" size={16} color="#fff"/>
+      <Text style={styles.verifiedText}>
+       Verified with aline2
+      </Text>
+     </View>
+
+    </View>
+
+    {/* STATS */}
 
     <View style={styles.stats}>
 
@@ -168,31 +177,31 @@ const ProfileScreen = ({navigation}: any) => {
       <Text style={styles.statText}>Posts</Text>
      </View>
 
-    <TouchableOpacity
-     style={styles.stat}
-     onPress={() =>
-      navigation.navigate("FollowersFollowingScreen", {
-       userId: user?._id,
-       type: "followers"
-      })
-     }
-    >
-    <Text style={styles.statNumber}>{user?.followers?.length || 0}</Text>
-    <Text style={styles.statText}>Followers</Text>
-    </TouchableOpacity>
+     <TouchableOpacity
+      style={styles.stat}
+      onPress={() =>
+       navigation.navigate("FollowersFollowingScreen", {
+        userId: user?._id,
+        type: "followers"
+       })
+      }
+     >
+     <Text style={styles.statNumber}>{user?.followers?.length || 0}</Text>
+     <Text style={styles.statText}>Followers</Text>
+     </TouchableOpacity>
 
-    <TouchableOpacity
-     style={styles.stat}
-     onPress={() =>
-      navigation.navigate("FollowersFollowingScreen", {
-       userId: user?._id,
-       type: "following"
-      })
-     }
-    >
-    <Text style={styles.statNumber}>{user?.following?.length || 0}</Text>
-    <Text style={styles.statText}>Following</Text>
-    </TouchableOpacity>
+     <TouchableOpacity
+      style={styles.stat}
+      onPress={() =>
+       navigation.navigate("FollowersFollowingScreen", {
+        userId: user?._id,
+        type: "following"
+       })
+      }
+     >
+     <Text style={styles.statNumber}>{user?.following?.length || 0}</Text>
+     <Text style={styles.statText}>Following</Text>
+     </TouchableOpacity>
 
     </View>
 
@@ -201,7 +210,10 @@ const ProfileScreen = ({navigation}: any) => {
    {/* BIO */}
 
    <View style={styles.bioSection}>
-    <Text style={styles.name}>{user?.pronouns || "User Name"} {user?.name || "User Name"}</Text>
+    <Text style={styles.name}>
+     {user?.pronouns || ""} {user?.name || ""}
+    </Text>
+
     <Text>{user?.bio || ""}</Text>
 
     {user?.link ? (
@@ -214,7 +226,10 @@ const ProfileScreen = ({navigation}: any) => {
 
    <View style={styles.buttons}>
 
-    <TouchableOpacity style={styles.editBtn} onPress={()=> navigation.navigate("Profile")}>
+    <TouchableOpacity
+     style={styles.editBtn}
+     onPress={()=> navigation.navigate("Profile")}
+    >
      <Text style={styles.btnText}>Edit Profile</Text>
     </TouchableOpacity>
 
@@ -267,58 +282,8 @@ const ProfileScreen = ({navigation}: any) => {
     showsVerticalScrollIndicator={false}
    />
 
-
-   <Modal
-    visible={menuVisible}
-    animationType="slide"
-    transparent={true}
-   >
-
-    <TouchableOpacity
-     style={styles.modalOverlay}
-     onPress={() => setMenuVisible(false)}
-    >
-
-     <View style={styles.menuContainer}>
-
-      <TouchableOpacity style={styles.menuItem}>
-       <Text style={styles.menuText}>Become a Seller</Text>
-      </TouchableOpacity>
-
-       <TouchableOpacity
-             style={styles.menuItem}
-             onPress={togglePrivateProfile}
-        >
-         <Text style={styles.menuText}>
-          {isPrivate
-           ? "Switch to Public Profile"
-           : "Change to Private Profile"}
-         </Text>
-        </TouchableOpacity>
-
-      <TouchableOpacity style={styles.menuItem}>
-       <Text style={styles.menuText}>Help & Support</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-       style={styles.menuItem}
-       onPress={async () => {
-        await AsyncStorage.removeItem("token");
-        navigation.replace("Login");
-       }}
-      >
-       <Text style={[styles.menuText, { color: "red" }]}>
-        Logout
-       </Text>
-      </TouchableOpacity>
-
-     </View>
-
-    </TouchableOpacity>
-
-   </Modal>
-
   </View>
+
  );
 };
 
@@ -331,64 +296,66 @@ const styles = StyleSheet.create({
   backgroundColor:"#fff"
  },
 
-topHeader:{
- flexDirection:"row",
- alignItems:"center",
- justifyContent:"space-between",
- paddingHorizontal:15,
- paddingTop:50,
- paddingBottom:10,
- borderBottomWidth:1,
- borderColor:"#eee"
+ topHeader:{
+  flexDirection:"row",
+  alignItems:"center",
+  justifyContent:"space-between",
+  paddingHorizontal:15,
+  paddingTop:50,
+  paddingBottom:10,
+  borderBottomWidth:1,
+  borderColor:"#eee"
+ },
 
-},
-modalOverlay:{
- flex:1,
- backgroundColor:"rgba(0,0,0,0.3)",
- justifyContent:"flex-end"
-},
-
-menuContainer:{
- backgroundColor:"#fff",
- padding:20,
- borderTopLeftRadius:20,
- borderTopRightRadius:20
-},
-
-menuItem:{
- paddingVertical:15,
- borderBottomWidth:1,
- borderColor:"#eee"
-},
-
-menuText:{
- fontSize:16
-},
-
-headerUsername:{
- fontSize:18,
- fontWeight:"600",
- maxWidth:"60%"
-},
+ headerUsername:{
+  fontSize:18,
+  fontWeight:"600",
+  maxWidth:"60%"
+ },
 
  header:{
-  flexDirection:"row",
-  padding:20,
   alignItems:"center",
-  paddingTop: 50
+  padding:20
+ },
+
+ profileCenter:{
+  alignItems:"center"
  },
 
  profilePic:{
-  width:100,
-  height:100,
-  borderRadius:50,
-  marginRight:20
+  width:110,
+  height:110,
+  borderRadius:60
+ },
+
+ profileName:{
+  fontSize:22,
+  fontWeight:"700",
+  marginTop:10
+ },
+
+ verifiedBadge:{
+  flexDirection:"row",
+  alignItems:"center",
+  backgroundColor:"#a020f0",
+  paddingHorizontal:10,
+  paddingVertical:4,
+  borderRadius:20,
+  marginTop:5
+ },
+
+ verifiedText:{
+  color:"#fff",
+  marginLeft:5,
+  fontSize:12,
+  fontWeight:"600"
  },
 
  stats:{
-  flex:1,
   flexDirection:"row",
-  justifyContent:"space-around"
+  justifyContent:"space-around",
+  width:"100%",
+  marginTop:20
  },
 
  stat:{
@@ -404,9 +371,11 @@ headerUsername:{
   color:"#444"
  },
 
- bioSection:{
-  paddingHorizontal:20
- },
+bioSection: {
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 20,
+},
 
  name:{
   fontWeight:"bold",
