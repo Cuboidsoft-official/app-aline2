@@ -462,7 +462,8 @@ borderRadius:10,
 flexDirection:"row",
 justifyContent:"center",
 alignItems:"center",
-marginRight:10
+marginRight:10,
+paddingHorizontal: 40,
 },
 
 secondaryBtn:{

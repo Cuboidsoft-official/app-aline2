@@ -25,6 +25,8 @@ import SellerRegistration from './src/screens/SellerRegistration';
 import SellerDashboardScreen from './src/screens/SellerDashboardScreen';
 import AddServiceScreen from './src/screens/AddServiceScreen';
 import SellerSettingsScreen from './src/screens/SellerSettingsScreen';
+import WalletScreen from './src/screens/WalletScreen';
+import HowToEarnScreen from './src/screens/HowToEarnScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
 
@@ -70,6 +72,8 @@ export default function App() {
           <Stack.Screen name="SellerDashboardScreen" component={SellerDashboardScreen} />
           <Stack.Screen name="AddServiceScreen" component={AddServiceScreen} />
           <Stack.Screen name="SellerSettingsScreen" component={SellerSettingsScreen} />
+          <Stack.Screen name="WalletScreen" component={WalletScreen} />
+          <Stack.Screen name="HowToEarnScreen" component={HowToEarnScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </GestureHandlerRootView>
