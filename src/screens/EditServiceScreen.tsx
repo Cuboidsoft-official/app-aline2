@@ -15,65 +15,47 @@ import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
 
-const AddServiceScreen = ({ navigation }: any) => {
-  const [serviceName, setServiceName] = useState("");
-  const [description, setDescription] = useState("");
-  const [eligibility, setEligibility] = useState("");
-  const [pricePerMin, setPricePerMin] = useState("");
-  const [pricePerMsg, setPricePerMsg] = useState("");
-  const [packagePrice, setPackagePrice] = useState("");
-  const [image, setImage] = useState<string | null>(null);
+const EditServiceScreen = ({ route, navigation }: any) => {
+  const { service } = route.params;
+
+  const [serviceName, setServiceName] = useState(service?.serviceName || "");
+  const [description, setDescription] = useState(service?.description || "");
+  const [eligibility, setEligibility] = useState(service?.eligibility || "");
+  const [pricePerMin, setPricePerMin] = useState(
+    service?.pricePerMin?.toString() || ""
+  );
+  const [pricePerMsg, setPricePerMsg] = useState(
+    service?.pricePerMsg?.toString() || ""
+  );
+  const [packagePrice, setPackagePrice] = useState(
+    service?.packagePrice?.toString() || ""
+  );
+  const [image, setImage] = useState(service?.image || null);
+
   const [loading, setLoading] = useState(false);
 
   const pickImage = () => {
-    launchImageLibrary(
-      {
-        mediaType: "photo",
-        selectionLimit: 1
-      },
-      response => {
-        if (response?.didCancel) return;
+    launchImageLibrary({ mediaType: "photo" }, res => {
+      if (res?.didCancel) return;
 
-        if (response?.errorCode) {
-          Alert.alert("Error", "Image pick failed");
-          return;
-        }
-
-        if (response?.assets?.length > 0) {
-          setImage(response.assets[0].uri || null);
-        }
+      if (res?.errorCode) {
+        Alert.alert("Error", "Image pick failed");
+        return;
       }
-    );
+
+      if (res?.assets && res.assets.length > 0) {
+        setImage(res.assets[0].uri || null);
+      }
+    });
   };
 
-  const validateForm = () => {
+  const handleUpdate = async () => {
     if (!serviceName.trim()) {
-      Alert.alert("Validation", "Please enter service name");
-      return false;
+      Alert.alert("Error", "Service name required");
+      return;
     }
 
-    if (!description.trim()) {
-      Alert.alert("Validation", "Please enter service description");
-      return false;
-    }
-
-    if (!eligibility.trim()) {
-      Alert.alert("Validation", "Please enter eligibility");
-      return false;
-    }
-
-    if (!pricePerMin.trim() && !pricePerMsg.trim() && !packagePrice.trim()) {
-      Alert.alert("Validation", "Please add at least one price");
-      return false;
-    }
-
-    return true;
-  };
-
-  const handleCreateService = async () => {
     try {
-      if (!validateForm()) return;
-
       setLoading(true);
 
       const token = await AsyncStorage.getItem("token");
@@ -93,24 +75,26 @@ const AddServiceScreen = ({ navigation }: any) => {
         image: image || ""
       };
 
-      const res = await API.post("/service/create", payload, {
+      const res = await API.put(`/service/update/${service._id}`, payload, {
         headers: {
           Authorization: `Bearer ${token}`
         }
       });
 
+      console.log("UPDATE RES:", res?.data);
+
       if (res?.data?.success) {
-        Alert.alert("Success", "Service created successfully");
+        Alert.alert("Success", "Service updated successfully");
         navigation.goBack();
       } else {
-        Alert.alert("Error", res?.data?.message || "Failed to create service");
+        Alert.alert("Error", res?.data?.message || "Update failed");
       }
-    } catch (error: any) {
-      console.log("create service error:", error?.response?.data || error.message);
+    } catch (err: any) {
+      console.log("UPDATE ERROR:", err?.response?.data || err.message);
 
       Alert.alert(
         "Error",
-        error?.response?.data?.message || "Failed to create service"
+        err?.response?.data?.message || "Update failed"
       );
     } finally {
       setLoading(false);
@@ -124,23 +108,16 @@ const AddServiceScreen = ({ navigation }: any) => {
           <Icon name="arrow-back" size={24} color="#111" />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>Create Service</Text>
+        <Text style={styles.headerTitle}>Edit Service</Text>
 
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 40 }}
-      >
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Service Image</Text>
 
-          <TouchableOpacity
-            style={styles.imageUpload}
-            onPress={pickImage}
-            activeOpacity={0.8}
-          >
+          <TouchableOpacity style={styles.imageUpload} onPress={pickImage}>
             {image ? (
               <Image source={{ uri: image }} style={styles.serviceImage} />
             ) : (
@@ -165,7 +142,7 @@ const AddServiceScreen = ({ navigation }: any) => {
 
           <TextInput
             style={styles.textarea}
-            placeholder="Describe your service..."
+            placeholder="Description"
             placeholderTextColor="#999"
             multiline
             value={description}
@@ -182,7 +159,7 @@ const AddServiceScreen = ({ navigation }: any) => {
               <TextInput
                 style={styles.priceInput}
                 keyboardType="numeric"
-                placeholder="₹"
+                placeholder="0"
                 placeholderTextColor="#999"
                 value={pricePerMin}
                 onChangeText={setPricePerMin}
@@ -194,7 +171,7 @@ const AddServiceScreen = ({ navigation }: any) => {
               <TextInput
                 style={styles.priceInput}
                 keyboardType="numeric"
-                placeholder="₹"
+                placeholder="0"
                 placeholderTextColor="#999"
                 value={pricePerMsg}
                 onChangeText={setPricePerMsg}
@@ -206,7 +183,7 @@ const AddServiceScreen = ({ navigation }: any) => {
               <TextInput
                 style={styles.priceInput}
                 keyboardType="numeric"
-                placeholder="₹"
+                placeholder="0"
                 placeholderTextColor="#999"
                 value={packagePrice}
                 onChangeText={setPackagePrice}
@@ -220,7 +197,7 @@ const AddServiceScreen = ({ navigation }: any) => {
 
           <TextInput
             style={styles.textarea}
-            placeholder="Who can use this service?"
+            placeholder="Eligibility"
             placeholderTextColor="#999"
             multiline
             value={eligibility}
@@ -230,13 +207,13 @@ const AddServiceScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={[styles.createBtn, loading && { opacity: 0.7 }]}
-          onPress={handleCreateService}
+          onPress={handleUpdate}
           disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.createText}>Create Service</Text>
+            <Text style={styles.createText}>Update Service</Text>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -244,7 +221,7 @@ const AddServiceScreen = ({ navigation }: any) => {
   );
 };
 
-export default AddServiceScreen;
+export default EditServiceScreen;
 
 const styles = StyleSheet.create({
   screen: {
@@ -276,24 +253,24 @@ const styles = StyleSheet.create({
     marginTop: 20,
     borderRadius: 16,
     padding: 18,
+    elevation: 3,
     shadowColor: "#000",
     shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3
+    shadowRadius: 10
   },
 
   cardTitle: {
-    fontSize: 16,
     fontWeight: "700",
-    marginBottom: 14,
-    color: "#111"
+    marginBottom: 12,
+    color: "#111",
+    fontSize: 16
   },
 
   imageUpload: {
     height: 150,
-    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E6E6E6",
+    borderColor: "#eee",
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
     overflow: "hidden",
@@ -307,8 +284,8 @@ const styles = StyleSheet.create({
   },
 
   uploadText: {
-    marginTop: 6,
-    color: "#888"
+    color: "#888",
+    marginTop: 6
   },
 
   input: {
@@ -323,14 +300,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F8",
     padding: 14,
     borderRadius: 10,
-    height: 110,
+    height: 100,
     textAlignVertical: "top",
     color: "#111"
   },
 
   priceRow: {
-    flexDirection: "row",
-    justifyContent: "space-between"
+    flexDirection: "row"
   },
 
   priceBox: {
@@ -346,21 +322,17 @@ const styles = StyleSheet.create({
 
   priceInput: {
     backgroundColor: "#F3F4F8",
-    borderRadius: 10,
     padding: 12,
+    borderRadius: 10,
     color: "#111"
   },
 
   createBtn: {
     backgroundColor: "#7B4DFF",
-    marginHorizontal: 20,
-    marginTop: 30,
+    margin: 20,
     padding: 18,
-    borderRadius: 14,
-    alignItems: "center",
-    shadowColor: "#7B4DFF",
-    shadowOpacity: 0.4,
-    shadowRadius: 10
+    borderRadius: 12,
+    alignItems: "center"
   },
 
   createText: {
