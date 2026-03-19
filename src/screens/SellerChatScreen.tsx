@@ -10,7 +10,7 @@ import {
   SafeAreaView,
   StatusBar,
   Modal,
-  Animated
+  ScrollView
 } from "react-native";
 
 import Icon from "react-native-vector-icons/Ionicons";
@@ -20,7 +20,7 @@ import { socket } from "../socket";
 
 const PRIMARY = "#7B4DFF";
 
-const SellerChatScreen = ({ route, navigation }:any) => {
+const SellerChatScreen = ({ route, navigation }) => {
   const { sellerId, conversationId } = route.params;
 
   const [seller, setSeller] = useState(null);
@@ -29,10 +29,14 @@ const SellerChatScreen = ({ route, navigation }:any) => {
 
   const [services, setServices] = useState([]);
   const [selectedService, setSelectedService] = useState(null);
-
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [showTools, setShowTools] = useState(false);
-  const [showSnackbar, setShowSnackbar] = useState(true);
+
+  const quickOptions = [
+    "I want to book",
+    "What are your charges?",
+    "Are you available?",
+    "Call me"
+  ];
 
   useEffect(() => {
     fetchSeller();
@@ -42,11 +46,12 @@ const SellerChatScreen = ({ route, navigation }:any) => {
     socket.emit("joinConversation", conversationId);
 
     socket.on("receiveMessage", (msg) => {
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) => {
+        const exists = prev.find((m) => m._id === msg._id);
+        if (exists) return prev;
+        return [...prev, msg];
+      });
     });
-
-    // Snackbar auto hide
-    setTimeout(() => setShowSnackbar(false), 3000);
 
     return () => socket.off("receiveMessage");
   }, []);
@@ -77,8 +82,8 @@ const SellerChatScreen = ({ route, navigation }:any) => {
     setMessages(res.data.messages || []);
   };
 
-  const sendMessage = async () => {
-    if (!text.trim()) return;
+  const sendMessage = async (msgText = text) => {
+    if (!msgText.trim()) return;
 
     const token = await AsyncStorage.getItem("token");
 
@@ -86,7 +91,7 @@ const SellerChatScreen = ({ route, navigation }:any) => {
       "/message/send",
       {
         conversationId,
-        text,
+        text: msgText,
         messageType: "text"
       },
       {
@@ -104,7 +109,7 @@ const SellerChatScreen = ({ route, navigation }:any) => {
     setText("");
   };
 
-  // ================= MESSAGE =================
+  // ================= UI =================
 
   const renderMessage = ({ item }) => {
     const isMine = item.isMine;
@@ -130,148 +135,184 @@ const SellerChatScreen = ({ route, navigation }:any) => {
     );
   };
 
-  // ================= UI =================
-
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={PRIMARY} />
 
       {/* HEADER */}
       <View style={styles.header}>
+
+        {/* LEFT - BACK */}
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={22} color="#fff" />
+          <Icon name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
 
-        <View style={styles.sellerInfo}>
-          <Image source={{ uri: seller?.profilePic }} style={styles.avatar} />
-          <Text style={styles.name}>{seller?.sellerName}</Text>
+        {/* CENTER - SELLER INFO (CLICKABLE) */}
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={styles.centerHeader}
+          onPress={() =>
+            navigation.navigate("SellerDetailsScreen", { sellerId })
+          }
+        >
+          <Image
+            source={{
+              uri:
+                seller?.profilePic ||
+                "https://cdn-icons-png.flaticon.com/512/149/149071.png"
+            }}
+            style={styles.avatar}
+          />
+
+          <View style={{ marginLeft: 8 }}>
+            <Text style={styles.name}>
+              {seller?.sellerName || "Loading..."}
+            </Text>
+            <Text style={styles.status}>Online</Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* RIGHT ICONS */}
+        <View style={styles.rightIcons}>
+          <TouchableOpacity style={{ marginRight: 15 }}>
+            <Icon name="call" size={20} color="#fff" />
+          </TouchableOpacity>
+
+          <TouchableOpacity>
+            <Icon name="videocam" size={22} color="#fff" />
+          </TouchableOpacity>
         </View>
 
-        <View style={{ flexDirection: "row" }}>
-          <Icon name="call" size={20} color="#fff" style={{ marginRight: 15 }} />
-          <Icon name="videocam" size={22} color="#fff" />
-        </View>
       </View>
 
-      {/* CENTER SERVICES */}
-      <View style={styles.centerServices}>
+      {/* SERVICES */}
+      <View style={styles.premiumServiceWrap}>
+        <Text style={styles.premiumTitle}>Available Services</Text>
+
         <FlatList
           horizontal
           data={services}
           showsHorizontalScrollIndicator={false}
           keyExtractor={(item) => item._id}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.serviceCard}
-              onPress={() => {
-                setSelectedService(item);
-                setShowPaymentModal(true);
-              }}
-            >
-              <Text style={styles.serviceName}>{item.serviceName}</Text>
+          contentContainerStyle={{ paddingHorizontal: 10 }}
+          renderItem={({ item }) => {
+            const isSelected = selectedService?._id === item._id;
 
-              <Text style={styles.servicePrice}>
-                ₹{item.pricePerMin || item.pricePerMsg || item.packagePrice}
-              </Text>
+            return (
+              <TouchableOpacity
+                style={[
+                  styles.premiumCard,
+                  isSelected && styles.selectedCard
+                ]}
+                onPress={() => setSelectedService(item)}
+              >
+                <Text
+                  style={[
+                    styles.serviceName,
+                    isSelected && { color: "#fff" }
+                  ]}
+                >
+                  {item.serviceName}
+                </Text>
 
-              <View style={styles.bookBtn}>
-                <Text style={{ color: "#fff" }}>Book</Text>
-              </View>
-            </TouchableOpacity>
-          )}
+                <Text
+                  style={[
+                    styles.servicePrice,
+                    isSelected && { color: "#fff" }
+                  ]}
+                >
+                  ₹{item.pricePerMin || item.pricePerMsg || item.packagePrice}
+                </Text>
+
+                {isSelected && (
+                  <TouchableOpacity
+                    style={styles.bookNowBtn}
+                    onPress={() => setShowPaymentModal(true)}
+                  >
+                    <Text style={styles.bookNowText}>Book Now</Text>
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+            );
+          }}
         />
       </View>
 
-      {/* CHAT */}
-      <FlatList
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item, index) => index.toString()}
-        contentContainerStyle={{ padding: 12 }}
-      />
+      {/* CHAT + QUICK */}
+      <View style={{ flex: 1 }}>
+        <FlatList
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item, index) => index.toString()}
+          contentContainerStyle={{ padding: 12, paddingBottom: 120 }}
+        />
+
+        {/* QUICK REPLIES */}
+        <View style={styles.quickContainer}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {quickOptions.map((item, index) => (
+              <TouchableOpacity
+                key={index}
+                style={styles.quickChip}
+                onPress={() => sendMessage(item)}
+              >
+                <Text style={styles.quickText}>{item}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
 
       {/* INPUT */}
-      <View style={styles.inputContainer}>
-        <TouchableOpacity onPress={() => setShowTools(true)}>
-          <Icon name="add" size={26} color={PRIMARY} />
-        </TouchableOpacity>
-
-        <View style={styles.inputBox}>
-          <TextInput
-            placeholder="Message"
-            value={text}
-            onChangeText={setText}
-            style={styles.input}
-          />
-        </View>
+      <View style={styles.inputWrap}>
+        <TextInput
+          placeholder="Message..."
+          value={text}
+          onChangeText={setText}
+          style={styles.input}
+        />
 
         {text.trim() ? (
           <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
             <Icon name="send" size={18} color="#fff" />
           </TouchableOpacity>
         ) : (
-          <>
-            <Icon name="camera-outline" size={24} color={PRIMARY} style={{ marginRight: 10 }} />
-            <Icon name="mic-outline" size={24} color={PRIMARY} />
-          </>
+          <Icon name="mic-outline" size={24} color={PRIMARY} />
         )}
       </View>
 
-      {/* TOOLBOX */}
-      <Modal visible={showTools} transparent animationType="slide">
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          onPress={() => setShowTools(false)}
-        >
-          <View style={styles.toolbox}>
-            {["camera", "image", "document", "location", "happy"].map((icon, i) => (
-              <TouchableOpacity key={i} style={styles.toolItem}>
-                <View style={styles.toolIcon}>
-                  <Icon name={icon} size={22} color="#fff" />
-                </View>
-                <Text>{icon}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
       {/* PAYMENT MODAL */}
       <Modal visible={showPaymentModal} transparent animationType="fade">
-        <View style={styles.modalOverlayCenter}>
+        <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>
+            <Text style={styles.modalTitle}>Confirm Booking</Text>
+
+            <Text style={styles.modalService}>
               {selectedService?.serviceName}
             </Text>
 
             <Text style={styles.modalPrice}>
-              ₹{selectedService?.pricePerMin ||
-                selectedService?.pricePerMsg ||
-                selectedService?.packagePrice}
+              ₹{selectedService?.pricePerMin || selectedService?.pricePerMsg || selectedService?.packagePrice}
             </Text>
 
-            <Text style={{ marginTop: 10 }}>
-              ⚠️ Payment Gateway is not added
+            <Text style={styles.modalNote}>
+              Payment Gateway is not added yet ⚠️
             </Text>
 
-            <TouchableOpacity
-              style={styles.payBtn}
-              onPress={() => setShowPaymentModal(false)}
-            >
-              <Text style={{ color: "#fff" }}>OK</Text>
+            <TouchableOpacity style={styles.payBtn}>
+              <Text style={{ color: "#fff", fontWeight: "700" }}>
+                Continue
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={() => setShowPaymentModal(false)}>
+              <Text style={{ marginTop: 10, color: "#777" }}>
+                Cancel
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-
-      {/* SNACKBAR */}
-      {showSnackbar && (
-        <View style={styles.snackbar}>
-          <Text style={{ color: "#fff" }}>
-            You are now chatting with seller
-          </Text>
-        </View>
-      )}
     </SafeAreaView>
   );
 };
@@ -281,15 +322,44 @@ export default SellerChatScreen;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F4F5FA" },
 
-  header: {
-    backgroundColor: PRIMARY,
-    paddingTop: 45,
-    paddingBottom: 15,
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between"
-  },
+header: {
+  backgroundColor: PRIMARY,
+  paddingTop: StatusBar.currentHeight || 80,
+  paddingBottom: 10,
+  paddingHorizontal: 12,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between"
+},
+
+centerHeader: {
+  flexDirection: "row",
+  alignItems: "center",
+  flex: 1,
+  marginLeft: 10
+},
+
+avatar: {
+  width: 38,
+  height: 38,
+  borderRadius: 19
+},
+
+name: {
+  color: "#fff",
+  fontWeight: "700",
+  fontSize: 15
+},
+
+status: {
+  color: "#E5D9FF",
+  fontSize: 11
+},
+
+rightIcons: {
+  flexDirection: "row",
+  alignItems: "center"
+},
 
   sellerInfo: { flexDirection: "row", alignItems: "center" },
 
@@ -297,29 +367,56 @@ const styles = StyleSheet.create({
 
   name: { color: "#fff", fontWeight: "700" },
 
-  centerServices: {
-    alignItems: "center",
-    paddingVertical: 10
-  },
-
-  serviceCard: {
+  premiumServiceWrap: {
     backgroundColor: "#fff",
-    padding: 14,
-    borderRadius: 16,
-    marginHorizontal: 8,
-    alignItems: "center",
-    elevation: 4
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: "#eee"
   },
 
-  serviceName: { fontWeight: "700" },
+  premiumTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginLeft: 12,
+    marginBottom: 6
+  },
 
-  servicePrice: { color: PRIMARY, marginVertical: 6 },
+  premiumCard: {
+    width: 140,
+    backgroundColor: "#fafafa",
+    padding: 12,
+    borderRadius: 16,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: "#eee"
+  },
 
-  bookBtn: {
+  selectedCard: {
     backgroundColor: PRIMARY,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 10
+    borderColor: PRIMARY
+  },
+
+  serviceName: { fontWeight: "700", fontSize: 13 },
+
+  servicePrice: {
+    marginTop: 5,
+    fontSize: 14,
+    fontWeight: "700",
+    color: PRIMARY
+  },
+
+  bookNowBtn: {
+    marginTop: 10,
+    backgroundColor: "#fff",
+    paddingVertical: 6,
+    borderRadius: 10,
+    alignItems: "center"
+  },
+
+  bookNowText: {
+    color: PRIMARY,
+    fontWeight: "700",
+    fontSize: 12
   },
 
   msgRow: { marginVertical: 5 },
@@ -336,89 +433,81 @@ const styles = StyleSheet.create({
   myText: { color: "#fff" },
   otherText: { color: "#111" },
 
-  inputContainer: {
+  quickContainer: {
+    position: "absolute",
+    bottom: 10,
+    left: 0,
+    right: 0,
+    paddingVertical: 6,
+    paddingLeft: 10,
+    backgroundColor: "#F4F5FA"
+  },
+
+  quickChip: {
+    backgroundColor: "#EDE9FF",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 10,
+
+  },
+
+  quickText: { color: PRIMARY, fontWeight: "600" },
+
+  inputWrap: {
     flexDirection: "row",
-    alignItems: "center",
     padding: 10,
     backgroundColor: "#fff"
   },
 
-  inputBox: {
+  input: {
     flex: 1,
     backgroundColor: "#F1F1F4",
     borderRadius: 25,
-    marginHorizontal: 10,
     paddingHorizontal: 15
   },
-
-  input: { height: 40 },
 
   sendBtn: {
     backgroundColor: PRIMARY,
     padding: 10,
-    borderRadius: 25
+    borderRadius: 20,
+    marginLeft: 8
   },
 
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.3)",
-    justifyContent: "flex-end"
-  },
-
-  toolbox: {
-    backgroundColor: "#fff",
-    padding: 20,
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    flexDirection: "row",
-    justifyContent: "space-around"
-  },
-
-  toolItem: { alignItems: "center" },
-
-  toolIcon: {
-    backgroundColor: PRIMARY,
-    padding: 12,
-    borderRadius: 25,
-    marginBottom: 6
-  },
-
-  modalOverlayCenter: {
-    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
     justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.4)"
-  },
-
-  modalBox: {
-    backgroundColor: "#fff",
-    padding: 20,
-    borderRadius: 16,
-    width: "80%",
     alignItems: "center"
   },
 
-  modalTitle: { fontWeight: "700", fontSize: 16 },
+  modalBox: {
+    width: "85%",
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 22,
+    alignItems: "center"
+  },
 
-  modalPrice: { color: PRIMARY, marginTop: 5 },
+  modalTitle: { fontSize: 16, fontWeight: "700" },
+
+  modalService: { marginTop: 10, fontWeight: "600" },
+
+  modalPrice: { marginTop: 6, color: PRIMARY, fontWeight: "700" },
+
+  modalNote: {
+    marginTop: 10,
+    fontSize: 12,
+    color: "#777",
+    textAlign: "center"
+  },
 
   payBtn: {
     marginTop: 15,
     backgroundColor: PRIMARY,
-    padding: 10,
-    borderRadius: 10,
-    width: "100%",
-    alignItems: "center"
-  },
-
-  snackbar: {
-    position: "absolute",
-    bottom: 90,
-    left: 20,
-    right: 20,
-    backgroundColor: "#333",
     padding: 12,
-    borderRadius: 10,
+    borderRadius: 12,
+    width: "100%",
     alignItems: "center"
   }
 });
