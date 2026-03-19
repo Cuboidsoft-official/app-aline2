@@ -1,246 +1,284 @@
-import React, {useState} from "react";
+import React, { useEffect, useState } from "react";
 import {
-View,
-Text,
-StyleSheet,
-TouchableOpacity,
-ScrollView,
-Switch,
-Image,
-Alert
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Switch,
+  Image,
+  Alert,
+  ActivityIndicator
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { API } from "../api/api"; // ✅ USE THIS
 
-const SellerSettingsScreen = ({navigation}: any) => {
+const SellerSettingsScreen = ({ navigation }: any) => {
 
-const [isAvailable, setIsAvailable] = useState(true);
+  const [isAvailable, setIsAvailable] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-const deleteSellerProfile = () => {
-Alert.alert(
-"Delete Seller Profile",
-"Are you sure you want to delete your seller profile?",
-[
-{ text: "Cancel", style: "cancel" },
-{ text: "Delete", style: "destructive" }
-]
-);
-};
+  // ✅ FETCH SELLER
+  const fetchSeller = async () => {
+    try {
+      setLoading(true);
 
-return (
+      const token = await AsyncStorage.getItem("token");
 
-<SafeAreaView style={styles.container}>
+      const res = await API.get("/seller/me", {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
 
-{/* HEADER */}
-<View style={styles.header}>
-<TouchableOpacity onPress={() => navigation.goBack()}>
-<Icon name="arrow-back" size={24} color="#000"/>
-</TouchableOpacity>
+      setIsAvailable(res.data.seller.availabilityStatus);
 
-<Text style={styles.headerTitle}>Seller Settings</Text>
-</View>
+    } catch (error) {
+      console.log("FETCH ERROR:", error.response?.data || error.message);
+      Alert.alert("Error", "Failed to load seller data");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-<ScrollView showsVerticalScrollIndicator={false}>
+  useEffect(() => {
+    fetchSeller();
+  }, []);
 
-{/* SELLER PROFILE */}
-<Text style={styles.section}>Seller Profile</Text>
+  // ✅ TOGGLE AVAILABILITY
+  const toggleAvailability = async () => {
+    try {
+      const token = await AsyncStorage.getItem("token");
 
-<TouchableOpacity
-style={styles.item}
-onPress={() => navigation.navigate("UpdateSellerProfile")}
->
-<Text style={styles.text}>Update Profile</Text>
-<Icon name="chevron-forward" size={20}/>
-</TouchableOpacity>
+      const newStatus = !isAvailable;
+      setIsAvailable(newStatus);
 
-<TouchableOpacity
-style={styles.item}
-onPress={() => navigation.navigate("UserProfile")}
->
-<Text style={styles.text}>Switch to User Profile</Text>
-<Icon name="person-outline" size={20}/>
-</TouchableOpacity>
+      const res = await API.put(
+        "/seller/update-availability",
+        { availabilityStatus: newStatus },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
 
+      console.log("SUCCESS:", res.data);
 
-{/* AVAILABILITY */}
-<Text style={styles.section}>Availability</Text>
+      Alert.alert(
+        "Updated",
+        newStatus ? "You are now Available" : "You are now Unavailable"
+      );
 
-<View style={styles.item}>
-<Text style={styles.text}>Seller Availability</Text>
+    } catch (error) {
+      console.log("ERROR:", error.response?.data || error.message);
 
-<Switch
-value={isAvailable}
-onValueChange={() => setIsAvailable(!isAvailable)}
-thumbColor={isAvailable ? "#ab2aeb" : "#ccc"}
-/>
-</View>
+      setIsAvailable(!isAvailable); // rollback
 
+      Alert.alert("Error", "Update failed");
+    }
+  };
 
-{/* WALLET */}
-<Text style={styles.section}>Seller Wallet</Text>
+  const deleteSellerProfile = () => {
+    Alert.alert(
+      "Delete Seller Profile",
+      "Are you sure you want to delete your seller profile?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive" }
+      ]
+    );
+  };
 
-<TouchableOpacity
-style={styles.item}
-onPress={() => navigation.navigate("RechargeWallet")}
->
-<Text style={styles.text}>Recharge Wallet</Text>
-<Icon name="wallet-outline" size={20}/>
-</TouchableOpacity>
+  if (loading) {
+    return (
+      <View style={styles.loader}>
+        <ActivityIndicator size="large" color="#ab2aeb" />
+      </View>
+    );
+  }
 
-{/* PAYMENT ICONS (FIXED PNG) */}
-<View style={styles.paymentRow}>
+  return (
+    <SafeAreaView style={styles.container}>
 
-<Image
- source={{ uri: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/phonepe-icon.png" }}
- style={styles.paymentIcon}
-/>
+      {/* HEADER */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Icon name="arrow-back" size={24} color="#000" />
+        </TouchableOpacity>
 
-<Image
- source={{ uri: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/google-pay-icon.png" }}
- style={styles.paymentIcon}
-/>
+        <Text style={styles.headerTitle}>Seller Settings</Text>
+      </View>
 
-<Image
- source={{ uri: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/paytm-icon.png" }}
- style={styles.paymentIcon}
-/>
+      <ScrollView showsVerticalScrollIndicator={false}>
 
-</View>
+        {/* PROFILE */}
+        <Text style={styles.section}>Seller Profile</Text>
 
+        <TouchableOpacity
+          style={styles.item}
+          onPress={() => navigation.navigate("UpdateSellerProfile")}
+        >
+          <Text style={styles.text}>Update Profile</Text>
+          <Icon name="chevron-forward" size={20} />
+        </TouchableOpacity>
 
-{/* 🔥 ADS & PROMOTIONS */}
-<Text style={styles.section}>Ads & Promotions</Text>
+        <TouchableOpacity
+          style={styles.item}
+          onPress={() => navigation.navigate("UserProfile")}
+        >
+          <Text style={styles.text}>Switch to User Profile</Text>
+          <Icon name="person-outline" size={20} />
+        </TouchableOpacity>
 
-<TouchableOpacity
-style={styles.item}
-onPress={() => navigation.navigate("PromoteProfile")}
->
-<View style={styles.row}>
-<Icon name="trending-up-outline" size={20} color="#ab2aeb"/>
-<Text style={styles.textSpacing}>Promote Profile</Text>
-</View>
+        {/* AVAILABILITY */}
+        <Text style={styles.section}>Availability</Text>
 
-<Text style={styles.badge}>NEW</Text>
-</TouchableOpacity>
+        <View style={styles.item}>
+          <Text style={styles.text}>Seller Availability</Text>
 
-<TouchableOpacity
-style={styles.item}
-onPress={() => navigation.navigate("BoostPost")}
->
-<View style={styles.row}>
-<Icon name="megaphone-outline" size={20} color="#ab2aeb"/>
-<Text style={styles.textSpacing}>Boost Ads / Campaign</Text>
-</View>
+          <Switch
+            value={isAvailable}
+            onValueChange={toggleAvailability}
+            thumbColor={isAvailable ? "#ab2aeb" : "#ccc"}
+          />
+        </View>
 
-<Icon name="chevron-forward" size={20}/>
-</TouchableOpacity>
+        {/* WALLET */}
+        <Text style={styles.section}>Seller Wallet</Text>
 
+        <TouchableOpacity
+          style={styles.item}
+          onPress={() => navigation.navigate("RechargeWallet")}
+        >
+          <Text style={styles.text}>Recharge Wallet</Text>
+          <Icon name="wallet-outline" size={20} />
+        </TouchableOpacity>
 
-{/* ACCOUNT */}
-<Text style={styles.section}>Account</Text>
+        {/* PAYMENTS */}
+        <View style={styles.paymentRow}>
+          <Image source={{ uri: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/phonepe-icon.png" }} style={styles.paymentIcon}/>
+          <Image source={{ uri: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/google-pay-icon.png" }} style={styles.paymentIcon}/>
+          <Image source={{ uri: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/paytm-icon.png" }} style={styles.paymentIcon}/>
+        </View>
 
-<TouchableOpacity style={styles.item} onPress={deleteSellerProfile}>
-<Text style={styles.deleteText}>Delete Seller Profile</Text>
-</TouchableOpacity>
+        {/* ADS */}
+        <Text style={styles.section}>Ads & Promotions</Text>
 
-</ScrollView>
+        <TouchableOpacity
+          style={styles.item}
+          onPress={() => navigation.navigate("PromoteProfile")}
+        >
+          <View style={styles.row}>
+            <Icon name="trending-up-outline" size={20} color="#ab2aeb" />
+            <Text style={styles.textSpacing}>Promote Profile</Text>
+          </View>
+          <Text style={styles.badge}>NEW</Text>
+        </TouchableOpacity>
 
-</SafeAreaView>
-);
+        <TouchableOpacity
+          style={styles.item}
+          onPress={() => navigation.navigate("BoostPost")}
+        >
+          <View style={styles.row}>
+            <Icon name="megaphone-outline" size={20} color="#ab2aeb" />
+            <Text style={styles.textSpacing}>Boost Ads / Campaign</Text>
+          </View>
+          <Icon name="chevron-forward" size={20} />
+        </TouchableOpacity>
+
+        {/* ACCOUNT */}
+        <Text style={styles.section}>Account</Text>
+
+        <TouchableOpacity style={styles.item} onPress={deleteSellerProfile}>
+          <Text style={styles.deleteText}>Delete Seller Profile</Text>
+        </TouchableOpacity>
+
+      </ScrollView>
+    </SafeAreaView>
+  );
 };
 
 export default SellerSettingsScreen;
-
 const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#fff" },
 
-container: {
-flex: 1,
-backgroundColor: "#fff"
-},
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 15,
+    borderBottomWidth: 1,
+    borderColor: "#eee"
+  },
 
-header: {
-flexDirection: "row",
-alignItems: "center",
-paddingHorizontal: 15,
-paddingVertical: 12,
-borderBottomWidth: 1,
-borderColor: "#eee"
-},
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    marginLeft: 15
+  },
 
-headerTitle: {
-fontSize: 18,
-fontWeight: "600",
-marginLeft: 15
-},
+  section: {
+    fontSize: 13,
+    color: "#888",
+    marginTop: 25,
+    marginLeft: 15,
+    marginBottom: 10
+  },
 
-section: {
-fontSize: 13,
-color: "#888",
-marginTop: 25,
-marginLeft: 15,
-marginBottom: 10
-},
+  item: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 15,
+    borderBottomWidth: 1,
+    borderColor: "#eee"
+  },
 
-item: {
-flexDirection: "row",
-justifyContent: "space-between",
-alignItems: "center",
-paddingVertical: 15,
-paddingHorizontal: 15,
-borderBottomWidth: 1,
-borderColor: "#eee"
-},
+  text: { fontSize: 16 },
 
-text: {
-fontSize: 16
-},
+  textSpacing: {
+    fontSize: 16,
+    marginLeft: 10
+  },
 
-textSpacing: {
-fontSize: 16,
-marginLeft: 10
-},
+  deleteText: {
+    fontSize: 16,
+    color: "red"
+  },
 
-deleteText: {
-fontSize: 16,
-color: "red"
-},
+  row: {
+    flexDirection: "row",
+    alignItems: "center"
+  },
 
-row: {
-flexDirection: "row",
-alignItems: "center"
-},
+  paymentRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 15
+  },
 
-paymentRow: {
-flexDirection: "row",
-justifyContent: "space-around",
-padding: 20
-},
-paymentRow: {
- flexDirection: "row",
- justifyContent: "space-between",
- paddingHorizontal: 20,
- paddingVertical: 15
-},
+  paymentIcon: {
+    width: 60,
+    height: 30,
+    resizeMode: "contain"
+  },
 
-paymentIcon: {
- width: 80,
- height: 35,
- resizeMode: "contain"
-},
-paymentIcon: {
-width: 60,
-height: 30,
-resizeMode: "contain"
-},
+  badge: {
+    backgroundColor: "#ab2aeb",
+    color: "#fff",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    fontSize: 10,
+    fontWeight: "bold"
+  },
 
-badge: {
-backgroundColor: "#ab2aeb",
-color: "#fff",
-paddingHorizontal: 8,
-paddingVertical: 3,
-borderRadius: 6,
-fontSize: 10,
-fontWeight: "bold"
-}
-
+  loader: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center"
+  }
 });

@@ -428,7 +428,7 @@ backgroundColor:"#7b3fe4",
 flexDirection:"row",
 alignItems:"center",
 paddingHorizontal:12,
-paddingTop:StatusBar.currentHeight + 30,
+paddingTop:StatusBar.currentHeight + 50,
 paddingBottom:15
 },
 

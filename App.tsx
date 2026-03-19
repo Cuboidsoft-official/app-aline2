@@ -29,6 +29,7 @@ import WalletScreen from './src/screens/WalletScreen';
 import HowToEarnScreen from './src/screens/HowToEarnScreen';
 import EditServiceScreen from './src/screens/EditServiceScreen';
 import SellerPreviewScreen from './src/screens/SellerPreviewScreen';
+import SellerChatScreen from './src/screens/SellerChatScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
 
@@ -78,6 +79,7 @@ export default function App() {
           <Stack.Screen name="HowToEarnScreen" component={HowToEarnScreen} />
           <Stack.Screen name="EditServiceScreen" component={EditServiceScreen} />
           <Stack.Screen name="SellerPreviewScreen" component={SellerPreviewScreen} />
+          <Stack.Screen name="SellerChatScreen" component={SellerChatScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </GestureHandlerRootView>
