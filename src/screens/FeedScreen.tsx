@@ -1,262 +1,593 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  FlatList,
   Image,
+  RefreshControl,
   ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
   TouchableOpacity,
-  Animated,
-  Dimensions
+  useWindowDimensions,
+  View,
 } from "react-native";
-
+import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 
-const { width } = Dimensions.get("window");
+import ContentActionSheet from "../features/social/components/ContentActionSheet";
+import PostCommentsSheet from "../features/social/components/PostCommentsSheet";
+import PostShareSheet from "../features/social/components/PostShareSheet";
+import { socialApi } from "../features/social/socialApi";
+import { FeedResponse, Post, Story } from "../features/social/types";
+import { toUserSafeMessage } from "../features/social/validation";
+import { getStoredUser } from "../utils/authSession";
+
+const initialFeed: FeedResponse = {
+  stories: [],
+  posts: [],
+};
+
+const formatCount = (value: number): string => {
+  if (value >= 1000000) {
+    return `${(value / 1000000).toFixed(1)}M`;
+  }
+
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(1)}K`;
+  }
+
+  return `${value}`;
+};
+
+const formatAgo = (timestamp: number): string => {
+  const mins = Math.max(1, Math.floor((Date.now() - timestamp) / (1000 * 60)));
+
+  if (mins < 60) {
+    return `${mins}m`;
+  }
+
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+
+  return `${Math.floor(hours / 24)}d`;
+};
+
+const getPostTypeTag = (post: Post): string => {
+  if (post.type === "carousel") {
+    return `${post.media.length} items`;
+  }
+
+  return post.type === "video" ? "Video" : "Photo";
+};
 
 function FeedScreen({ navigation }: any) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const slideAnim = useState(new Animated.Value(-width))[0];
+  const { width } = useWindowDimensions();
+  const [feed, setFeed] = useState<FeedResponse>(initialFeed);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isActionBusy, setIsActionBusy] = useState<Record<string, boolean>>({});
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const [activeSheet, setActiveSheet] = useState<null | "comments" | "share" | "actions">(null);
+  const [currentUser, setCurrentUser] = useState<{ id: string; avatarUrl: string } | null>(null);
 
-  // ✅ Sidebar toggle with animation
-  const toggleMenu = () => {
-    Animated.timing(slideAnim, {
-      toValue: menuOpen ? -width : 0,
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => {
-      setMenuOpen(!menuOpen); // state updates AFTER animation
-    });
+  const loadFeed = useCallback(async () => {
+    const [data, storedUser] = await Promise.all([socialApi.getFeed(), getStoredUser()]);
+    setFeed(data);
+    setCurrentUser(
+      storedUser
+        ? {
+            id: String(storedUser._id || storedUser.id || ""),
+            avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
+          }
+        : null,
+    );
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      const run = async () => {
+        try {
+          setLoading(true);
+          const [data, storedUser] = await Promise.all([socialApi.getFeed(), getStoredUser()]);
+          if (active) {
+            setFeed(data);
+            setCurrentUser(
+              storedUser
+                ? {
+                    id: String(storedUser._id || storedUser.id || ""),
+                    avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
+                  }
+                : null,
+            );
+          }
+        } finally {
+          if (active) {
+            setLoading(false);
+            setRefreshing(false);
+          }
+        }
+      };
+
+      run();
+
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadFeed();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
-  // ✅ Section Based Menu
-  const menuSections = [
-    {
-      title: "Account",
-      data: [
-        { icon: "person-outline", label: "My Profile", screen: "ProfileView" },
-        { icon: "wallet-outline", label: "My Balance", screen: "WalletScreen" },
-      ],
-    },
-    {
-      title: "Earnings",
-      data: [
-        { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen" },
-        { icon: "gift-outline", label: "Referral Program", screen: "ReferralScreen" },
-      ],
-    },
-    {
-      title: "Business",
-      data: [
-        { icon: "storefront-outline", label: "Become a Seller", screen: "SellerScreen" },
-      ],
-    },
-    {
-      title: "Support",
-      data: [
-        { icon: "chatbubble-outline", label: "Feedback", screen: "FeedbackScreen" },
-        { icon: "help-circle-outline", label: "Help Center", screen: "HelpScreen" },
-      ],
-    },
-  ];
+  const updatePost = (nextPost: Post) => {
+    setFeed((prev) => ({
+      ...prev,
+      posts: prev.posts.map((item) => (item.id === nextPost.id ? nextPost : item)),
+    }));
+  };
 
-  const stories = ["You", "Rahul", "Reema", "Amit", "Rohit", "Neha"];
+  const handleLike = async (postId: string) => {
+    if (isActionBusy[`like_${postId}`]) {
+      return;
+    }
+
+    setIsActionBusy((prev) => ({ ...prev, [`like_${postId}`]: true }));
+    try {
+      const updated = await socialApi.togglePostLike(postId);
+      updatePost(updated);
+    } catch (error) {
+      Alert.alert("Could not like post", toUserSafeMessage(error));
+    } finally {
+      setIsActionBusy((prev) => ({ ...prev, [`like_${postId}`]: false }));
+    }
+  };
+
+  const handleSave = async (postId: string) => {
+    if (isActionBusy[`save_${postId}`]) {
+      return;
+    }
+
+    setIsActionBusy((prev) => ({ ...prev, [`save_${postId}`]: true }));
+    try {
+      const updated = await socialApi.togglePostSave(postId);
+      updatePost(updated);
+    } catch (error) {
+      Alert.alert("Could not save post", toUserSafeMessage(error));
+    } finally {
+      setIsActionBusy((prev) => ({ ...prev, [`save_${postId}`]: false }));
+    }
+  };
+
+  const handleCommentSubmit = async (postId: string) => {
+    const draft = (commentDrafts[postId] || "").trim();
+    if (!draft || isActionBusy[`comment_${postId}`]) {
+      return;
+    }
+
+    setIsActionBusy((prev) => ({ ...prev, [`comment_${postId}`]: true }));
+
+    try {
+      await socialApi.addPostComment(postId, draft);
+      const latestPost = feed.posts.find((item) => item.id === postId);
+
+      if (latestPost) {
+        updatePost({
+          ...latestPost,
+          commentsCount: latestPost.commentsCount + 1,
+        });
+      }
+
+      setCommentDrafts((prev) => ({ ...prev, [postId]: "" }));
+    } catch (error) {
+      Alert.alert("Could not comment", toUserSafeMessage(error));
+    } finally {
+      setIsActionBusy((prev) => ({ ...prev, [`comment_${postId}`]: false }));
+    }
+  };
+
+  const openPostDetail = (postId: string) => {
+    navigation.navigate("PostDetail", { postId });
+  };
+
+  const closeSheet = () => {
+    setActiveSheet(null);
+    setSelectedPost(null);
+  };
+
+  const openPostComments = (postId: string) => {
+    navigation.navigate("PostComments", { postId });
+  };
+
+  const openContentActions = (post: Post) => {
+    setSelectedPost(post);
+    setActiveSheet("actions");
+  };
+
+  const openPostCommentsSheet = (post: Post) => {
+    setSelectedPost(post);
+    setActiveSheet("comments");
+  };
+
+  const openPostShareSheet = (post: Post) => {
+    setSelectedPost(post);
+    setActiveSheet("share");
+  };
+
+  const renderStory = ({ item }: { item: Story }) => {
+    const ringStyle = item.viewed ? styles.storyRingSeen : styles.storyRingUnseen;
+    const closeFriends = item.visibility === "close_friends";
+
+    return (
+      <TouchableOpacity
+        style={styles.storyItem}
+        onPress={() => navigation.navigate("StoryViewer", { storyId: item.id })}
+      >
+        <View style={[styles.storyRing, ringStyle, closeFriends && styles.storyRingCloseFriends]}>
+          <Image source={{ uri: item.user.avatarUrl }} style={styles.storyAvatar} />
+        </View>
+        <Text style={styles.storyName} numberOfLines={1}>
+          {item.user.name}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderPostMedia = (post: Post) => {
+    if (post.type !== "carousel") {
+      const primaryMedia = post.media[0];
+      return (
+        <Image
+          source={{ uri: primaryMedia?.mediaType === "video" ? primaryMedia?.thumbnailUrl || primaryMedia?.url : primaryMedia?.url }}
+          style={[styles.postImage, { width }]}
+        />
+      );
+    }
+
+    return (
+      <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={styles.carouselWrap}>
+        {post.media.map((asset) => (
+          <Image
+            key={asset.id}
+            source={{ uri: asset.mediaType === "video" ? asset.thumbnailUrl || asset.url : asset.url }}
+            style={[styles.postImage, { width }]}
+          />
+        ))}
+      </ScrollView>
+    );
+  };
+
+  const renderPost = ({ item }: { item: Post }) => {
+    const tokens: string[] = [getPostTypeTag(item)];
+
+    if (item.location) {
+      tokens.push(`📍 ${item.location}`);
+    }
+
+    if (item.music) {
+      tokens.push(`🎵 ${item.music}`);
+    }
+
+    const metaLine = tokens.join(" • ");
+
+    return (
+      <View style={styles.postCard}>
+        <View style={styles.postHeader}>
+          <Image source={{ uri: item.user.avatarUrl }} style={styles.postAvatar} />
+          <View style={styles.userMeta}>
+            <View style={styles.row}>
+              <Text style={styles.username}>{item.user.username}</Text>
+              {item.user.isVerified ? (
+                <Icon style={styles.verifiedIcon} name="checkmark-circle" color="#4ba8ff" size={14} />
+              ) : null}
+            </View>
+            <Text style={styles.postTime}>{formatAgo(item.createdAt)}</Text>
+          </View>
+          <TouchableOpacity style={styles.moreButton} onPress={() => openContentActions(item)}>
+            <Icon name="ellipsis-horizontal" size={20} color="#141414" />
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity activeOpacity={0.95} onPress={() => openPostDetail(item.id)}>
+          {renderPostMedia(item)}
+        </TouchableOpacity>
+
+        <View style={styles.actionsRow}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => handleLike(item.id)}>
+            <Icon name={item.liked ? "heart" : "heart-outline"} size={24} color={item.liked ? "#f3425f" : "#111"} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.iconButton} onPress={() => openPostCommentsSheet(item)}>
+            <Icon name="chatbubble-outline" size={22} color="#111" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.iconButton} onPress={() => openPostShareSheet(item)}>
+            <Icon name="paper-plane-outline" size={22} color="#111" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.bookmarkButton} onPress={() => handleSave(item.id)}>
+            <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={22} color="#111" />
+          </TouchableOpacity>
+        </View>
+
+        {!item.settings.hideLikeCount ? (
+          <Text style={styles.likesText}>{formatCount(item.likesCount)} likes</Text>
+        ) : null}
+
+        <Text style={styles.caption}>
+          <Text style={styles.captionUser}>{item.user.username} </Text>
+          {item.caption}
+        </Text>
+
+        {item.hashtags.length ? (
+          <Text style={styles.tagLine}>{item.hashtags.map((tag) => `#${tag}`).join(" ")}</Text>
+        ) : null}
+
+        {item.mentions.length ? (
+          <Text style={styles.tagLineMuted}>{item.mentions.map((mention) => `@${mention}`).join(" ")}</Text>
+        ) : null}
+
+        <Text style={styles.metaLine}>{metaLine}</Text>
+
+        {item.collaboratorIds.length ? (
+          <Text style={styles.collabLine}>Collab post • {item.collaboratorIds.length} collaborators</Text>
+        ) : null}
+
+        <TouchableOpacity onPress={() => openPostCommentsSheet(item)}>
+          <Text style={styles.commentCount}>View all {item.commentsCount} comments</Text>
+        </TouchableOpacity>
+
+        {!item.settings.disableComments ? (
+          <View style={styles.commentComposer}>
+            <TextInput
+              value={commentDrafts[item.id] || ""}
+              onChangeText={(text) => setCommentDrafts((prev) => ({ ...prev, [item.id]: text }))}
+              style={styles.commentInput}
+              placeholder="Add a comment..."
+              placeholderTextColor="#777"
+            />
+            <TouchableOpacity onPress={() => handleCommentSubmit(item.id)}>
+              <Text style={styles.postButton}>Post</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Text style={styles.commentsDisabled}>Comments limited for this post</Text>
+        )}
+      </View>
+    );
+  };
+
+  const renderHeader = () => {
+    const ownStory = feed.stories.find((item) => item.isOwner || (currentUser?.id && item.user.id === currentUser.id));
+    const ownStoryOwnerId = ownStory?.user.id || currentUser?.id || "";
+    const ownStoryAvatar = ownStory?.user.avatarUrl || currentUser?.avatarUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+
+    return (
+      <>
+      <View style={styles.topBar}>
+        <View style={styles.topLeft}>
+          <Image source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }} style={styles.logo} />
+          <Text style={styles.brand}>Aline2</Text>
+        </View>
+
+        <View style={styles.topRight}>
+          <TouchableOpacity onPress={() => navigation.navigate("Search")}>
+            <Icon name="search-outline" size={23} color="#111" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.headerIconGap}
+            onPress={() => navigation.navigate("NotificationScreen")}
+          >
+            <Icon name="notifications-outline" size={23} color="#111" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.headerIconGap} onPress={() => navigation.navigate("Swipes")}>
+            <Icon name="play-circle-outline" size={23} color="#111" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyListContent}>
+        <TouchableOpacity
+          style={styles.storyItem}
+          onPress={() => {
+            if (ownStory) {
+              navigation.navigate("StoryViewer", { storyId: ownStory.id });
+              return;
+            }
+
+            navigation.navigate("Create", { initialTab: "story" });
+          }}
+        >
+          <View style={[styles.storyRing, styles.storyRingSeen]}>
+            <Image
+              source={{ uri: ownStoryAvatar }}
+              style={styles.storyAvatar}
+            />
+            <View style={styles.storyAddBadge}>
+              <Icon name="add" size={13} color="#fff" />
+            </View>
+          </View>
+        <Text style={styles.storyName} numberOfLines={1}>
+          Your story
+        </Text>
+      </TouchableOpacity>
+        {feed.stories.filter((story) => story.user.id !== ownStoryOwnerId).map((story) => (
+          <View key={story.id}>{renderStory({ item: story })}</View>
+        ))}
+      </ScrollView>
+    </>
+    );
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#7b3fe4" />
+      </View>
+    );
+  }
 
   return (
-    <View style={{ flex: 1 }}>
-
-      {/* Overlay */}
-      <TouchableOpacity
-        style={[styles.overlay, { opacity: menuOpen ? 1 : 0 }]}
-        activeOpacity={1}
-        onPress={toggleMenu}
-        pointerEvents={menuOpen ? 'auto' : 'none'} // click works only when menuOpen
+    <View style={styles.container}>
+      <FlatList
+        data={feed.posts}
+        keyExtractor={(item) => item.id}
+        renderItem={renderPost}
+        ListHeaderComponent={renderHeader}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       />
 
-      {/* ✅ Sidebar */}
-      <Animated.View
-        style={[
-          styles.sidebar,
-          { transform: [{ translateX: slideAnim }] },
-        ]}
-      >
-        {/* Gradient Header */}
-        <View style={styles.headerGradient}>
-          <Image
-            source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }}
-            style={styles.profileImg}
-          />
-          <Text style={styles.name}>Aline2</Text>
-          <Text style={styles.tagline}>Earn • Connect • Grow</Text>
-        </View>
+      <PostCommentsSheet
+        visible={activeSheet === "comments"}
+        post={selectedPost}
+        onClose={closeSheet}
+        onPostUpdate={updatePost}
+        onOpenFull={openPostComments}
+      />
 
-        {/* User Card */}
-        <View style={styles.userCard}>
-          <Text style={styles.balanceText}>₹ 12,450</Text>
-          <Text style={styles.balanceLabel}>Available Balance</Text>
-        </View>
+      <PostShareSheet
+        visible={activeSheet === "share"}
+        post={selectedPost}
+        onClose={closeSheet}
+        onPostUpdate={updatePost}
+        onOpenStoryComposer={(post) =>
+          navigation.navigate("Create", {
+            initialTab: "story",
+            initialMedia: post.media[0]?.thumbnailUrl || post.media[0]?.url,
+          })
+        }
+      />
 
-        {/* Sections */}
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {menuSections.map((section, index) => (
-            <View key={index} style={styles.section}>
-              <Text style={styles.sectionTitle}>{section.title}</Text>
-              {section.data.map((item, i) => (
-                <TouchableOpacity key={i} style={styles.menuItem} onPress={() => navigation.navigate(item.screen)}>
-                  <View style={styles.iconCircle}>
-                    <Icon name={item.icon} size={18} color="#ab2aeb" />
-                  </View>
-                  <Text style={styles.menuText}>{item.label}</Text>
-                  <Icon name="chevron-forward" size={18} color="#bbb" />
-                </TouchableOpacity>
-              ))}
-            </View>
-          ))}
-        </ScrollView>
+      {selectedPost ? (
+        <ContentActionSheet
+          visible={activeSheet === "actions"}
+          contentType="post"
+          contentId={selectedPost.id}
+          userId={selectedPost.user.id}
+          userLabel={selectedPost.user.username}
+          title="Post options"
+          onClose={closeSheet}
+          onActionComplete={(action) => {
+            if (action === "not_interested") {
+              setFeed((prev) => ({
+                ...prev,
+                posts: prev.posts.filter((item) => item.id !== selectedPost.id),
+              }));
+            }
 
-        {/* Logout */}
-        <TouchableOpacity style={styles.logout}>
-          <Icon name="log-out-outline" size={18} color="#fff" />
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
-      </Animated.View>
-
-      {/* MAIN UI */}
-      <View style={styles.container}>
-
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <TouchableOpacity onPress={toggleMenu}>
-              <Image
-                source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }}
-                style={styles.logo}
-              />
-            </TouchableOpacity>
-            <Text style={styles.title}>Aline2</Text>
-          </View>
-
-          <View style={styles.headerRight}>
-            <Icon onPress={() => navigation.navigate('Search')} name="search-outline" size={24} color="#333" />
-            <Icon
-              onPress={() => navigation.navigate('NotificationScreen')}
-              name="notifications-outline"
-              size={24}
-              color="#333"
-              style={{ marginLeft: 15 }}
-            />
-          </View>
-        </View>
-
-        <ScrollView showsVerticalScrollIndicator={false}>
-
-          {/* Stories */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.storyContainer}>
-            {stories.map((name, i) => (
-              <View key={i} style={styles.story}>
-                <Image
-                  source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }}
-                  style={styles.storyImage}
-                />
-                <Text style={styles.storyText}>{name}</Text>
-              </View>
-            ))}
-          </ScrollView>
-
-          {/* Post */}
-          <View style={styles.post}>
-            <View style={styles.postHeader}>
-              <Image
-                source={{ uri: "https://randomuser.me/api/portraits/women/2.jpg" }}
-                style={styles.postProfile}
-              />
-              <Text style={styles.postUser}>@reema</Text>
-              <Icon name="ellipsis-horizontal" size={20} style={{ marginLeft: "auto" }} />
-            </View>
-
-            <Image source={{ uri: "https://picsum.photos/500" }} style={styles.postImage} />
-
-            <View style={styles.postActions}>
-              <TouchableOpacity><Icon name="heart-outline" size={24} /></TouchableOpacity>
-              <TouchableOpacity><Icon name="chatbubble-outline" size={24} /></TouchableOpacity>
-              <TouchableOpacity><Icon name="paper-plane-outline" size={24} /></TouchableOpacity>
-              <TouchableOpacity style={{ marginLeft: "auto" }}>
-                <Icon name="bookmark-outline" size={24} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.likes}>120 likes</Text>
-          </View>
-
-        </ScrollView>
-      </View>
+            if (action === "mute" || action === "block") {
+              setFeed((prev) => ({
+                ...prev,
+                posts: prev.posts.filter((item) => item.user.id !== selectedPost.user.id),
+              }));
+            }
+          }}
+        />
+      ) : null}
     </View>
   );
 }
 
-export default FeedScreen;
-
-// ===================== Styles =====================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
-  header: {
+  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
+  topBar: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    borderBottomWidth: 0.5,
-    borderColor: "#ddd",
+    paddingHorizontal: 14,
     paddingTop: 40,
-    marginBottom: 10,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: "#ddd",
   },
-  headerLeft: { flexDirection: "row", alignItems: "center" },
-  sidebar: {
-    position: "absolute",
-    width: width * 0.8,
-    height: "100%",
-    backgroundColor: "#fff",
-    zIndex: 10,
-    elevation: 20,
-  },
-  overlay: {
-    position: "absolute",
-    width: "100%",
-    height: "100%",
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
-  headerGradient: {
-    backgroundColor: "#ab2aeb",
-    padding: 20,
-    borderBottomLeftRadius: 25,
-    borderBottomRightRadius: 25,
+  topLeft: { flexDirection: "row", alignItems: "center" },
+  logo: { width: 34, height: 34, borderRadius: 17, marginRight: 8 },
+  brand: { fontSize: 28, color: "#7b3fe4", fontWeight: "800" },
+  topRight: { flexDirection: "row", alignItems: "center" },
+  headerIconGap: { marginLeft: 14 },
+  storyListContent: { paddingHorizontal: 10, paddingVertical: 14 },
+  storyItem: { width: 84, alignItems: "center" },
+  storyRing: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    borderWidth: 2,
+    justifyContent: "center",
     alignItems: "center",
   },
-  profileImg: { width: 70, height: 70, borderRadius: 40, borderWidth: 2, borderColor: "#fff" },
-  name: { color: "#fff", fontSize: 18, fontWeight: "bold", marginTop: 8 },
-  tagline: { color: "#ddd", fontSize: 12 },
-  userCard: { backgroundColor: "#fff", margin: 15, padding: 15, borderRadius: 15, elevation: 4, alignItems: "center" },
-  balanceText: { fontSize: 22, fontWeight: "bold", color: "#ab2aeb" },
-  balanceLabel: { fontSize: 12, color: "#888" },
-  section: { marginHorizontal: 15, marginBottom: 10 },
-  sectionTitle: { fontSize: 12, color: "#888", marginBottom: 5 },
-  menuItem: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10 },
-  iconCircle: { width: 35, height: 35, borderRadius: 20, backgroundColor: "#f3efff", justifyContent: "center", alignItems: "center", marginRight: 10 },
-  menuText: { flex: 1, fontSize: 16 },
-  logout: { backgroundColor: "#ab2aeb", margin: 20, padding: 15, borderRadius: 30, flexDirection: "row", justifyContent: "center", alignItems: "center" },
-  logoutText: { color: "#fff", marginLeft: 10, fontWeight: "bold" },
-  logo: { width: 40, height: 40, borderRadius: 20, marginRight: 8 },
-  title: { fontSize: 28, fontWeight: "bold", color: "#7b3fe4" },
-  headerRight: { flexDirection: "row", alignItems: "center" },
-  storyContainer: { paddingVertical: 12, paddingLeft: 10 },
-  story: { alignItems: "center", marginRight: 15 },
-  storyImage: { width: 70, height: 70, borderRadius: 40, borderWidth: 2, borderColor: "#a64bf4" },
-  storyText: { fontSize: 12, marginTop: 4 },
-  post: { marginBottom: 20 },
-  postHeader: { flexDirection: "row", alignItems: "center", padding: 10 },
-  postProfile: { width: 36, height: 36, borderRadius: 20, marginRight: 8 },
-  postUser: { fontWeight: "bold", fontSize: 14 },
-  postImage: { width: "100%", height: 300 },
-  postActions: { flexDirection: "row", padding: 10, gap: 15 },
-  likes: { fontWeight: "bold", paddingHorizontal: 10 },
+  storyRingUnseen: { borderColor: "#f15181" },
+  storyRingSeen: { borderColor: "#c9c9c9" },
+  storyRingCloseFriends: { borderColor: "#22c55e" },
+  storyAvatar: { width: 66, height: 66, borderRadius: 33 },
+  storyAddBadge: {
+    position: "absolute",
+    right: 2,
+    bottom: 2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#2563eb",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#fff",
+  },
+  storyName: { marginTop: 6, fontSize: 12, color: "#272727" },
+  postCard: { marginBottom: 18 },
+  postHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 9 },
+  postAvatar: { width: 36, height: 36, borderRadius: 18 },
+  userMeta: { marginLeft: 9 },
+  row: { flexDirection: "row", alignItems: "center" },
+  username: { fontSize: 14, fontWeight: "700", color: "#111" },
+  verifiedIcon: { marginLeft: 4 },
+  postTime: { fontSize: 12, color: "#666", marginTop: 1 },
+  moreButton: { marginLeft: "auto", padding: 2 },
+  carouselWrap: { width: "100%" },
+  postImage: { height: 350, backgroundColor: "#f3f3f3" },
+  actionsRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 9 },
+  iconButton: { marginRight: 12 },
+  bookmarkButton: { marginLeft: "auto" },
+  likesText: { fontWeight: "700", color: "#121212", fontSize: 13, paddingHorizontal: 12 },
+  caption: { fontSize: 13.5, color: "#131313", paddingHorizontal: 12, paddingTop: 4 },
+  captionUser: { fontWeight: "700" },
+  tagLine: { color: "#3345d1", fontSize: 12.5, paddingHorizontal: 12, paddingTop: 4 },
+  tagLineMuted: { color: "#5a5a5a", fontSize: 12, paddingHorizontal: 12, paddingTop: 2 },
+  metaLine: { color: "#646464", fontSize: 12, paddingHorizontal: 12, paddingTop: 4 },
+  collabLine: { color: "#2f2f2f", fontSize: 12, paddingHorizontal: 12, paddingTop: 4, fontWeight: "600" },
+  commentCount: { color: "#787878", fontSize: 12.5, paddingHorizontal: 12, paddingTop: 6 },
+  commentComposer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 12,
+    marginTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: "#ddd",
+    paddingTop: 8,
+  },
+  commentInput: { flex: 1, fontSize: 13, color: "#222" },
+  postButton: { color: "#3a4ce3", fontWeight: "700", paddingHorizontal: 8 },
+  commentsDisabled: {
+    color: "#707070",
+    fontSize: 12,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
 });
+
+export default FeedScreen;

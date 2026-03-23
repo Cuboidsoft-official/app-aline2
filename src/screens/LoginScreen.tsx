@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { API } from '../api/api';
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { setStoredSession } from "../utils/authSession";
 
 import {
+  Alert,
   View,
   Text,
   TextInput,
@@ -12,15 +13,22 @@ import {
   Image,
 } from 'react-native';
 
-const LoginScreen = ({ navigation }: any) => {
+const LoginScreen = ({ navigation, route }: any) => {
+  const presetEmail = route?.params?.email || '';
 
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(presetEmail || '');
   const [password, setPassword] = useState('');
+
+  useEffect(() => {
+    if (presetEmail) {
+      setEmail(String(presetEmail).trim().toLowerCase());
+    }
+  }, [presetEmail]);
 
   const handleLogin = async () => {
 
     if (!email || !password) {
-      alert("Please enter email and password");
+      Alert.alert("Missing credentials", "Please enter email and password.");
       return;
     }
 
@@ -28,18 +36,27 @@ const LoginScreen = ({ navigation }: any) => {
       const res = await API.post("/auth/login", { email, password });
 
       if (res?.data?.success) {
-        await AsyncStorage.setItem("token", res.data.token);
-        await AsyncStorage.setItem("user", JSON.stringify(res.data.user));
+        await setStoredSession({
+          token: res.data.token,
+          user: res.data.user,
+        });
 
         navigation.replace("MainApp");
 
       } else {
-        alert(res?.data?.message || "Login failed");
+        Alert.alert("Login failed", res?.data?.message || "Login failed");
       }
 
     } catch (error: any) {
       console.log("LOGIN ERROR:", error);
-      alert(error?.response?.data?.message || error?.message || "Something went wrong");
+      console.log("LOGIN ERROR DETAILS:", {
+        baseURL: API.defaults?.baseURL,
+        requestUrl: error?.config?.url,
+        method: error?.config?.method,
+        status: error?.response?.status,
+        responseData: error?.response?.data,
+      });
+      Alert.alert("Login failed", error?.response?.data?.message || error?.message || "Something went wrong");
     }
   };
 
@@ -60,7 +77,7 @@ const LoginScreen = ({ navigation }: any) => {
       <View style={styles.card}>
 
         <TextInput
-          placeholder="Username, email or mobile number"
+          placeholder="Email address"
           style={styles.input}
           value={email}
           onChangeText={setEmail}

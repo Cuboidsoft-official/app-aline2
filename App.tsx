@@ -31,14 +31,33 @@ import EditServiceScreen from './src/screens/EditServiceScreen';
 import SellerPreviewScreen from './src/screens/SellerPreviewScreen';
 import SellerChatScreen from './src/screens/SellerChatScreen';
 import SellerDetailsScreen from './src/screens/SellerDetailsScreen';
+import ServiceRequestsScreen from './src/screens/ServiceRequestsScreen';
+import SwipesScreen from './src/screens/social/SwipesScreen';
+import StoryViewerScreen from './src/screens/social/StoryViewerScreen';
+import PostDetailScreen from './src/screens/social/PostDetailScreen';
+import StoryArchiveScreen from './src/screens/social/StoryArchiveScreen';
+import PostCommentsScreen from './src/screens/social/PostCommentsScreen';
+import SwipeCommentsScreen from './src/screens/social/SwipeCommentsScreen';
+import StoryInsightsScreen from './src/screens/social/StoryInsightsScreen';
+import ContentActionsScreen from './src/screens/social/ContentActionsScreen';
+import StoryRepliesScreen from './src/screens/social/StoryRepliesScreen';
+import CommentThreadScreen from './src/screens/social/CommentThreadScreen';
+import SearchScreen from './src/screens/SearchScreen';
+import HashtagResultsScreen from './src/screens/HashtagResultsScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
 
 const Stack = createNativeStackNavigator();
+const rootStyle = { flex: 1 } as const;
+const transparentSheetOptions = {
+  presentation: 'transparentModal' as const,
+  animation: 'fade' as const,
+  contentStyle: { backgroundColor: 'transparent' },
+};
 
 export default function App() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={rootStyle}>
       <NavigationContainer>
 
         <Stack.Navigator
@@ -72,6 +91,8 @@ export default function App() {
           <Stack.Screen name="BlockedUsersScreen" component={BlockedUsersScreen} />
           <Stack.Screen name="NotificationSettingsScreen" component={NotificationSettingsScreen} />
           <Stack.Screen name="DeleteAccountScreen" component={DeleteAccountScreen} />
+          <Stack.Screen name="Search" component={SearchScreen} />
+          <Stack.Screen name="HashtagResultsScreen" component={HashtagResultsScreen} />
           <Stack.Screen name="SellerRegistration" component={SellerRegistration} />
           <Stack.Screen name="SellerDashboardScreen" component={SellerDashboardScreen} />
           <Stack.Screen name="AddServiceScreen" component={AddServiceScreen} />
@@ -82,6 +103,17 @@ export default function App() {
           <Stack.Screen name="SellerPreviewScreen" component={SellerPreviewScreen} />
           <Stack.Screen name="SellerChatScreen" component={SellerChatScreen} />
           <Stack.Screen name="SellerDetailsScreen" component={SellerDetailsScreen} />
+          <Stack.Screen name="ServiceRequestsScreen" component={ServiceRequestsScreen} />
+          <Stack.Screen name="Swipes" component={SwipesScreen} />
+          <Stack.Screen name="StoryViewer" component={StoryViewerScreen} />
+          <Stack.Screen name="PostDetail" component={PostDetailScreen} />
+          <Stack.Screen name="StoryArchive" component={StoryArchiveScreen} />
+          <Stack.Screen name="PostComments" component={PostCommentsScreen} options={transparentSheetOptions} />
+          <Stack.Screen name="SwipeComments" component={SwipeCommentsScreen} options={transparentSheetOptions} />
+          <Stack.Screen name="StoryInsights" component={StoryInsightsScreen} options={transparentSheetOptions} />
+          <Stack.Screen name="StoryReplies" component={StoryRepliesScreen} options={transparentSheetOptions} />
+          <Stack.Screen name="CommentThread" component={CommentThreadScreen} options={transparentSheetOptions} />
+          <Stack.Screen name="ContentActions" component={ContentActionsScreen} options={transparentSheetOptions} />
         </Stack.Navigator>
       </NavigationContainer>
     </GestureHandlerRootView>

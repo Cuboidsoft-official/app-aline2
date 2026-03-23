@@ -13,6 +13,7 @@ import { useIsFocused } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
+import { clearStoredSession } from "../utils/authSession";
 
 const SettingsScreen = ({ navigation }: any) => {
 
@@ -25,14 +26,14 @@ const SettingsScreen = ({ navigation }: any) => {
  // LOAD PRIVACY WHEN SCREEN OPENS
  useEffect(() => {
 
-  const loadPrivacy = async () => {
+    const loadPrivacy = async () => {
 
    try {
 
     const token = await AsyncStorage.getItem("token");
 
-    const res = await API.get(
-     "/auth/me",
+     const res = await API.get(
+     "/auth/profile",
      {
       headers: { Authorization: `Bearer ${token}` }
      }
@@ -47,7 +48,7 @@ const SettingsScreen = ({ navigation }: any) => {
      JSON.stringify(value)
     );
 
-   } catch (err) {
+   } catch {
 
     const saved = await AsyncStorage.getItem("isPrivate");
 
@@ -67,7 +68,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
  // LOGOUT
  const logout = async () => {
-  await AsyncStorage.removeItem("token");
+  await clearStoredSession();
   navigation.replace("Login");
  };
 
@@ -106,7 +107,7 @@ const SettingsScreen = ({ navigation }: any) => {
      : "🌍 Your profile is now Public"
    );
 
-  } catch (error) {
+  } catch {
 
    Alert.alert(
     "Error",
@@ -117,7 +118,11 @@ const SettingsScreen = ({ navigation }: any) => {
    setLoading(false);
   }
 
- };
+	 };
+
+	 const showUnavailableSetting = (feature: string) => {
+	  Alert.alert("Not available yet", `${feature} is not implemented yet.`);
+	 };
 
  return (
 
@@ -162,10 +167,10 @@ const SettingsScreen = ({ navigation }: any) => {
      <Icon name="chevron-forward" size={20}/>
     </TouchableOpacity>
 
-    <TouchableOpacity
-     style={styles.item}
-     onPress={() => navigation.navigate("AccountCenter")}
-    >
+	    <TouchableOpacity
+	     style={styles.item}
+	     onPress={() => showUnavailableSetting("Account center")}
+	    >
      <Text style={styles.text}>Account center</Text>
      <Icon name="chevron-forward" size={20}/>
     </TouchableOpacity>
@@ -188,22 +193,30 @@ const SettingsScreen = ({ navigation }: any) => {
      <Icon name="chevron-forward" size={20}/>
     </TouchableOpacity>
 
+    <TouchableOpacity
+     style={styles.item}
+     onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "user" })}
+    >
+     <Text style={styles.text}>My service requests</Text>
+     <Icon name="chevron-forward" size={20}/>
+    </TouchableOpacity>
+
     <Text style={styles.section}>
      How others interact with you
     </Text>
 
-    <TouchableOpacity
-     style={styles.item}
-     onPress={() => navigation.navigate("CommentSettings")}
-    >
+	    <TouchableOpacity
+	     style={styles.item}
+	     onPress={() => showUnavailableSetting("Comment settings")}
+	    >
      <Text style={styles.text}>Comments</Text>
      <Icon name="chevron-forward" size={20}/>
     </TouchableOpacity>
 
-    <TouchableOpacity
-     style={styles.item}
-     onPress={() => navigation.navigate("TagSettings")}
-    >
+	    <TouchableOpacity
+	     style={styles.item}
+	     onPress={() => showUnavailableSetting("Tag and mention settings")}
+	    >
      <Text style={styles.text}>Tags and mentions</Text>
      <Icon name="chevron-forward" size={20}/>
     </TouchableOpacity>
@@ -320,4 +333,3 @@ const styles = StyleSheet.create({
  }
 
 });
-

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/Ionicons";
 import Tooltip from "react-native-walkthrough-tooltip";
 import { API } from "../api/api";
+import { formatPrimaryServicePrice, formatSummaryAmount } from "../utils/servicePricing";
 
 const DEFAULT_COVER =
   "https://www.bcmch.org/asset/uploads/common/867349919655f1491613e4.webp";
@@ -27,19 +28,20 @@ const SellerDashboardScreen = ({ navigation }: any) => {
   const [step, setStep] = useState(1);
   const [services, setServices] = useState([]);
   const [serviceLoading, setServiceLoading] = useState(true);
+  const [requestSummary, setRequestSummary] = useState<any>(null);
+  const [recentRequests, setRecentRequests] = useState<any[]>([]);
+  const [requestLoading, setRequestLoading] = useState(true);
 
   const [loading, setLoading] = useState(true);
   const [seller, setSeller] = useState<any>(null);
 
   const next = () => setStep(step + 1);
   const close = () => setStep(0);
+  const showUnavailableFeature = (feature: string) => {
+    Alert.alert("Not available yet", `${feature} is not implemented in the backend yet.`);
+  };
 
-  useEffect(() => {
-    fetchSellerProfile();
-    fetchServices();
-  }, []);
-
-const fetchServices = async () => {
+const fetchServices = useCallback(async () => {
   try {
     const token = await AsyncStorage.getItem("token");
 
@@ -55,7 +57,7 @@ const fetchServices = async () => {
   } finally {
     setServiceLoading(false);
   }
-};
+}, []);
 const handleDeleteService = (id: string) => {
   Alert.alert("Delete Service", "Are you sure?", [
     { text: "Cancel" },
@@ -79,7 +81,23 @@ const handleShareService = async (item: any) => {
     message: `${item.serviceName}\n${item.description}`
   });
 };
-  const fetchSellerProfile = async () => {
+const fetchRequestData = useCallback(async () => {
+  try {
+    setRequestLoading(true);
+    const [summaryRes, requestsRes] = await Promise.all([
+      API.get("/service-requests/summary", { params: { role: "seller" } }),
+      API.get("/service-requests", { params: { role: "seller", status: "pending" } })
+    ]);
+
+    setRequestSummary(summaryRes.data?.summary || null);
+    setRecentRequests((requestsRes.data?.requests || []).slice(0, 3));
+  } catch (error) {
+    console.log("request data error:", error);
+  } finally {
+    setRequestLoading(false);
+  }
+}, []);
+  const fetchSellerProfile = useCallback(async () => {
     try {
       setLoading(true);
 
@@ -116,7 +134,13 @@ const handleShareService = async (item: any) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigation]);
+
+  useEffect(() => {
+    fetchSellerProfile();
+    fetchServices();
+    fetchRequestData();
+  }, [fetchRequestData, fetchSellerProfile, fetchServices]);
 
   const getVerificationLabel = () => {
     if (!seller?.verificationStatus) return "Pending";
@@ -269,7 +293,7 @@ const handleShareService = async (item: any) => {
               <Text style={styles.walletTitle}>Seller Wallet</Text>
             </View>
 
-            <Text style={styles.walletAmount}>₹0</Text>
+            <Text style={styles.walletAmount}>{formatSummaryAmount(requestSummary, "completed")}</Text>
           </View>
         </Tooltip>
 
@@ -332,12 +356,34 @@ const handleShareService = async (item: any) => {
           >
             <TouchableOpacity
               style={styles.secondaryBtn}
-              onPress={() => navigation.navigate("Appointments")}
+              onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "seller" })}
             >
               <Icon name="calendar-outline" size={18} color="#333" />
               <Text style={styles.btnText2}> View Appointments</Text>
             </TouchableOpacity>
           </Tooltip>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Recent Requests</Text>
+
+          {requestLoading ? (
+            <ActivityIndicator style={{ marginTop: 16 }} />
+          ) : recentRequests.length === 0 ? (
+            <Text style={styles.emptyRequestText}>No pending requests right now.</Text>
+          ) : (
+            recentRequests.map((item: any) => (
+              <View key={item._id} style={styles.requestCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.requestTitle}>{item.service?.serviceName || "Service request"}</Text>
+                  <Text style={styles.requestSubtitle}>{item.user?.name || item.user?.username || "Client"}</Text>
+                </View>
+                <Text style={styles.requestPrice}>
+                  {formatPrimaryServicePrice({ pricingOptions: [item.pricing], currency: item.pricing?.currency })}
+                </Text>
+              </View>
+            ))
+          )}
         </View>
 
         <View style={styles.section}>
@@ -466,15 +512,7 @@ const handleShareService = async (item: any) => {
 
                {/* PRICE */}
                <View style={{ flexDirection: "row", marginTop: 6 }}>
-                 {item.pricePerMin > 0 && (
-                   <Text style={styles.priceTag}>₹{item.pricePerMin}/min</Text>
-                 )}
-                 {item.pricePerMsg > 0 && (
-                   <Text style={styles.priceTag}>₹{item.pricePerMsg}/msg</Text>
-                 )}
-                 {item.packagePrice > 0 && (
-                   <Text style={styles.priceTag}>₹{item.packagePrice}</Text>
-                 )}
+                 <Text style={styles.priceTag}>{formatPrimaryServicePrice(item)}</Text>
                </View>
 
                {/* ACTIONS */}
@@ -714,6 +752,31 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: "#555",
     lineHeight: 20
+  },
+  requestCard: {
+    marginTop: 12,
+    backgroundColor: "#FAFAFA",
+    borderRadius: 12,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center"
+  },
+  requestTitle: {
+    fontWeight: "700",
+    color: "#111"
+  },
+  requestSubtitle: {
+    marginTop: 4,
+    color: "#666"
+  },
+  requestPrice: {
+    color: "#7B4DFF",
+    fontWeight: "700",
+    marginLeft: 10
+  },
+  emptyRequestText: {
+    marginTop: 12,
+    color: "#777"
   },
 
   readMore: {

@@ -14,15 +14,36 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
+import { uploadImageAsset } from "../utils/uploadMedia";
+
+type SelectedImage = {
+  uri: string;
+  fileName?: string;
+  type?: string;
+};
+
+const PRICING_MODES = [
+  { key: "per_minute", label: "Per Minute" },
+  { key: "per_hour", label: "Per Hour" },
+  { key: "per_message", label: "Per Message" },
+  { key: "per_session", label: "Per Session" },
+  { key: "package", label: "Package" },
+];
 
 const AddServiceScreen = ({ navigation }: any) => {
   const [serviceName, setServiceName] = useState("");
   const [description, setDescription] = useState("");
   const [eligibility, setEligibility] = useState("");
   const [pricePerMin, setPricePerMin] = useState("");
+  const [pricePerHour, setPricePerHour] = useState("");
   const [pricePerMsg, setPricePerMsg] = useState("");
+  const [pricePerSession, setPricePerSession] = useState("");
   const [packagePrice, setPackagePrice] = useState("");
-  const [image, setImage] = useState<string | null>(null);
+  const [sessionDurationMinutes, setSessionDurationMinutes] = useState("");
+  const [availabilityNotes, setAvailabilityNotes] = useState("");
+  const [pricingModel, setPricingModel] = useState("per_minute");
+  const [imagePreviewUri, setImagePreviewUri] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
   const [loading, setLoading] = useState(false);
 
   const pickImage = () => {
@@ -39,8 +60,14 @@ const AddServiceScreen = ({ navigation }: any) => {
           return;
         }
 
-        if (response?.assets?.length > 0) {
-          setImage(response.assets[0].uri || null);
+        const asset = response.assets?.[0];
+        if (asset?.uri) {
+          setSelectedImage({
+            uri: asset.uri,
+            fileName: asset.fileName,
+            type: asset.type,
+          });
+          setImagePreviewUri(asset.uri);
         }
       }
     );
@@ -62,7 +89,13 @@ const AddServiceScreen = ({ navigation }: any) => {
       return false;
     }
 
-    if (!pricePerMin.trim() && !pricePerMsg.trim() && !packagePrice.trim()) {
+    if (
+      !pricePerMin.trim() &&
+      !pricePerHour.trim() &&
+      !pricePerMsg.trim() &&
+      !pricePerSession.trim() &&
+      !packagePrice.trim()
+    ) {
       Alert.alert("Validation", "Please add at least one price");
       return false;
     }
@@ -83,14 +116,22 @@ const AddServiceScreen = ({ navigation }: any) => {
         return;
       }
 
+      const imageUrl = selectedImage ? await uploadImageAsset(selectedImage) : "";
+
       const payload = {
         serviceName: serviceName.trim(),
         description: description.trim(),
         eligibility: eligibility.trim(),
         pricePerMin: pricePerMin || "0",
+        pricePerHour: pricePerHour || "0",
         pricePerMsg: pricePerMsg || "0",
+        pricePerSession: pricePerSession || "0",
         packagePrice: packagePrice || "0",
-        image: image || ""
+        pricingModel,
+        sessionDurationMinutes: sessionDurationMinutes || "0",
+        availabilityNotes: availabilityNotes.trim(),
+        currency: "INR",
+        image: imageUrl
       };
 
       const res = await API.post("/service/create", payload, {
@@ -107,11 +148,7 @@ const AddServiceScreen = ({ navigation }: any) => {
       }
     } catch (error: any) {
       console.log("create service error:", error?.response?.data || error.message);
-
-      Alert.alert(
-        "Error",
-        error?.response?.data?.message || "Failed to create service"
-      );
+      Alert.alert("Error", error?.response?.data?.message || "Failed to create service");
     } finally {
       setLoading(false);
     }
@@ -126,12 +163,12 @@ const AddServiceScreen = ({ navigation }: any) => {
 
         <Text style={styles.headerTitle}>Create Service</Text>
 
-        <View style={{ width: 24 }} />
+        <View style={styles.headerSpacer} />
       </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={styles.scrollContent}
       >
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Service Image</Text>
@@ -141,8 +178,8 @@ const AddServiceScreen = ({ navigation }: any) => {
             onPress={pickImage}
             activeOpacity={0.8}
           >
-            {image ? (
-              <Image source={{ uri: image }} style={styles.serviceImage} />
+            {imagePreviewUri ? (
+              <Image source={{ uri: imagePreviewUri }} style={styles.serviceImage} />
             ) : (
               <>
                 <Icon name="image-outline" size={40} color="#999" />
@@ -174,49 +211,67 @@ const AddServiceScreen = ({ navigation }: any) => {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Pricing</Text>
+          <Text style={styles.cardTitle}>Pricing Model</Text>
+
+          <View style={styles.pricingModeRow}>
+            {PRICING_MODES.map((mode) => (
+              <TouchableOpacity
+                key={mode.key}
+                style={[
+                  styles.modeChip,
+                  pricingModel === mode.key && styles.modeChipActive
+                ]}
+                onPress={() => setPricingModel(mode.key)}
+              >
+                <Text
+                  style={[
+                    styles.modeChipText,
+                    pricingModel === mode.key && styles.modeChipTextActive
+                  ]}
+                >
+                  {mode.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
           <View style={styles.priceRow}>
             <View style={styles.priceBox}>
-              <Text style={styles.priceLabel}>Call / Min</Text>
-              <TextInput
-                style={styles.priceInput}
-                keyboardType="numeric"
-                placeholder="₹"
-                placeholderTextColor="#999"
-                value={pricePerMin}
-                onChangeText={setPricePerMin}
-              />
+              <Text style={styles.priceLabel}>Per Min</Text>
+              <TextInput style={styles.priceInput} keyboardType="numeric" placeholder="₹" placeholderTextColor="#999" value={pricePerMin} onChangeText={setPricePerMin} />
             </View>
 
             <View style={styles.priceBox}>
-              <Text style={styles.priceLabel}>Per Msg</Text>
-              <TextInput
-                style={styles.priceInput}
-                keyboardType="numeric"
-                placeholder="₹"
-                placeholderTextColor="#999"
-                value={pricePerMsg}
-                onChangeText={setPricePerMsg}
-              />
+              <Text style={styles.priceLabel}>Per Hour</Text>
+              <TextInput style={styles.priceInput} keyboardType="numeric" placeholder="₹" placeholderTextColor="#999" value={pricePerHour} onChangeText={setPricePerHour} />
             </View>
 
-            <View style={[styles.priceBox, { marginRight: 0 }]}>
+            <View style={[styles.priceBox, styles.priceBoxLast]}>
+              <Text style={styles.priceLabel}>Per Msg</Text>
+              <TextInput style={styles.priceInput} keyboardType="numeric" placeholder="₹" placeholderTextColor="#999" value={pricePerMsg} onChangeText={setPricePerMsg} />
+            </View>
+          </View>
+
+          <View style={[styles.priceRow, styles.secondPriceRow]}>
+            <View style={styles.priceBox}>
+              <Text style={styles.priceLabel}>Per Session</Text>
+              <TextInput style={styles.priceInput} keyboardType="numeric" placeholder="₹" placeholderTextColor="#999" value={pricePerSession} onChangeText={setPricePerSession} />
+            </View>
+
+            <View style={styles.priceBox}>
+              <Text style={styles.priceLabel}>Session Min</Text>
+              <TextInput style={styles.priceInput} keyboardType="numeric" placeholder="30" placeholderTextColor="#999" value={sessionDurationMinutes} onChangeText={setSessionDurationMinutes} />
+            </View>
+
+            <View style={[styles.priceBox, styles.priceBoxLast]}>
               <Text style={styles.priceLabel}>Package</Text>
-              <TextInput
-                style={styles.priceInput}
-                keyboardType="numeric"
-                placeholder="₹"
-                placeholderTextColor="#999"
-                value={packagePrice}
-                onChangeText={setPackagePrice}
-              />
+              <TextInput style={styles.priceInput} keyboardType="numeric" placeholder="₹" placeholderTextColor="#999" value={packagePrice} onChangeText={setPackagePrice} />
             </View>
           </View>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Eligibility</Text>
+          <Text style={styles.cardTitle}>Eligibility & Availability</Text>
 
           <TextInput
             style={styles.textarea}
@@ -226,10 +281,19 @@ const AddServiceScreen = ({ navigation }: any) => {
             value={eligibility}
             onChangeText={setEligibility}
           />
+
+          <TextInput
+            style={[styles.textarea, styles.notesInput]}
+            placeholder="Availability notes, timings, or booking instructions"
+            placeholderTextColor="#999"
+            multiline
+            value={availabilityNotes}
+            onChangeText={setAvailabilityNotes}
+          />
         </View>
 
         <TouchableOpacity
-          style={[styles.createBtn, loading && { opacity: 0.7 }]}
+          style={[styles.createBtn, loading && styles.createBtnDisabled]}
           onPress={handleCreateService}
           disabled={loading}
         >
@@ -247,11 +311,7 @@ const AddServiceScreen = ({ navigation }: any) => {
 export default AddServiceScreen;
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: "#F7F8FC"
-  },
-
+  screen: { flex: 1, backgroundColor: "#F7F8FC" },
   header: {
     height: 90,
     paddingTop: 40,
@@ -263,54 +323,33 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#eee"
   },
-
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#111"
-  },
-
+  headerTitle: { fontSize: 18, fontWeight: "700", color: "#111" },
+  headerSpacer: { width: 24 },
+  scrollContent: { paddingBottom: 40 },
   card: {
     backgroundColor: "#fff",
     marginHorizontal: 20,
     marginTop: 20,
     borderRadius: 16,
     padding: 18,
+    elevation: 3,
     shadowColor: "#000",
     shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3
+    shadowRadius: 10
   },
-
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 14,
-    color: "#111"
-  },
-
+  cardTitle: { fontWeight: "700", marginBottom: 12, color: "#111", fontSize: 16 },
   imageUpload: {
     height: 150,
-    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E6E6E6",
+    borderColor: "#eee",
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
     overflow: "hidden",
     backgroundColor: "#FAFAFA"
   },
-
-  serviceImage: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 12
-  },
-
-  uploadText: {
-    marginTop: 6,
-    color: "#888"
-  },
-
+  serviceImage: { width: "100%", height: "100%", borderRadius: 12 },
+  uploadText: { color: "#888", marginTop: 6 },
   input: {
     backgroundColor: "#F3F4F8",
     padding: 14,
@@ -318,51 +357,80 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     color: "#111"
   },
-
   textarea: {
     backgroundColor: "#F3F4F8",
     padding: 14,
     borderRadius: 10,
-    height: 110,
-    textAlignVertical: "top",
-    color: "#111"
+    color: "#111",
+    minHeight: 100,
+    textAlignVertical: "top"
   },
-
+  notesInput: {
+    marginTop: 12,
+    minHeight: 80
+  },
+  pricingModeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginBottom: 14
+  },
+  modeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: "#F2F4F8",
+    marginRight: 8,
+    marginBottom: 8
+  },
+  modeChipActive: {
+    backgroundColor: "#7B4DFF"
+  },
+  modeChipText: {
+    color: "#555",
+    fontSize: 12,
+    fontWeight: "600"
+  },
+  modeChipTextActive: {
+    color: "#fff"
+  },
   priceRow: {
     flexDirection: "row",
-    justifyContent: "space-between"
+    gap: 12
   },
-
+  secondPriceRow: {
+    marginTop: 12
+  },
   priceBox: {
-    flex: 1,
-    marginRight: 10
+    flex: 1
   },
-
+  priceBoxLast: {
+    marginRight: 0
+  },
   priceLabel: {
+    marginBottom: 8,
+    color: "#666",
     fontSize: 12,
-    color: "#777",
-    marginBottom: 4
+    fontWeight: "600"
   },
-
   priceInput: {
     backgroundColor: "#F3F4F8",
     borderRadius: 10,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
     color: "#111"
   },
-
   createBtn: {
-    backgroundColor: "#7B4DFF",
     marginHorizontal: 20,
-    marginTop: 30,
-    padding: 18,
+    marginTop: 24,
+    backgroundColor: "#7B4DFF",
     borderRadius: 14,
     alignItems: "center",
-    shadowColor: "#7B4DFF",
-    shadowOpacity: 0.4,
-    shadowRadius: 10
+    justifyContent: "center",
+    paddingVertical: 15
   },
-
+  createBtnDisabled: {
+    opacity: 0.7
+  },
   createText: {
     color: "#fff",
     fontWeight: "700",

@@ -38,8 +38,14 @@ local.properties
 # node.js
 #
 node_modules/
-npm-debug.log
-yarn-error.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
 
 # fastlane
 #

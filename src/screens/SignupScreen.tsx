@@ -27,6 +27,10 @@ const SignupScreen = ({ navigation }: any) => {
       Alert.alert("Error", "Please enter email");
       return;
     }
+    if (!/\S+@\S+\.\S+/.test(cleanEmail)) {
+      Alert.alert("Invalid Email", "Please enter a valid email address.");
+      return;
+    }
 
     if (loading) return;
 
@@ -53,6 +57,23 @@ const SignupScreen = ({ navigation }: any) => {
     } catch (err: any) {
 
       console.log("OTP Error:", err?.response?.data || err.message);
+
+      const status = err?.response?.status;
+      const code = err?.response?.data?.code;
+      if (status === 409 && code === "ACCOUNT_EXISTS") {
+        Alert.alert(
+          "Account Found",
+          "This email is already registered. Please login.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Go to Login",
+              onPress: () => navigation.navigate("Login", { email: cleanEmail })
+            }
+          ]
+        );
+        return;
+      }
 
       Alert.alert(
         "Network Error",

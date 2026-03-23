@@ -15,6 +15,11 @@ import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api"; // ✅ USE THIS
 
+type ApiLikeError = {
+  response?: { data?: unknown };
+  message?: string;
+};
+
 const SellerSettingsScreen = ({ navigation }: any) => {
 
   const [isAvailable, setIsAvailable] = useState(false);
@@ -36,7 +41,8 @@ const SellerSettingsScreen = ({ navigation }: any) => {
       setIsAvailable(res.data.seller.availabilityStatus);
 
     } catch (error) {
-      console.log("FETCH ERROR:", error.response?.data || error.message);
+      const apiError = error as ApiLikeError;
+      console.log("FETCH ERROR:", apiError.response?.data || apiError.message);
       Alert.alert("Error", "Failed to load seller data");
     } finally {
       setLoading(false);
@@ -73,7 +79,8 @@ const SellerSettingsScreen = ({ navigation }: any) => {
       );
 
     } catch (error) {
-      console.log("ERROR:", error.response?.data || error.message);
+      const apiError = error as ApiLikeError;
+      console.log("ERROR:", apiError.response?.data || apiError.message);
 
       setIsAvailable(!isAvailable); // rollback
 
@@ -90,6 +97,10 @@ const SellerSettingsScreen = ({ navigation }: any) => {
         { text: "Delete", style: "destructive" }
       ]
     );
+  };
+
+  const showUnavailableFeature = (feature: string) => {
+    Alert.alert("Not available yet", `${feature} is not implemented in the backend yet.`);
   };
 
   if (loading) {
@@ -119,7 +130,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() => navigation.navigate("UpdateSellerProfile")}
+          onPress={() => navigation.navigate("SellerRegistration", { mode: "edit" })}
         >
           <Text style={styles.text}>Update Profile</Text>
           <Icon name="chevron-forward" size={20} />
@@ -127,7 +138,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() => navigation.navigate("UserProfile")}
+          onPress={() => navigation.navigate("Profile")}
         >
           <Text style={styles.text}>Switch to User Profile</Text>
           <Icon name="person-outline" size={20} />
@@ -151,7 +162,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() => navigation.navigate("RechargeWallet")}
+          onPress={() => navigation.navigate("WalletScreen")}
         >
           <Text style={styles.text}>Recharge Wallet</Text>
           <Icon name="wallet-outline" size={20} />
@@ -169,7 +180,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() => navigation.navigate("PromoteProfile")}
+          onPress={() => showUnavailableFeature("Profile promotion")}
         >
           <View style={styles.row}>
             <Icon name="trending-up-outline" size={20} color="#ab2aeb" />
@@ -180,7 +191,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() => navigation.navigate("BoostPost")}
+          onPress={() => showUnavailableFeature("Campaign boosting")}
         >
           <View style={styles.row}>
             <Icon name="megaphone-outline" size={20} color="#ab2aeb" />

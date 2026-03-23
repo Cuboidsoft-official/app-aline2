@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -30,11 +30,7 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
   const [services, setServices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem("token");
 
@@ -54,33 +50,40 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
     } finally {
       setLoading(false);
     }
+  }, [sellerId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const resolveSellerUserId = () => {
+    const rawUserId = seller?.user;
+
+    if (!rawUserId) {
+      return null;
+    }
+
+    if (typeof rawUserId === "string") {
+      return rawUserId;
+    }
+
+    return rawUserId?._id || null;
   };
 
-  const handleBook = async (service: any) => {
-    try {
-      const token = await AsyncStorage.getItem("token");
+  const openSellerChat = (service?: any) => {
+    const sellerUserId = resolveSellerUserId();
 
-      if (!token) {
-        Alert.alert("Login Required");
-        return;
-      }
-
-      await API.post(
-        "/booking/create",
-        {
-          sellerId,
-          serviceId: service._id
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
-
-      Alert.alert("Success", "Appointment Booked");
-    } catch (error) {
-      console.log(error);
-      Alert.alert("Error", "Booking failed");
+    if (!sellerUserId) {
+      Alert.alert("Unavailable", "This seller profile is missing its linked user account.");
+      return;
     }
+
+    navigation.navigate("SellerChatScreen", {
+      sellerId,
+      sellerUserId,
+      serviceId: service?._id,
+      serviceName: service?.serviceName
+    });
   };
 
   const getPriceText = (item: any) => {
@@ -221,14 +224,10 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
             {/* Profile Card ke niche ADD KAR */}
                     <TouchableOpacity
                       style={styles.chatBtn}
-                      onPress={() =>
-                        navigation.navigate("SellerChatScreen", {
-                          sellerId
-                        })
-                      }
+                      onPress={() => openSellerChat()}
                     >
                       <Icon name="chatbubble-ellipses-outline" size={18} color="#fff" />
-                      <Text style={styles.chatBtnText}> Chat / Book Appointment</Text>
+                      <Text style={styles.chatBtnText}> Chat / Request Booking</Text>
                     </TouchableOpacity>
         </View>
 
@@ -325,15 +324,10 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
 
                   <TouchableOpacity
                     style={styles.bookBtn}
-                    onPress={() =>
-                      navigation.navigate("SellerChatScreen", {
-                        sellerId,
-                        service: item
-                      })
-                    }
+                    onPress={() => openSellerChat(item)}
                   >
                     <Icon name="calendar-outline" size={17} color="#fff" />
-                    <Text style={styles.bookText}> Book Appointment</Text>
+                    <Text style={styles.bookText}> Request in Chat</Text>
                   </TouchableOpacity>
                 </View>
               </View>

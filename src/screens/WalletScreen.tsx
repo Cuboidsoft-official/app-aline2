@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
  View,
  Text,
@@ -7,10 +7,14 @@ import {
  Image,
  Alert,
  ScrollView,
- StatusBar
+ StatusBar,
+ ActivityIndicator
 } from "react-native";
 
 import Icon from "react-native-vector-icons/Ionicons";
+import { useFocusEffect } from "@react-navigation/native";
+import { API } from "../api/api";
+import { formatSummaryAmount } from "../utils/servicePricing";
 
 const paymentMethods = [
  {
@@ -27,12 +31,46 @@ const paymentMethods = [
  },
 ];
 
+type PaymentMethod = (typeof paymentMethods)[number]["name"];
+
 function WalletScreen({ navigation }:any) {
 
- const [balance, setBalance] = useState(12450);
+ const [summary, setSummary] = useState<any>(null);
+ const [loading, setLoading] = useState(true);
 
- const handleRecharge = (method) => {
-  Alert.alert("Recharge", `Recharge using ${method}`);
+ useFocusEffect(
+  useCallback(() => {
+   let active = true;
+
+   const loadSummary = async () => {
+    try {
+     setLoading(true);
+     const res = await API.get("/service-requests/summary", {
+      params: { role: "user" }
+     });
+
+     if (active) {
+      setSummary(res.data?.summary || null);
+     }
+    } catch (error) {
+     console.log("wallet summary error:", error);
+    } finally {
+     if (active) {
+      setLoading(false);
+     }
+    }
+   };
+
+   loadSummary();
+
+   return () => {
+    active = false;
+   };
+  }, [])
+ );
+
+ const handleRecharge = (method: PaymentMethod) => {
+  Alert.alert("Not available yet", `${method} recharge depends on payment-gateway integration and is deferred for later.`);
  };
 
  return (
@@ -53,18 +91,37 @@ function WalletScreen({ navigation }:any) {
 
     {/* BALANCE */}
     <View style={styles.balanceBox}>
-     <Text style={styles.balanceLabel}>Available Balance</Text>
-     <Text style={styles.balance}>₹ {balance}</Text>
+     <Text style={styles.balanceLabel}>Completed Request Value</Text>
+     {loading ? (
+      <ActivityIndicator color="#fff" style={{ marginVertical: 8 }} />
+     ) : (
+      <Text style={styles.balance}>{formatSummaryAmount(summary, "completed")}</Text>
+     )}
 
-     <TouchableOpacity style={styles.addMoneyBtn}>
+     <TouchableOpacity style={styles.addMoneyBtn} onPress={() => Alert.alert("Deferred", "Wallet top-up and settlement require payment-provider integration and are intentionally deferred.")}>
       <Icon name="add-circle-outline" size={18} color="#fff" />
-      <Text style={styles.addMoneyText}>Add Money</Text>
+      <Text style={styles.addMoneyText}>Provider Needed</Text>
      </TouchableOpacity>
     </View>
    </View>
 
+   <View style={styles.summaryStrip}>
+    <View style={styles.summaryCard}>
+     <Text style={styles.summaryLabel}>Pending</Text>
+     <Text style={styles.summaryValue}>{summary?.pending || 0}</Text>
+    </View>
+    <View style={styles.summaryCard}>
+     <Text style={styles.summaryLabel}>Accepted</Text>
+     <Text style={styles.summaryValue}>{summary?.accepted || 0}</Text>
+    </View>
+    <View style={styles.summaryCard}>
+     <Text style={styles.summaryLabel}>Completed</Text>
+     <Text style={styles.summaryValue}>{summary?.completed || 0}</Text>
+    </View>
+   </View>
+
    {/* PAYMENT METHODS */}
-   <Text style={styles.sectionTitle}>Recharge Options</Text>
+   <Text style={styles.sectionTitle}>Deferred Payment Integrations</Text>
 
    {paymentMethods.map((item, index) => (
     <TouchableOpacity
@@ -81,19 +138,10 @@ function WalletScreen({ navigation }:any) {
     </TouchableOpacity>
    ))}
 
-   {/* QUICK ADD */}
-   <Text style={styles.sectionTitle}>Quick Add</Text>
-
-   <View style={styles.quickRow}>
-    {[100, 200, 500, 1000].map((amt) => (
-     <TouchableOpacity
-      key={amt}
-      style={styles.quickBtn}
-      onPress={() => setBalance(balance + amt)}
-     >
-      <Text style={styles.quickText}>₹{amt}</Text>
-     </TouchableOpacity>
-    ))}
+   <Text style={styles.sectionTitle}>What works now</Text>
+   <View style={styles.infoBox}>
+    <Text style={styles.infoText}>Service requests, pricing selection, seller responses, and completion tracking are live.</Text>
+    <Text style={[styles.infoText, styles.infoTextSecondary]}>Wallet settlement, recharge, and payout flows stay deferred until payment-provider integration is approved.</Text>
    </View>
 
   </ScrollView>
@@ -175,6 +223,29 @@ const styles = StyleSheet.create({
   color: "#555",
   fontSize: 15,
  },
+ summaryStrip: {
+  flexDirection: "row",
+  marginHorizontal: 15,
+  marginTop: 18
+ },
+ summaryCard: {
+  flex: 1,
+  backgroundColor: "#fff",
+  padding: 14,
+  borderRadius: 14,
+  marginHorizontal: 5,
+  alignItems: "center"
+ },
+ summaryLabel: {
+  color: "#666",
+  fontSize: 12
+ },
+ summaryValue: {
+  color: "#ab2aeb",
+  fontWeight: "700",
+  fontSize: 18,
+  marginTop: 6
+ },
 
  /* PAYMENT CARD */
  paymentCard: {
@@ -205,23 +276,19 @@ const styles = StyleSheet.create({
   fontWeight: "500",
  },
 
- /* QUICK ADD */
- quickRow: {
-  flexDirection: "row",
-  justifyContent: "space-around",
-  margin: 20,
- },
-
- quickBtn: {
+ infoBox: {
   backgroundColor: "#fff",
-  paddingVertical: 14,
-  paddingHorizontal: 18,
-  borderRadius: 12,
-  elevation: 3,
+  marginHorizontal: 15,
+  marginTop: 12,
+  padding: 16,
+  borderRadius: 14
  },
-
- quickText: {
-  fontWeight: "bold",
-  color: "#ab2aeb",
+ infoText: {
+  color: "#444",
+  lineHeight: 20
+ },
+ infoTextSecondary: {
+  marginTop: 8,
+  color: "#777"
  },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
  View,
  Text,
@@ -13,32 +13,36 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
+import { getStoredUserId } from "../utils/authSession";
 
-const ProfilePreviewScreen = ({ route, navigation }) => {
+type ProfilePreviewPost = {
+ _id: string;
+ image?: string;
+ postType?: string;
+ media?: Array<{
+  url?: string;
+  thumbnailUrl?: string;
+ }>;
+};
 
- const { userId } = route.params;
+const ProfilePreviewScreen = ({ route, navigation }: { route: any; navigation: any }) => {
 
- const [user, setUser] = useState(null);
- const [posts, setPosts] = useState([]);
+ const { userId } = route.params as { userId: string };
+
+ const [user, setUser] = useState<any>(null);
+ const [allPosts, setAllPosts] = useState<ProfilePreviewPost[]>([]);
  const [loading, setLoading] = useState(true);
  const [activeTab, setActiveTab] = useState("posts");
  const [isFollowing, setIsFollowing] = useState(false);
  const [isMutual, setIsMutual] = useState(false);
  const [actionLoading, setActionLoading] = useState(false);
- const [suggestions, setSuggestions] = useState([]);
- const [showSuggestions, setShowSuggestions] = useState(true);
- const [myFollowing, setMyFollowing] = useState([]);
+ const [suggestions, setSuggestions] = useState<any[]>([]);
+const [showSuggestions, setShowSuggestions] = useState(true);
+const [myFollowing, setMyFollowing] = useState<string[]>([]);
+const suggestionListContentStyle = styles.suggestionListContent;
 
 
-useEffect(() => {
- fetchProfile();
- fetchSuggestions();
-}, []);
-
-const isPrivateLocked =
- user?.isPrivate === true && isMutual === false;
-
-const fetchProfile = async () => {
+const fetchProfile = useCallback(async () => {
  try {
 
   const token = await AsyncStorage.getItem("token");
@@ -49,23 +53,21 @@ const fetchProfile = async () => {
 
   const profileUser = res.data.user;
   const me = res.data.me;
+  const profilePosts = Array.isArray(res.data.posts) ? (res.data.posts as ProfilePreviewPost[]) : [];
 
   setUser(profileUser);
-  setPosts(profileUser.posts || []);
+  setAllPosts(profilePosts);
 
   // 🔥 store my following list
-  setMyFollowing(me?.following || []);
+  setMyFollowing((me?.following || []) as string[]);
 
   const amIFollowing = me?.following?.some(
-   id => String(id) === String(userId)
+   (id: string) => String(id) === String(userId)
   );
 
 const isHeFollowingMe = profileUser?.following?.some(
- id => String(id) === String(me?._id)
+ (id: string) => String(id) === String(me?._id)
 );
-
-  const isNotMyProfile =
-   String(profileUser?._id) !== String(me?._id);
 
 const mutualCheck =
  amIFollowing && isHeFollowingMe;
@@ -75,22 +77,23 @@ const mutualCheck =
 
 
   if(profileUser.isPrivate && !mutualCheck){
-    setPosts([]);
+    setAllPosts([]);
   }else{
-    setPosts(profileUser.posts || []);
+    setAllPosts(profilePosts);
   }
  } catch (err) {
   console.log(err);
  } finally {
   setLoading(false);
  }
-};
-const fetchSuggestions = async () => {
+}, [userId]);
+
+const fetchSuggestions = useCallback(async () => {
 
  try {
 
   const token = await AsyncStorage.getItem("token");
-  const currentUserId = await AsyncStorage.getItem("userId");
+  const currentUserId = await getStoredUserId();
 
   const res = await API.get("/auth/users", {
    headers: { Authorization: `Bearer ${token}` }
@@ -98,13 +101,13 @@ const fetchSuggestions = async () => {
 
   const allUsers = res.data.users || [];
 
-  const filteredUsers = allUsers.filter(user => {
+  const filteredUsers = allUsers.filter((suggestionUser: any) => {
 
-   const isMe = user._id === currentUserId;
-   const isProfileUser = user._id === userId;
+   const isMe = suggestionUser._id === currentUserId;
+   const isProfileUser = suggestionUser._id === userId;
 
    // 🔥 correct follow check
-   const alreadyFollowing = myFollowing.includes(user._id);
+   const alreadyFollowing = myFollowing.includes(suggestionUser._id);
 
    return !isMe && !isProfileUser && !alreadyFollowing;
 
@@ -118,9 +121,41 @@ const fetchSuggestions = async () => {
 
  }
 
-};
+}, [myFollowing, userId]);
 
-const renderSuggestion = ({ item }) => (
+useEffect(() => {
+ fetchProfile();
+ fetchSuggestions();
+}, [fetchProfile, fetchSuggestions]);
+
+const isPrivateLocked =
+ user?.isPrivate === true && isMutual === false;
+
+const posts = useMemo(() => {
+ if (activeTab === "swipes") {
+  return allPosts.filter((post) => post.postType === "reel");
+ }
+
+ if (activeTab === "tagged") {
+  return [];
+ }
+
+ return allPosts.filter((post) => post.postType !== "reel");
+}, [activeTab, allPosts]);
+
+const totalPostCount = useMemo(
+ () => allPosts.filter((post) => post.postType !== "reel").length,
+ [allPosts],
+);
+
+const getPostPreviewUrl = (post: ProfilePreviewPost): string =>
+ post.media?.[0]?.thumbnailUrl ||
+ post.media?.[0]?.url ||
+ post.image ||
+ "https://picsum.photos/300";
+
+
+const renderSuggestion = ({ item }: { item: any }) => (
 
  <TouchableOpacity
   style={styles.suggestionCard}
@@ -179,7 +214,7 @@ const followUser = async () => {
 
   Alert.alert("Success ✅", "You are now following");
 
- } catch (err) {
+ } catch {
 
   Alert.alert("Error", "Something went wrong");
 
@@ -188,7 +223,7 @@ const followUser = async () => {
  }
 };
 
-const toggleSuggestionFollow = async (targetUserId) => {
+const toggleSuggestionFollow = async (targetUserId: string) => {
 
  try {
 
@@ -202,12 +237,12 @@ const toggleSuggestionFollow = async (targetUserId) => {
 
   // suggestion list se remove
   setSuggestions(prev =>
-   prev.filter(user => user._id !== targetUserId)
+   prev.filter((suggestedUser) => suggestedUser._id !== targetUserId)
   );
 
   fetchProfile();
 
- } catch (err) {
+ } catch (err: any) {
 
   console.log("Follow Error:", err.response?.data || err);
 
@@ -247,7 +282,7 @@ const unfollowUser = async () => {
 
       Alert.alert("Done ✅", "Unfollowed");
 
-     } catch (err) {
+     } catch {
 
       Alert.alert("Error", "Something went wrong");
 
@@ -261,9 +296,9 @@ const unfollowUser = async () => {
  );
 };
 
- const renderPost = ({ item }) => (
+const renderPost = ({ item }: { item: any }) => (
   <Image
-   source={{ uri: item.image || "https://picsum.photos/300" }}
+   source={{ uri: getPostPreviewUrl(item) }}
    style={styles.postImage}
   />
  );
@@ -309,7 +344,7 @@ const unfollowUser = async () => {
 
     <View style={styles.stats}>
      <View style={styles.stat}>
-      <Text style={styles.statNumber}>{posts.length}</Text>
+      <Text style={styles.statNumber}>{totalPostCount}</Text>
       <Text style={styles.statText}>Posts</Text>
      </View>
 
@@ -393,11 +428,12 @@ const unfollowUser = async () => {
    style={styles.messageBtn}
    activeOpacity={0.7}
    onPress={() => navigation.navigate("ChatScreen", {
-    userId: user?._id
+    userId: user?._id,
+    conversationType: user?.category === "Seller" ? "seller" : "direct"
    })}
   >
    <Icon name="chatbubble-ellipses-outline" size={20} color="#000" />
-    <Text style={{ marginLeft:6 }}>Message</Text>
+    <Text style={styles.messageText}>Message</Text>
   </TouchableOpacity>
  )}
 
@@ -424,14 +460,14 @@ const unfollowUser = async () => {
 
  {showSuggestions && (
 
-  <FlatList
-   data={suggestions}
-   renderItem={renderSuggestion}
-   keyExtractor={(item) => item._id}
-   horizontal
-   showsHorizontalScrollIndicator={false}
-   contentContainerStyle={{ paddingHorizontal:15 }}
-  />
+	  <FlatList
+	   data={suggestions}
+	   renderItem={renderSuggestion}
+	   keyExtractor={(item) => item._id}
+	   horizontal
+	   showsHorizontalScrollIndicator={false}
+	   contentContainerStyle={suggestionListContentStyle}
+	  />
 
  )}
 
@@ -654,7 +690,7 @@ lockIcon:{
   fontWeight:"500"
  },
 
- messageBtn:{
+messageBtn:{
   borderWidth:1,
   borderColor:"#ccc",
   paddingVertical:9,
@@ -664,6 +700,9 @@ lockIcon:{
   alignItems:"center",
   justifyContent:"center",
   flexDirection:"row"
+ },
+ messageText:{
+  marginLeft:6
  },
 
  tabs:{
@@ -693,6 +732,9 @@ lockIcon:{
 suggestionSection:{
  marginTop:15,
  marginBottom:10
+},
+suggestionListContent:{
+ paddingHorizontal:15
 },
 
 suggestionHeader:{

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { Dispatch, SetStateAction, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,16 +14,18 @@ import {
   Alert
 } from 'react-native';
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from '../api/api';
 import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
+import { getStoredUser, getStoredToken, setStoredSession } from "../utils/authSession";
+import { uploadImageAsset } from "../utils/uploadMedia";
 
 const ProfileScreen = ({ navigation }: any) => {
 
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
+  const [interests, setInterests] = useState('');
   const [pronouns, setPronouns] = useState('');
   const [gender, setGender] = useState('');
   const [link, setLink] = useState('');
@@ -47,7 +49,11 @@ const ProfileScreen = ({ navigation }: any) => {
 
       if (result.didCancel) return;
 
-      const image = result.assets[0];
+      const image = result.assets?.[0];
+
+      if (!image?.uri) {
+        return;
+      }
 
       setProfilePic(image.uri);
 
@@ -57,7 +63,7 @@ const ProfileScreen = ({ navigation }: any) => {
   const fetchUser = async () => {
     try {
 
-      const token = await AsyncStorage.getItem("token");
+      const token = await getStoredToken();
 
       const res = await API.get("/auth/profile", {
         headers: {
@@ -70,6 +76,7 @@ const ProfileScreen = ({ navigation }: any) => {
       setName(user.name || "");
       setUsername(user.username || "");
       setBio(user.bio || "");
+      setInterests(Array.isArray(user.interests) ? user.interests.join(", ") : "");
       setPronouns(user.pronouns || "");
       setGender(user.gender || "");
       setLink(user.link || "");
@@ -90,12 +97,22 @@ const ProfileScreen = ({ navigation }: any) => {
 
       setLoading(true);
 
-      const token = await AsyncStorage.getItem("token");
+      const token = await getStoredToken();
 
       if (!token) {
         Alert.alert("Error", "Login again");
         return;
       }
+
+      const resolvedProfilePic = profilePic.startsWith("http")
+        ? profilePic
+        : profilePic
+          ? await uploadImageAsset({
+              uri: profilePic,
+              fileName: `profile_${Date.now()}.jpg`,
+              type: "image/jpeg"
+            })
+          : "";
 
       const res = await API.post(
         "/auth/update-profile",
@@ -103,11 +120,12 @@ const ProfileScreen = ({ navigation }: any) => {
           name,
           username,
           bio,
+          interests: interests.split(",").map((item) => item.trim()).filter(Boolean),
           pronouns,
           gender,
           link,
           category,
-          profilePic
+          profilePic: resolvedProfilePic
         },
         {
           headers: {
@@ -117,12 +135,33 @@ const ProfileScreen = ({ navigation }: any) => {
       );
 
       if (res.data.success) {
+        const storedUser = await getStoredUser();
+        await setStoredSession({
+          token,
+          user: {
+            ...(storedUser || {}),
+            name,
+            username,
+            bio,
+            interests: interests.split(",").map((item) => item.trim()).filter(Boolean),
+            pronouns,
+            gender,
+            link,
+            category,
+            profilePic: resolvedProfilePic
+          }
+        });
         Alert.alert("Success", "Profile updated");
         navigation.goBack();
       }
 
-    } catch (err) {
-      console.log("Update error:", err.response?.data || err.message);
+    } catch (err: unknown) {
+      const message =
+        typeof err === "object" && err !== null
+          ? ((err as { response?: { data?: unknown }; message?: string }).response?.data ||
+            (err as { message?: string }).message)
+          : err;
+      console.log("Update error:", message);
       Alert.alert("Error", "Update failed");
     } finally {
       setLoading(false);
@@ -152,19 +191,19 @@ const ProfileScreen = ({ navigation }: any) => {
 
         <Text style={styles.header}>Edit Profile</Text>
 
-        <View style={{ width: 20 }} />
+        <View style={styles.headerSpacer} />
 
       </View>
 
 
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={styles.flexFill}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={styles.scrollContent}
         >
 
           {/* Profile Image */}
@@ -191,6 +230,7 @@ const ProfileScreen = ({ navigation }: any) => {
           {renderInput("Name", name, setName)}
           {renderInput("Username", username, setUsername)}
           {renderInput("Bio", bio, setBio, true)}
+          {renderInput("Interests (comma separated)", interests, setInterests, true)}
           {renderInput("Pronouns", pronouns, setPronouns)}
           {renderInput("Gender", gender, setGender)}
           {renderInput("Link", link, setLink)}
@@ -206,7 +246,7 @@ const ProfileScreen = ({ navigation }: any) => {
           <TouchableOpacity
             style={[
               styles.saveButton,
-              loading && { opacity: 0.7 }
+              loading && styles.saveButtonDisabled
             ]}
             onPress={updateProfile}
             disabled={loading}
@@ -235,7 +275,7 @@ const ProfileScreen = ({ navigation }: any) => {
 const renderInput = (
   label: string,
   value: string,
-  setter: any,
+  setter: Dispatch<SetStateAction<string>>,
   multiline = false
 ) => (
   <View style={styles.inputGroup}>
@@ -245,7 +285,7 @@ const renderInput = (
     <TextInput
       style={[
         styles.input,
-        multiline && { height: 90 }
+        multiline && styles.multilineInput
       ]}
       value={value}
       onChangeText={setter}
@@ -279,6 +319,18 @@ const styles = StyleSheet.create({
   header: {
     fontSize: 18,
     fontWeight: '600'
+  },
+
+  headerSpacer: {
+    width: 20
+  },
+
+  flexFill: {
+    flex: 1
+  },
+
+  scrollContent: {
+    paddingBottom: 120
   },
 
   imageContainer: {
@@ -340,6 +392,10 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
 
+  saveButtonDisabled: {
+    opacity: 0.7
+  },
+
   saveText: {
     color: '#fff',
     fontSize: 16,
@@ -350,6 +406,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center"
+  },
+
+  multilineInput: {
+    height: 90
   }
 
 });

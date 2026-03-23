@@ -1,35 +1,60 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   Image,
   TouchableOpacity,
-  ScrollView
+  ScrollView,
+  Alert,
+  Share
 } from "react-native";
 
 import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
+import { formatPrimaryServicePrice, getServicePricingOptions } from "../utils/servicePricing";
 
 const PRIMARY = "#7B4DFF";
 
-const SellerDetailsScreen = ({ route, navigation }) => {
+type SellerProfile = {
+  _id?: string;
+  user?: string | { _id?: string };
+  sellerName?: string;
+  profilePic?: string;
+  bio?: string;
+  media?: string[];
+};
+
+type SellerService = {
+  _id?: string;
+  serviceName?: string;
+  pricePerMin?: number;
+  pricePerHour?: number;
+  pricePerMsg?: number;
+  pricePerSession?: number;
+  packagePrice?: number;
+  pricingOptions?: Array<{
+    model?: string;
+    label?: string;
+    amount?: number;
+    isDefault?: boolean;
+  }>;
+  currency?: string;
+  sessionDurationMinutes?: number;
+};
+
+const SellerDetailsScreen = ({ route, navigation }: any) => {
 
   const { sellerId } = route.params;
 
-  const [seller, setSeller] = useState(null);
-  const [services, setServices] = useState([]);
-  const [media, setMedia] = useState([]);
-
-  useEffect(() => {
-    fetchSeller();
-    fetchServices();
-  }, []);
+  const [seller, setSeller] = useState<SellerProfile | null>(null);
+  const [services, setServices] = useState<SellerService[]>([]);
+  const [media, setMedia] = useState<string[]>([]);
 
   // ================= API =================
 
-  const fetchSeller = async () => {
+  const fetchSeller = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem("token");
 
@@ -43,9 +68,9 @@ const SellerDetailsScreen = ({ route, navigation }) => {
     } catch (err) {
       console.log("Seller error:", err);
     }
-  };
+  }, [sellerId]);
 
-  const fetchServices = async () => {
+  const fetchServices = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem("token");
 
@@ -57,6 +82,49 @@ const SellerDetailsScreen = ({ route, navigation }) => {
 
     } catch (err) {
       console.log("Service error:", err);
+    }
+  }, [sellerId]);
+
+  useEffect(() => {
+    fetchSeller();
+    fetchServices();
+  }, [fetchSeller, fetchServices]);
+
+  const resolveSellerUserId = () => {
+    const rawUserId = seller?.user;
+
+    if (!rawUserId) {
+      return null;
+    }
+
+    return typeof rawUserId === "string" ? rawUserId : rawUserId._id || null;
+  };
+
+  const openSellerChat = (service?: SellerService) => {
+    const sellerUserId = resolveSellerUserId();
+
+    if (!sellerUserId) {
+      Alert.alert("Unavailable", "This seller profile is missing its linked user account.");
+      return;
+    }
+
+    navigation.navigate("SellerChatScreen", {
+      sellerId,
+      sellerUserId,
+      serviceId: service?._id,
+      serviceName: service?.serviceName
+    });
+  };
+
+  const shareSellerProfile = async () => {
+    try {
+      await Share.share({
+        message: seller?.sellerName
+          ? `Check out ${seller.sellerName} on Aline2`
+          : "Check out this seller on Aline2"
+      });
+    } catch (error) {
+      console.log("seller share error:", error);
     }
   };
 
@@ -107,10 +175,26 @@ const SellerDetailsScreen = ({ route, navigation }) => {
         {/* ACTION BUTTONS */}
         <View style={styles.actions}>
 
-          <Action icon="call-outline" title="Call" />
-          <Action icon="videocam-outline" title="Video" />
-          <Action icon="chatbubble-outline" title="Chat" />
-          <Action icon="share-social-outline" title="Share" />
+          <Action
+            icon="call-outline"
+            title="Call"
+            onPress={() => Alert.alert("Not available yet", "Voice calling is not implemented yet.")}
+          />
+          <Action
+            icon="videocam-outline"
+            title="Video"
+            onPress={() => Alert.alert("Not available yet", "Video calling is not implemented yet.")}
+          />
+          <Action
+            icon="chatbubble-outline"
+            title="Chat"
+            onPress={() => openSellerChat()}
+          />
+          <Action
+            icon="share-social-outline"
+            title="Share"
+            onPress={shareSellerProfile}
+          />
 
         </View>
 
@@ -129,12 +213,21 @@ const SellerDetailsScreen = ({ route, navigation }) => {
                   </Text>
 
                   <Text style={styles.servicePrice}>
-                    ₹{item.pricePerMin || item.pricePerMsg || item.packagePrice}
+                    {formatPrimaryServicePrice(item)}
                   </Text>
+
+                  {!!getServicePricingOptions(item).slice(1, 3).length && (
+                    <Text style={styles.serviceMeta}>
+                      {getServicePricingOptions(item)
+                        .slice(1, 3)
+                        .map((option: { label?: string }) => option.label)
+                        .join(" • ")}
+                    </Text>
+                  )}
                 </View>
 
-                <TouchableOpacity style={styles.bookBtn}>
-                  <Text style={{ color: "#fff" }}>Book</Text>
+                <TouchableOpacity style={styles.bookBtn} onPress={() => openSellerChat(item)}>
+                  <Text style={{ color: "#fff" }}>Request</Text>
                 </TouchableOpacity>
 
               </View>
@@ -195,8 +288,16 @@ export default SellerDetailsScreen;
 
 /* ================= COMPONENTS ================= */
 
-const Action = ({ icon, title }) => (
-  <TouchableOpacity style={styles.actionItem}>
+const Action = ({
+  icon,
+  title,
+  onPress
+}: {
+  icon: string;
+  title: string;
+  onPress?: () => void;
+}) => (
+  <TouchableOpacity style={styles.actionItem} onPress={onPress}>
     <View style={styles.actionIcon}>
       <Icon name={icon} size={24} color={PRIMARY} />
     </View>
@@ -204,7 +305,7 @@ const Action = ({ icon, title }) => (
   </TouchableOpacity>
 );
 
-const Option = ({ icon, title }) => (
+const Option = ({ icon, title }: { icon: string; title: string }) => (
   <TouchableOpacity style={styles.optionRow}>
     <Icon name={icon} size={22} style={{ marginRight: 15 }} />
     <Text style={{ flex: 1 }}>{title}</Text>
@@ -324,6 +425,12 @@ const styles = StyleSheet.create({
   servicePrice: {
     color: PRIMARY,
     marginTop: 4
+  },
+
+  serviceMeta: {
+    color: "#666",
+    marginTop: 4,
+    fontSize: 12
   },
 
   bookBtn: {

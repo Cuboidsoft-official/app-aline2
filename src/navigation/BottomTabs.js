@@ -5,11 +5,40 @@ import { Platform, TouchableNativeFeedback, View, StyleSheet } from "react-nativ
 
 import FeedScreen from "../screens/FeedScreen";
 import ProfileView from "../screens/ProfileView";
-import SearchScreen from "../screens/SearchScreen";
 import CreatePostScreen from "../screens/CreatePostScreen";
-import AllChatsScreen from "../screens/AllChatsScreen"; // 👈 import chat screen
+import AllChatsScreen from "../screens/AllChatsScreen";
+import SwipesScreen from "../screens/social/SwipesScreen";
 
 const Tab = createBottomTabNavigator();
+
+const tabIconNameByRoute = {
+  Feed: { active: "home", inactive: "home-outline" },
+  Swipes: { active: "play-circle", inactive: "play-circle-outline" },
+  Create: { active: "add-circle", inactive: "add-circle-outline" },
+  Chats: { active: "chatbubbles", inactive: "chatbubbles-outline" },
+  ProfileView: { active: "person", inactive: "person-outline" },
+};
+
+const renderTabIcon = (routeName, focused, color) => {
+  const config = tabIconNameByRoute[routeName] || tabIconNameByRoute.Feed;
+  return <Icon name={focused ? config.active : config.inactive} size={26} color={color} />;
+};
+
+function TabBarButton(props) {
+  if (Platform.OS === "android") {
+    return (
+      <TouchableNativeFeedback
+        {...props}
+        background={TouchableNativeFeedback.Ripple("rgba(123,63,228,0.18)", true, 25)}
+        useForeground
+      >
+        <View style={styles.tabButtonContainer}>{props.children}</View>
+      </TouchableNativeFeedback>
+    );
+  }
+
+  return <View style={styles.tabButtonContainer}>{props.children}</View>;
+}
 
 export default function BottomTabs() {
   return (
@@ -17,65 +46,17 @@ export default function BottomTabs() {
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarActiveTintColor: "#ab2aeb",
+        tabBarActiveTintColor: "#7b3fe4",
         tabBarInactiveTintColor: "#555",
-
-        tabBarIcon: ({ focused, color }) => {
-          let iconName;
-
-          if (route.name === "Feed")
-            iconName = focused ? "home" : "home-outline";
-
-          else if (route.name === "Search")
-            iconName = focused ? "search" : "search-outline";
-
-          else if (route.name === "Add")
-            iconName = focused ? "add-circle" : "add-circle-outline";
-
-          else if (route.name === "Chats")
-            iconName = focused ? "chatbubbles" : "chatbubbles-outline";
-
-          else if (route.name === "ProfileView")
-            iconName = focused ? "person" : "person-outline";
-
-          return <Icon name={iconName} size={26} color={color} />;
-        },
-
-        tabBarButton: (props) => {
-          if (Platform.OS === "android") {
-            return (
-              <TouchableNativeFeedback
-                {...props}
-                background={TouchableNativeFeedback.Ripple("rgba(171,42,235,0.2)", true, 25)}
-                useForeground={true}
-              >
-                <View style={styles.tabButtonContainer}>
-                  {props.children}
-                </View>
-              </TouchableNativeFeedback>
-            );
-          }
-
-          return (
-            <View style={styles.tabButtonContainer}>
-              {props.children}
-            </View>
-          );
-        },
+        tabBarIcon: ({ focused, color }) => renderTabIcon(route.name, focused, color),
+        tabBarButton: TabBarButton,
       })}
     >
-
       <Tab.Screen name="Feed" component={FeedScreen} />
-
-      <Tab.Screen name="Search" component={SearchScreen} />
-
-      <Tab.Screen name="Add" component={CreatePostScreen} />
-
-      {/* CHAT TAB */}
+      <Tab.Screen name="Swipes" component={SwipesScreen} />
+      <Tab.Screen name="Create" component={CreatePostScreen} />
       <Tab.Screen name="Chats" component={AllChatsScreen} />
-
       <Tab.Screen name="ProfileView" component={ProfileView} />
-
     </Tab.Navigator>
   );
 }

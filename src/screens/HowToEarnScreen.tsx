@@ -9,14 +9,15 @@ import {
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 
-const comboOptions = ["Stories", "Post", "Reel", "Video"];
+type ComboOption = "Stories" | "Post" | "Reel" | "Video";
+type ChargesMap = Record<ComboOption, number>;
+
+const comboOptions: ComboOption[] = ["Stories", "Post", "Reel", "Video"];
 
 function HowToEarnScreen({ navigation }:any) {
+ const [selectedCombo, setSelectedCombo] = useState<ComboOption[]>([]);
 
- const [selectedCombo, setSelectedCombo] = useState([]);
- const [dropdownOpen, setDropdownOpen] = useState(false);
-
- const [charges, setCharges] = useState({
+ const [charges, setCharges] = useState<ChargesMap>({
   Stories: 500,
   Post: 1000,
   Reel: 1500,
@@ -28,7 +29,7 @@ function HowToEarnScreen({ navigation }:any) {
   return sum + (charges[item] || 0);
  }, 0);
 
- const toggleCombo = (item) => {
+ const toggleCombo = (item: ComboOption) => {
   if (selectedCombo.includes(item)) {
    setSelectedCombo(selectedCombo.filter(i => i !== item));
   } else {
@@ -36,11 +37,11 @@ function HowToEarnScreen({ navigation }:any) {
   }
  };
 
- const updateCharge = (key, value) => {
+ const updateCharge = (key: ComboOption, value: string) => {
   setCharges({ ...charges, [key]: Number(value) });
  };
 
- const InputField = ({ icon, placeholder }) => (
+ const InputField = ({ icon, placeholder }: { icon: string; placeholder: string }) => (
   <View style={styles.inputBox}>
    <Icon name={icon} size={18} color="#ab2aeb" />
    <TextInput

@@ -1,17 +1,18 @@
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import {
 View,
 Text,
 StyleSheet,
-Image,
 StatusBar,
 Animated,
 Dimensions
 } from "react-native";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { API } from "../api/api";
+import { clearStoredSession } from "../utils/authSession";
 
-const { width, height } = Dimensions.get("window");
+const { height } = Dimensions.get("window");
 
 const SplashScreen = ({ navigation }: any) => {
 
@@ -20,6 +21,42 @@ const bounceAnim = useRef(new Animated.Value(-120)).current;
 const textAnim = useRef(new Animated.Value(50)).current;
 const opacityAnim = useRef(new Animated.Value(0)).current;
 const circleAnim = useRef(new Animated.Value(0)).current;
+
+const checkLogin = useCallback(async () => {
+
+const token = await AsyncStorage.getItem("token");
+
+setTimeout(async () => {
+
+if(!token){
+navigation.replace("Login");
+return;
+}
+
+try {
+ await API.get("/auth/profile", {
+  headers: {
+   Authorization: `Bearer ${token}`
+  }
+ });
+
+ navigation.replace("MainApp");
+} catch (error) {
+ console.log("Session validation failed:", error);
+ console.log("Session validation error details:", {
+  baseURL: API.defaults?.baseURL,
+  requestUrl: error?.config?.url,
+  method: error?.config?.method,
+  status: error?.response?.status,
+  responseData: error?.response?.data,
+ });
+ await clearStoredSession();
+ navigation.replace("Login");
+}
+
+},3000);
+
+}, [navigation]);
 
 useEffect(() => {
 
@@ -61,23 +98,7 @@ useNativeDriver:true
 
 checkLogin();
 
-},[]);
-
-const checkLogin = async () => {
-
-const token = await AsyncStorage.getItem("token");
-
-setTimeout(()=>{
-
-if(token){
-navigation.replace("MainApp");
-}else{
-navigation.replace("Login");
-}
-
-},3000);
-
-};
+},[bounceAnim, checkLogin, circleAnim, opacityAnim, scaleAnim, textAnim]);
 
 const floatY = circleAnim.interpolate({
 inputRange:[0,1],

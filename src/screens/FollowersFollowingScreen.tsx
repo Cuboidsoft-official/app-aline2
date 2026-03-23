@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
  View,
  Text,
@@ -14,21 +14,26 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
 
-const FollowersFollowingScreen = ({ route, navigation }) => {
+type FollowTab = "followers" | "following";
 
- const { userId, type } = route.params;
+interface FollowUser {
+ _id: string;
+ username?: string;
+ name?: string;
+ profilePic?: string;
+}
 
- const [users, setUsers] = useState([]);
- const [filteredUsers, setFilteredUsers] = useState([]);
- const [activeTab, setActiveTab] = useState(type);
+const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigation: any }) => {
+
+ const { userId, type } = route.params as { userId: string; type: FollowTab };
+
+ const [users, setUsers] = useState<FollowUser[]>([]);
+ const [filteredUsers, setFilteredUsers] = useState<FollowUser[]>([]);
+ const [activeTab, setActiveTab] = useState<FollowTab>(type);
  const [search, setSearch] = useState("");
  const [loading, setLoading] = useState(true);
 
- useEffect(() => {
-  fetchUsers(activeTab);
- }, [activeTab]);
-
- const fetchUsers = async (tabType) => {
+ const fetchUsers = useCallback(async (tabType: FollowTab) => {
 
   try {
 
@@ -45,8 +50,8 @@ const FollowersFollowingScreen = ({ route, navigation }) => {
      ? res.data.followers
      : res.data.following;
 
-   setUsers(list || []);
-   setFilteredUsers(list || []);
+   setUsers((list || []) as FollowUser[]);
+   setFilteredUsers((list || []) as FollowUser[]);
 
   } catch (err) {
    console.log("FOLLOW ERROR:", err);
@@ -54,9 +59,13 @@ const FollowersFollowingScreen = ({ route, navigation }) => {
    setLoading(false);
   }
 
- };
+ }, [userId]);
 
- const handleSearch = (text) => {
+ useEffect(() => {
+  fetchUsers(activeTab);
+ }, [activeTab, fetchUsers]);
+
+ const handleSearch = (text: string) => {
 
   setSearch(text);
 
@@ -67,7 +76,7 @@ const FollowersFollowingScreen = ({ route, navigation }) => {
   setFilteredUsers(filtered);
  };
 
- const renderUser = ({ item }) => (
+ const renderUser = ({ item }: { item: FollowUser }) => (
 
   <TouchableOpacity
    style={styles.userItem}
@@ -87,7 +96,7 @@ const FollowersFollowingScreen = ({ route, navigation }) => {
     style={styles.avatar}
    />
 
-   <View style={{ flex: 1 }}>
+   <View style={styles.userMeta}>
     <Text style={styles.username}>{item.username}</Text>
     <Text style={styles.name}>{item.name}</Text>
    </View>
@@ -117,7 +126,7 @@ const FollowersFollowingScreen = ({ route, navigation }) => {
 
     <Text style={styles.headerTitle}>Connections</Text>
 
-    <View style={{ width: 26 }} />
+    <View style={styles.headerSpacer} />
 
    </View>
 
@@ -252,6 +261,10 @@ const styles = StyleSheet.create({
   padding:15
  },
 
+ userMeta:{
+  flex:1
+ },
+
  avatar:{
   width:50,
   height:50,
@@ -271,6 +284,10 @@ const styles = StyleSheet.create({
   flex:1,
   justifyContent:"center",
   alignItems:"center"
+ },
+
+ headerSpacer:{
+  width:26
  }
 
 });

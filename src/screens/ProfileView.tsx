@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
  View,
@@ -13,93 +13,144 @@ import {
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/Ionicons";
-import { Modal } from "react-native";
 import { API } from "../api/api";
+
+interface ProfilePost {
+ _id: string;
+ image?: string;
+ postType?: string;
+ media?: Array<{
+  url?: string;
+  thumbnailUrl?: string;
+ }>;
+}
+
+interface ProfileUser {
+ _id: string;
+ name?: string;
+ pronouns?: string;
+ bio?: string;
+ interests?: string[];
+ link?: string;
+ profilePic?: string;
+ followers?: string[];
+ following?: string[];
+ isPrivate?: boolean;
+}
+
+const getErrorMessage = (error: unknown) => {
+ if (typeof error === "object" && error !== null) {
+  const maybeError = error as { response?: { data?: { message?: string } }; message?: string };
+  return maybeError.response?.data?.message || maybeError.message || "Unknown error";
+ }
+
+ return "Unknown error";
+};
 
 const ProfileScreen = ({navigation}: any) => {
 
- const [user, setUser] = useState(null);
- const [posts, setPosts] = useState([]);
+ const [user, setUser] = useState<ProfileUser | null>(null);
+ const [allPosts, setAllPosts] = useState<ProfilePost[]>([]);
  const [loading, setLoading] = useState(true);
+ const [privateLoading, setPrivateLoading] = useState(false);
  const [activeTab, setActiveTab] = useState("posts");
- const [menuVisible, setMenuVisible] = useState(false);
  const [isPrivate, setIsPrivate] = useState(false);
 
- useEffect(() => {
-  fetchProfile();
- }, []);
-
- const fetchProfile = async () => {
+ const fetchProfile = useCallback(async () => {
 
   try {
-
    const token = await AsyncStorage.getItem("token");
-
-   const res = await API.get("/auth/profile", {
+   const profileRes = await API.get("/auth/profile", {
     headers: {
      Authorization: `Bearer ${token}`
     }
    });
 
-   setUser(res.data.user);
-   setPosts(res.data.posts || []);
+   const profileUser = (profileRes.data.user || null) as ProfileUser | null;
+   setUser(profileUser);
+   setIsPrivate(!!profileUser?.isPrivate);
+
+   if (profileUser?._id) {
+    const postsRes = await API.get(`/posts/user/${profileUser._id}`, {
+     headers: {
+      Authorization: `Bearer ${token}`
+     }
+    });
+
+    setAllPosts((postsRes.data.posts || []) as ProfilePost[]);
+   } else {
+    setAllPosts([]);
+   }
 
   } catch (error) {
-   console.log("Profile Error:", error.response?.data || error.message);
+   console.log("Profile Error:", getErrorMessage(error));
   } finally {
    setLoading(false);
   }
 
- };
+ }, []);
+
+ useEffect(() => {
+  fetchProfile();
+ }, [fetchProfile]);
+
+ const posts = useMemo(() => {
+  if (activeTab === "swipes") {
+   return allPosts.filter((post) => post.postType === "reel");
+  }
+
+  if (activeTab === "tagged") {
+   return [];
+  }
+
+  return allPosts.filter((post) => post.postType !== "reel");
+ }, [activeTab, allPosts]);
+
+ const totalPostCount = useMemo(
+  () => allPosts.filter((post) => post.postType !== "reel").length,
+  [allPosts],
+ );
+
+ const getPostPreviewUrl = (post: ProfilePost): string =>
+  post.media?.[0]?.thumbnailUrl ||
+  post.media?.[0]?.url ||
+  post.image ||
+  "https://picsum.photos/300";
 
  const togglePrivateProfile = async () => {
+  if (privateLoading) {
+   return;
+  }
 
-  try{
-
+  try {
+   setPrivateLoading(true);
    const token = await AsyncStorage.getItem("token");
 
    const res = await API.post(
     "/auth/toggle-private",
     {},
-    { headers:{ Authorization:`Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${token}` } }
    );
 
-   setIsPrivate(res.data.isPrivate);
-   setMenuVisible(false);
-
-   if(res.data.isPrivate){
-
-    Alert.alert(
-     "Profile Updated",
-     "🔒 Your profile is now Private"
-    );
-
-   }else{
-
-    Alert.alert(
-     "Profile Updated",
-     "🌍 Your profile is now Public"
-    );
-
-   }
-
-  }catch(err){
-
-   console.log("Private Toggle Error:",err);
+   const nextValue = !!res?.data?.isPrivate;
+   setIsPrivate(nextValue);
 
    Alert.alert(
-    "Error",
-    "Unable to change profile privacy"
+    "Profile Updated",
+    nextValue ? "Your profile is now Private" : "Your profile is now Public"
    );
-
+  } catch (error) {
+   Alert.alert("Error", "Unable to change profile privacy");
+   console.log("Private Toggle Error:", getErrorMessage(error));
+  } finally {
+   setPrivateLoading(false);
   }
-
  };
 
- const renderPost = ({ item }) => (
+ const renderPost = ({ item }: { item: ProfilePost }) => (
   <Image
    source={{
-    uri: item.image || "https://picsum.photos/300"
+    uri: getPostPreviewUrl(item)
    }}
    style={styles.postImage}
   />
@@ -173,7 +224,7 @@ const ProfileScreen = ({navigation}: any) => {
     <View style={styles.stats}>
 
      <View style={styles.stat}>
-      <Text style={styles.statNumber}>{posts.length}</Text>
+      <Text style={styles.statNumber}>{totalPostCount}</Text>
       <Text style={styles.statText}>Posts</Text>
      </View>
 
@@ -220,6 +271,16 @@ const ProfileScreen = ({navigation}: any) => {
      <Text style={styles.link}>{user.link}</Text>
     ) : null}
 
+    {!!user?.interests?.length && (
+     <View style={styles.interestsRow}>
+      {user.interests.map((interest) => (
+       <View key={interest} style={styles.interestChip}>
+        <Text style={styles.interestText}>{interest}</Text>
+       </View>
+      ))}
+     </View>
+    )}
+
    </View>
 
    {/* BUTTONS */}
@@ -237,7 +298,25 @@ const ProfileScreen = ({navigation}: any) => {
      <Text style={styles.btnText}>Share Profile</Text>
     </TouchableOpacity>
 
-   </View>
+    <TouchableOpacity
+     style={[styles.shareBtn, isPrivate ? styles.privateOnBtn : null]}
+     onPress={togglePrivateProfile}
+     disabled={privateLoading}
+    >
+     <Text style={styles.btnText}>
+      {privateLoading ? "Updating..." : isPrivate ? "Private" : "Public"}
+     </Text>
+   </TouchableOpacity>
+
+  </View>
+
+   <TouchableOpacity
+    style={styles.requestsBtn}
+    onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "user" })}
+   >
+    <Icon name="briefcase-outline" size={18} color="#333" />
+    <Text style={styles.requestsBtnText}>My Requests</Text>
+   </TouchableOpacity>
 
    {/* TABS */}
 
@@ -387,6 +466,25 @@ bioSection: {
   color:"#1877f2",
   marginTop:2
  },
+ interestsRow:{
+  flexDirection:"row",
+  flexWrap:"wrap",
+  justifyContent:"center",
+  marginTop:10
+ },
+ interestChip:{
+  backgroundColor:"#F1EDFF",
+  borderRadius:16,
+  paddingHorizontal:10,
+  paddingVertical:6,
+  marginRight:8,
+  marginBottom:8
+ },
+ interestText:{
+  color:"#6847E3",
+  fontWeight:"600",
+  fontSize:12
+ },
 
  buttons:{
   flexDirection:"row",
@@ -412,9 +510,28 @@ bioSection: {
   marginLeft:5,
   alignItems:"center"
  },
+ privateOnBtn:{
+  borderColor:"#8bbdff",
+  backgroundColor:"#eef6ff"
+ },
 
  btnText:{
   fontWeight:"500"
+ },
+ requestsBtn:{
+  marginHorizontal:20,
+  marginBottom:14,
+  backgroundColor:"#f1f1f1",
+  borderRadius:12,
+  paddingVertical:12,
+  alignItems:"center",
+  justifyContent:"center",
+  flexDirection:"row"
+ },
+ requestsBtnText:{
+  marginLeft:8,
+  color:"#333",
+  fontWeight:"600"
  },
 
  tabs:{

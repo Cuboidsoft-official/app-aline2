@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
 View,
 Text,
@@ -12,17 +12,13 @@ import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
 
-const ChatDetailsScreen = ({ route, navigation }: any) => {
+const ChatDetailsScreen = ({ route, navigation }) => {
 
 const { userId } = route.params;
 const [user,setUser] = useState(null);
 const [media,setMedia] = useState([]);
 
-useEffect(()=>{
- fetchUser();
-},[]);
-
-const fetchUser = async ()=>{
+const fetchUser = useCallback(async ()=>{
 
  try{
 
@@ -41,7 +37,11 @@ const fetchUser = async ()=>{
   console.log(err);
  }
 
-};
+}, [userId]);
+
+useEffect(()=>{
+ fetchUser();
+},[fetchUser]);
 
 return(
 

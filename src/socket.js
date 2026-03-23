@@ -1,5 +1,6 @@
 import { io } from "socket.io-client";
+import { appConfig } from "./config/env";
 
-export const socket = io("http://172.20.10.3:5000", {
+export const socket = io(appConfig.socketUrl, {
  transports: ["websocket"]
 });
