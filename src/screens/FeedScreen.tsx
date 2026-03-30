@@ -524,6 +524,13 @@ function FeedScreen({ navigation }: any) {
                 posts: prev.posts.filter((item) => item.user.id !== selectedPost.user.id),
               }));
             }
+
+            if (action === "archive") {
+              setFeed((prev) => ({
+                ...prev,
+                posts: prev.posts.filter((item) => item.id !== selectedPost.id),
+              }));
+            }
           }}
         />
       ) : null}

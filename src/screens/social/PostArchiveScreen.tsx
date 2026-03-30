@@ -13,17 +13,17 @@ import {
 import Icon from "react-native-vector-icons/Ionicons";
 
 import { socialApi } from "../../features/social/socialApi";
-import { Story } from "../../features/social/types";
+import { Post } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
 
-function StoryArchiveScreen({ navigation }: any) {
-  const [stories, setStories] = useState<Story[]>([]);
+function PostArchiveScreen({ navigation }: any) {
+  const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadArchive = useCallback(async () => {
-    const data = await socialApi.getStoryArchive();
-    setStories(data);
+    const data = await socialApi.getPostArchive();
+    setPosts(data);
   }, []);
 
   useEffect(() => {
@@ -31,9 +31,9 @@ function StoryArchiveScreen({ navigation }: any) {
 
     const load = async () => {
       try {
-        const data = await socialApi.getStoryArchive();
+        const data = await socialApi.getPostArchive();
         if (active) {
-          setStories(data);
+          setPosts(data);
         }
       } finally {
         if (active) {
@@ -58,33 +58,15 @@ function StoryArchiveScreen({ navigation }: any) {
     }
   };
 
-  const deleteStory = (storyId: string) => {
-    Alert.alert("Delete story", "This cannot be undone.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await socialApi.deleteStory(storyId);
-            setStories((prev) => prev.filter((item) => item.id !== storyId));
-          } catch (error) {
-            Alert.alert("Could not delete", toUserSafeMessage(error));
-          }
-        },
-      },
-    ]);
-  };
-
-  const restoreStory = (storyId: string) => {
-    Alert.alert("Restore story", "This story will return to your archive feed history.", [
+  const restorePost = (postId: string) => {
+    Alert.alert("Restore post", "This post will return to your profile and feed.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Restore",
         onPress: async () => {
           try {
-            await socialApi.restoreStory(storyId);
-            setStories((prev) => prev.filter((item) => item.id !== storyId));
+            await socialApi.restorePost(postId);
+            setPosts((prev) => prev.filter((item) => item.id !== postId));
           } catch (error) {
             Alert.alert("Could not restore", toUserSafeMessage(error));
           }
@@ -93,27 +75,48 @@ function StoryArchiveScreen({ navigation }: any) {
     ]);
   };
 
-  const renderStoryItem = ({ item }: { item: Story }) => {
+  const deletePost = (postId: string) => {
+    Alert.alert("Delete post", "This cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await socialApi.deletePost(postId);
+            setPosts((prev) => prev.filter((item) => item.id !== postId));
+          } catch (error) {
+            Alert.alert("Could not delete", toUserSafeMessage(error));
+          }
+        },
+      },
+    ]);
+  };
+
+  const renderPostItem = ({ item }: { item: Post }) => {
+    const primaryMedia = item.media[0];
+    const mediaUri = primaryMedia?.thumbnailUrl || primaryMedia?.url;
+
     return (
       <View style={styles.card}>
-        {item.media ? <Image source={{ uri: item.media.url }} style={styles.thumb} /> : <View style={[styles.thumb, styles.textThumb]} />}
+        {mediaUri ? <Image source={{ uri: mediaUri }} style={styles.thumb} /> : <View style={[styles.thumb, styles.thumbPlaceholder]} />}
 
         <View style={styles.cardBody}>
           <Text style={styles.type}>{item.type.toUpperCase()}</Text>
-          <Text style={styles.meta}>{item.visibility === "close_friends" ? "Close friends" : "Public"}</Text>
+          <Text style={styles.meta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
           <Text style={styles.statsLine}>
-            {(item.viewCount || 0)} views • {(item.replyCount || 0)} replies • {(item.reactionCount || 0)} likes
+            {item.likesCount} likes • {item.commentsCount} comments • {item.sharesCount} shares
           </Text>
-          <Text numberOfLines={2} style={styles.contentPreview}>
-            {item.text || item.poll?.question || item.question?.prompt || item.linkUrl || "Media story"}
+          <Text numberOfLines={2} style={styles.captionPreview}>
+            {item.caption || "Untitled post"}
           </Text>
         </View>
 
         <View style={styles.actionCol}>
-          <TouchableOpacity style={styles.restoreIcon} onPress={() => restoreStory(item.id)}>
+          <TouchableOpacity style={styles.actionIcon} onPress={() => restorePost(item.id)}>
             <Icon name="refresh-outline" size={20} color="#2563eb" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.deleteIcon} onPress={() => deleteStory(item.id)}>
+          <TouchableOpacity style={styles.actionIcon} onPress={() => deletePost(item.id)}>
             <Icon name="trash-outline" size={20} color="#b91c1c" />
           </TouchableOpacity>
         </View>
@@ -135,17 +138,22 @@ function StoryArchiveScreen({ navigation }: any) {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={24} color="#111" />
         </TouchableOpacity>
-        <Text style={styles.title}>Story Archive</Text>
+        <Text style={styles.title}>Post Archive</Text>
         <View style={styles.headerSpacer} />
       </View>
 
       <FlatList
-        data={stories}
+        data={posts}
         keyExtractor={(item) => item.id}
-        renderItem={renderStoryItem}
+        renderItem={renderPostItem}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={styles.listContent}
-        ListHeaderComponent={<Text style={styles.helperText}>Archived stories are private to you. Restore them to bring them back, or delete them permanently.</Text>}
+        ListHeaderComponent={
+          <Text style={styles.helperText}>
+            Archived posts are private to you. Restore them to publish them back to your profile, or delete them permanently.
+          </Text>
+        }
+        ListEmptyComponent={<Text style={styles.emptyText}>No archived posts yet.</Text>}
       />
     </View>
   );
@@ -166,13 +174,9 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 18, fontWeight: "700", color: "#111" },
   headerSpacer: { width: 20 },
-  listContent: { padding: 12 },
-  helperText: {
-    color: "#666",
-    fontSize: 12.5,
-    lineHeight: 18,
-    marginBottom: 12,
-  },
+  listContent: { padding: 12, paddingBottom: 28, flexGrow: 1 },
+  helperText: { color: "#666", fontSize: 12.5, lineHeight: 18, marginBottom: 12 },
+  emptyText: { textAlign: "center", color: "#666", marginTop: 48, fontSize: 14 },
   card: {
     borderWidth: 1,
     borderColor: "#e7e7e7",
@@ -183,15 +187,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   thumb: { width: 72, height: 72, borderRadius: 10, backgroundColor: "#e5e7eb" },
-  textThumb: { backgroundColor: "#dbeafe" },
+  thumbPlaceholder: { backgroundColor: "#ede9fe" },
   cardBody: { flex: 1, marginLeft: 10 },
   type: { fontSize: 12, color: "#3345d1", fontWeight: "700" },
   meta: { fontSize: 11.5, color: "#666", marginTop: 2 },
   statsLine: { fontSize: 11.5, color: "#4b5563", marginTop: 6, fontWeight: "600" },
-  contentPreview: { marginTop: 8, color: "#222", fontSize: 13 },
+  captionPreview: { marginTop: 8, color: "#222", fontSize: 13 },
   actionCol: { marginLeft: 10, alignItems: "center" },
-  restoreIcon: { marginBottom: 8 },
-  deleteIcon: { marginTop: 4 },
+  actionIcon: { paddingVertical: 6 },
 });
 
-export default StoryArchiveScreen;
+export default PostArchiveScreen;

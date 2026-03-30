@@ -20,6 +20,8 @@ import AllChatsScreen from './src/screens/AllChatsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import BlockedUsersScreen from './src/screens/BlockedUsersScreen';
 import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
+import CommentControlsScreen from './src/screens/CommentControlsScreen';
+import TagsMentionsScreen from './src/screens/TagsMentionsScreen';
 import DeleteAccountScreen from './src/screens/DeleteAccountScreen';
 import FeatureInfoScreen from './src/screens/FeatureInfoScreen';
 import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
@@ -38,6 +40,7 @@ import SwipesScreen from './src/screens/social/SwipesScreen';
 import StoryViewerScreen from './src/screens/social/StoryViewerScreen';
 import PostDetailScreen from './src/screens/social/PostDetailScreen';
 import StoryArchiveScreen from './src/screens/social/StoryArchiveScreen';
+import PostArchiveScreen from './src/screens/social/PostArchiveScreen';
 import PostCommentsScreen from './src/screens/social/PostCommentsScreen';
 import SwipeCommentsScreen from './src/screens/social/SwipeCommentsScreen';
 import StoryInsightsScreen from './src/screens/social/StoryInsightsScreen';
@@ -46,6 +49,7 @@ import StoryRepliesScreen from './src/screens/social/StoryRepliesScreen';
 import CommentThreadScreen from './src/screens/social/CommentThreadScreen';
 import SearchScreen from './src/screens/SearchScreen';
 import HashtagResultsScreen from './src/screens/HashtagResultsScreen';
+import CloseFriendsScreen from './src/screens/CloseFriendsScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
 import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
@@ -95,6 +99,9 @@ function AppNavigator() {
         <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
         <Stack.Screen name="BlockedUsersScreen" component={BlockedUsersScreen} />
         <Stack.Screen name="NotificationSettingsScreen" component={NotificationSettingsScreen} />
+        <Stack.Screen name="CommentControlsScreen" component={CommentControlsScreen} />
+        <Stack.Screen name="TagsMentionsScreen" component={TagsMentionsScreen} />
+        <Stack.Screen name="CloseFriendsScreen" component={CloseFriendsScreen} />
         <Stack.Screen name="DeleteAccountScreen" component={DeleteAccountScreen} />
         <Stack.Screen name="FeatureInfoScreen" component={FeatureInfoScreen} />
         <Stack.Screen name="Search" component={SearchScreen} />
@@ -114,6 +121,7 @@ function AppNavigator() {
         <Stack.Screen name="StoryViewer" component={StoryViewerScreen} />
         <Stack.Screen name="PostDetail" component={PostDetailScreen} />
         <Stack.Screen name="StoryArchive" component={StoryArchiveScreen} />
+        <Stack.Screen name="PostArchive" component={PostArchiveScreen} />
         <Stack.Screen name="PostComments" component={PostCommentsScreen} options={transparentSheetOptions} />
         <Stack.Screen name="SwipeComments" component={SwipeCommentsScreen} options={transparentSheetOptions} />
         <Stack.Screen name="StoryInsights" component={StoryInsightsScreen} options={transparentSheetOptions} />

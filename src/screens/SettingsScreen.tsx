@@ -170,6 +170,30 @@ const SettingsScreen = ({ navigation }: any) => {
 
     <TouchableOpacity
      style={[styles.item, isDarkMode ? styles.itemDark : null]}
+     onPress={() => navigation.navigate("CloseFriendsScreen")}
+    >
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Close friends</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+     style={[styles.item, isDarkMode ? styles.itemDark : null]}
+     onPress={() => navigation.navigate("PostArchive")}
+    >
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Post archive</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+     style={[styles.item, isDarkMode ? styles.itemDark : null]}
+     onPress={() => navigation.navigate("StoryArchive")}
+    >
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Story archive</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+     style={[styles.item, isDarkMode ? styles.itemDark : null]}
      onPress={() => navigation.navigate("NotificationSettingsScreen")}
     >
      <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Notifications</Text>
@@ -216,7 +240,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
 	    <TouchableOpacity
 	     style={[styles.item, isDarkMode ? styles.itemDark : null]}
-	     onPress={() => openFeatureInfo("Comments", "Comment settings are not available in the current backend yet.")}
+	     onPress={() => navigation.navigate("CommentControlsScreen")}
 	    >
      <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Comments</Text>
      <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
@@ -224,7 +248,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
 	    <TouchableOpacity
 	     style={[styles.item, isDarkMode ? styles.itemDark : null]}
-	     onPress={() => openFeatureInfo("Tags and Mentions", "Tag and mention settings are not available in the current backend yet.")}
+	     onPress={() => navigation.navigate("TagsMentionsScreen")}
 	    >
      <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Tags and mentions</Text>
      <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>

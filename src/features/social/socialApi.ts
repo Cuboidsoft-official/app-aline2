@@ -60,6 +60,7 @@ const commentReplies = new Map<string, Comment[]>();
 const storyViewers = new Map<string, StoryViewerEntry[]>();
 const storyLikers = new Map<string, SocialUser[]>();
 const archivedStoryIds = new Set<string>();
+const archivedPostIds = new Set<string>();
 const mutedUserIds = new Set<string>();
 const blockedUserIds = new Set<string>();
 const hiddenContentKeys = new Set<string>();
@@ -465,7 +466,10 @@ class MockSocialApi implements SocialApi {
         feed.stories.filter((item) => !archivedStoryIds.has(item.id)),
         "story",
       ),
-      posts: applyContentVisibilityFilters(feed.posts, "post"),
+      posts: applyContentVisibilityFilters(
+        feed.posts.filter((item) => !archivedPostIds.has(item.id)),
+        "post",
+      ),
     };
   }
 
@@ -535,6 +539,7 @@ class MockSocialApi implements SocialApi {
       throw new Error("Post not found");
     }
     if (
+      archivedPostIds.has(cloned.id) ||
       blockedUserIds.has(cloned.user.id) ||
       mutedUserIds.has(cloned.user.id) ||
       hiddenContentKeys.has(buildContentKey("post", cloned.id))
@@ -556,6 +561,14 @@ class MockSocialApi implements SocialApi {
       )
       .map(syncMockStoryMeta)
       .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  async getPostArchive(): Promise<Post[]> {
+    await wait(120);
+    return state.posts
+      .filter((item) => archivedPostIds.has(item.id))
+      .map((item) => clonePostById(item.id))
+      .filter(Boolean) as Post[];
   }
 
   async markStoryViewed(storyId: string): Promise<Story> {
@@ -997,6 +1010,30 @@ class MockSocialApi implements SocialApi {
     return cloned;
   }
 
+  async archivePost(postId: string): Promise<void> {
+    await wait(100);
+    const target = state.posts.find((item) => item.id === postId);
+
+    if (!target) {
+      throw new Error("Post not found");
+    }
+
+    assertCurrentUserOwns(target.user.id, POST_DELETE_OWNER_ERROR);
+    archivedPostIds.add(postId);
+  }
+
+  async restorePost(postId: string): Promise<void> {
+    await wait(100);
+    const target = state.posts.find((item) => item.id === postId);
+
+    if (!target) {
+      throw new Error("Post not found");
+    }
+
+    assertCurrentUserOwns(target.user.id, POST_DELETE_OWNER_ERROR);
+    archivedPostIds.delete(postId);
+  }
+
   async deletePost(postId: string): Promise<void> {
     await wait(100);
     const idx = state.posts.findIndex((item) => item.id === postId);
@@ -1007,6 +1044,7 @@ class MockSocialApi implements SocialApi {
 
     assertCurrentUserOwns(state.posts[idx]?.user?.id || "", POST_DELETE_OWNER_ERROR);
     state.posts.splice(idx, 1);
+    archivedPostIds.delete(postId);
     postComments.delete(postId);
   }
 
@@ -1374,6 +1412,18 @@ class MockSocialApi implements SocialApi {
 
     assertCurrentUserOwns(target.user.id, STORY_OWNER_ERROR);
     archivedStoryIds.add(storyId);
+  }
+
+  async restoreStory(storyId: string): Promise<void> {
+    await wait(90);
+    const target = state.stories.find((item) => item.id === storyId);
+
+    if (!target) {
+      throw new Error("Story not found");
+    }
+
+    assertCurrentUserOwns(target.user.id, STORY_OWNER_ERROR);
+    archivedStoryIds.delete(storyId);
   }
 
   async deleteStory(storyId: string): Promise<void> {
@@ -2127,6 +2177,13 @@ class RemoteSocialApi implements SocialApi {
     return applyContentVisibilityFilters(stories, "story");
   }
 
+  async getPostArchive(): Promise<Post[]> {
+    const res = await API.get("/posts/archive");
+    const posts: Post[] = (res?.data?.posts || []).map((post: any) => this.mapPost(post));
+    posts.forEach((post) => this.postCache.set(post.id, post));
+    return posts;
+  }
+
   async markStoryViewed(storyId: string): Promise<Story> {
     if (!this.isBackendObjectId(storyId)) {
       const cached = this.getCachedStory(storyId);
@@ -2551,6 +2608,16 @@ class RemoteSocialApi implements SocialApi {
     return updated;
   }
 
+  async archivePost(postId: string): Promise<void> {
+    await this.requireOwnedPost(postId);
+    await API.put(`/posts/${postId}/archive`);
+    this.postCache.delete(postId);
+  }
+
+  async restorePost(postId: string): Promise<void> {
+    await API.put(`/posts/${postId}/restore`);
+  }
+
   async deletePost(postId: string): Promise<void> {
     await this.requireOwnedPost(postId);
     await API.delete(`/posts/delete/${postId}`);
@@ -2830,6 +2897,10 @@ class RemoteSocialApi implements SocialApi {
     await API.put(`/story/${storyId}/archive`);
     this.storyCache.delete(storyId);
     this.storyReplyCache.delete(storyId);
+  }
+
+  async restoreStory(storyId: string): Promise<void> {
+    await API.put(`/story/${storyId}/restore`);
   }
 
   async deleteStory(storyId: string): Promise<void> {

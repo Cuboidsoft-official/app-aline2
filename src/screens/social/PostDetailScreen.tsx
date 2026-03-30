@@ -346,6 +346,11 @@ function PostDetailScreen({ route, navigation }: any) {
         title="Post options"
         onClose={closeSheet}
         onActionComplete={(action) => {
+          if (action === "archive") {
+            navigation.goBack();
+            return;
+          }
+
           if (action === "not_interested" || action === "mute" || action === "block") {
             navigation.goBack();
           }

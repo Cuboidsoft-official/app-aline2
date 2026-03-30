@@ -272,6 +272,7 @@ export interface SocialApi {
   getPost(postId: string): Promise<Post>;
   getStory(storyId: string): Promise<Story>;
   getStoryArchive(): Promise<Story[]>;
+  getPostArchive(): Promise<Post[]>;
 
   markStoryViewed(storyId: string): Promise<Story>;
   toggleStoryLike(storyId: string): Promise<Story>;
@@ -291,6 +292,8 @@ export interface SocialApi {
   togglePostCommentLike(postId: string, commentId: string): Promise<Comment>;
   deletePostComment(postId: string, commentId: string): Promise<void>;
   updatePost(postId: string, input: UpdatePostInput): Promise<Post>;
+  archivePost(postId: string): Promise<void>;
+  restorePost(postId: string): Promise<void>;
   deletePost(postId: string): Promise<void>;
 
   toggleReelLike(reelId: string): Promise<Reel>;
@@ -314,6 +317,7 @@ export interface SocialApi {
   createSwipe(input: CreateSwipeInput): Promise<Swipe>;
   updateStory(storyId: string, input: UpdateStoryInput): Promise<Story>;
   archiveStory(storyId: string): Promise<void>;
+  restoreStory(storyId: string): Promise<void>;
   deleteStory(storyId: string): Promise<void>;
 
   getStoryViewers(storyId: string): Promise<StoryViewerEntry[]>;

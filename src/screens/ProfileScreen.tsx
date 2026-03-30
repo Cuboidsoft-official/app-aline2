@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 
 import { API } from '../api/api';
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
 import { getStoredUser, getStoredToken, setStoredSession } from "../utils/authSession";
@@ -120,7 +121,7 @@ const ProfileScreen = ({ navigation }: any) => {
         "/auth/update-profile",
         {
           name,
-          username,
+          username: username.trim().toLowerCase(),
           bio,
           interests: interests.split(",").map((item) => item.trim()).filter(Boolean),
           pronouns,
@@ -142,7 +143,7 @@ const ProfileScreen = ({ navigation }: any) => {
           user: {
             ...(storedUser || {}),
             name,
-            username,
+            username: username.trim().toLowerCase(),
             bio,
             interests: interests.split(",").map((item) => item.trim()).filter(Boolean),
             pronouns,
@@ -157,13 +158,8 @@ const ProfileScreen = ({ navigation }: any) => {
       }
 
     } catch (err: unknown) {
-      const message =
-        typeof err === "object" && err !== null
-          ? ((err as { response?: { data?: unknown }; message?: string }).response?.data ||
-            (err as { message?: string }).message)
-          : err;
-      console.log("Update error:", message);
-      Alert.alert("Error", "Update failed");
+      console.log("Update error:", err);
+      Alert.alert("Update failed", getReadableApiErrorMessage(err, "Please try again."));
     } finally {
       setLoading(false);
     }
@@ -229,7 +225,7 @@ const ProfileScreen = ({ navigation }: any) => {
           </View>
 
           {renderInput("Name", name, setName)}
-          {renderInput("Username", username, setUsername)}
+          {renderInput("Username", username, (value) => setUsername(String(value || "").toLowerCase().replace(/\s+/g, "")))}
           {renderInput("Bio", bio, setBio, true)}
           {renderInput("Interests (comma separated)", interests, setInterests, true)}
           {renderInput("Pronouns", pronouns, setPronouns)}
@@ -238,6 +234,9 @@ const ProfileScreen = ({ navigation }: any) => {
           {renderReadonlyField("Account Type", accountTypeLabel)}
           <Text style={styles.helperText}>
             Account type is managed server-side, so special account states are assigned outside the app.
+          </Text>
+          <Text style={styles.helperText}>
+            Usernames use 3-30 lowercase letters, numbers, dots, or underscores.
           </Text>
 
         </ScrollView>

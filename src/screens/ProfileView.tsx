@@ -11,10 +11,10 @@ import {
  ActivityIndicator
 } from "react-native";
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
 import { shareContentLink } from "../utils/shareLinks";
+import { getStoredToken } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
 
 interface ProfilePost {
@@ -30,11 +30,13 @@ interface ProfilePost {
 interface ProfileUser {
  _id: string;
  name?: string;
+ username?: string;
  pronouns?: string;
  bio?: string;
  interests?: string[];
  link?: string;
  profilePic?: string;
+ isVerified?: boolean;
  followers?: string[];
  following?: string[];
  isPrivate?: boolean;
@@ -54,6 +56,7 @@ const ProfileScreen = ({navigation}: any) => {
 
  const [user, setUser] = useState<ProfileUser | null>(null);
  const [allPosts, setAllPosts] = useState<ProfilePost[]>([]);
+ const [taggedPosts, setTaggedPosts] = useState<ProfilePost[]>([]);
  const [loading, setLoading] = useState(true);
  const [privateLoading, setPrivateLoading] = useState(false);
  const [activeTab, setActiveTab] = useState("posts");
@@ -61,8 +64,8 @@ const ProfileScreen = ({navigation}: any) => {
 
  const fetchProfile = useCallback(async () => {
 
-  try {
-   const token = await AsyncStorage.getItem("token");
+ try {
+   const token = await getStoredToken();
    const profileRes = await API.get("/auth/profile", {
     headers: {
      Authorization: `Bearer ${token}`
@@ -74,15 +77,23 @@ const ProfileScreen = ({navigation}: any) => {
    setIsPrivate(!!profileUser?.isPrivate);
 
    if (profileUser?._id) {
-    const postsRes = await API.get(`/posts/user/${profileUser._id}`, {
+   const postsRes = await API.get(`/posts/user/${profileUser._id}`, {
+     headers: {
+      Authorization: `Bearer ${token}`
+     }
+    });
+
+    const taggedRes = await API.get(`/posts/tagged/${profileUser._id}`, {
      headers: {
       Authorization: `Bearer ${token}`
      }
     });
 
     setAllPosts((postsRes.data.posts || []) as ProfilePost[]);
+    setTaggedPosts((taggedRes.data.posts || []) as ProfilePost[]);
    } else {
     setAllPosts([]);
+    setTaggedPosts([]);
    }
 
   } catch (error) {
@@ -103,11 +114,11 @@ const ProfileScreen = ({navigation}: any) => {
   }
 
   if (activeTab === "tagged") {
-   return [];
+   return taggedPosts.filter((post) => post.postType !== "reel");
   }
 
   return allPosts.filter((post) => post.postType !== "reel");
- }, [activeTab, allPosts]);
+ }, [activeTab, allPosts, taggedPosts]);
 
  const totalPostCount = useMemo(
   () => allPosts.filter((post) => post.postType !== "reel").length,
@@ -125,9 +136,9 @@ const ProfileScreen = ({navigation}: any) => {
    return;
   }
 
-  try {
+ try {
    setPrivateLoading(true);
-   const token = await AsyncStorage.getItem("token");
+   const token = await getStoredToken();
 
    const res = await API.post(
     "/auth/toggle-private",
@@ -220,12 +231,18 @@ const ProfileScreen = ({navigation}: any) => {
       {user?.name || "User Name"}
      </Text>
 
-     <View style={styles.verifiedBadge}>
-      <Icon name="checkmark-circle" size={16} color="#fff"/>
-      <Text style={styles.verifiedText}>
-       Verified with aline2
-      </Text>
-     </View>
+     {user?.username ? (
+      <Text style={[styles.profileHandle, { color: colors.mutedText }]}>@{user.username}</Text>
+     ) : null}
+
+     {user?.isVerified ? (
+      <View style={styles.verifiedBadge}>
+       <Icon name="checkmark-circle" size={16} color="#fff"/>
+       <Text style={styles.verifiedText}>
+        Verified account
+       </Text>
+      </View>
+     ) : null}
 
     </View>
 
@@ -372,6 +389,20 @@ const ProfileScreen = ({navigation}: any) => {
    style={[styles.container, { backgroundColor: colors.background }]}
    contentContainerStyle={styles.listContent}
    ListHeaderComponent={renderHeader}
+   ListEmptyComponent={
+    <View style={styles.emptyState}>
+     <Text style={[styles.emptyTitle, { color: colors.text }]}>
+      {activeTab === "tagged" ? "No tagged posts yet" : activeTab === "swipes" ? "No swipes yet" : "No posts yet"}
+     </Text>
+     <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+      {activeTab === "tagged"
+       ? "Posts where you are tagged will show up here."
+       : activeTab === "swipes"
+        ? "Your short video posts will appear here."
+        : "Share photos and videos to build your profile."}
+     </Text>
+    </View>
+   }
    showsVerticalScrollIndicator={false}
   />
  );
@@ -425,6 +456,12 @@ const styles = StyleSheet.create({
   fontSize:22,
   fontWeight:"700",
   marginTop:10
+ },
+
+ profileHandle:{
+  marginTop:6,
+  fontSize:14,
+  fontWeight:"500"
  },
 
  verifiedBadge:{
@@ -573,6 +610,20 @@ bioSection: {
  postImage:{
   width:"33.33%",
   height:130
+ },
+ emptyState:{
+  paddingHorizontal:24,
+  paddingVertical:36,
+  alignItems:"center"
+ },
+ emptyTitle:{
+  fontSize:16,
+  fontWeight:"700"
+ },
+ emptyText:{
+  marginTop:8,
+  textAlign:"center",
+  lineHeight:20
  },
 
  center:{

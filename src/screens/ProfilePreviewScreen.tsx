@@ -31,6 +31,7 @@ const ProfilePreviewScreen = ({ route, navigation }: { route: any; navigation: a
 
  const [user, setUser] = useState<any>(null);
  const [allPosts, setAllPosts] = useState<ProfilePreviewPost[]>([]);
+ const [taggedPosts, setTaggedPosts] = useState<ProfilePreviewPost[]>([]);
  const [loading, setLoading] = useState(true);
  const [activeTab, setActiveTab] = useState("posts");
  const [isFollowing, setIsFollowing] = useState(false);
@@ -54,10 +55,14 @@ const fetchProfile = useCallback(async () => {
   const profileUser = res.data.user;
   const me = res.data.me;
   const profilePosts = Array.isArray(res.data.posts) ? (res.data.posts as ProfilePreviewPost[]) : [];
+  const taggedRes = await API.get(`/posts/tagged/${userId}`, {
+   headers: { Authorization: `Bearer ${token}` }
+  });
   const accessGranted = Boolean(res.data?.canViewPosts);
 
   setUser(profileUser);
   setAllPosts(profilePosts);
+  setTaggedPosts(Array.isArray(taggedRes.data.posts) ? (taggedRes.data.posts as ProfilePreviewPost[]) : []);
 
   // 🔥 store my following list
   setMyFollowing((me?.following || []) as string[]);
@@ -124,11 +129,11 @@ const posts = useMemo(() => {
  }
 
  if (activeTab === "tagged") {
-  return [];
+  return taggedPosts.filter((post) => post.postType !== "reel");
  }
 
  return allPosts.filter((post) => post.postType !== "reel");
-}, [activeTab, allPosts]);
+}, [activeTab, allPosts, taggedPosts]);
 
 const totalPostCount = useMemo(
  () => allPosts.filter((post) => post.postType !== "reel").length,
@@ -284,11 +289,16 @@ const unfollowUser = async () => {
 };
 
 const renderPost = ({ item }: { item: any }) => (
+ <TouchableOpacity
+  activeOpacity={0.9}
+  onPress={() => navigation.navigate("PostDetail", { postId: item._id })}
+ >
   <Image
    source={{ uri: getPostPreviewUrl(item) }}
    style={styles.postImage}
   />
- );
+ </TouchableOpacity>
+);
 
  if (loading) {
   return (
@@ -550,11 +560,25 @@ const renderPost = ({ item }: { item: any }) => (
   ) : (
 
    <FlatList
-    data={posts}
-    renderItem={renderPost}
-    keyExtractor={(item) => item._id}
-    numColumns={3}
-    showsVerticalScrollIndicator={false}
+   data={posts}
+   renderItem={renderPost}
+   keyExtractor={(item) => item._id}
+   numColumns={3}
+   showsVerticalScrollIndicator={false}
+   ListEmptyComponent={
+    <View style={styles.emptyState}>
+     <Text style={styles.emptyTitle}>
+      {activeTab === "tagged" ? "No tagged posts yet" : activeTab === "swipes" ? "No swipes yet" : "No posts yet"}
+     </Text>
+     <Text style={styles.emptyText}>
+      {activeTab === "tagged"
+       ? "Posts that tag this account will show here."
+       : activeTab === "swipes"
+        ? "Swipe posts will appear here."
+        : "Posts from this account will appear here."}
+     </Text>
+    </View>
+   }
    />
 
   )}
@@ -718,6 +742,22 @@ messageBtn:{
  postImage:{
   width:"33.33%",
   height:130
+ },
+ emptyState:{
+  paddingHorizontal:24,
+  paddingVertical:36,
+  alignItems:"center"
+ },
+ emptyTitle:{
+  fontSize:16,
+  fontWeight:"700",
+  color:"#111"
+ },
+ emptyText:{
+  marginTop:8,
+  textAlign:"center",
+  color:"#666",
+  lineHeight:20
  },
 
  center:{

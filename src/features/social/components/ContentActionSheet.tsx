@@ -16,6 +16,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { socialApi } from "../socialApi";
 import { ContentKind, ReportReason } from "../types";
 import { toUserSafeMessage } from "../validation";
+import { getStoredUserId } from "../../../utils/authSession";
 
 const reportReasons: ReportReason[] = [
   "spam",
@@ -27,7 +28,7 @@ const reportReasons: ReportReason[] = [
   "other",
 ];
 
-type ActionKind = "not_interested" | "mute" | "block" | "report";
+type ActionKind = "archive" | "not_interested" | "mute" | "block" | "report";
 
 interface ContentActionSheetProps {
   visible: boolean;
@@ -53,6 +54,24 @@ function ContentActionSheet({
   const [note, setNote] = useState("");
   const [selectedReason, setSelectedReason] = useState<ReportReason>("spam");
   const [busyAction, setBusyAction] = useState<ActionKind | null>(null);
+  const [currentUserId, setCurrentUserId] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    const loadCurrentUserId = async () => {
+      const nextUserId = await getStoredUserId();
+      if (active) {
+        setCurrentUserId(String(nextUserId || ""));
+      }
+    };
+
+    loadCurrentUserId();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!visible) {
@@ -84,6 +103,7 @@ function ContentActionSheet({
 
   const displayTitle =
     title || (contentType === "story" ? "Story options" : contentType === "swipe" ? "Swipe options" : "Post options");
+  const isOwner = !!userId && !!currentUserId && String(userId) === String(currentUserId);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -98,84 +118,98 @@ function ContentActionSheet({
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
-            style={styles.actionRow}
-            disabled={!!busyAction}
-            onPress={() => runAction("not_interested", () => socialApi.markNotInterested(contentType, contentId))}
-          >
-            <Icon name="eye-off-outline" size={20} color="#111" />
-            <Text style={styles.actionText}>Not interested</Text>
-            {busyAction === "not_interested" ? <ActivityIndicator size="small" color="#111" /> : null}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionRow}
-            disabled={!!busyAction || !userId}
-            onPress={() => {
-              if (!userId) {
-                Alert.alert("Unavailable", "User action is not available for this item.");
-                return;
-              }
-              runAction("mute", () => socialApi.muteUser(userId));
-            }}
-          >
-            <Icon name="volume-mute-outline" size={20} color="#111" />
-            <Text style={styles.actionText}>Mute {userLabel ? `@${userLabel}` : "user"}</Text>
-            {busyAction === "mute" ? <ActivityIndicator size="small" color="#111" /> : null}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionRow}
-            disabled={!!busyAction || !userId}
-            onPress={() => {
-              if (!userId) {
-                Alert.alert("Unavailable", "User action is not available for this item.");
-                return;
-              }
-              runAction("block", () => socialApi.blockUser(userId));
-            }}
-          >
-            <Icon name="ban-outline" size={20} color="#b91c1c" />
-            <Text style={[styles.actionText, styles.dangerText]}>Block {userLabel ? `@${userLabel}` : "user"}</Text>
-            {busyAction === "block" ? <ActivityIndicator size="small" color="#b91c1c" /> : null}
-          </TouchableOpacity>
-
-          <Text style={styles.reportTitle}>Report {contentType}</Text>
-          <View style={styles.reasonWrap}>
-            {reportReasons.map((reason) => (
+          {isOwner && contentType === "post" ? (
+            <TouchableOpacity
+              style={styles.actionRow}
+              disabled={!!busyAction}
+              onPress={() => runAction("archive", () => socialApi.archivePost(contentId))}
+            >
+              <Icon name="archive-outline" size={20} color="#111" />
+              <Text style={styles.actionText}>Archive post</Text>
+              {busyAction === "archive" ? <ActivityIndicator size="small" color="#111" /> : null}
+            </TouchableOpacity>
+          ) : (
+            <>
               <TouchableOpacity
-                key={reason}
-                style={[styles.reasonPill, selectedReason === reason && styles.reasonPillSelected]}
+                style={styles.actionRow}
                 disabled={!!busyAction}
-                onPress={() => setSelectedReason(reason)}
+                onPress={() => runAction("not_interested", () => socialApi.markNotInterested(contentType, contentId))}
               >
-                <Text style={[styles.reasonText, selectedReason === reason && styles.reasonTextSelected]}>
-                  {reason.replace("_", " ")}
-                </Text>
+                <Icon name="eye-off-outline" size={20} color="#111" />
+                <Text style={styles.actionText}>Not interested</Text>
+                {busyAction === "not_interested" ? <ActivityIndicator size="small" color="#111" /> : null}
               </TouchableOpacity>
-            ))}
-          </View>
 
-          <TextInput
-            style={styles.noteInput}
-            placeholder="Additional context (optional)"
-            placeholderTextColor="#8a8a8a"
-            value={note}
-            onChangeText={setNote}
-            editable={!busyAction}
-            multiline
-            maxLength={500}
-          />
+              <TouchableOpacity
+                style={styles.actionRow}
+                disabled={!!busyAction || !userId}
+                onPress={() => {
+                  if (!userId) {
+                    Alert.alert("Unavailable", "User action is not available for this item.");
+                    return;
+                  }
+                  runAction("mute", () => socialApi.muteUser(userId));
+                }}
+              >
+                <Icon name="volume-mute-outline" size={20} color="#111" />
+                <Text style={styles.actionText}>Mute {userLabel ? `@${userLabel}` : "user"}</Text>
+                {busyAction === "mute" ? <ActivityIndicator size="small" color="#111" /> : null}
+              </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.reportButton, !!busyAction && styles.reportButtonDisabled]}
-            disabled={!!busyAction}
-            onPress={() =>
-              runAction("report", () => socialApi.reportContent(contentType, contentId, selectedReason, note))
-            }
-          >
-            <Text style={styles.reportButtonText}>Submit report</Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.actionRow}
+                disabled={!!busyAction || !userId}
+                onPress={() => {
+                  if (!userId) {
+                    Alert.alert("Unavailable", "User action is not available for this item.");
+                    return;
+                  }
+                  runAction("block", () => socialApi.blockUser(userId));
+                }}
+              >
+                <Icon name="ban-outline" size={20} color="#b91c1c" />
+                <Text style={[styles.actionText, styles.dangerText]}>Block {userLabel ? `@${userLabel}` : "user"}</Text>
+                {busyAction === "block" ? <ActivityIndicator size="small" color="#b91c1c" /> : null}
+              </TouchableOpacity>
+
+              <Text style={styles.reportTitle}>Report {contentType}</Text>
+              <View style={styles.reasonWrap}>
+                {reportReasons.map((reason) => (
+                  <TouchableOpacity
+                    key={reason}
+                    style={[styles.reasonPill, selectedReason === reason && styles.reasonPillSelected]}
+                    disabled={!!busyAction}
+                    onPress={() => setSelectedReason(reason)}
+                  >
+                    <Text style={[styles.reasonText, selectedReason === reason && styles.reasonTextSelected]}>
+                      {reason.replace("_", " ")}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TextInput
+                style={styles.noteInput}
+                placeholder="Additional context (optional)"
+                placeholderTextColor="#8a8a8a"
+                value={note}
+                onChangeText={setNote}
+                editable={!busyAction}
+                multiline
+                maxLength={500}
+              />
+
+              <TouchableOpacity
+                style={[styles.reportButton, !!busyAction && styles.reportButtonDisabled]}
+                disabled={!!busyAction}
+                onPress={() =>
+                  runAction("report", () => socialApi.reportContent(contentType, contentId, selectedReason, note))
+                }
+              >
+                <Text style={styles.reportButtonText}>Submit report</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </ScrollView>
       </View>
     </Modal>
