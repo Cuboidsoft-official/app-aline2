@@ -73,12 +73,32 @@ const reports: Array<{
 const LOCAL_MODERATION_PREFS_KEY = "social_local_prefs_v1";
 let moderationPrefsLoaded = false;
 
+const applyModerationPrefsPayload = (payload: any): void => {
+  mutedUserIds.clear();
+  blockedUserIds.clear();
+  hiddenContentKeys.clear();
+  reports.splice(0, reports.length);
+
+  (payload?.mutedUserIds || []).forEach((id: string) => mutedUserIds.add(id));
+  (payload?.blockedUserIds || []).forEach((id: string) => blockedUserIds.add(id));
+  (payload?.hiddenContentKeys || []).forEach((key: string) => hiddenContentKeys.add(key));
+  (payload?.reports || []).forEach((report: any) => reports.push(report));
+};
+
 const loadModerationPrefs = async (): Promise<void> => {
   if (moderationPrefsLoaded) {
     return;
   }
 
   try {
+    if (SOCIAL_API_MODE === "remote") {
+      const res = await API.get("/user/content-preferences");
+      applyModerationPrefsPayload(res?.data?.preferences || {});
+      await persistModerationPrefs();
+      moderationPrefsLoaded = true;
+      return;
+    }
+
     const raw = await AsyncStorage.getItem(LOCAL_MODERATION_PREFS_KEY);
     if (!raw) {
       moderationPrefsLoaded = true;
@@ -86,21 +106,9 @@ const loadModerationPrefs = async (): Promise<void> => {
     }
 
     const parsed = JSON.parse(raw);
-
-    mutedUserIds.clear();
-    blockedUserIds.clear();
-    hiddenContentKeys.clear();
-    reports.splice(0, reports.length);
-
-    (parsed?.mutedUserIds || []).forEach((id: string) => mutedUserIds.add(id));
-    (parsed?.blockedUserIds || []).forEach((id: string) => blockedUserIds.add(id));
-    (parsed?.hiddenContentKeys || []).forEach((key: string) => hiddenContentKeys.add(key));
-    (parsed?.reports || []).forEach((report: any) => reports.push(report));
+    applyModerationPrefsPayload(parsed);
   } catch {
-    mutedUserIds.clear();
-    blockedUserIds.clear();
-    hiddenContentKeys.clear();
-    reports.splice(0, reports.length);
+    applyModerationPrefsPayload({});
   } finally {
     moderationPrefsLoaded = true;
   }
@@ -1431,6 +1439,13 @@ class MockSocialApi implements SocialApi {
     await loadModerationPrefs();
     await wait(60);
     blockedUserIds.add(userId);
+    await persistModerationPrefs();
+  }
+
+  async unblockUser(userId: string): Promise<void> {
+    await loadModerationPrefs();
+    await wait(60);
+    blockedUserIds.delete(userId);
     await persistModerationPrefs();
   }
 
@@ -2798,19 +2813,14 @@ class RemoteSocialApi implements SocialApi {
   }
 
   async updateStory(storyId: string, input: UpdateStoryInput): Promise<Story> {
-    const cached = this.getCachedStory(storyId);
     const payload = normalizeUpdateStoryInput(input);
-    const updated = {
-      ...cached,
-      text: payload.text !== undefined ? payload.text : cached.text,
-      backgroundColor: payload.backgroundColor !== undefined ? payload.backgroundColor : cached.backgroundColor,
-      linkUrl: payload.linkUrl !== undefined ? payload.linkUrl : cached.linkUrl,
-      visibility: payload.visibility !== undefined ? payload.visibility : cached.visibility,
-      allowReplies: payload.allowReplies !== undefined ? payload.allowReplies : cached.allowReplies,
-      allowSharing: payload.allowSharing !== undefined ? payload.allowSharing : cached.allowSharing,
-      music: payload.music !== undefined ? payload.music : cached.music,
-    };
-
+    const res = await API.put(`/story/${storyId}`, {
+      text: payload.text,
+      visibility: payload.visibility,
+      allowReplies: payload.allowReplies,
+      allowSharing: payload.allowSharing,
+    });
+    const updated = this.mapStory(res?.data?.story);
     this.storyCache.set(storyId, updated);
     return updated;
   }
@@ -2837,6 +2847,12 @@ class RemoteSocialApi implements SocialApi {
 
   async reportContent(_contentType: ContentKind, _contentId: string, _reason: ReportReason, _note?: string): Promise<void> {
     await loadModerationPrefs();
+    await API.post("/user/report", {
+      contentType: _contentType,
+      contentId: _contentId,
+      reason: _reason,
+      note: normalizeReportNote(_note),
+    });
     reports.push({
       contentType: _contentType,
       contentId: _contentId,
@@ -2849,6 +2865,7 @@ class RemoteSocialApi implements SocialApi {
 
   async muteUser(_userId: string): Promise<void> {
     await loadModerationPrefs();
+    await API.post(`/user/mute/${_userId}`);
     mutedUserIds.add(_userId);
     await persistModerationPrefs();
   }
@@ -2860,8 +2877,19 @@ class RemoteSocialApi implements SocialApi {
     await persistModerationPrefs();
   }
 
+  async unblockUser(_userId: string): Promise<void> {
+    await loadModerationPrefs();
+    await API.delete(`/user/block/${_userId}`);
+    blockedUserIds.delete(_userId);
+    await persistModerationPrefs();
+  }
+
   async markNotInterested(_contentType: ContentKind, _contentId: string): Promise<void> {
     await loadModerationPrefs();
+    await API.post("/user/not-interested", {
+      contentType: _contentType,
+      contentId: _contentId,
+    });
     hiddenContentKeys.add(buildContentKey(_contentType, _contentId));
     await persistModerationPrefs();
   }

@@ -118,7 +118,7 @@ const handleSetPassword = async () => {
       setShowPasswordModal(false);
       navigation.reset({
         index: 0,
-        routes: [{ name: "Profile" }]
+        routes: [{ name: "MainApp" }]
       });
     } else {
       Alert.alert("Error", res?.data?.message || "Something went wrong");

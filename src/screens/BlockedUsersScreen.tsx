@@ -4,6 +4,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { useFocusEffect } from "@react-navigation/native";
 import { API } from "../api/api";
+import { socialApi } from "../features/social/socialApi";
 
 type BlockedUser = {
  _id: string;
@@ -38,7 +39,7 @@ const BlockedUsersScreen = ({ navigation }: any) => {
 
  const unblockUser = async (userId: string) => {
   try {
-   await API.delete(`/user/block/${userId}`);
+   await socialApi.unblockUser(userId);
    setBlockedUsers((prev) => prev.filter((item) => item._id !== userId));
    Alert.alert("Unblocked", "This account can interact with you again.");
   } catch (error) {

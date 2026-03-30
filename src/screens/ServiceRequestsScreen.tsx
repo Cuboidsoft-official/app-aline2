@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
@@ -40,11 +41,17 @@ type ServiceRequestRecord = {
     durationMinutes?: number;
   };
   user?: RequestParty;
-  seller?: RequestParty;
   service?: {
+    _id?: string;
     serviceName?: string;
     image?: string;
   };
+  seller?: RequestParty & { _id?: string };
+};
+
+type SlotOption = {
+  start: string;
+  label?: string;
 };
 
 const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
@@ -63,6 +70,12 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState("");
+  const [slotModalVisible, setSlotModalVisible] = useState(false);
+  const [slotModalLoading, setSlotModalLoading] = useState(false);
+  const [slotModalRequest, setSlotModalRequest] = useState<ServiceRequestRecord | null>(null);
+  const [slotOptions, setSlotOptions] = useState<SlotOption[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState("");
+  const [slotSubmitMode, setSlotSubmitMode] = useState<"accept" | "reschedule">("accept");
 
   const fetchData = useCallback(async () => {
     try {
@@ -122,6 +135,78 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
     return slotText;
   }, []);
 
+  const openSlotModal = useCallback(async (item: ServiceRequestRecord, nextMode: "accept" | "reschedule") => {
+    try {
+      setSlotModalVisible(true);
+      setSlotModalLoading(true);
+      setSlotModalRequest(item);
+      setSlotSubmitMode(nextMode);
+
+      const sellerId = item.seller?._id;
+      const serviceId = item.service?._id;
+
+      if (!sellerId || !serviceId) {
+        setSlotOptions([]);
+        setSelectedSlot("");
+        return;
+      }
+
+      const res = await API.get(`/seller/${sellerId}/slots`, {
+        params: { serviceId },
+      });
+
+      const nextSlots = Array.isArray(res.data?.slots) ? (res.data.slots as SlotOption[]) : [];
+      setSlotOptions(nextSlots);
+      setSelectedSlot(nextSlots[0]?.start || "");
+    } catch (error) {
+      console.log("slot modal fetch error:", error);
+      setSlotOptions([]);
+      setSelectedSlot("");
+      Alert.alert("Error", "Failed to load seller slots");
+    } finally {
+      setSlotModalLoading(false);
+    }
+  }, []);
+
+  const closeSlotModal = useCallback(() => {
+    setSlotModalVisible(false);
+    setSlotModalLoading(false);
+    setSlotModalRequest(null);
+    setSlotOptions([]);
+    setSelectedSlot("");
+    setSlotSubmitMode("accept");
+  }, []);
+
+  const submitSlotUpdate = useCallback(async () => {
+    if (!slotModalRequest?._id || !selectedSlot) {
+      return;
+    }
+
+    try {
+      setUpdatingId(slotModalRequest._id);
+      if (slotSubmitMode === "accept") {
+        await API.put(`/service-requests/${slotModalRequest._id}/status`, {
+          status: "accepted",
+          appointmentStart: selectedSlot,
+          appointmentTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata",
+        });
+      } else {
+        await API.put(`/service-requests/${slotModalRequest._id}/schedule`, {
+          appointmentStart: selectedSlot,
+          appointmentTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata",
+        });
+      }
+
+      closeSlotModal();
+      await fetchData();
+    } catch (error: any) {
+      console.log("slot submit error:", error?.response?.data || error);
+      Alert.alert("Error", error?.response?.data?.message || "Failed to update appointment");
+    } finally {
+      setUpdatingId("");
+    }
+  }, [closeSlotModal, fetchData, selectedSlot, slotModalRequest?._id, slotSubmitMode]);
+
   const renderActions = (item: ServiceRequestRecord) => {
     if (mode === "seller") {
       if (item.status === "pending") {
@@ -129,6 +214,9 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
           <View style={styles.actionRow}>
             <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]} onPress={() => updateStatus(item._id, "accepted")} disabled={updatingId === item._id}>
               <Text style={styles.actionBtnText}>Accept</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionBtn, styles.rescheduleBtn]} onPress={() => openSlotModal(item, "accept")} disabled={updatingId === item._id}>
+              <Text style={styles.actionBtnText}>Change Time</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.actionBtn, styles.declineBtn]} onPress={() => updateStatus(item._id, "declined")} disabled={updatingId === item._id}>
               <Text style={styles.actionBtnText}>Decline</Text>
@@ -139,9 +227,14 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
 
       if (item.status === "accepted") {
         return (
-          <TouchableOpacity style={[styles.actionBtn, styles.completeBtn]} onPress={() => updateStatus(item._id, "completed")} disabled={updatingId === item._id}>
-            <Text style={styles.actionBtnText}>Mark Completed</Text>
-          </TouchableOpacity>
+          <View style={styles.actionRow}>
+            <TouchableOpacity style={[styles.actionBtn, styles.rescheduleBtn]} onPress={() => openSlotModal(item, "reschedule")} disabled={updatingId === item._id}>
+              <Text style={styles.actionBtnText}>Reschedule</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionBtn, styles.completeBtn]} onPress={() => updateStatus(item._id, "completed")} disabled={updatingId === item._id}>
+              <Text style={styles.actionBtnText}>Mark Completed</Text>
+            </TouchableOpacity>
+          </View>
         );
       }
     }
@@ -258,6 +351,60 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
           </View>
         }
       />
+
+      <Modal visible={slotModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              {slotSubmitMode === "accept" ? "Pick a slot and accept" : "Reschedule appointment"}
+            </Text>
+            <Text style={styles.modalSubtitle}>
+              {slotModalRequest?.service?.serviceName || "Appointment"}
+            </Text>
+
+            {slotModalLoading ? (
+              <ActivityIndicator size="large" color="#7B4DFF" />
+            ) : slotOptions.length ? (
+              <View style={styles.slotList}>
+                {slotOptions.map((slot) => {
+                  const isSelected = selectedSlot === slot.start;
+                  return (
+                    <TouchableOpacity
+                      key={slot.start}
+                      style={[styles.slotChip, isSelected && styles.slotChipActive]}
+                      onPress={() => setSelectedSlot(slot.start)}
+                    >
+                      <Text style={[styles.slotChipText, isSelected && styles.slotChipTextActive]}>
+                        {slot.label || new Date(slot.start).toLocaleString()}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={styles.modalEmptyText}>No bookable slots are available right now.</Text>
+            )}
+
+            <TouchableOpacity
+              style={[styles.modalPrimaryButton, (!selectedSlot || slotModalLoading || !slotOptions.length) && styles.modalPrimaryButtonDisabled]}
+              onPress={() => {
+                submitSlotUpdate().catch((error) => {
+                  console.log("slot submit error:", error);
+                });
+              }}
+              disabled={!selectedSlot || slotModalLoading || !slotOptions.length}
+            >
+              <Text style={styles.modalPrimaryButtonText}>
+                {slotSubmitMode === "accept" ? "Schedule & Accept" : "Save New Time"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={closeSlotModal}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -313,6 +460,7 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: "row", marginTop: 14 },
   actionBtn: { marginTop: 14, borderRadius: 12, paddingVertical: 10, alignItems: "center", flex: 1 },
   acceptBtn: { backgroundColor: "#2563EB", marginRight: 8 },
+  rescheduleBtn: { backgroundColor: "#7C3AED", marginHorizontal: 4 },
   declineBtn: { backgroundColor: "#DC2626", marginLeft: 8 },
   completeBtn: { backgroundColor: "#059669" },
   cancelBtn: { backgroundColor: "#6B7280" },
@@ -320,5 +468,75 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: "center", paddingTop: 80, paddingHorizontal: 30 },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111" },
   emptyText: { marginTop: 8, color: "#666", textAlign: "center", lineHeight: 20 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" }
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(17,24,39,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalCard: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  modalSubtitle: {
+    marginTop: 6,
+    color: "#6B7280",
+    marginBottom: 14,
+  },
+  slotList: {
+    marginTop: 4,
+  },
+  slotChip: {
+    borderWidth: 1,
+    borderColor: "#DDD6FE",
+    backgroundColor: "#F5F3FF",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  slotChipActive: {
+    borderColor: "#7C3AED",
+    backgroundColor: "#7C3AED",
+  },
+  slotChipText: {
+    color: "#4C1D95",
+    fontWeight: "600",
+  },
+  slotChipTextActive: {
+    color: "#fff",
+  },
+  modalEmptyText: {
+    color: "#6B7280",
+    lineHeight: 20,
+  },
+  modalPrimaryButton: {
+    marginTop: 16,
+    backgroundColor: "#7C3AED",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  modalPrimaryButtonDisabled: {
+    opacity: 0.5,
+  },
+  modalPrimaryButtonText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+  modalCancelText: {
+    marginTop: 12,
+    color: "#6B7280",
+    textAlign: "center",
+    fontWeight: "600",
+  },
 });

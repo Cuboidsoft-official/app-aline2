@@ -322,5 +322,6 @@ export interface SocialApi {
   reportContent(contentType: ContentKind, contentId: string, reason: ReportReason, note?: string): Promise<void>;
   muteUser(userId: string): Promise<void>;
   blockUser(userId: string): Promise<void>;
+  unblockUser(userId: string): Promise<void>;
   markNotInterested(contentType: ContentKind, contentId: string): Promise<void>;
 }

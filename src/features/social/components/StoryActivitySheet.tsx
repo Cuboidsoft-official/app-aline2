@@ -16,7 +16,7 @@ import {
 import Icon from "react-native-vector-icons/Ionicons";
 
 import { socialApi } from "../socialApi";
-import { Comment, SocialUser, Story, StoryViewerEntry } from "../types";
+import { Comment, SocialUser, Story, StoryViewerEntry, Visibility } from "../types";
 import { toUserSafeMessage } from "../validation";
 
 type ActivityTab = "views" | "likes" | "replies";
@@ -57,6 +57,7 @@ function StoryActivitySheet({
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
+  const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -160,6 +161,34 @@ function StoryActivitySheet({
       onStoryUpdate?.(next);
       return next;
     });
+  };
+
+  const updateStorySettings = async (input: { visibility?: Visibility; allowReplies?: boolean; allowSharing?: boolean }) => {
+    if (!story || savingSettings) {
+      return;
+    }
+
+    try {
+      setSavingSettings(true);
+      const updated = await socialApi.updateStory(story.id, input);
+      setStory(updated);
+      onStoryUpdate?.(updated);
+    } catch (error) {
+      Alert.alert("Could not update story settings", toUserSafeMessage(error));
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const cycleVisibility = async () => {
+    if (!story) {
+      return;
+    }
+
+    const order: Visibility[] = ["public", "friends", "close_friends"];
+    const currentIndex = order.indexOf(story.visibility === "custom" ? "public" : story.visibility);
+    const nextVisibility = order[(currentIndex + 1) % order.length];
+    await updateStorySettings({ visibility: nextVisibility });
   };
 
   const onToggleReplies = async (comment: Comment) => {
@@ -359,6 +388,28 @@ function StoryActivitySheet({
             </TouchableOpacity>
           </View>
 
+          {story ? (
+            <View style={styles.settingsCard}>
+              <View style={styles.settingsHeaderRow}>
+                <Text style={styles.settingsTitle}>Story settings</Text>
+                {savingSettings ? <ActivityIndicator size="small" color="#3345d1" /> : null}
+              </View>
+              <View style={styles.settingsActionsRow}>
+                <TouchableOpacity style={styles.settingChip} onPress={() => updateStorySettings({ allowReplies: !story.allowReplies })}>
+                  <Text style={styles.settingChipLabel}>{story.allowReplies ? "Replies on" : "Replies off"}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.settingChip} onPress={() => updateStorySettings({ allowSharing: !story.allowSharing })}>
+                  <Text style={styles.settingChipLabel}>{story.allowSharing ? "Sharing on" : "Sharing off"}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.settingChip} onPress={cycleVisibility}>
+                  <Text style={styles.settingChipLabel}>
+                    Audience: {story.visibility === "close_friends" ? "Close friends" : story.visibility === "friends" ? "Friends" : "Public"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+
           {loading ? (
             <View style={styles.loader}>
               <ActivityIndicator size="small" color="#3345d1" />
@@ -494,6 +545,35 @@ const styles = StyleSheet.create({
   },
   summaryTitle: { color: "#666", fontWeight: "600", fontSize: 12.5 },
   summaryValue: { color: "#111", fontSize: 20, fontWeight: "800", marginTop: 8 },
+  settingsCard: {
+    borderWidth: 1,
+    borderColor: "#ececec",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+    backgroundColor: "#fafafa",
+  },
+  settingsHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  settingsTitle: { color: "#111", fontWeight: "800", fontSize: 14 },
+  settingsActionsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  settingChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  settingChipLabel: { color: "#374151", fontWeight: "700", fontSize: 12.5 },
   loader: { paddingVertical: 24, alignItems: "center" },
   listContent: { paddingBottom: 100 },
   metricRow: {

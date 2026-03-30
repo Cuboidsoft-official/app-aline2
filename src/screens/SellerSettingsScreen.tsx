@@ -47,6 +47,8 @@ const formatMinutes = (minutes: number) => {
   });
 };
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
 const SellerSettingsScreen = ({ navigation }: any) => {
 
   const [isAvailable, setIsAvailable] = useState(false);
@@ -131,6 +133,30 @@ const SellerSettingsScreen = ({ navigation }: any) => {
           ? { ...entry, enabled: !entry.enabled }
           : entry
       )
+    );
+  };
+
+  const adjustWeekdayTime = (dayOfWeek: number, field: "startMinutes" | "endMinutes", deltaMinutes: number) => {
+    setWeeklyAvailability((current) =>
+      current.map((entry) => {
+        if (entry.dayOfWeek !== dayOfWeek) {
+          return entry;
+        }
+
+        if (field === "startMinutes") {
+          const nextStart = clamp(entry.startMinutes + deltaMinutes, 0, entry.endMinutes - 30);
+          return {
+            ...entry,
+            startMinutes: nextStart,
+          };
+        }
+
+        const nextEnd = clamp(entry.endMinutes + deltaMinutes, entry.startMinutes + 30, 1440);
+        return {
+          ...entry,
+          endMinutes: nextEnd,
+        };
+      })
     );
   };
 
@@ -242,11 +268,41 @@ const SellerSettingsScreen = ({ navigation }: any) => {
             .sort((a, b) => a.dayOfWeek - b.dayOfWeek)
             .map((entry) => (
               <View key={entry.dayOfWeek} style={styles.scheduleRow}>
-                <View>
+                <View style={styles.scheduleMeta}>
                   <Text style={styles.scheduleDay}>{DAY_LABELS[entry.dayOfWeek]}</Text>
                   <Text style={styles.scheduleHours}>
                     {formatMinutes(entry.startMinutes)} - {formatMinutes(entry.endMinutes)}
                   </Text>
+                  <View style={styles.timeAdjustRow}>
+                    <Text style={styles.timeAdjustLabel}>Start</Text>
+                    <TouchableOpacity
+                      style={styles.timeAdjustButton}
+                      onPress={() => adjustWeekdayTime(entry.dayOfWeek, "startMinutes", -30)}
+                    >
+                      <Text style={styles.timeAdjustButtonText}>-30m</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.timeAdjustButton}
+                      onPress={() => adjustWeekdayTime(entry.dayOfWeek, "startMinutes", 30)}
+                    >
+                      <Text style={styles.timeAdjustButtonText}>+30m</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.timeAdjustRow}>
+                    <Text style={styles.timeAdjustLabel}>End</Text>
+                    <TouchableOpacity
+                      style={styles.timeAdjustButton}
+                      onPress={() => adjustWeekdayTime(entry.dayOfWeek, "endMinutes", -30)}
+                    >
+                      <Text style={styles.timeAdjustButtonText}>-30m</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.timeAdjustButton}
+                      onPress={() => adjustWeekdayTime(entry.dayOfWeek, "endMinutes", 30)}
+                    >
+                      <Text style={styles.timeAdjustButtonText}>+30m</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <Switch
@@ -429,10 +485,14 @@ const styles = StyleSheet.create({
   scheduleRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#EEE7FF"
+  },
+  scheduleMeta: {
+    flex: 1,
+    paddingRight: 12,
   },
   scheduleDay: {
     fontSize: 14,
@@ -442,6 +502,31 @@ const styles = StyleSheet.create({
   scheduleHours: {
     marginTop: 3,
     color: "#6B7280"
+  },
+  timeAdjustRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  timeAdjustLabel: {
+    width: 42,
+    color: "#6B7280",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  timeAdjustButton: {
+    borderWidth: 1,
+    borderColor: "#D8CCFF",
+    backgroundColor: "#fff",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    marginRight: 8,
+  },
+  timeAdjustButtonText: {
+    color: "#5B21B6",
+    fontSize: 12,
+    fontWeight: "700",
   },
   scheduleSaveButton: {
     marginTop: 14,
