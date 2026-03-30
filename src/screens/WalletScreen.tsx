@@ -14,6 +14,7 @@ import {
 import Icon from "react-native-vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { API } from "../api/api";
+import { monetizationDisabledMessage, productFlags } from "../config/productFlags";
 import { formatSummaryAmount } from "../utils/servicePricing";
 
 const paymentMethods = [
@@ -72,6 +73,32 @@ function WalletScreen({ navigation }:any) {
  const handleRecharge = (method: PaymentMethod) => {
   Alert.alert("Not available yet", `${method} recharge depends on payment-gateway integration and is deferred for later.`);
  };
+
+ if (!productFlags.sellerMonetizationInConsumerApp) {
+  return (
+   <ScrollView style={styles.container} contentContainerStyle={styles.readOnlyContainer} showsVerticalScrollIndicator={false}>
+    <StatusBar barStyle="light-content" backgroundColor="#ab2aeb" />
+
+    <View style={styles.header}>
+     <View style={styles.headerRow}>
+      <TouchableOpacity onPress={() => navigation.goBack()}>
+       <Icon name="arrow-back" size={24} color="#fff" />
+      </TouchableOpacity>
+
+      <Text style={styles.title}>Business Tools</Text>
+
+      <View style={{ width: 24 }} />
+     </View>
+    </View>
+
+    <View style={styles.readOnlyCard}>
+     <Icon name="lock-closed-outline" size={26} color="#ab2aeb" />
+     <Text style={styles.readOnlyTitle}>Payments are not handled in this app</Text>
+     <Text style={styles.readOnlyText}>{monetizationDisabledMessage}</Text>
+    </View>
+   </ScrollView>
+  );
+ }
 
  return (
   <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -155,6 +182,9 @@ const styles = StyleSheet.create({
  container: {
   flex: 1,
   backgroundColor: "#f8f5ff",
+ },
+ readOnlyContainer: {
+  paddingBottom: 32,
  },
 
  /* HEADER */
@@ -290,5 +320,25 @@ const styles = StyleSheet.create({
  infoTextSecondary: {
   marginTop: 8,
   color: "#777"
+ },
+ readOnlyCard: {
+  marginHorizontal: 20,
+  marginTop: 24,
+  padding: 20,
+  borderRadius: 18,
+  backgroundColor: "#fff",
+  borderWidth: 1,
+  borderColor: "#E9D5FF"
+ },
+ readOnlyTitle: {
+  marginTop: 12,
+  color: "#111827",
+  fontSize: 18,
+  fontWeight: "bold"
+ },
+ readOnlyText: {
+  marginTop: 8,
+  color: "#4B5563",
+  lineHeight: 21
  },
 });

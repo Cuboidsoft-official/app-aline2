@@ -6,14 +6,14 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
-  Alert,
-  Share
+  Alert
 } from "react-native";
 
 import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
 import { formatPrimaryServicePrice, getServicePricingOptions } from "../utils/servicePricing";
+import { shareContentLink } from "../utils/shareLinks";
 
 const PRIMARY = "#7B4DFF";
 
@@ -23,6 +23,7 @@ type SellerProfile = {
   sellerName?: string;
   profilePic?: string;
   bio?: string;
+  clinicLink?: string;
   media?: string[];
 };
 
@@ -118,14 +119,58 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
 
   const shareSellerProfile = async () => {
     try {
-      await Share.share({
-        message: seller?.sellerName
+      await shareContentLink({
+        originalUrl: seller?.clinicLink,
+        title: seller?.sellerName || "Aline2 Seller",
+        description: seller?.bio || "",
+        fallbackMessage: seller?.sellerName
           ? `Check out ${seller.sellerName} on Aline2`
-          : "Check out this seller on Aline2"
+          : "Check out this seller on Aline2",
       });
     } catch (error) {
       console.log("seller share error:", error);
     }
+  };
+
+  const openFeatureInfo = (title: string, description: string) => {
+    navigation.navigate("FeatureInfoScreen", {
+      title,
+      description,
+    });
+  };
+
+  const blockSeller = async () => {
+    const sellerUserId = resolveSellerUserId();
+
+    if (!sellerUserId) {
+      Alert.alert("Unavailable", "This seller profile is missing its linked user account.");
+      return;
+    }
+
+    Alert.alert(
+      "Block seller",
+      `Block ${seller?.sellerName || "this seller"}? You can unblock them later from Settings.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Block",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const token = await AsyncStorage.getItem("token");
+              await API.post(`/user/block/${sellerUserId}`, {}, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              Alert.alert("Blocked", "This seller has been blocked.");
+              navigation.goBack();
+            } catch (error) {
+              console.log("block seller error:", error);
+              Alert.alert("Unable to block seller", "Please try again.");
+            }
+          }
+        }
+      ]
+    );
   };
 
   // ================= UI =================
@@ -178,12 +223,12 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
           <Action
             icon="call-outline"
             title="Call"
-            onPress={() => Alert.alert("Not available yet", "Voice calling is not implemented yet.")}
+            onPress={() => openFeatureInfo("Voice Call", "Voice calling is not available in the current backend yet.")}
           />
           <Action
             icon="videocam-outline"
             title="Video"
-            onPress={() => Alert.alert("Not available yet", "Video calling is not implemented yet.")}
+            onPress={() => openFeatureInfo("Video Call", "Video calling is not available in the current backend yet.")}
           />
           <Action
             icon="chatbubble-outline"
@@ -205,7 +250,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
           {services.length > 0 ? (
 
             services.map((item, index) => (
-              <View key={index} style={styles.serviceCard}>
+              <TouchableOpacity key={index} style={styles.serviceCard} activeOpacity={0.92} onPress={() => openSellerChat(item)}>
 
                 <View>
                   <Text style={styles.serviceName}>
@@ -230,7 +275,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
                   <Text style={{ color: "#fff" }}>Request</Text>
                 </TouchableOpacity>
 
-              </View>
+              </TouchableOpacity>
             ))
 
           ) : (
@@ -261,14 +306,17 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
 
         {/* SETTINGS */}
         <View style={styles.optionBox}>
-          <Option icon="notifications-outline" title="Notifications" />
-          <Option icon="color-palette-outline" title="Chat Theme" />
-          <Option icon="time-outline" title="Disappearing Messages" />
-          <Option icon="shield-checkmark-outline" title="Encryption" />
+          <Option icon="notifications-outline" title="Notifications" onPress={() => navigation.navigate("NotificationSettingsScreen")} />
+          <Option icon="color-palette-outline" title="Chat Theme" onPress={() => openFeatureInfo("Chat Theme", "Custom seller chat themes are not available yet, but this setting is now routed correctly.")} />
+          <Option icon="time-outline" title="Disappearing Messages" onPress={() => openFeatureInfo("Disappearing Messages", "Disappearing messages need backend support before they can be enabled.")} />
+          <Option icon="shield-checkmark-outline" title="Encryption" onPress={() => openFeatureInfo("Encryption", "End-to-end encryption details are not exposed by the current backend yet.")} />
         </View>
 
         {/* BLOCK */}
-        <TouchableOpacity style={styles.blockButton}>
+        <TouchableOpacity
+          style={styles.blockButton}
+          onPress={blockSeller}
+        >
           <Icon name="close-circle-outline" size={20} color="#ef4444" />
           <Text style={styles.blockText}>
             Block {seller?.sellerName || "Seller"}
@@ -305,8 +353,16 @@ const Action = ({
   </TouchableOpacity>
 );
 
-const Option = ({ icon, title }: { icon: string; title: string }) => (
-  <TouchableOpacity style={styles.optionRow}>
+const Option = ({
+  icon,
+  title,
+  onPress,
+}: {
+  icon: string;
+  title: string;
+  onPress?: () => void;
+}) => (
+  <TouchableOpacity style={styles.optionRow} onPress={onPress}>
     <Icon name={icon} size={22} style={{ marginRight: 15 }} />
     <Text style={{ flex: 1 }}>{title}</Text>
     <Icon name="chevron-forward" />

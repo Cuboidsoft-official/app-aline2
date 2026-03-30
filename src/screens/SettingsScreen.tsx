@@ -14,19 +14,20 @@ import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
 import { clearStoredSession } from "../utils/authSession";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 const SettingsScreen = ({ navigation }: any) => {
 
  const isFocused = useIsFocused();
 
  const [isPrivate, setIsPrivate] = useState(false);
- const [darkMode, setDarkMode] = useState(false);
  const [loading, setLoading] = useState(false);
+ const { colors, isDarkMode, setDarkModePreference } = useAppTheme();
 
  // LOAD PRIVACY WHEN SCREEN OPENS
  useEffect(() => {
 
-    const loadPrivacy = async () => {
+   const loadPrivacy = async () => {
 
    try {
 
@@ -57,7 +58,6 @@ const SettingsScreen = ({ navigation }: any) => {
     }
 
    }
-
   };
 
   if (isFocused) {
@@ -120,18 +120,27 @@ const SettingsScreen = ({ navigation }: any) => {
 
 	 };
 
-	 const showUnavailableSetting = (feature: string) => {
-	  Alert.alert("Not available yet", `${feature} is not implemented yet.`);
+	 const openFeatureInfo = (title: string, description: string) => {
+	  navigation.navigate("FeatureInfoScreen", {
+	   title,
+	   description
+	  });
 	 };
+
+ const toggleDarkMode = async () => {
+  const nextValue = !isDarkMode;
+  await setDarkModePreference(nextValue);
+  Alert.alert("Theme updated", nextValue ? "Dark mode preference saved." : "Light mode preference saved.");
+ };
 
  return (
 
-  <SafeAreaView style={styles.container}>
+  <SafeAreaView style={[styles.container, isDarkMode ? styles.containerDark : null]}>
    <View style={styles.header}>
     <TouchableOpacity onPress={() => navigation.goBack()}>
-     <Icon name="arrow-back" size={26}/>
+     <Icon name="arrow-back" size={26} color={isDarkMode ? colors.text : "#111"} />
     </TouchableOpacity>
-    <Text style={styles.headerTitle}>
+    <Text style={[styles.headerTitle, isDarkMode ? styles.headerTitleDark : null]}>
      Settings and Activity
     </Text>
 
@@ -139,10 +148,10 @@ const SettingsScreen = ({ navigation }: any) => {
 
    <ScrollView showsVerticalScrollIndicator={false}>
 
-    <Text style={styles.section}>Your account</Text>
+    <Text style={[styles.section, isDarkMode ? styles.sectionDark : null]}>Your account</Text>
 
-    <View style={styles.item}>
-     <Text style={styles.text}>Private account</Text>
+    <View style={[styles.item, isDarkMode ? styles.itemDark : null]}>
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Private account</Text>
 
      <Switch
       value={isPrivate}
@@ -152,33 +161,33 @@ const SettingsScreen = ({ navigation }: any) => {
     </View>
 
     <TouchableOpacity
-     style={styles.item}
+     style={[styles.item, isDarkMode ? styles.itemDark : null]}
      onPress={() => navigation.navigate("BlockedUsersScreen")}
     >
-     <Text style={styles.text}>Blocked users</Text>
-     <Icon name="chevron-forward" size={20}/>
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Blocked users</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
     </TouchableOpacity>
 
     <TouchableOpacity
-     style={styles.item}
+     style={[styles.item, isDarkMode ? styles.itemDark : null]}
      onPress={() => navigation.navigate("NotificationSettingsScreen")}
     >
-     <Text style={styles.text}>Notifications</Text>
-     <Icon name="chevron-forward" size={20}/>
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Notifications</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
     </TouchableOpacity>
 
 	    <TouchableOpacity
-	     style={styles.item}
-	     onPress={() => showUnavailableSetting("Account center")}
+	     style={[styles.item, isDarkMode ? styles.itemDark : null]}
+	     onPress={() => openFeatureInfo("Account Center", "Account Center is not connected to a backend service yet, but this page is now routed correctly.")}
 	    >
-     <Text style={styles.text}>Account center</Text>
-     <Icon name="chevron-forward" size={20}/>
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Account center</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
     </TouchableOpacity>
 
-    <Text style={styles.section}>Seller</Text>
+    <Text style={[styles.section, isDarkMode ? styles.sectionDark : null]}>Seller</Text>
 
     <TouchableOpacity
-     style={styles.item}
+     style={[styles.item, isDarkMode ? styles.itemDark : null]}
      onPress={() => navigation.navigate("SellerRegistration")}
     >
      <Text style={styles.vendorText}>Become a Seller</Text>
@@ -186,56 +195,59 @@ const SettingsScreen = ({ navigation }: any) => {
     </TouchableOpacity>
 
     <TouchableOpacity
-     style={styles.item}
+     style={[styles.item, isDarkMode ? styles.itemDark : null]}
      onPress={() => navigation.navigate("SellerDashboardScreen")}
     >
-     <Text style={styles.text}>Seller dashboard</Text>
-     <Icon name="chevron-forward" size={20}/>
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Seller dashboard</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
     </TouchableOpacity>
 
     <TouchableOpacity
-     style={styles.item}
+     style={[styles.item, isDarkMode ? styles.itemDark : null]}
      onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "user" })}
     >
-     <Text style={styles.text}>My service requests</Text>
-     <Icon name="chevron-forward" size={20}/>
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>My service requests</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
     </TouchableOpacity>
 
-    <Text style={styles.section}>
+    <Text style={[styles.section, isDarkMode ? styles.sectionDark : null]}>
      How others interact with you
     </Text>
 
 	    <TouchableOpacity
-	     style={styles.item}
-	     onPress={() => showUnavailableSetting("Comment settings")}
+	     style={[styles.item, isDarkMode ? styles.itemDark : null]}
+	     onPress={() => openFeatureInfo("Comments", "Comment settings are not available in the current backend yet.")}
 	    >
-     <Text style={styles.text}>Comments</Text>
-     <Icon name="chevron-forward" size={20}/>
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Comments</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
     </TouchableOpacity>
 
 	    <TouchableOpacity
-	     style={styles.item}
-	     onPress={() => showUnavailableSetting("Tag and mention settings")}
+	     style={[styles.item, isDarkMode ? styles.itemDark : null]}
+	     onPress={() => openFeatureInfo("Tags and Mentions", "Tag and mention settings are not available in the current backend yet.")}
 	    >
-     <Text style={styles.text}>Tags and mentions</Text>
-     <Icon name="chevron-forward" size={20}/>
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Tags and mentions</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
     </TouchableOpacity>
 
-    <Text style={styles.section}>App settings</Text>
+    <Text style={[styles.section, isDarkMode ? styles.sectionDark : null]}>App settings</Text>
 
-    <View style={styles.item}>
-     <Text style={styles.text}>Dark mode</Text>
+    <View style={[styles.item, isDarkMode ? styles.itemDark : null]}>
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Dark mode</Text>
      <Switch
-      value={darkMode}
-      onValueChange={() => setDarkMode(!darkMode)}
+      value={isDarkMode}
+      onValueChange={toggleDarkMode}
      />
     </View>
 
-    <Text style={styles.section}>Support</Text>
+    <Text style={[styles.section, isDarkMode ? styles.sectionDark : null]}>Support</Text>
 
-    <TouchableOpacity style={styles.item}>
-     <Text style={styles.text}>Help & Support</Text>
-     <Icon name="chevron-forward" size={20}/>
+    <TouchableOpacity
+     style={[styles.item, isDarkMode ? styles.itemDark : null]}
+     onPress={() => openFeatureInfo("Help & Support", "Help and support resources will be available here in a future update.")}
+    >
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Help & Support</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
     </TouchableOpacity>
 
     <TouchableOpacity
@@ -271,6 +283,9 @@ const styles = StyleSheet.create({
   flex:1,
   backgroundColor:"#fff"
  },
+ containerDark:{
+  backgroundColor:"#111827"
+ },
 
  header:{
   flexDirection:"row",
@@ -280,6 +295,9 @@ const styles = StyleSheet.create({
   borderBottomWidth:1,
   borderColor:"#eee",
   paddingTop:10
+ },
+ headerTitleDark:{
+  color:"#fff"
  },
 
  headerTitle:{
@@ -295,6 +313,9 @@ const styles = StyleSheet.create({
   marginLeft:15,
   marginBottom:10
  },
+ sectionDark:{
+  color:"#9CA3AF"
+ },
 
  item:{
   flexDirection:"row",
@@ -305,9 +326,16 @@ const styles = StyleSheet.create({
   borderBottomWidth:1,
   borderColor:"#eee"
  },
+ itemDark:{
+  borderColor:"#1F2937",
+  backgroundColor:"#111827"
+ },
 
  text:{
   fontSize:16
+ },
+ textDark:{
+  color:"#fff"
  },
 
  vendorText:{

@@ -249,7 +249,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
       const [file] = await pick({
         mode: "import",
         allowMultiSelection: false,
-        type: [types.images, types.pdf]
+        type: [types.allFiles]
       });
 
       if (!file?.uri) {
@@ -257,7 +257,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
       }
 
       if (file.hasRequestedType === false) {
-        Alert.alert("Unsupported file", "Please select an image or PDF document.");
+        Alert.alert("Unsupported file", "Please select a supported verification document.");
         return;
       }
 
@@ -361,15 +361,20 @@ const SellerRegistration = ({ navigation, route }: any) => {
   };
 
   const handleDigiLockerVerify = async () => {
+    if (digilockerVerified) {
+      Alert.alert("Verified", "Your seller profile is already marked as DigiLocker verified.");
+      return;
+    }
+
     if (!aadhaar.trim() || !pan.trim()) {
       Alert.alert("Validation", "Please enter Aadhaar and PAN first");
       return;
     }
 
-    // UI demo only
-    // Real DigiLocker verification needs official partner/API integration on backend
-    setDigilockerVerified(true);
-    Alert.alert("Success", "DigiLocker verification marked successfully");
+    Alert.alert(
+      "Manual review required",
+      "DigiLocker verification is not self-serve in this build. Submit your documents and the verification state will be updated after review."
+    );
   };
 
   const submitSellerRegistration = async () => {
@@ -421,8 +426,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
         panDoc: uploadedPanDoc,
         idProof: uploadedIdProof,
         profilePic: uploadedProfilePic,
-        coverPic: uploadedCoverPic,
-        digilockerVerified
+        coverPic: uploadedCoverPic
       };
 
       const endpoint = mode === "edit" ? "/seller/update" : "/seller/register";
@@ -661,8 +665,8 @@ const SellerRegistration = ({ navigation, route }: any) => {
               </TouchableOpacity>
 
               <Text style={styles.noteText}>
-                DigiLocker verification currently works as UI/demo flow. Real verification
-                requires backend + official DigiLocker integration.
+                DigiLocker status is controlled after document review. You can submit your
+                documents here, but verification is no longer self-marked from the app.
               </Text>
             </View>
           )}

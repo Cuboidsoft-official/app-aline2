@@ -21,6 +21,8 @@ import SettingsScreen from './src/screens/SettingsScreen';
 import BlockedUsersScreen from './src/screens/BlockedUsersScreen';
 import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
 import DeleteAccountScreen from './src/screens/DeleteAccountScreen';
+import FeatureInfoScreen from './src/screens/FeatureInfoScreen';
+import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import SellerRegistration from './src/screens/SellerRegistration';
 import SellerDashboardScreen from './src/screens/SellerDashboardScreen';
 import AddServiceScreen from './src/screens/AddServiceScreen';
@@ -46,6 +48,7 @@ import SearchScreen from './src/screens/SearchScreen';
 import HashtagResultsScreen from './src/screens/HashtagResultsScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
+import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
 
 const Stack = createNativeStackNavigator();
 const rootStyle = { flex: 1 } as const;
@@ -55,67 +58,79 @@ const transparentSheetOptions = {
   contentStyle: { backgroundColor: 'transparent' },
 };
 
+function AppNavigator() {
+  const { navigationTheme } = useAppTheme();
+
+  return (
+    <NavigationContainer theme={navigationTheme}>
+      <Stack.Navigator
+        initialRouteName="Splash"
+        screenOptions={{ headerShown: false }}
+      >
+
+        {/* Splash First */}
+        <Stack.Screen name="Splash" component={SplashScreen} />
+
+        {/* Auth Screens */}
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Signup" component={SignupScreen} />
+        <Stack.Screen name="OtpVerify" component={OtpVerifyScreen} />
+        <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+        <Stack.Screen name="ForgotPasswordScreen" component={ForgotPasswordScreen} />
+
+        {/* Main App */}
+        <Stack.Screen name="MainApp" component={BottomTabs} />
+
+        {/* Other Screens */}
+        <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen name="Feed" component={FeedScreen} />
+        <Stack.Screen name="ProfileView" component={ProfileView} />
+        <Stack.Screen name="NotificationScreen" component={NotificationScreen} />
+        <Stack.Screen name="CreatePostScreen" component={CreatePostScreen} />
+        <Stack.Screen name="ProfilePreviewScreen" component={ProfilePreviewScreen} />
+        <Stack.Screen name="FollowersFollowingScreen" component={FollowersFollowingScreen} />
+        <Stack.Screen name="ChatScreen" component={ChatScreen} />
+        <Stack.Screen name="ChatDetailsScreen" component={ChatDetailsScreen} />
+        <Stack.Screen name="AllChatsScreen" component={AllChatsScreen} />
+        <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
+        <Stack.Screen name="BlockedUsersScreen" component={BlockedUsersScreen} />
+        <Stack.Screen name="NotificationSettingsScreen" component={NotificationSettingsScreen} />
+        <Stack.Screen name="DeleteAccountScreen" component={DeleteAccountScreen} />
+        <Stack.Screen name="FeatureInfoScreen" component={FeatureInfoScreen} />
+        <Stack.Screen name="Search" component={SearchScreen} />
+        <Stack.Screen name="HashtagResultsScreen" component={HashtagResultsScreen} />
+        <Stack.Screen name="SellerRegistration" component={SellerRegistration} />
+        <Stack.Screen name="SellerDashboardScreen" component={SellerDashboardScreen} />
+        <Stack.Screen name="AddServiceScreen" component={AddServiceScreen} />
+        <Stack.Screen name="SellerSettingsScreen" component={SellerSettingsScreen} />
+        <Stack.Screen name="WalletScreen" component={WalletScreen} />
+        <Stack.Screen name="HowToEarnScreen" component={HowToEarnScreen} />
+        <Stack.Screen name="EditServiceScreen" component={EditServiceScreen} />
+        <Stack.Screen name="SellerPreviewScreen" component={SellerPreviewScreen} />
+        <Stack.Screen name="SellerChatScreen" component={SellerChatScreen} />
+        <Stack.Screen name="SellerDetailsScreen" component={SellerDetailsScreen} />
+        <Stack.Screen name="ServiceRequestsScreen" component={ServiceRequestsScreen} />
+        <Stack.Screen name="Swipes" component={SwipesScreen} />
+        <Stack.Screen name="StoryViewer" component={StoryViewerScreen} />
+        <Stack.Screen name="PostDetail" component={PostDetailScreen} />
+        <Stack.Screen name="StoryArchive" component={StoryArchiveScreen} />
+        <Stack.Screen name="PostComments" component={PostCommentsScreen} options={transparentSheetOptions} />
+        <Stack.Screen name="SwipeComments" component={SwipeCommentsScreen} options={transparentSheetOptions} />
+        <Stack.Screen name="StoryInsights" component={StoryInsightsScreen} options={transparentSheetOptions} />
+        <Stack.Screen name="StoryReplies" component={StoryRepliesScreen} options={transparentSheetOptions} />
+        <Stack.Screen name="CommentThread" component={CommentThreadScreen} options={transparentSheetOptions} />
+        <Stack.Screen name="ContentActions" component={ContentActionsScreen} options={transparentSheetOptions} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
 export default function App() {
   return (
     <GestureHandlerRootView style={rootStyle}>
-      <NavigationContainer>
-
-        <Stack.Navigator
-          initialRouteName="Splash"
-          screenOptions={{ headerShown: false }}
-        >
-
-          {/* Splash First */}
-          <Stack.Screen name="Splash" component={SplashScreen} />
-
-          {/* Auth Screens */}
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Signup" component={SignupScreen} />
-          <Stack.Screen name="OtpVerify" component={OtpVerifyScreen} />
-
-          {/* Main App */}
-          <Stack.Screen name="MainApp" component={BottomTabs} />
-
-          {/* Other Screens */}
-          <Stack.Screen name="Profile" component={ProfileScreen} />
-          <Stack.Screen name="Feed" component={FeedScreen} />
-          <Stack.Screen name="ProfileView" component={ProfileView} />
-          <Stack.Screen name="NotificationScreen" component={NotificationScreen} />
-          <Stack.Screen name="CreatePostScreen" component={CreatePostScreen} />
-          <Stack.Screen name="ProfilePreviewScreen" component={ProfilePreviewScreen} />
-          <Stack.Screen name="FollowersFollowingScreen" component={FollowersFollowingScreen} />
-          <Stack.Screen name="ChatScreen" component={ChatScreen} />
-          <Stack.Screen name="ChatDetailsScreen" component={ChatDetailsScreen} />
-          <Stack.Screen name="AllChatsScreen" component={AllChatsScreen} />
-          <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
-          <Stack.Screen name="BlockedUsersScreen" component={BlockedUsersScreen} />
-          <Stack.Screen name="NotificationSettingsScreen" component={NotificationSettingsScreen} />
-          <Stack.Screen name="DeleteAccountScreen" component={DeleteAccountScreen} />
-          <Stack.Screen name="Search" component={SearchScreen} />
-          <Stack.Screen name="HashtagResultsScreen" component={HashtagResultsScreen} />
-          <Stack.Screen name="SellerRegistration" component={SellerRegistration} />
-          <Stack.Screen name="SellerDashboardScreen" component={SellerDashboardScreen} />
-          <Stack.Screen name="AddServiceScreen" component={AddServiceScreen} />
-          <Stack.Screen name="SellerSettingsScreen" component={SellerSettingsScreen} />
-          <Stack.Screen name="WalletScreen" component={WalletScreen} />
-          <Stack.Screen name="HowToEarnScreen" component={HowToEarnScreen} />
-          <Stack.Screen name="EditServiceScreen" component={EditServiceScreen} />
-          <Stack.Screen name="SellerPreviewScreen" component={SellerPreviewScreen} />
-          <Stack.Screen name="SellerChatScreen" component={SellerChatScreen} />
-          <Stack.Screen name="SellerDetailsScreen" component={SellerDetailsScreen} />
-          <Stack.Screen name="ServiceRequestsScreen" component={ServiceRequestsScreen} />
-          <Stack.Screen name="Swipes" component={SwipesScreen} />
-          <Stack.Screen name="StoryViewer" component={StoryViewerScreen} />
-          <Stack.Screen name="PostDetail" component={PostDetailScreen} />
-          <Stack.Screen name="StoryArchive" component={StoryArchiveScreen} />
-          <Stack.Screen name="PostComments" component={PostCommentsScreen} options={transparentSheetOptions} />
-          <Stack.Screen name="SwipeComments" component={SwipeCommentsScreen} options={transparentSheetOptions} />
-          <Stack.Screen name="StoryInsights" component={StoryInsightsScreen} options={transparentSheetOptions} />
-          <Stack.Screen name="StoryReplies" component={StoryRepliesScreen} options={transparentSheetOptions} />
-          <Stack.Screen name="CommentThread" component={CommentThreadScreen} options={transparentSheetOptions} />
-          <Stack.Screen name="ContentActions" component={ContentActionsScreen} options={transparentSheetOptions} />
-        </Stack.Navigator>
-      </NavigationContainer>
+      <AppThemeProvider>
+        <AppNavigator />
+      </AppThemeProvider>
     </GestureHandlerRootView>
   );
 }

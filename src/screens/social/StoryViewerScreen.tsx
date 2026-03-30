@@ -15,6 +15,7 @@ import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
+import SocialVideo from "../../features/social/components/SocialVideo";
 import StoryActivitySheet from "../../features/social/components/StoryActivitySheet";
 import { socialApi } from "../../features/social/socialApi";
 import { Story } from "../../features/social/types";
@@ -295,6 +296,18 @@ function StoryViewerScreen({ route, navigation }: any) {
         <View style={[styles.textStoryWrap, { backgroundColor: currentStory.backgroundColor || "#1f2937" }]}>
           <Text style={styles.textStoryContent}>{currentStory.text}</Text>
         </View>
+      );
+    }
+
+    if (currentStory.media?.mediaType === "video") {
+      return (
+        <SocialVideo
+          uri={currentStory.media?.url}
+          posterUri={currentStory.media?.thumbnailUrl}
+          style={styles.storyImage}
+          paused={paused}
+          onEnd={next}
+        />
       );
     }
 

@@ -19,6 +19,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import ContentActionSheet from "../features/social/components/ContentActionSheet";
 import PostCommentsSheet from "../features/social/components/PostCommentsSheet";
 import PostShareSheet from "../features/social/components/PostShareSheet";
+import SocialVideo from "../features/social/components/SocialVideo";
 import { socialApi } from "../features/social/socialApi";
 import { FeedResponse, Post, Story } from "../features/social/types";
 import { toUserSafeMessage } from "../features/social/validation";
@@ -248,9 +249,21 @@ function FeedScreen({ navigation }: any) {
   const renderPostMedia = (post: Post) => {
     if (post.type !== "carousel") {
       const primaryMedia = post.media[0];
+      if (primaryMedia?.mediaType === "video") {
+        return (
+          <SocialVideo
+            uri={primaryMedia.url}
+            posterUri={primaryMedia.thumbnailUrl}
+            style={[styles.postImage, { width }]}
+            muted
+            repeat
+          />
+        );
+      }
+
       return (
         <Image
-          source={{ uri: primaryMedia?.mediaType === "video" ? primaryMedia?.thumbnailUrl || primaryMedia?.url : primaryMedia?.url }}
+          source={{ uri: primaryMedia?.url }}
           style={[styles.postImage, { width }]}
         />
       );
@@ -259,11 +272,22 @@ function FeedScreen({ navigation }: any) {
     return (
       <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={styles.carouselWrap}>
         {post.media.map((asset) => (
-          <Image
-            key={asset.id}
-            source={{ uri: asset.mediaType === "video" ? asset.thumbnailUrl || asset.url : asset.url }}
-            style={[styles.postImage, { width }]}
-          />
+          asset.mediaType === "video" ? (
+            <SocialVideo
+              key={asset.id}
+              uri={asset.url}
+              posterUri={asset.thumbnailUrl}
+              style={[styles.postImage, { width }]}
+              muted
+              repeat
+            />
+          ) : (
+            <Image
+              key={asset.id}
+              source={{ uri: asset.url }}
+              style={[styles.postImage, { width }]}
+            />
+          )
         ))}
       </ScrollView>
     );
@@ -468,7 +492,11 @@ function FeedScreen({ navigation }: any) {
         onOpenStoryComposer={(post) =>
           navigation.navigate("Create", {
             initialTab: "story",
-            initialMedia: post.media[0]?.thumbnailUrl || post.media[0]?.url,
+            initialMedia:
+              post.media[0]?.mediaType === "video"
+                ? post.media[0]?.url
+                : post.media[0]?.thumbnailUrl || post.media[0]?.url,
+            initialMediaType: post.media[0]?.mediaType || "image",
           })
         }
       />

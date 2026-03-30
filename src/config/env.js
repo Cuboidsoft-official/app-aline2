@@ -1,18 +1,83 @@
 import { Platform } from "react-native";
-import { API_BASE_URL, SOCKET_URL } from "@env";
+import { API_BASE_URL, SHARE_BASE_URL, SOCKET_URL } from "@env";
 
 const trimTrailingSlash = (value) => value.replace(/\/+$/, "");
+const dedupe = (items) => Array.from(new Set(items.filter(Boolean)));
+const isPrivateHostname = (hostname = "") =>
+  /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|.*\.local$)/i.test(
+    String(hostname || "").trim()
+  );
+const isLoopbackHostname = (hostname = "") =>
+  /^(localhost|0\.0\.0\.0|127(?:\.\d{1,3}){0,3})$/i.test(String(hostname || "").trim());
+const ANDROID_EMULATOR_HOSTS = ["10.0.2.2", "10.0.3.2"];
+const replaceUrlHostname = (rawUrl, nextHostname) => {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.hostname = nextHostname;
+    return trimTrailingSlash(parsed.toString());
+  } catch {
+    return "";
+  }
+};
+const buildCandidateUrls = (rawUrl, fallbackUrl) => {
+  const baseUrl = trimTrailingSlash(rawUrl || fallbackUrl);
+
+  if (Platform.OS !== "android") {
+    return [baseUrl];
+  }
+
+  try {
+    const parsed = new URL(baseUrl);
+    const extraCandidates =
+      isLoopbackHostname(parsed.hostname)
+        ? ANDROID_EMULATOR_HOSTS.map((host) => replaceUrlHostname(baseUrl, host))
+        : isPrivateHostname(parsed.hostname)
+          ? ANDROID_EMULATOR_HOSTS.map((host) => replaceUrlHostname(baseUrl, host))
+          : [];
+
+    return dedupe([baseUrl, ...extraCandidates]);
+  } catch {
+    return [baseUrl];
+  }
+};
 
 const fallbackApiBaseUrl =
-  Platform.OS === "android" ? "http://0.0.0.0:5000/api" : "http://localhost:5000/api";
+  Platform.OS === "android" ? "http://10.0.2.2:5000/api" : "http://localhost:5000/api";
+const apiBaseUrlCandidates = buildCandidateUrls(API_BASE_URL, fallbackApiBaseUrl);
+const socketBaseFallback = (apiBaseUrlCandidates[0] || fallbackApiBaseUrl).replace(/\/api$/, "");
+const socketUrlCandidates = buildCandidateUrls(SOCKET_URL, socketBaseFallback);
+const connectionCandidates = dedupe(
+  apiBaseUrlCandidates.map((apiBaseUrl, index) =>
+    JSON.stringify({
+      apiBaseUrl,
+      socketUrl: socketUrlCandidates[index] || socketUrlCandidates[0] || socketBaseFallback,
+    }),
+  ),
+).map((entry) => JSON.parse(entry));
+const resolvedApiBaseUrl = connectionCandidates[0]?.apiBaseUrl || fallbackApiBaseUrl;
+const resolvedSocketUrl = connectionCandidates[0]?.socketUrl || socketBaseFallback;
 
-const resolvedApiBaseUrl = trimTrailingSlash(API_BASE_URL || fallbackApiBaseUrl);
+const resolvePublicShareBaseUrl = () => {
+  const explicitShareBaseUrl = trimTrailingSlash(SHARE_BASE_URL || "");
+  if (explicitShareBaseUrl) {
+    return explicitShareBaseUrl;
+  }
 
-const resolvedSocketUrl = trimTrailingSlash(
-  SOCKET_URL || resolvedApiBaseUrl.replace(/\/api$/, "")
-);
+  try {
+    const parsedSocketUrl = new URL(resolvedSocketUrl);
+    if (!isPrivateHostname(parsedSocketUrl.hostname)) {
+      return resolvedSocketUrl;
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+};
 
 export const appConfig = {
   apiBaseUrl: resolvedApiBaseUrl,
   socketUrl: resolvedSocketUrl,
+  connectionCandidates,
+  publicShareBaseUrl: resolvePublicShareBaseUrl(),
 };

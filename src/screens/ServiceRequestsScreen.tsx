@@ -29,6 +29,10 @@ type ServiceRequestRecord = {
   createdAt: string;
   note?: string;
   responseNote?: string;
+  appointmentStart?: string | null;
+  appointmentEnd?: string | null;
+  appointmentTimezone?: string;
+  appointmentDurationMinutes?: number;
   pricing?: {
     label?: string;
     amount?: number;
@@ -97,6 +101,27 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
     }
   }, [fetchData]);
 
+  const formatAppointmentText = useCallback((item: ServiceRequestRecord) => {
+    if (!item.appointmentStart) {
+      return "";
+    }
+
+    const date = new Date(item.appointmentStart);
+    const slotText = date.toLocaleString([], {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+
+    if (item.appointmentDurationMinutes) {
+      return `${slotText} (${item.appointmentDurationMinutes} min)`;
+    }
+
+    return slotText;
+  }, []);
+
   const renderActions = (item: ServiceRequestRecord) => {
     if (mode === "seller") {
       if (item.status === "pending") {
@@ -139,6 +164,10 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
       ? formatCurrencyAmount(item.pricing.amount, item.pricing.currency || "INR")
       : "Quoted later";
     const statusColor = statusColorMap[item.status] || "#6B7280";
+    const appointmentText = formatAppointmentText(item);
+    const appointmentLabel = item.status === "accepted" || item.status === "completed"
+      ? "Scheduled for"
+      : "Preferred slot";
 
     return (
       <View style={styles.card}>
@@ -160,6 +189,12 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
 
         {!!item.pricing?.durationMinutes && (
           <Text style={styles.metaLine}>Duration: {item.pricing.durationMinutes} min</Text>
+        )}
+
+        {!!appointmentText && (
+          <Text style={styles.metaLine}>
+            {appointmentLabel}: {appointmentText}
+          </Text>
         )}
 
         {!!item.note && <Text style={styles.noteText}>Note: {item.note}</Text>}
@@ -188,7 +223,7 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={24} color="#111" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{mode === "seller" ? "Appointments" : "My Requests"}</Text>
+        <Text style={styles.headerTitle}>{mode === "seller" ? "Appointments" : "My Appointments"}</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -214,11 +249,11 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No requests yet</Text>
+            <Text style={styles.emptyTitle}>No appointments yet</Text>
             <Text style={styles.emptyText}>
               {mode === "seller"
-                ? "Service requests from users will appear here."
-                : "Book a seller service to create your first request."}
+                ? "Appointment requests from users will appear here."
+                : "Request an appointment with a seller to see it here."}
             </Text>
           </View>
         }

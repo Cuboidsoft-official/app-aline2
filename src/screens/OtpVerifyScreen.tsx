@@ -10,6 +10,8 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { API } from '../api/api';
+import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { setStoredSession } from "../utils/authSession";
 
 const OtpVerifyScreen = ({ route, navigation }: any) => {
 
@@ -65,8 +67,10 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
 
       Alert.alert(
         "Verification Failed",
-        err?.response?.data?.message ||
-        "Server error. Please try again."
+        getReadableApiErrorMessage(
+          err,
+          "Server error. Please try again."
+        )
       );
 
     } finally {
@@ -95,14 +99,33 @@ const handleSetPassword = async () => {
     });
 
     if (res?.data?.success) {
+      const loginRes = await API.post("/auth/login", {
+        email,
+        password
+      });
+
+      if (!loginRes?.data?.success || !loginRes?.data?.token || !loginRes?.data?.user) {
+        Alert.alert("Almost there", "Password was set, but we could not sign you in automatically. Please log in.");
+        navigation.replace("Login", { email });
+        return;
+      }
+
+      await setStoredSession({
+        token: loginRes.data.token,
+        user: loginRes.data.user
+      });
+
       setShowPasswordModal(false);
-      navigation.replace("Profile");
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Profile" }]
+      });
     } else {
       Alert.alert("Error", res?.data?.message || "Something went wrong");
     }
 
   } catch (error: any) {
-    Alert.alert("Error", error?.response?.data?.message || "Server error");
+    Alert.alert("Error", getReadableApiErrorMessage(error, "Server error"));
   } finally {
     setPasswordLoading(false);
   }

@@ -4,18 +4,40 @@ export const getMessageSenderId = (message) =>
 export const getMessageText = (message) =>
   String(message?.text || message?.message || message?.content || "").trim();
 
-export const getMessageAttachment = (message) =>
-  message?.attachment && typeof message.attachment === "object" ? message.attachment : null;
+export const getMessageAttachment = (message) => {
+  if (message?.attachment && typeof message.attachment === "object") {
+    return message.attachment;
+  }
+
+  if (message?.mediaUrl || message?.thumbnailUrl || message?.fileName) {
+    return {
+      url: message?.mediaUrl || null,
+      thumbnailUrl: message?.thumbnailUrl || null,
+      fileName: message?.fileName || null,
+      mimeType: message?.mimeType || null,
+    };
+  }
+
+  return null;
+};
 
 export const isImageMessage = (message) => {
   const attachment = getMessageAttachment(message);
-  return message?.messageType === "image" || Boolean(attachment?.mimeType?.startsWith("image/"));
+  return ["image", "gif"].includes(String(message?.messageType || "")) || Boolean(attachment?.mimeType?.startsWith("image/"));
 };
 
 export const isDocumentMessage = (message) => {
+  if (["video", "audio"].includes(String(message?.messageType || ""))) {
+    return false;
+  }
+
   const attachment = getMessageAttachment(message);
   return message?.messageType === "document" || Boolean(attachment?.url && !isImageMessage(message));
 };
+
+export const isVideoMessage = (message) => String(message?.messageType || "") === "video";
+
+export const isAudioMessage = (message) => String(message?.messageType || "") === "audio";
 
 export const getAttachmentDisplayName = (message) => {
   const attachment = getMessageAttachment(message);
@@ -39,8 +61,11 @@ export const getConversationPreview = (conversation) => {
   switch (conversation?.lastMessageType) {
     case "image":
       return "Sent an image";
+    case "gif":
+      return "Sent a GIF";
     case "document":
       return "Sent a document";
+    case "audio":
     case "voice":
       return "Sent a voice note";
     case "video":

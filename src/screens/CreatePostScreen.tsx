@@ -15,6 +15,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 
 import { API } from "../api/api";
 import {
+  captureComposerAssets,
   ComposerAsset,
   createRemoteComposerAsset,
   pickComposerAssets,
@@ -26,10 +27,19 @@ import {
   CreateSwipeInput,
   CreateStoryInput,
   PostType,
+  SelectedMusicClip,
   StoryType,
   Visibility,
 } from "../features/social/types";
 import { limits, parseCaptionEntities, toUserSafeMessage } from "../features/social/validation";
+import {
+  getTrendingMusicCatalog,
+  importMusicCatalogItem,
+  MusicCatalogItem,
+  searchMusicCatalog,
+  getUserOriginalSounds,
+} from "../utils/musicApi";
+import { getStoredUserId } from "../utils/authSession";
 
 type ComposerTab = "post" | "story" | "swipe";
 
@@ -43,6 +53,9 @@ type AudienceCandidate = {
   username: string;
   name: string;
 };
+
+type MusicSelections = Record<ComposerTab, SelectedMusicClip | null>;
+type MusicBrowseMode = "trending" | "original" | "search";
 
 const splitTokens = (raw: string): string[] =>
   raw
@@ -63,6 +76,29 @@ const appendCaptionEntities = (baseCaption: string, hashtags: string[], mentions
 };
 
 const isRemoteImage = (asset: ComposerAsset | undefined): boolean => !!asset && asset.source === "remote" && asset.mediaType === "image";
+const defaultClipDuration = (tab: ComposerTab, trackDuration: number): number => {
+  const safeDuration = Math.max(1, Math.round(trackDuration || 0));
+
+  if (tab === "story") {
+    return Math.min(15, safeDuration);
+  }
+
+  if (tab === "swipe") {
+    return Math.min(30, safeDuration);
+  }
+
+  return Math.min(20, safeDuration);
+};
+
+const formatDuration = (seconds: number | undefined): string => {
+  const safe = Math.max(0, Math.round(Number(seconds || 0)));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+};
+
+const buildMusicLabel = (music: SelectedMusicClip | null | undefined): string =>
+  [music?.title, music?.artist].filter(Boolean).join(" • ");
 
 function CreatePostScreen({ navigation, route }: any) {
   const initialTab = (route?.params?.initialTab as ComposerTab | undefined) || "post";
@@ -78,7 +114,6 @@ function CreatePostScreen({ navigation, route }: any) {
 
   const [caption, setCaption] = useState("");
   const [location, setLocation] = useState("");
-  const [music, setMusic] = useState("");
 
   const [hashtagsRaw, setHashtagsRaw] = useState("");
   const [mentionsRaw, setMentionsRaw] = useState("");
@@ -103,8 +138,17 @@ function CreatePostScreen({ navigation, route }: any) {
   const [questionPrompt, setQuestionPrompt] = useState("");
   const [storyAllowReplies, setStoryAllowReplies] = useState(true);
   const [storyAllowSharing, setStoryAllowSharing] = useState(true);
-  const [storyMusicTrack, setStoryMusicTrack] = useState("");
-  const [storyMusicArtist, setStoryMusicArtist] = useState("");
+  const [musicSelections, setMusicSelections] = useState<MusicSelections>({
+    post: null,
+    story: null,
+    swipe: null,
+  });
+  const [musicQuery, setMusicQuery] = useState("");
+  const [musicResults, setMusicResults] = useState<MusicCatalogItem[]>([]);
+  const [musicLoading, setMusicLoading] = useState(false);
+  const [musicImportingId, setMusicImportingId] = useState("");
+  const [musicError, setMusicError] = useState("");
+  const [musicBrowseMode, setMusicBrowseMode] = useState<MusicBrowseMode>("trending");
 
   useEffect(() => {
     const routeTab = route?.params?.initialTab as ComposerTab | undefined;
@@ -175,6 +219,39 @@ function CreatePostScreen({ navigation, route }: any) {
     };
   }, [activeTab, storyAudienceCandidates.length, storyAudienceLoading, storyVisibility]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    const loadTrending = async () => {
+      if (musicResults.length || musicLoading) {
+        return;
+      }
+
+      try {
+        setMusicLoading(true);
+        setMusicError("");
+        const tracks = await getTrendingMusicCatalog(8);
+        if (mounted) {
+          setMusicResults(tracks);
+        }
+      } catch (error) {
+        if (mounted) {
+          setMusicError(toUserSafeMessage(error));
+        }
+      } finally {
+        if (mounted) {
+          setMusicLoading(false);
+        }
+      }
+    };
+
+    loadTrending();
+
+    return () => {
+      mounted = false;
+    };
+  }, [musicLoading, musicResults.length]);
+
   const resetAssetsForTab = (tab: ComposerTab) => {
     if (tab === "story" && initialMedia) {
       setSelectedAssets([createRemoteComposerAsset(initialMedia, initialMediaType)]);
@@ -187,6 +264,115 @@ function CreatePostScreen({ navigation, route }: any) {
   const onSelectTab = (tab: ComposerTab) => {
     setActiveTab(tab);
     resetAssetsForTab(tab);
+  };
+
+  const setMusicForTab = (tab: ComposerTab, selection: SelectedMusicClip | null) => {
+    setMusicSelections((prev) => ({
+      ...prev,
+      [tab]: selection,
+    }));
+  };
+
+  const loadTrendingMusic = async () => {
+    try {
+      setMusicBrowseMode("trending");
+      setMusicLoading(true);
+      setMusicError("");
+      setMusicResults(await getTrendingMusicCatalog(8));
+    } catch (error) {
+      setMusicError(toUserSafeMessage(error));
+    } finally {
+      setMusicLoading(false);
+    }
+  };
+
+  const loadOriginalSounds = async () => {
+    try {
+      setMusicBrowseMode("original");
+      setMusicLoading(true);
+      setMusicError("");
+      const userId = await getStoredUserId();
+
+      if (!userId) {
+        throw new Error("Log in again to load your original sounds.");
+      }
+
+      const originals = await getUserOriginalSounds(userId, 12);
+      setMusicResults(originals);
+    } catch (error) {
+      setMusicError(toUserSafeMessage(error));
+    } finally {
+      setMusicLoading(false);
+    }
+  };
+
+  const runMusicSearch = async () => {
+    const query = musicQuery.trim();
+
+    if (!query) {
+      await loadTrendingMusic();
+      return;
+    }
+
+    try {
+      setMusicBrowseMode("search");
+      setMusicLoading(true);
+      setMusicError("");
+      setMusicResults(await searchMusicCatalog(query, 12));
+    } catch (error) {
+      setMusicError(toUserSafeMessage(error));
+    } finally {
+      setMusicLoading(false);
+    }
+  };
+
+  const attachMusic = async (item: MusicCatalogItem) => {
+    try {
+      setMusicImportingId(item.id);
+      setMusicError("");
+      const imported = await importMusicCatalogItem({
+        ...item,
+        clipStartTime: 0,
+        clipDuration: defaultClipDuration(activeTab, item.duration),
+      });
+      setMusicForTab(activeTab, imported);
+    } catch (error) {
+      setMusicError(toUserSafeMessage(error));
+    } finally {
+      setMusicImportingId("");
+    }
+  };
+
+  const updateSelectedMusic = (updater: (current: SelectedMusicClip) => SelectedMusicClip) => {
+    const current = musicSelections[activeTab];
+    if (!current) {
+      return;
+    }
+
+    setMusicForTab(activeTab, updater(current));
+  };
+
+  const setSelectedMusicClipDuration = (nextDuration: number) => {
+    updateSelectedMusic((current) => {
+      const maxDuration = Math.max(1, current.duration - (current.clipStartTime || 0));
+      return {
+        ...current,
+        clipDuration: Math.max(1, Math.min(nextDuration, maxDuration)),
+      };
+    });
+  };
+
+  const nudgeSelectedMusicStart = (delta: number) => {
+    updateSelectedMusic((current) => {
+      const maxStart = Math.max(0, current.duration - 1);
+      const nextStart = Math.max(0, Math.min(maxStart, (current.clipStartTime || 0) + delta));
+      const maxDuration = Math.max(1, current.duration - nextStart);
+      return {
+        ...current,
+        clipStartTime: nextStart,
+        clipDuration: Math.max(1, Math.min(current.clipDuration || current.duration, maxDuration)),
+      };
+    });
   };
 
   const onPickMedia = async () => {
@@ -223,6 +409,40 @@ function CreatePostScreen({ navigation, route }: any) {
       setSelectedAssets([pickedAssets[0]]);
     } catch (error) {
       Alert.alert("Could not pick media", toUserSafeMessage(error));
+    } finally {
+      setPickingMedia(false);
+    }
+  };
+
+  const onCaptureMedia = async () => {
+    if (pickingMedia) {
+      return;
+    }
+
+    const captureMediaType =
+      activeTab === "story"
+        ? "mixed"
+        : activeTab === "swipe" || postType === "video"
+          ? "video"
+          : "photo";
+
+    try {
+      setPickingMedia(true);
+      const capturedAssets = await captureComposerAssets({
+        mediaType: captureMediaType,
+        quality: 0.9,
+        saveToPhotos: false,
+        videoQuality: "high",
+        durationLimit: activeTab === "swipe" ? 60 : undefined,
+      });
+
+      if (!capturedAssets.length) {
+        return;
+      }
+
+      setSelectedAssets([capturedAssets[0]]);
+    } catch (error) {
+      Alert.alert("Could not open camera", toUserSafeMessage(error));
     } finally {
       setPickingMedia(false);
     }
@@ -273,7 +493,7 @@ function CreatePostScreen({ navigation, route }: any) {
       caption: appendCaptionEntities(caption, hashtags, mentions),
       media,
       location,
-      music,
+      music: musicSelections.post || undefined,
       hashtags,
       mentions,
       collaboratorIds: splitTokens(collabsRaw),
@@ -301,12 +521,7 @@ function CreatePostScreen({ navigation, route }: any) {
       visibleToUserIds: storyVisibility === "custom" ? storyVisibleToUserIds : undefined,
       allowReplies: storyAllowReplies,
       allowSharing: storyAllowSharing,
-      music: storyMusicTrack
-        ? {
-            trackName: storyMusicTrack,
-            artistName: storyMusicArtist || undefined,
-          }
-        : undefined,
+      music: musicSelections.story || undefined,
     };
 
     if (storyType === "poll") {
@@ -337,7 +552,7 @@ function CreatePostScreen({ navigation, route }: any) {
       caption: appendCaptionEntities(caption, splitTokens(hashtagsRaw), splitTokens(mentionsRaw)),
       media: video,
       thumbnailUrl: video.thumbnailUrl,
-      music,
+      music: musicSelections.swipe || undefined,
       location,
       hashtags: splitTokens(hashtagsRaw),
       mentions: splitTokens(mentionsRaw),
@@ -424,6 +639,144 @@ function CreatePostScreen({ navigation, route }: any) {
     );
   };
 
+  const renderMusicPicker = (tab: ComposerTab) => {
+    const current = musicSelections[tab];
+    const clipPresets = [5, 10, 15, 30];
+
+    return (
+      <>
+        <Text style={styles.sectionLabel}>Music</Text>
+        <View style={styles.modeRow}>
+          <TouchableOpacity
+            style={[styles.pill, musicBrowseMode === "trending" && styles.pillActive]}
+            onPress={loadTrendingMusic}
+          >
+            <Text style={[styles.pillText, musicBrowseMode === "trending" && styles.pillTextActive]}>Trending</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.pill, musicBrowseMode === "original" && styles.pillActive]}
+            onPress={loadOriginalSounds}
+          >
+            <Text style={[styles.pillText, musicBrowseMode === "original" && styles.pillTextActive]}>My Audio</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.musicSearchRow}>
+          <TextInput
+            style={styles.musicSearchInput}
+            value={musicQuery}
+            onChangeText={setMusicQuery}
+            placeholder="Search tracks or original sounds"
+            maxLength={limits.music}
+          />
+          <TouchableOpacity style={styles.musicActionButton} onPress={runMusicSearch} disabled={musicLoading}>
+            {musicLoading ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="search-outline" size={16} color="#fff" />}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.musicSecondaryButton} onPress={loadTrendingMusic} disabled={musicLoading}>
+            <Icon name="flame-outline" size={16} color="#111827" />
+          </TouchableOpacity>
+        </View>
+
+        {current ? (
+          <View style={styles.musicCard}>
+            <View style={styles.musicCardHeader}>
+              <View style={styles.musicTitleBlock}>
+                <Text style={styles.musicTitle}>{buildMusicLabel(current)}</Text>
+                <Text style={styles.musicMeta}>
+                  {[current.source || "catalog", current.isOriginal ? "original" : null, `${formatDuration(current.duration)} track`]
+                    .filter(Boolean)
+                    .join(" • ")}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.musicClearButton} onPress={() => setMusicForTab(tab, null)}>
+                <Text style={styles.musicClearText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.sectionLabel}>Clip length</Text>
+            <View style={styles.modeRow}>
+              {clipPresets
+                .filter((preset) => preset <= current.duration)
+                .map((preset) => (
+                  <TouchableOpacity
+                    key={preset}
+                    style={[styles.pill, (current.clipDuration || 0) === preset && styles.pillActive]}
+                    onPress={() => setSelectedMusicClipDuration(preset)}
+                  >
+                    <Text style={[styles.pillText, (current.clipDuration || 0) === preset && styles.pillTextActive]}>
+                      {preset}s
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+            </View>
+
+            <Text style={styles.sectionLabel}>Clip start</Text>
+            <View style={styles.clipAdjustRow}>
+              <TouchableOpacity style={styles.clipAdjustButton} onPress={() => nudgeSelectedMusicStart(-5)}>
+                <Text style={styles.clipAdjustText}>-5s</Text>
+              </TouchableOpacity>
+              <Text style={styles.clipAdjustValue}>
+                Starts at {formatDuration(current.clipStartTime)} for {formatDuration(current.clipDuration)}
+              </Text>
+              <TouchableOpacity style={styles.clipAdjustButton} onPress={() => nudgeSelectedMusicStart(5)}>
+                <Text style={styles.clipAdjustText}>+5s</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <Text style={styles.helperText}>
+            Attach a real track so this {tab === "story" ? "story" : tab} uses a saved music record instead of placeholder text.
+          </Text>
+        )}
+
+        {musicError ? <Text style={styles.musicError}>{musicError}</Text> : null}
+
+        {!musicLoading && !musicResults.length ? (
+          <Text style={styles.helperText}>
+            {musicBrowseMode === "original"
+              ? "You do not have any original sounds yet. Publish a video first, then turn it into audio."
+              : musicBrowseMode === "search"
+                ? "No tracks matched this search yet."
+                : "No music is available right now."}
+          </Text>
+        ) : null}
+
+        <View style={styles.musicResultsWrap}>
+          {musicResults.map((item) => {
+            const isCurrent = !!current && (
+              current.id === item.id ||
+              (!!current.externalId && current.externalId === item.externalId && current.source === item.source) ||
+              (current.title === item.title && current.artist === item.artist && current.source === item.source)
+            );
+            const isImporting = musicImportingId === item.id;
+
+            return (
+              <TouchableOpacity
+                key={`${item.id}:${item.title}`}
+                style={[styles.musicResultCard, isCurrent && styles.musicResultCardActive]}
+                onPress={() => attachMusic(item)}
+                disabled={isImporting}
+              >
+                <View style={styles.musicResultBody}>
+                  <Text style={styles.musicResultTitle}>{buildMusicLabel(item)}</Text>
+                  <Text style={styles.musicResultMeta}>
+                    {[item.source || "catalog", item.isOriginal ? "original" : null, formatDuration(item.duration)]
+                      .filter(Boolean)
+                      .join(" • ")}
+                  </Text>
+                </View>
+                {isImporting ? (
+                  <ActivityIndicator size="small" color="#111827" />
+                ) : (
+                  <Icon name={isCurrent ? "checkmark-circle" : "add-circle-outline"} size={20} color="#111827" />
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </>
+    );
+  };
+
   const renderPostControls = () => (
     <>
       <Text style={styles.sectionLabel}>Post Type</Text>
@@ -455,9 +808,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
       <Text style={styles.sectionLabel}>Location</Text>
       <TextInput style={styles.inputSingle} value={location} onChangeText={setLocation} placeholder="Add location" maxLength={limits.location} />
-
-      <Text style={styles.sectionLabel}>Music</Text>
-      <TextInput style={styles.inputSingle} value={music} onChangeText={setMusic} placeholder="Track name" maxLength={limits.music} />
+      {renderMusicPicker("post")}
 
       <Text style={styles.sectionLabel}>Hashtags (comma separated)</Text>
       <TextInput style={styles.inputSingle} value={hashtagsRaw} onChangeText={setHashtagsRaw} placeholder="fashion, travel" />
@@ -566,10 +917,7 @@ function CreatePostScreen({ navigation, route }: any) {
         </>
       ) : null}
 
-      <Text style={styles.sectionLabel}>Music</Text>
-      <TextInput style={styles.inputSingle} value={storyMusicTrack} onChangeText={setStoryMusicTrack} placeholder="Track name" maxLength={limits.music} />
-      <Text style={styles.sectionLabel}>Artist</Text>
-      <TextInput style={styles.inputSingle} value={storyMusicArtist} onChangeText={setStoryMusicArtist} placeholder="Artist name" maxLength={limits.music} />
+      {renderMusicPicker("story")}
 
       <View style={styles.switchRow}><Text style={styles.switchLabel}>Allow replies</Text><Switch value={storyAllowReplies} onValueChange={setStoryAllowReplies} /></View>
       <View style={styles.switchRow}><Text style={styles.switchLabel}>Allow sharing</Text><Switch value={storyAllowSharing} onValueChange={setStoryAllowSharing} /></View>
@@ -586,8 +934,7 @@ function CreatePostScreen({ navigation, route }: any) {
       <TextInput style={styles.input} value={caption} onChangeText={setCaption} placeholder="Write swipe caption" maxLength={limits.caption} multiline />
       <Text style={styles.counter}>{caption.length}/{limits.caption}</Text>
 
-      <Text style={styles.sectionLabel}>Music</Text>
-      <TextInput style={styles.inputSingle} value={music} onChangeText={setMusic} placeholder="Track name" maxLength={limits.music} />
+      {renderMusicPicker("swipe")}
 
       <Text style={styles.sectionLabel}>Location</Text>
       <TextInput style={styles.inputSingle} value={location} onChangeText={setLocation} placeholder="Add location" maxLength={limits.location} />
@@ -619,10 +966,16 @@ function CreatePostScreen({ navigation, route }: any) {
 
         <View style={styles.mediaSectionHeader}>
           <Text style={styles.sectionLabel}>Media</Text>
-          <TouchableOpacity style={styles.pickButton} disabled={pickingMedia} onPress={onPickMedia}>
-            {pickingMedia ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="images-outline" size={18} color="#fff" />}
-            <Text style={styles.pickButtonText}>{selectedAssets.length ? "Replace" : "Choose"}</Text>
-          </TouchableOpacity>
+          <View style={styles.mediaActionsRow}>
+            <TouchableOpacity style={styles.secondaryPickButton} disabled={pickingMedia} onPress={onCaptureMedia}>
+              <Icon name="camera-outline" size={18} color="#111827" />
+              <Text style={styles.secondaryPickButtonText}>Camera</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.pickButton} disabled={pickingMedia} onPress={onPickMedia}>
+              {pickingMedia ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="images-outline" size={18} color="#fff" />}
+              <Text style={styles.pickButtonText}>{selectedAssets.length ? "Replace" : "Choose"}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {renderSelectedAssets()}
@@ -656,6 +1009,25 @@ const styles = StyleSheet.create({
     borderColor: "#ddd",
   },
   headerTitle: { fontSize: 24, fontWeight: "800", color: "#171717" },
+  mediaActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  secondaryPickButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f3f4f6",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+  },
+  secondaryPickButtonText: {
+    marginLeft: 6,
+    color: "#111827",
+    fontWeight: "700",
+  },
   tabsRow: {
     flexDirection: "row",
     paddingHorizontal: 12,
@@ -712,6 +1084,97 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   sectionLabel: { marginTop: 16, marginBottom: 8, fontSize: 13, fontWeight: "700", color: "#111" },
+  musicSearchRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  musicSearchInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 14,
+    minHeight: 46,
+    paddingHorizontal: 14,
+    color: "#111827",
+    backgroundColor: "#fff",
+  },
+  musicActionButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "#111827",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  musicSecondaryButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#fff",
+  },
+  musicCard: {
+    marginTop: 12,
+    borderRadius: 18,
+    padding: 14,
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  musicCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  musicTitleBlock: { flex: 1 },
+  musicTitle: { fontSize: 15, fontWeight: "800", color: "#111827" },
+  musicMeta: { marginTop: 4, color: "#6b7280", fontSize: 12 },
+  musicClearButton: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+  },
+  musicClearText: { color: "#111827", fontWeight: "700", fontSize: 12 },
+  clipAdjustRow: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  clipAdjustButton: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: "#111827",
+  },
+  clipAdjustText: { color: "#fff", fontWeight: "700" },
+  clipAdjustValue: { flex: 1, textAlign: "center", color: "#374151", fontWeight: "600" },
+  musicError: { marginTop: 10, color: "#b91c1c", fontWeight: "600" },
+  musicResultsWrap: { marginTop: 12, gap: 10 },
+  musicResultCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    backgroundColor: "#fff",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  musicResultCardActive: {
+    borderColor: "#111827",
+    backgroundColor: "#f9fafb",
+  },
+  musicResultBody: { flex: 1 },
+  musicResultTitle: { color: "#111827", fontWeight: "800" },
+  musicResultMeta: { marginTop: 4, color: "#6b7280", fontSize: 12 },
   pickButton: {
     marginTop: 8,
     flexDirection: "row",

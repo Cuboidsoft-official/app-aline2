@@ -4,6 +4,7 @@ import {
   CreateReelInput,
   CreateStoryInput,
   MediaAsset,
+  SelectedMusicClip,
   StoryReply,
   UpdatePostInput,
   UpdateStoryInput,
@@ -18,6 +19,7 @@ const MAX_COLLABS = 3;
 const MAX_COMMENT_LENGTH = 2200;
 const MAX_STORY_TEXT_LENGTH = 180;
 const MAX_REPORT_NOTE_LENGTH = 500;
+const MAX_CLIP_DURATION = 60;
 
 const URL_PROTOCOL_PATTERN = /^https?:\/\//i;
 const USERNAME_TOKEN = /^[a-zA-Z0-9_.]{1,30}$/;
@@ -103,6 +105,63 @@ const normalizeTagList = (values: string[] | undefined, maxItems: number, label:
   return Array.from(unique);
 };
 
+const normalizeSelectedMusic = (music: SelectedMusicClip | undefined): SelectedMusicClip | undefined => {
+  if (!music) {
+    return undefined;
+  }
+
+  const id = cleanText(music.id);
+  const title = cleanText(music.title);
+  const artist = cleanText(music.artist);
+  const source = cleanText(music.source);
+  const artworkUrl = music.artworkUrl ? cleanText(music.artworkUrl) : undefined;
+  const previewUrl = music.previewUrl ? cleanText(music.previewUrl) : undefined;
+  const duration = Math.max(1, Math.round(Number(music.duration || 0)));
+  const clipDuration = Math.max(
+    1,
+    Math.min(
+      MAX_CLIP_DURATION,
+      Math.round(Number(music.clipDuration || duration || 1)),
+      duration,
+    ),
+  );
+  const clipStartTime = Math.max(
+    0,
+    Math.min(duration - 1, Math.round(Number(music.clipStartTime || 0))),
+  );
+
+  if (!id || !title || !duration) {
+    throw new SocialValidationError("validation_error", "Choose a valid music track.");
+  }
+
+  assertLength(title, MAX_MUSIC_LENGTH, "Music title");
+
+  if (artist) {
+    assertLength(artist, MAX_MUSIC_LENGTH, "Music artist");
+  }
+
+  if (artworkUrl && !URL_PROTOCOL_PATTERN.test(artworkUrl)) {
+    throw new SocialValidationError("validation_error", "Music artwork URL must be http/https.");
+  }
+
+  if (previewUrl && !URL_PROTOCOL_PATTERN.test(previewUrl)) {
+    throw new SocialValidationError("validation_error", "Music preview URL must be http/https.");
+  }
+
+  return {
+    ...music,
+    id,
+    title,
+    artist: artist || undefined,
+    source: source || undefined,
+    artworkUrl,
+    previewUrl,
+    duration,
+    clipStartTime,
+    clipDuration,
+  };
+};
+
 export const parseCaptionEntities = (caption: string): { hashtags: string[]; mentions: string[] } => {
   const hashtagMatches = caption.match(/#([a-zA-Z0-9_.]{1,30})/g) || [];
   const mentionMatches = caption.match(/@([a-zA-Z0-9_.]{1,30})/g) || [];
@@ -116,7 +175,7 @@ export const parseCaptionEntities = (caption: string): { hashtags: string[]; men
 export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
   const caption = cleanText(input.caption);
   const location = cleanText(input.location);
-  const music = cleanText(input.music);
+  const music = normalizeSelectedMusic(input.music);
 
   if (!caption) {
     throw new SocialValidationError("validation_error", "Caption is required.");
@@ -124,7 +183,6 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
 
   assertLength(caption, MAX_CAPTION_LENGTH, "Caption");
   assertLength(location, MAX_LOCATION_LENGTH, "Location");
-  assertLength(music, MAX_MUSIC_LENGTH, "Music");
 
   const media = (input.media || []).map(normalizeMedia);
 
@@ -167,6 +225,7 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
   const linkUrl = cleanText(input.linkUrl);
   const hashtags = normalizeTagList(input.hashtags, MAX_HASHTAGS, "hashtags");
   const mentions = normalizeTagList(input.mentions, MAX_MENTIONS, "mentions");
+  const music = normalizeSelectedMusic(input.music);
 
   if (linkUrl && !URL_PROTOCOL_PATTERN.test(linkUrl)) {
     throw new SocialValidationError("validation_error", "Story link must be http/https.");
@@ -209,20 +268,13 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
     mentions,
     allowReplies: input.allowReplies !== false,
     allowSharing: input.allowSharing !== false,
-    music: input.music?.trackName
-      ? {
-          trackName: cleanText(input.music.trackName).slice(0, MAX_MUSIC_LENGTH),
-          artistName: cleanText(input.music.artistName).slice(0, MAX_MUSIC_LENGTH) || undefined,
-          startTime: input.music.startTime,
-          duration: input.music.duration,
-        }
-      : undefined,
+    music,
   };
 };
 
 export const normalizeReelInput = (input: CreateReelInput): CreateReelInput => {
   const caption = cleanText(input.caption);
-  const music = cleanText(input.music);
+  const music = normalizeSelectedMusic(input.music);
   const location = cleanText(input.location);
 
   if (!caption) {
@@ -230,7 +282,6 @@ export const normalizeReelInput = (input: CreateReelInput): CreateReelInput => {
   }
 
   assertLength(caption, MAX_CAPTION_LENGTH, "Caption");
-  assertLength(music, MAX_MUSIC_LENGTH, "Music");
   assertLength(location, MAX_LOCATION_LENGTH, "Location");
 
   return {

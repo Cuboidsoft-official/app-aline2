@@ -34,7 +34,7 @@ const ProfilePreviewScreen = ({ route, navigation }: { route: any; navigation: a
  const [loading, setLoading] = useState(true);
  const [activeTab, setActiveTab] = useState("posts");
  const [isFollowing, setIsFollowing] = useState(false);
- const [isMutual, setIsMutual] = useState(false);
+ const [canViewPosts, setCanViewPosts] = useState(false);
  const [actionLoading, setActionLoading] = useState(false);
  const [suggestions, setSuggestions] = useState<any[]>([]);
 const [showSuggestions, setShowSuggestions] = useState(true);
@@ -54,6 +54,7 @@ const fetchProfile = useCallback(async () => {
   const profileUser = res.data.user;
   const me = res.data.me;
   const profilePosts = Array.isArray(res.data.posts) ? (res.data.posts as ProfilePreviewPost[]) : [];
+  const accessGranted = Boolean(res.data?.canViewPosts);
 
   setUser(profileUser);
   setAllPosts(profilePosts);
@@ -65,22 +66,8 @@ const fetchProfile = useCallback(async () => {
    (id: string) => String(id) === String(userId)
   );
 
-const isHeFollowingMe = profileUser?.following?.some(
- (id: string) => String(id) === String(me?._id)
-);
-
-const mutualCheck =
- amIFollowing && isHeFollowingMe;
-
   setIsFollowing(!!amIFollowing);
-  setIsMutual(!!mutualCheck);
-
-
-  if(profileUser.isPrivate && !mutualCheck){
-    setAllPosts([]);
-  }else{
-    setAllPosts(profilePosts);
-  }
+  setCanViewPosts(accessGranted);
  } catch (err) {
   console.log(err);
  } finally {
@@ -129,7 +116,7 @@ useEffect(() => {
 }, [fetchProfile, fetchSuggestions]);
 
 const isPrivateLocked =
- user?.isPrivate === true && isMutual === false;
+ user?.isPrivate === true && canViewPosts === false;
 
 const posts = useMemo(() => {
  if (activeTab === "swipes") {
@@ -329,7 +316,16 @@ const renderPost = ({ item }: { item: any }) => (
   </Text>
 </View>
 
-    <Icon name="menu" size={26} />
+    <TouchableOpacity
+      onPress={() =>
+        navigation.navigate("FeatureInfoScreen", {
+          title: "Profile Actions",
+          description: "More profile actions will appear here once moderation and blocking flows are connected end to end."
+        })
+      }
+    >
+      <Icon name="menu" size={26} />
+    </TouchableOpacity>
    </View>
 
    <View style={styles.header}>
@@ -423,7 +419,7 @@ const renderPost = ({ item }: { item: any }) => (
     </TouchableOpacity>
    )}
 
- {isMutual && (
+ {!!user?._id && (
   <TouchableOpacity
    style={styles.messageBtn}
    activeOpacity={0.7}

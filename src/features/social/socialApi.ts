@@ -165,6 +165,100 @@ const cloneStoryRecord = (story: Story): Story => ({
   music: story.music ? { ...story.music } : undefined,
 });
 
+const formatMusicLabel = (music: any): string | undefined => {
+  if (!music) {
+    return undefined;
+  }
+
+  if (typeof music === "string") {
+    const trimmed = music.trim();
+    return trimmed || undefined;
+  }
+
+  const title = String(music?.title || music?.trackName || "").trim();
+  const artist = String(music?.artist || music?.artistName || "").trim();
+
+  if (!title) {
+    return undefined;
+  }
+
+  return artist ? `${title} • ${artist}` : title;
+};
+
+const mapStoryMusicDetails = (music: any, musicConfig?: any) => {
+  if (!music) {
+    return undefined;
+  }
+
+  const trackName = String(music?.title || music?.trackName || "").trim();
+  const artistName = String(music?.artist || music?.artistName || "").trim() || undefined;
+
+  if (!trackName) {
+    return undefined;
+  }
+
+  return {
+    id: typeof music === "object" ? String(music?._id || music?.id || "") || undefined : undefined,
+    trackName,
+    artistName,
+    artworkUrl: music?.thumbnailUrl || music?.artworkUrl || undefined,
+    previewUrl: music?.previewUrl || music?.audioUrl || undefined,
+    source: music?.source || undefined,
+    isOriginal: !!music?.isOriginal,
+    startTime:
+      typeof musicConfig?.startTime === "number"
+        ? musicConfig.startTime
+        : typeof music?.startTime === "number"
+          ? music.startTime
+          : 0,
+    duration:
+      typeof musicConfig?.duration === "number"
+        ? musicConfig.duration
+        : typeof music?.duration === "number"
+          ? music.duration
+          : undefined,
+  };
+};
+
+const buildMusicRequestPayload = (music: any) =>
+  music?.id
+    ? {
+        musicId: music.id,
+        musicConfig: {
+          startTime: music.clipStartTime ?? 0,
+          duration: music.clipDuration ?? music.duration,
+          volume: 1,
+        },
+      }
+    : {};
+
+const buildStoryMusicSticker = (music: any) => {
+  const label = formatMusicLabel(music);
+
+  if (!label) {
+    return null;
+  }
+
+  return {
+    type: "music",
+    text: label,
+    position: {
+      x: 0.5,
+      y: 0.82,
+      width: 0.64,
+      height: 0.1,
+      rotation: 0,
+      scale: 1,
+    },
+    style: {
+      color: "#ffffff",
+      backgroundColor: "rgba(17,24,39,0.72)",
+      alignment: "center",
+    },
+    interactive: false,
+  };
+};
+
 const getCurrentUserId = (): string => getUsers()[0]?.id || "";
 const assertCurrentUserOwns = (ownerId: string, message: string): void => {
   if (!ownerId || ownerId !== getCurrentUserId()) {
@@ -1143,7 +1237,7 @@ class MockSocialApi implements SocialApi {
       caption: payload.caption,
       media: payload.media,
       location: payload.location,
-      music: payload.music,
+      music: formatMusicLabel(payload.music),
       hashtags: payload.hashtags || [],
       mentions: payload.mentions || [],
       collaboratorIds: payload.collaboratorIds || [],
@@ -1205,7 +1299,10 @@ class MockSocialApi implements SocialApi {
       reactionCount: 0,
       allowReplies: payload.allowReplies,
       allowSharing: payload.allowSharing,
-      music: payload.music,
+      music: mapStoryMusicDetails(payload.music, {
+        startTime: payload.music?.clipStartTime,
+        duration: payload.music?.clipDuration,
+      }),
     };
 
     state.stories.unshift(story);
@@ -1354,7 +1451,7 @@ class MockSocialApi implements SocialApi {
       caption: payload.caption,
       media: payload.media,
       thumbnailUrl: payload.thumbnailUrl || payload.media.thumbnailUrl || payload.media.url,
-      music: payload.music,
+      music: formatMusicLabel(payload.music),
       hashtags: payload.hashtags || [],
       mentions: payload.mentions || [],
       location: payload.location,
@@ -1511,7 +1608,21 @@ class RemoteSocialApi implements SocialApi {
       username: user?.username || "user",
       name: user?.name || user?.fullName || user?.username || "User",
       avatarUrl: user?.profilePic || user?.avatarUrl || this.fallbackAvatarUrl,
+      isVerified: !!user?.isVerified,
     };
+  }
+
+  private mapMentionNames(mentions: any): string[] {
+    if (!Array.isArray(mentions)) {
+      return [];
+    }
+
+    return mentions
+      .map((item: any) => {
+        const value = typeof item === "string" ? item : item?.username;
+        return typeof value === "string" ? value.replace(/^@/, "").trim() : "";
+      })
+      .filter(Boolean);
   }
 
   private mapMediaAsset(item: any, index = 0, prefix = "media"): MediaAsset {
@@ -1554,9 +1665,9 @@ class RemoteSocialApi implements SocialApi {
       caption: post?.caption || "",
       media,
       location: typeof post?.location === "string" ? post.location : post?.location?.name,
-      music: post?.music,
+      music: formatMusicLabel(post?.music),
       hashtags: Array.isArray(post?.hashtags) ? post.hashtags : [],
-      mentions: [],
+      mentions: this.mapMentionNames(post?.mentions),
       collaboratorIds: Array.isArray(post?.collaborators) ? post.collaborators.map((item: any) => this.getId(item)) : [],
       settings: {
         disableComments: !!post?.commentsDisabled,
@@ -1568,8 +1679,8 @@ class RemoteSocialApi implements SocialApi {
       likesCount: typeof post?.likes === "number" ? post.likes : 0,
       commentsCount: typeof post?.comments === "number" ? post.comments : 0,
       sharesCount: typeof post?.shares === "number" ? post.shares : 0,
-      liked: false,
-      saved: false,
+      liked: typeof post?.liked === "boolean" ? post.liked : false,
+      saved: typeof post?.saved === "boolean" ? post.saved : false,
       ...overrides,
     };
   }
@@ -1584,16 +1695,16 @@ class RemoteSocialApi implements SocialApi {
       caption: post?.caption || "",
       media: primary,
       thumbnailUrl: primary.thumbnailUrl || primary.url,
-      music: post?.music,
+      music: formatMusicLabel(post?.music),
       hashtags: Array.isArray(post?.hashtags) ? post.hashtags : [],
-      mentions: [],
+      mentions: this.mapMentionNames(post?.mentions),
       location: typeof post?.location === "string" ? post.location : post?.location?.name,
       createdAt: this.toTimestamp(post?.createdAt),
       likesCount: typeof post?.likes === "number" ? post.likes : 0,
       commentsCount: typeof post?.comments === "number" ? post.comments : 0,
       sharesCount: typeof post?.shares === "number" ? post.shares : 0,
-      liked: false,
-      saved: false,
+      liked: typeof post?.liked === "boolean" ? post.liked : false,
+      saved: typeof post?.saved === "boolean" ? post.saved : false,
       ...overrides,
     };
   }
@@ -1657,14 +1768,7 @@ class RemoteSocialApi implements SocialApi {
       replyCount: typeof story?.replyCount === "number" ? story.replyCount : 0,
       allowReplies: story?.allowReplies !== false,
       allowSharing: story?.allowSharing !== false,
-      music: story?.music?.trackName
-        ? {
-            trackName: story.music.trackName,
-            artistName: story.music.artistName,
-            startTime: story.music.startTime,
-            duration: story.music.duration,
-          }
-        : undefined,
+      music: mapStoryMusicDetails(story?.music, story?.musicConfig),
       ...overrides,
     };
   }
@@ -1822,23 +1926,16 @@ class RemoteSocialApi implements SocialApi {
 
   async getFeed(): Promise<FeedResponse> {
     await loadModerationPrefs();
-    const [postsRes, storyGroups, savedIds, currentUserId] = await Promise.all([
+    const [postsRes, storyGroups, currentUserId] = await Promise.all([
       API.get("/posts/feed"),
       this.getStoryFeedGroups(),
-      this.getSavedPostIds(),
       this.getCurrentUserId(),
     ]);
 
     const postPayload = Array.isArray(postsRes?.data?.posts) ? postsRes.data.posts : [];
-    const postLikes = await this.getLikeStatusMap(postPayload.map((post: any) => this.getId(post)), "postId");
 
     const posts = this.cachePosts(
-      postPayload.map((post: any) =>
-        this.mapPost(post, {
-          liked: !!postLikes.get(this.getId(post)),
-          saved: savedIds.has(this.getId(post)),
-        }),
-      ),
+      postPayload.map((post: any) => this.mapPost(post)),
     );
 
     const stories = this.cacheStories(
@@ -2582,11 +2679,13 @@ class RemoteSocialApi implements SocialApi {
         height: asset.height,
         order: index,
       })),
-      postType: payload.type === "video" ? "reel" : "post",
+      // Video posts are still regular feed posts; only the dedicated swipe flow should create reels.
+      postType: "post",
       location: payload.location ? { name: payload.location } : undefined,
       commentsDisabled: payload.settings?.disableComments || false,
       likesHidden: payload.settings?.hideLikeCount || false,
       collaborators: payload.collaboratorIds || [],
+      ...buildMusicRequestPayload(payload.music),
     });
 
     const post = this.mapPost(res?.data?.post);
@@ -2601,7 +2700,7 @@ class RemoteSocialApi implements SocialApi {
       throw new Error("Text stories are not supported by the current backend.");
     }
 
-    const stickers =
+    const stickers: any[] =
       payload.type === "poll" && payload.poll
         ? [
             {
@@ -2633,9 +2732,13 @@ class RemoteSocialApi implements SocialApi {
                   rotation: 0,
                   scale: 1,
                 },
-              },
-            ]
+            },
+          ]
           : [];
+    const musicSticker = buildStoryMusicSticker(payload.music);
+    if (musicSticker) {
+      stickers.push(musicSticker);
+    }
 
     if (payload.type === "media" && !payload.media) {
       throw new Error("Media stories require an image or video.");
@@ -2657,7 +2760,7 @@ class RemoteSocialApi implements SocialApi {
       isCloseFriends: payload.visibility === "close_friends",
       allowReplies: payload.allowReplies,
       allowSharing: payload.allowSharing,
-      music: payload.music,
+      ...buildMusicRequestPayload(payload.music),
     });
 
     const story = this.mapStory(res?.data?.story);
@@ -2686,6 +2789,7 @@ class RemoteSocialApi implements SocialApi {
       ],
       postType: "reel",
       location: payload.location ? { name: payload.location } : undefined,
+      ...buildMusicRequestPayload(payload.music),
     });
 
     const reel = this.mapReel(res?.data?.post);
@@ -2732,19 +2836,34 @@ class RemoteSocialApi implements SocialApi {
   }
 
   async reportContent(_contentType: ContentKind, _contentId: string, _reason: ReportReason, _note?: string): Promise<void> {
-    throw new Error("Reporting is not supported by the current backend yet.");
+    await loadModerationPrefs();
+    reports.push({
+      contentType: _contentType,
+      contentId: _contentId,
+      reason: _reason,
+      note: normalizeReportNote(_note),
+      createdAt: Date.now(),
+    });
+    await persistModerationPrefs();
   }
 
   async muteUser(_userId: string): Promise<void> {
-    throw new Error("Mute is not supported by the current backend yet.");
+    await loadModerationPrefs();
+    mutedUserIds.add(_userId);
+    await persistModerationPrefs();
   }
 
   async blockUser(_userId: string): Promise<void> {
-    throw new Error("Block is not supported by the current backend yet.");
+    await loadModerationPrefs();
+    await API.post(`/user/block/${_userId}`);
+    blockedUserIds.add(_userId);
+    await persistModerationPrefs();
   }
 
   async markNotInterested(_contentType: ContentKind, _contentId: string): Promise<void> {
-    throw new Error("Not interested is not supported by the current backend yet.");
+    await loadModerationPrefs();
+    hiddenContentKeys.add(buildContentKey(_contentType, _contentId));
+    await persistModerationPrefs();
   }
 }
 

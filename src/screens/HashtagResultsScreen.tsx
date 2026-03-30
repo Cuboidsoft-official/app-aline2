@@ -55,9 +55,7 @@ function HashtagResultsScreen({ route, navigation }: any) {
     }
 
     try {
-      const res = await API.get("/posts/explore/posts", {
-        params: { hashtag }
-      });
+      const res = await API.get(`/search/hashtag/${encodeURIComponent(hashtag)}`);
 
       setPosts(res.data?.posts || []);
     } catch (error) {

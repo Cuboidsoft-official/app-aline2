@@ -32,6 +32,7 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
 
   const fetchData = useCallback(async () => {
     try {
+      setLoading(true);
       const token = await AsyncStorage.getItem("token");
 
       const sellerRes = await API.get(`/seller/${sellerId}`, {

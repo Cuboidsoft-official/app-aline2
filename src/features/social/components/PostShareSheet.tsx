@@ -15,6 +15,9 @@ import ShareTargetsList from "./ShareTargetsList";
 import { socialApi } from "../socialApi";
 import { Post } from "../types";
 import { toUserSafeMessage } from "../validation";
+import { createChatConversation, sendChatMessage } from "../../../utils/chatApi";
+import { createShortShareUrl, shareContentLink } from "../../../utils/shareLinks";
+import { appConfig } from "../../../config/env";
 
 interface PostShareSheetProps {
   visible: boolean;
@@ -31,7 +34,32 @@ function PostShareSheet({
   onPostUpdate,
   onOpenStoryComposer,
 }: PostShareSheetProps) {
-  const [busy, setBusy] = useState<"share" | "save" | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const buildPostShareUrl = (targetPost: Post) => {
+    if (!appConfig.publicShareBaseUrl) {
+      return "";
+    }
+
+    return `${appConfig.publicShareBaseUrl.replace(/\/+$/, "")}/post/${targetPost.id}`;
+  };
+
+  const buildPostShareMessage = async (targetPost: Post) => {
+    const originalUrl = buildPostShareUrl(targetPost);
+    const shortUrl = originalUrl
+      ? await createShortShareUrl({
+          originalUrl,
+          title: `${targetPost.user.username}'s post`,
+          description: targetPost.caption || "",
+        })
+      : null;
+
+    const header = targetPost.caption
+      ? `Check out @${targetPost.user.username}'s post on Aline2:\n\n${targetPost.caption}`
+      : `Check out @${targetPost.user.username}'s post on Aline2.`;
+
+    return [header, shortUrl || originalUrl].filter(Boolean).join("\n\n");
+  };
 
   const shareToStory = async () => {
     if (!post || busy) {
@@ -39,13 +67,32 @@ function PostShareSheet({
     }
 
     try {
-      setBusy("share");
-      const updated = await socialApi.sharePost(post.id);
-      onPostUpdate(updated);
+      setBusy("story");
       onClose();
-      onOpenStoryComposer(updated);
+      onOpenStoryComposer(post);
     } catch (error) {
       Alert.alert("Could not share post", toUserSafeMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const shareExternally = async () => {
+    if (!post || busy) {
+      return;
+    }
+
+    try {
+      setBusy("external");
+      await shareContentLink({
+        originalUrl: buildPostShareUrl(post),
+        title: `${post.user.username}'s post`,
+        description: post.caption || "",
+        fallbackMessage: `Check out @${post.user.username}'s post on Aline2`,
+      });
+      onClose();
+    } catch (error) {
+      Alert.alert("Could not share link", toUserSafeMessage(error));
     } finally {
       setBusy(null);
     }
@@ -84,7 +131,13 @@ function PostShareSheet({
           <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={shareToStory}>
             <Icon name="sparkles-outline" size={20} color="#111" />
             <Text style={styles.actionText}>Add to your story</Text>
-            {busy === "share" ? <ActivityIndicator size="small" color="#111" /> : null}
+            {busy === "story" ? <ActivityIndicator size="small" color="#111" /> : null}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={shareExternally}>
+            <Icon name="share-social-outline" size={20} color="#111" />
+            <Text style={styles.actionText}>Share externally</Text>
+            {busy === "external" ? <ActivityIndicator size="small" color="#111" /> : null}
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={toggleSave}>
@@ -94,7 +147,26 @@ function PostShareSheet({
           </TouchableOpacity>
 
           <ShareTargetsList
-            onSend={(target) => {
+            onSend={async (target) => {
+              if (!post) {
+                return;
+              }
+
+              const conversation = await createChatConversation({
+                receiverId: target.id,
+                conversationType: "direct",
+              });
+
+              const conversationId = conversation?.conversation?._id;
+              if (!conversationId) {
+                throw new Error("Could not open a conversation with this user.");
+              }
+
+              await sendChatMessage({
+                conversationId,
+                text: await buildPostShareMessage(post),
+              });
+
               Alert.alert("Sent", `Post sent to @${target.username}.`);
               onClose();
             }}

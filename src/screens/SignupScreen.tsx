@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { API } from '../api/api';
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 
 const SignupScreen = ({ navigation }: any) => {
 
@@ -77,7 +78,7 @@ const SignupScreen = ({ navigation }: any) => {
 
       Alert.alert(
         "Network Error",
-        err?.response?.data?.message || "Something went wrong. Try again."
+        getReadableApiErrorMessage(err, "Something went wrong. Try again.")
       );
 
     } finally {
@@ -128,7 +129,16 @@ const SignupScreen = ({ navigation }: any) => {
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.mobileButton}>
+        <TouchableOpacity
+          style={styles.mobileButton}
+          onPress={() =>
+            navigation.navigate("FeatureInfoScreen", {
+              title: "Mobile OTP Sign Up",
+              description:
+                "The current backend supports email OTP only. Mobile-number OTP can be added once SMS delivery is configured server-side.",
+            })
+          }
+        >
           <Text style={styles.mobileText}>
             Sign up with mobile number
           </Text>

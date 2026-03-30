@@ -12,21 +12,36 @@ Alert
 
 import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { API, ROOT_API } from "../api/api";
+import { API } from "../api/api";
 import Icon from "react-native-vector-icons/Ionicons";
 import { getStoredUserId } from "../utils/authSession";
+import { fetchChatConversations } from "../utils/chatApi";
 import { getConversationPreview } from "../utils/chatPresentation";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 interface ChatUser {
   _id: string;
   username?: string;
   name?: string;
   profilePic?: string;
+  sellerProfile?: string;
+}
+
+interface SellerServiceSummary {
+  _id?: string;
+  serviceName?: string;
+  seller?: {
+    _id?: string;
+    sellerName?: string;
+    user?: string;
+  } | null;
 }
 
 interface Conversation {
   _id: string;
   otherUser?: ChatUser | null;
+  sellerUser?: ChatUser | null;
+  service?: SellerServiceSummary | null;
   updatedAt?: string;
   lastMessageTime?: string;
   lastMessageText?: string;
@@ -35,8 +50,9 @@ interface Conversation {
 }
 
 const AllChatsScreen = ({ navigation }: any) => {
+  const { colors, isDarkMode } = useAppTheme();
 
-const [users,setUsers] = useState<ChatUser[]>([]);
+  const [users,setUsers] = useState<ChatUser[]>([]);
 const [conversations,setConversations] = useState<Conversation[]>([]);
 const [loading,setLoading] = useState(true);
 const [activeTab,setActiveTab] = useState("regular"); // regular / seller
@@ -44,6 +60,7 @@ const [activeTab,setActiveTab] = useState("regular"); // regular / seller
 const fetchChatData = useCallback(async ()=>{
 
  try{
+  setLoading(true);
 
   const token = await AsyncStorage.getItem("token");
   const currentUserId = await getStoredUserId();
@@ -56,10 +73,7 @@ const fetchChatData = useCallback(async ()=>{
      ? { category:"Seller" }
      : { excludeCategory:"Seller" }
    }),
-	   ROOT_API.get("/chat/my-conversations",{
-	    headers:{ Authorization:`Bearer ${token}` },
-	    params:{ conversationType }
-	   })
+   fetchChatConversations({ conversationType })
   ]);
 
   const fetchedUsers = ((usersRes?.data?.users || []) as ChatUser[]).filter(
@@ -67,7 +81,7 @@ const fetchChatData = useCallback(async ()=>{
   );
 
   setUsers(fetchedUsers);
-  setConversations((conversationsRes?.data?.conversations || []) as Conversation[]);
+  setConversations((conversationsRes?.conversations || []) as Conversation[]);
 
  }catch(err){
 
@@ -112,6 +126,16 @@ const orderedUsers = useMemo(() => {
  });
 }, [conversationMap, users]);
 
+const orderedSellerConversations = useMemo(() => {
+ return [...conversations]
+  .filter((conversation) => conversation?.service || conversation?.sellerUser || conversation?.otherUser?.sellerProfile)
+  .sort((a, b) => {
+   const timeA = new Date(a.updatedAt || a.lastMessageTime || 0).getTime();
+   const timeB = new Date(b.updatedAt || b.lastMessageTime || 0).getTime();
+   return timeB - timeA;
+  });
+}, [conversations]);
+
 	const handleCreateGroupPress = () => {
 	 Alert.alert(
 	  "Not available yet",
@@ -127,7 +151,7 @@ const orderedUsers = useMemo(() => {
  return(
 
  <TouchableOpacity
- style={styles.chatCard}
+ style={[styles.chatCard, { borderColor: colors.border, backgroundColor: colors.card }]}
  onPress={()=>navigation.navigate("ChatScreen",{
   userId:item._id,
   conversationId:conversation?._id,
@@ -150,11 +174,11 @@ const orderedUsers = useMemo(() => {
 
  <View style={styles.chatInfo}>
 
- <Text style={styles.username}>
- {item.username}
+ <Text style={[styles.username, { color: colors.text }]}>
+ {item.username || item.name || "User"}
  </Text>
 
- <Text style={styles.lastMessage} numberOfLines={1}>
+ <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={1}>
  {subtitle}
  </Text>
 
@@ -169,7 +193,7 @@ const orderedUsers = useMemo(() => {
    </View>
   )}
 
-  <Icon name="chevron-forward-outline" size={20} color="#aaa"/>
+  <Icon name="chevron-forward-outline" size={20} color={colors.mutedText}/>
  </View>
 
  </TouchableOpacity>
@@ -178,12 +202,79 @@ const orderedUsers = useMemo(() => {
 
 };
 
+ const renderSellerConversation = ({ item }: { item: Conversation }) => {
+  const sellerUserId = item?.sellerUser?._id || item?.otherUser?._id || "";
+  const sellerId = item?.service?.seller?._id || item?.otherUser?.sellerProfile || "";
+  const sellerName = item?.service?.seller?.sellerName || item?.otherUser?.username || item?.otherUser?.name || "Seller";
+  const profilePic = item?.otherUser?.profilePic || item?.sellerUser?.profilePic || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+  const subtitleParts = [
+   item?.service?.serviceName ? `Service: ${item.service.serviceName}` : "",
+   getConversationPreview(item),
+  ].filter(Boolean);
+
+  const handlePress = () => {
+   if (!sellerUserId || !sellerId) {
+    Alert.alert("Unavailable", "This seller conversation is missing profile details.");
+    return;
+   }
+
+   navigation.navigate("SellerChatScreen", {
+    sellerId,
+    sellerUserId,
+    conversationId: item._id,
+    serviceId: item?.service?._id,
+    serviceName: item?.service?.serviceName,
+   });
+  };
+
+  return (
+   <TouchableOpacity style={[styles.chatCard, { borderColor: colors.border, backgroundColor: colors.card }]} onPress={handlePress}>
+    <View style={styles.avatarContainer}>
+     <Image
+      source={{
+       uri: profilePic
+      }}
+      style={styles.avatar}
+     />
+
+     <View style={styles.onlineDot}/>
+    </View>
+
+    <View style={styles.chatInfo}>
+     <Text style={[styles.username, { color: colors.text }]}>
+      {sellerName}
+     </Text>
+
+     <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={2}>
+      {subtitleParts.join(" • ") || "Tap to open seller conversation"}
+     </Text>
+    </View>
+
+    <View style={styles.chatMeta}>
+     {!!item?.unreadCount && (
+      <View style={styles.unreadBadge}>
+       <Text style={styles.unreadText}>
+        {item.unreadCount > 99 ? "99+" : item.unreadCount}
+       </Text>
+      </View>
+     )}
+
+     <Icon name="chevron-forward-outline" size={20} color={colors.mutedText}/>
+    </View>
+   </TouchableOpacity>
+  );
+ };
+
+ const listData = activeTab === "seller" ? orderedSellerConversations : orderedUsers;
+ const renderListItem = activeTab === "seller" ? renderSellerConversation : renderChat;
+ const keyExtractor = (item: ChatUser | Conversation) => item._id;
+
 if(loading){
 
  return(
 
- <View style={styles.center}>
- <ActivityIndicator size="large"/>
+ <View style={[styles.center, { backgroundColor: colors.background }]}>
+ <ActivityIndicator size="large" color={colors.primary}/>
  </View>
 
  );
@@ -192,13 +283,13 @@ if(loading){
 
 return(
 
-<View style={styles.container}>
+<View style={[styles.container, { backgroundColor: colors.background }]}>
 
 {/* HEADER */}
 
 <View style={styles.header}>
 
-<Text style={styles.headerTitle}>
+<Text style={[styles.headerTitle, { color: colors.text }]}>
 Chats
 </Text>
 
@@ -208,13 +299,13 @@ Chats
 	style={styles.headerActionButton}
 	onPress={handleCreateGroupPress}
 	>
-<Icon name="people-outline" size={24}/>
+<Icon name="people-outline" size={24} color={colors.text}/>
 </TouchableOpacity>
 
 <TouchableOpacity
 onPress={()=>navigation.navigate("Search")}
 >
-<Icon name="search-outline" size={24}/>
+<Icon name="search-outline" size={24} color={colors.text}/>
 </TouchableOpacity>
 
 </View>
@@ -223,7 +314,7 @@ onPress={()=>navigation.navigate("Search")}
 
 {/* TABS */}
 
-<View style={styles.tabs}>
+<View style={[styles.tabs, { backgroundColor: isDarkMode ? colors.surface : "#f2f2f2" }]}>
 
 <TouchableOpacity
 style={[
@@ -234,7 +325,8 @@ onPress={()=>setActiveTab("regular")}
 >
 <Text style={[
 styles.tabText,
-activeTab === "regular" && styles.activeTabText
+activeTab === "regular" && styles.activeTabText,
+{ color: activeTab === "regular" ? "#fff" : colors.mutedText }
 ]}>
 Regular Chats
 </Text>
@@ -249,7 +341,8 @@ onPress={()=>setActiveTab("seller")}
 >
 <Text style={[
 styles.tabText,
-activeTab === "seller" && styles.activeTabText
+activeTab === "seller" && styles.activeTabText,
+{ color: activeTab === "seller" ? "#fff" : colors.mutedText }
 ]}>
 Seller Chats
 </Text>
@@ -260,18 +353,18 @@ Seller Chats
 {/* CHAT LIST */}
 
 <FlatList
-data={orderedUsers}
-keyExtractor={(item)=>item._id}
-renderItem={renderChat}
+data={listData}
+keyExtractor={keyExtractor}
+renderItem={renderListItem}
 showsVerticalScrollIndicator={false}
 ListEmptyComponent={
  <View style={styles.emptyState}>
-  <Text style={styles.emptyTitle}>
+  <Text style={[styles.emptyTitle, { color: colors.text }]}>
    {activeTab === "seller" ? "No seller chats yet" : "No chats yet"}
   </Text>
-  <Text style={styles.emptyText}>
+  <Text style={[styles.emptyText, { color: colors.mutedText }]}>
    {activeTab === "seller"
-    ? "Start a seller conversation from a seller profile or this tab."
+    ? "Start a seller conversation from a seller profile to see it here."
     : "Start a direct conversation from a user profile or this tab."}
   </Text>
  </View>

@@ -21,6 +21,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 
 import CommentThreadSheet from "../../features/social/components/CommentThreadSheet";
 import ShareTargetsList from "../../features/social/components/ShareTargetsList";
+import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, Swipe, SwipeComment } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
@@ -140,12 +141,16 @@ function SwipesScreen({ navigation }: any) {
 
     try {
       setBusy("share", swipeId, true);
-      const updated = await socialApi.shareSwipe(swipeId);
-      setSwipes((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-      setSelectedSwipe((prev) => (prev?.id === updated.id ? updated : prev));
+      const targetSwipe = swipes.find((item) => item.id === swipeId) || selectedSwipe;
+
+      if (!targetSwipe) {
+        throw new Error("Swipe not found");
+      }
+
       navigation.navigate("Create", {
         initialTab: "story",
-        initialMedia: updated.media.thumbnailUrl || updated.media.url,
+        initialMedia: targetSwipe.media.url,
+        initialMediaType: targetSwipe.media.mediaType || "video",
       });
     } catch (error) {
       Alert.alert("Could not share swipe", toUserSafeMessage(error));
@@ -342,10 +347,13 @@ function SwipesScreen({ navigation }: any) {
   };
 
   const renderSwipe = ({ item }: { item: Swipe }) => (
-    <ImageBackground
-      source={{ uri: item.thumbnailUrl || item.media.url }}
-      style={[styles.swipeItem, { height: viewportHeight }]}
-    >
+    <View style={[styles.swipeItem, { height: viewportHeight }]}>
+      <SocialVideo
+        uri={item.media.url}
+        posterUri={item.thumbnailUrl || item.media.thumbnailUrl}
+        style={styles.swipeMedia}
+        repeat
+      />
       <View style={styles.overlay}>
         <View style={styles.topBar}>
           <Text style={styles.screenTitle}>Swipes</Text>
@@ -401,7 +409,7 @@ function SwipesScreen({ navigation }: any) {
           </View>
         </View>
       </View>
-    </ImageBackground>
+    </View>
   );
 
   if (loading) {
@@ -624,6 +632,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#000" },
   swipeItem: { justifyContent: "flex-end", backgroundColor: "#121212" },
+  swipeMedia: { ...StyleSheet.absoluteFillObject },
   overlay: {
     paddingHorizontal: 12,
     paddingBottom: 24,

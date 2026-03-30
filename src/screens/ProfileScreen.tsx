@@ -35,6 +35,8 @@ const ProfileScreen = ({ navigation }: any) => {
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
 
+  const accountTypeLabel = category === "Seller" ? "Seller" : "Member";
+
 
   useEffect(() => {
     fetchUser();
@@ -124,7 +126,6 @@ const ProfileScreen = ({ navigation }: any) => {
           pronouns,
           gender,
           link,
-          category,
           profilePic: resolvedProfilePic
         },
         {
@@ -234,7 +235,10 @@ const ProfileScreen = ({ navigation }: any) => {
           {renderInput("Pronouns", pronouns, setPronouns)}
           {renderInput("Gender", gender, setGender)}
           {renderInput("Link", link, setLink)}
-          {renderInput("Profile Category", category, setCategory)}
+          {renderReadonlyField("Account Type", accountTypeLabel)}
+          <Text style={styles.helperText}>
+            Account type is managed server-side, so special account states are assigned outside the app.
+          </Text>
 
         </ScrollView>
 
@@ -294,6 +298,15 @@ const renderInput = (
       multiline={multiline}
     />
 
+  </View>
+);
+
+const renderReadonlyField = (label: string, value: string) => (
+  <View style={styles.inputGroup}>
+    <Text style={styles.label}>{label}</Text>
+    <View style={styles.readonlyField}>
+      <Text style={styles.readonlyValue}>{value}</Text>
+    </View>
   </View>
 );
 
@@ -362,6 +375,14 @@ const styles = StyleSheet.create({
     marginBottom: 5,
     color: '#444'
   },
+  helperText: {
+    paddingHorizontal: 20,
+    marginTop: -8,
+    marginBottom: 20,
+    color: '#777',
+    fontSize: 12,
+    lineHeight: 18,
+  },
 
   input: {
     borderWidth: 1,
@@ -410,6 +431,22 @@ const styles = StyleSheet.create({
 
   multilineInput: {
     height: 90
+  },
+
+  readonlyField: {
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    minHeight: 50,
+    justifyContent: 'center',
+    backgroundColor: '#f3f3f3'
+  },
+
+  readonlyValue: {
+    fontSize: 15,
+    color: '#444',
+    fontWeight: '500'
   }
 
 });

@@ -8,6 +8,7 @@ import {
  ScrollView
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
+import { monetizationDisabledMessage, productFlags } from "../config/productFlags";
 
 type ComboOption = "Stories" | "Post" | "Reel" | "Video";
 type ChargesMap = Record<ComboOption, number>;
@@ -40,6 +41,25 @@ function HowToEarnScreen({ navigation }:any) {
  const updateCharge = (key: ComboOption, value: string) => {
   setCharges({ ...charges, [key]: Number(value) });
  };
+
+ if (!productFlags.sellerMonetizationInConsumerApp) {
+  return (
+   <View style={styles.disabledContainer}>
+    <View style={styles.header}>
+     <TouchableOpacity onPress={() => navigation.goBack()}>
+      <Icon name="arrow-back" size={24} color="#fff" />
+     </TouchableOpacity>
+     <Text style={styles.headerTitle}>Business Tools</Text>
+    </View>
+
+    <View style={styles.disabledCard}>
+     <Icon name="briefcase-outline" size={28} color="#ab2aeb" />
+     <Text style={styles.disabledTitle}>Creator monetization is out of scope here</Text>
+     <Text style={styles.disabledText}>{monetizationDisabledMessage}</Text>
+    </View>
+   </View>
+  );
+ }
 
  const InputField = ({ icon, placeholder }: { icon: string; placeholder: string }) => (
   <View style={styles.inputBox}>
@@ -150,10 +170,33 @@ function HowToEarnScreen({ navigation }:any) {
 export default HowToEarnScreen;
 
 const styles = StyleSheet.create({
+ disabledContainer: {
+  flex: 1,
+  backgroundColor: "#f8f5ff",
+ },
 
  container: {
   flex: 1,
   backgroundColor: "#f8f5ff",
+ },
+ disabledCard: {
+  margin: 16,
+  padding: 20,
+  borderRadius: 18,
+  backgroundColor: "#fff",
+  borderWidth: 1,
+  borderColor: "#E9D5FF",
+ },
+ disabledTitle: {
+  marginTop: 12,
+  color: "#111827",
+  fontSize: 18,
+  fontWeight: "bold",
+ },
+ disabledText: {
+  marginTop: 8,
+  color: "#4B5563",
+  lineHeight: 21,
  },
 
  header: {

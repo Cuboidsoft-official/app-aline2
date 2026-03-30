@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { API } from '../api/api';
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { setStoredSession } from "../utils/authSession";
 
 import {
@@ -56,7 +57,7 @@ const LoginScreen = ({ navigation, route }: any) => {
         status: error?.response?.status,
         responseData: error?.response?.data,
       });
-      Alert.alert("Login failed", error?.response?.data?.message || error?.message || "Something went wrong");
+      Alert.alert("Login failed", getReadableApiErrorMessage(error, "Something went wrong"));
     }
   };
 
@@ -97,8 +98,20 @@ const LoginScreen = ({ navigation, route }: any) => {
           <Text style={styles.loginText}>Log in</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate("ForgotPassword", { email })}>
           <Text style={styles.forgot}>Forgot password?</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() =>
+            navigation.navigate("FeatureInfoScreen", {
+              title: "Mobile OTP Login",
+              description:
+                "Mobile-number OTP login is not available in the current backend yet. The supported auth flows are email/password and email OTP.",
+            })
+          }
+        >
+          <Text style={styles.forgot}>Use mobile OTP</Text>
         </TouchableOpacity>
 
         <View style={styles.divider} />

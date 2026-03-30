@@ -14,6 +14,8 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
+import { shareContentLink } from "../utils/shareLinks";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 interface ProfilePost {
  _id: string;
@@ -48,6 +50,7 @@ const getErrorMessage = (error: unknown) => {
 };
 
 const ProfileScreen = ({navigation}: any) => {
+ const { colors, isDarkMode } = useAppTheme();
 
  const [user, setUser] = useState<ProfileUser | null>(null);
  const [allPosts, setAllPosts] = useState<ProfilePost[]>([]);
@@ -147,50 +150,57 @@ const ProfileScreen = ({navigation}: any) => {
   }
  };
 
+ const handleShareProfile = async () => {
+  try {
+   await shareContentLink({
+    originalUrl: user?.link,
+    title: user?.name || "Aline2 Profile",
+    description: user?.bio || "",
+    fallbackMessage: user?.name
+     ? `Check out ${user.name}'s profile on Aline2`
+     : "Check out this profile on Aline2",
+   });
+  } catch (error) {
+   console.log("Profile share error:", getErrorMessage(error));
+   Alert.alert("Error", "Unable to share profile right now");
+  }
+ };
+
  const renderPost = ({ item }: { item: ProfilePost }) => (
-  <Image
-   source={{
-    uri: getPostPreviewUrl(item)
-   }}
-   style={styles.postImage}
-  />
+  <TouchableOpacity
+   activeOpacity={0.9}
+   onPress={() => navigation.navigate("PostDetail", { postId: item._id })}
+  >
+   <Image
+    source={{
+     uri: getPostPreviewUrl(item)
+    }}
+    style={styles.postImage}
+   />
+  </TouchableOpacity>
  );
 
- if (loading) {
-  return (
-   <View style={styles.center}>
-    <ActivityIndicator size="large" />
-   </View>
-  );
- }
-
- return (
-
-  <View style={styles.container}>
-
-   {/* TOP HEADER */}
-
+ const renderHeader = () => (
+  <>
    <View style={styles.topHeader}>
 
-    <TouchableOpacity onPress={() => navigation.goBack()}>
-     <Icon name="arrow-back" size={26} color="#000" />
+   <TouchableOpacity onPress={() => navigation.goBack()}>
+     <Icon name="arrow-back" size={26} color={colors.text} />
     </TouchableOpacity>
 
     <Text
      numberOfLines={1}
      ellipsizeMode="tail"
-     style={styles.headerUsername}
+     style={[styles.headerUsername, { color: colors.text }]}
     >
      {user?.name || "User Name"}
     </Text>
 
     <TouchableOpacity onPress={() => navigation.navigate("SettingsScreen")}>
-     <Icon name="menu" size={28} color="#000" />
+     <Icon name="menu" size={28} color={colors.text} />
     </TouchableOpacity>
 
    </View>
-
-   {/* PROFILE HEADER */}
 
    <View style={styles.header}>
 
@@ -206,7 +216,7 @@ const ProfileScreen = ({navigation}: any) => {
       style={styles.profilePic}
      />
 
-     <Text style={styles.profileName}>
+     <Text style={[styles.profileName, { color: colors.text }]}>
       {user?.name || "User Name"}
      </Text>
 
@@ -218,8 +228,6 @@ const ProfileScreen = ({navigation}: any) => {
      </View>
 
     </View>
-
-    {/* STATS */}
 
     <View style={styles.stats}>
 
@@ -258,24 +266,22 @@ const ProfileScreen = ({navigation}: any) => {
 
    </View>
 
-   {/* BIO */}
-
    <View style={styles.bioSection}>
-    <Text style={styles.name}>
+    <Text style={[styles.name, { color: colors.text }]}>
      {user?.pronouns || ""} {user?.name || ""}
     </Text>
 
-    <Text>{user?.bio || ""}</Text>
+    <Text style={{ color: colors.text }}>{user?.bio || ""}</Text>
 
     {user?.link ? (
-     <Text style={styles.link}>{user.link}</Text>
+     <Text style={[styles.link, { color: colors.primary }]}>{user.link}</Text>
     ) : null}
 
     {!!user?.interests?.length && (
      <View style={styles.interestsRow}>
       {user.interests.map((interest) => (
-       <View key={interest} style={styles.interestChip}>
-        <Text style={styles.interestText}>{interest}</Text>
+       <View key={interest} style={[styles.interestChip, { backgroundColor: isDarkMode ? colors.surface : "#F1ECFF" }]}>
+        <Text style={[styles.interestText, { color: colors.text }]}>{interest}</Text>
        </View>
       ))}
      </View>
@@ -283,27 +289,25 @@ const ProfileScreen = ({navigation}: any) => {
 
    </View>
 
-   {/* BUTTONS */}
-
    <View style={styles.buttons}>
 
     <TouchableOpacity
-     style={styles.editBtn}
+     style={[styles.editBtn, { backgroundColor: isDarkMode ? colors.surface : "#EFEFEF" }]}
      onPress={()=> navigation.navigate("Profile")}
     >
-     <Text style={styles.btnText}>Edit Profile</Text>
+     <Text style={[styles.btnText, { color: colors.text }]}>Edit Profile</Text>
     </TouchableOpacity>
 
-    <TouchableOpacity style={styles.shareBtn}>
-     <Text style={styles.btnText}>Share Profile</Text>
+    <TouchableOpacity style={[styles.shareBtn, { backgroundColor: isDarkMode ? colors.surface : "#EFEFEF" }]} onPress={handleShareProfile}>
+     <Text style={[styles.btnText, { color: colors.text }]}>Share Profile</Text>
     </TouchableOpacity>
 
     <TouchableOpacity
-     style={[styles.shareBtn, isPrivate ? styles.privateOnBtn : null]}
+     style={[styles.shareBtn, { backgroundColor: isDarkMode ? colors.surface : "#EFEFEF" }, isPrivate ? styles.privateOnBtn : null]}
      onPress={togglePrivateProfile}
      disabled={privateLoading}
     >
-     <Text style={styles.btnText}>
+     <Text style={[styles.btnText, { color: isPrivate ? "#fff" : colors.text }]}>
       {privateLoading ? "Updating..." : isPrivate ? "Private" : "Public"}
      </Text>
    </TouchableOpacity>
@@ -311,14 +315,12 @@ const ProfileScreen = ({navigation}: any) => {
   </View>
 
    <TouchableOpacity
-    style={styles.requestsBtn}
+    style={[styles.requestsBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
     onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "user" })}
    >
-    <Icon name="briefcase-outline" size={18} color="#333" />
-    <Text style={styles.requestsBtnText}>My Requests</Text>
+    <Icon name="briefcase-outline" size={18} color={colors.text} />
+    <Text style={[styles.requestsBtnText, { color: colors.text }]}>My Requests</Text>
    </TouchableOpacity>
-
-   {/* TABS */}
 
    <View style={styles.tabs}>
 
@@ -326,7 +328,7 @@ const ProfileScreen = ({navigation}: any) => {
      style={styles.tab}
      onPress={() => setActiveTab("posts")}
     >
-     <Text style={activeTab === "posts" ? styles.activeTab : styles.tabText}>
+     <Text style={activeTab === "posts" ? [styles.activeTab, { color: colors.primary }] : [styles.tabText, { color: colors.mutedText }]}>
       POSTS
      </Text>
     </TouchableOpacity>
@@ -335,7 +337,7 @@ const ProfileScreen = ({navigation}: any) => {
      style={styles.tab}
      onPress={() => setActiveTab("swipes")}
     >
-     <Text style={activeTab === "swipes" ? styles.activeTab : styles.tabText}>
+     <Text style={activeTab === "swipes" ? [styles.activeTab, { color: colors.primary }] : [styles.tabText, { color: colors.mutedText }]}>
       Swipes
      </Text>
     </TouchableOpacity>
@@ -344,25 +346,34 @@ const ProfileScreen = ({navigation}: any) => {
      style={styles.tab}
      onPress={() => setActiveTab("tagged")}
     >
-     <Text style={activeTab === "tagged" ? styles.activeTab : styles.tabText}>
+     <Text style={activeTab === "tagged" ? [styles.activeTab, { color: colors.primary }] : [styles.tabText, { color: colors.mutedText }]}>
       TAGGED
      </Text>
     </TouchableOpacity>
 
    </View>
+  </>
+ );
 
-   {/* POSTS GRID */}
+ if (loading) {
+  return (
+   <View style={[styles.center, { backgroundColor: colors.background }]}>
+    <ActivityIndicator size="large" color={colors.primary} />
+   </View>
+  );
+ }
 
-   <FlatList
-    data={posts}
-    renderItem={renderPost}
-    keyExtractor={(item) => item._id}
-    numColumns={3}
-    showsVerticalScrollIndicator={false}
-   />
-
-  </View>
-
+ return (
+  <FlatList
+   data={posts}
+   renderItem={renderPost}
+   keyExtractor={(item) => item._id}
+   numColumns={3}
+   style={[styles.container, { backgroundColor: colors.background }]}
+   contentContainerStyle={styles.listContent}
+   ListHeaderComponent={renderHeader}
+   showsVerticalScrollIndicator={false}
+  />
  );
 };
 
@@ -373,6 +384,9 @@ const styles = StyleSheet.create({
  container:{
   flex:1,
   backgroundColor:"#fff"
+ },
+ listContent:{
+  paddingBottom:24
  },
 
  topHeader:{

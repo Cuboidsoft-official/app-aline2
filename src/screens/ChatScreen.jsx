@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { launchImageLibrary } from "react-native-image-picker";
+import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import {
   errorCodes,
   isErrorWithCode,
@@ -25,17 +25,28 @@ import {
   pick,
   types,
 } from "@react-native-documents/picker";
-import { API, ROOT_API } from "../api/api";
-import { socket } from "../socket";
+import { API } from "../api/api";
+import { connectSocket, socket } from "../socket";
 import {
   getAttachmentDisplayName,
   getMessageAttachment,
   getMessageSenderId,
   getMessageText,
+  isAudioMessage,
   isDocumentMessage,
   isImageMessage,
+  isVideoMessage,
 } from "../utils/chatPresentation";
-import { uploadDocumentAsset, uploadImageAsset } from "../utils/uploadMedia";
+import {
+  createChatConversation,
+  fetchConversationMessages,
+  sendChatMessage,
+} from "../utils/chatApi";
+import {
+  getLastIncomingUnseenMessage,
+  mergeMessageReaction,
+  mergeMessageSeen,
+} from "../utils/chatRealtime";
 
 const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 const PRIMARY = "#7b3fe4";
@@ -59,6 +70,9 @@ const getDocumentPickerMessage = (error) => {
   }
 };
 
+const getRequestErrorMessage = (error, fallbackMessage) =>
+  error?.response?.data?.message || error?.message || fallbackMessage;
+
 const ChatScreen = ({ navigation, route }) => {
   const { userId, conversationId, conversationType = "direct", serviceId } = route.params || {};
   const [user, setUser] = useState(null);
@@ -69,6 +83,10 @@ const ChatScreen = ({ navigation, route }) => {
   const [currentConversationId, setCurrentConversationId] = useState(conversationId || null);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pagination, setPagination] = useState({ nextCursor: null, hasMore: false, limit: 30 });
+  const [typingUserId, setTypingUserId] = useState("");
+  const typingTimeoutRef = useRef(null);
 
   const fetchUser = useCallback(async () => {
     try {
@@ -92,17 +110,27 @@ const ChatScreen = ({ navigation, route }) => {
     });
   }, []);
 
-  const fetchMessages = useCallback(async (targetConversationId = currentConversationId) => {
+  const applyMessageSeen = useCallback((payload) => {
+    setMessages((prev) => mergeMessageSeen(prev, payload));
+  }, []);
+
+  const applyMessageReaction = useCallback((payload) => {
+    setMessages((prev) => mergeMessageReaction(prev, payload));
+  }, []);
+
+  const fetchMessages = useCallback(async (targetConversationId = currentConversationId, options = {}) => {
     if (!targetConversationId) {
       return;
     }
 
     try {
-      const token = await AsyncStorage.getItem("token");
-      const res = await API.get(`/message/${targetConversationId}`, {
-        headers: { Authorization: `Bearer ${token}` }
+      const data = await fetchConversationMessages(targetConversationId, {
+        cursor: options.cursor,
+        limit: options.limit || 30,
       });
-      setMessages(res?.data?.messages || []);
+      const nextMessages = data?.messages || [];
+      setPagination(data?.pagination || { nextCursor: null, hasMore: false, limit: 30 });
+      setMessages((prev) => (options.append ? [...nextMessages, ...prev] : nextMessages));
     } catch (err) {
       console.log("Fetch messages error:", err?.response?.data || err);
     }
@@ -118,20 +146,13 @@ const ChatScreen = ({ navigation, route }) => {
     }
 
     try {
-      const token = await AsyncStorage.getItem("token");
-      const res = await ROOT_API.post(
-        "/chat/create",
-        {
-          receiverId: userId,
-          conversationType,
-          serviceId
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
+      const res = await createChatConversation({
+        receiverId: userId,
+        conversationType,
+        serviceId,
+      });
 
-      const nextConversationId = res?.data?.conversation?._id || null;
+      const nextConversationId = res?.conversation?._id || null;
       if (nextConversationId) {
         setCurrentConversationId(nextConversationId);
       }
@@ -159,6 +180,7 @@ const ChatScreen = ({ navigation, route }) => {
         }
 
         if (nextUserId) {
+          await connectSocket();
           socket.emit("userOnline", nextUserId);
         }
       } catch (err) {
@@ -185,11 +207,39 @@ const ChatScreen = ({ navigation, route }) => {
       mergeMessage(message);
     };
 
+    const handleTyping = (data) => {
+      const nextUserId = String(data?.userId || "");
+      if (nextUserId && nextUserId !== String(currentUserId || "")) {
+        setTypingUserId(nextUserId);
+      }
+    };
+
+    const handleStopTyping = (data) => {
+      const nextUserId = String(data?.userId || "");
+      setTypingUserId((prev) => (prev === nextUserId ? "" : prev));
+    };
+
+    const handleMessageSeen = (data) => {
+      applyMessageSeen(data);
+    };
+
+    const handleMessageReaction = (data) => {
+      applyMessageReaction(data);
+    };
+
     socket.on("receiveMessage", handleReceiveMessage);
+    socket.on("typing", handleTyping);
+    socket.on("stopTyping", handleStopTyping);
+    socket.on("messageSeen", handleMessageSeen);
+    socket.on("messageReaction", handleMessageReaction);
     return () => {
       socket.off("receiveMessage", handleReceiveMessage);
+      socket.off("typing", handleTyping);
+      socket.off("stopTyping", handleStopTyping);
+      socket.off("messageSeen", handleMessageSeen);
+      socket.off("messageReaction", handleMessageReaction);
     };
-  }, [mergeMessage]);
+  }, [applyMessageReaction, applyMessageSeen, currentUserId, mergeMessage]);
 
   useEffect(() => {
     let active = true;
@@ -202,6 +252,7 @@ const ChatScreen = ({ navigation, route }) => {
 
       if (active && resolvedConversationId) {
         await fetchMessages(resolvedConversationId);
+        await connectSocket();
         socket.emit("joinConversation", resolvedConversationId);
       }
     };
@@ -217,33 +268,35 @@ const ChatScreen = ({ navigation, route }) => {
       return;
     }
 
-    socket.emit("joinConversation", currentConversationId);
+    const joinConversation = async () => {
+      await connectSocket();
+      socket.emit("joinConversation", currentConversationId);
+    };
+
+    joinConversation().catch((error) => {
+      console.log("Join conversation error:", error);
+    });
   }, [currentConversationId]);
 
-  const submitMessage = useCallback(async (payload) => {
+  const submitMessage = useCallback(async ({ text: nextText, file }) => {
     const resolvedConversationId = await ensureConversation();
     if (!resolvedConversationId) {
       Alert.alert("Unavailable", "This conversation is not ready yet.");
       return;
     }
 
-    const token = await AsyncStorage.getItem("token");
-    const res = await API.post(
-      "/message/send",
-      {
-        conversationId: resolvedConversationId,
-        ...payload
-      },
-      {
-        headers: { Authorization: `Bearer ${token}` }
-      }
-    );
+    const res = await sendChatMessage({
+      conversationId: resolvedConversationId,
+      text: nextText,
+      file,
+    });
 
-    if (res?.data?.message) {
-      mergeMessage(res.data.message);
+    if (res?.message) {
+      mergeMessage(res.message);
+      await connectSocket();
       socket.emit("sendMessage", {
         conversationId: resolvedConversationId,
-        message: res.data.message
+        message: res.message
       });
     }
   }, [ensureConversation, mergeMessage]);
@@ -255,14 +308,11 @@ const ChatScreen = ({ navigation, route }) => {
 
     try {
       setSending(true);
-      await submitMessage({
-        text: text.trim(),
-        messageType: "text"
-      });
+      await submitMessage({ text: text.trim() });
       setText("");
     } catch (err) {
       console.log("Send message error:", err?.response?.data || err);
-      Alert.alert("Error", "Failed to send message");
+      Alert.alert("Error", getRequestErrorMessage(err, "Failed to send message"));
     } finally {
       setSending(false);
     }
@@ -271,7 +321,7 @@ const ChatScreen = ({ navigation, route }) => {
   const sendImageAttachment = useCallback(async () => {
     launchImageLibrary(
       {
-        mediaType: "photo",
+        mediaType: "mixed",
         selectionLimit: 1
       },
       async (response) => {
@@ -288,26 +338,60 @@ const ChatScreen = ({ navigation, route }) => {
 
         try {
           setUploading(true);
-          const url = await uploadImageAsset({
-            uri: asset.uri,
-            fileName: asset.fileName,
-            type: asset.type,
-          });
-
           await submitMessage({
-            messageType: "image",
             text: text.trim(),
-            attachment: {
-              url,
-              fileName: asset.fileName,
-              mimeType: asset.type || "image/jpeg",
+            file: {
+              uri: asset.uri,
+              name: asset.fileName || `media_${Date.now()}`,
+              type: asset.type || "application/octet-stream",
             }
           });
           setText("");
           setShowTools(false);
         } catch (error) {
           console.log("image message send error:", error);
-          Alert.alert("Error", "Failed to send image");
+          Alert.alert("Error", getRequestErrorMessage(error, "Failed to send attachment"));
+        } finally {
+          setUploading(false);
+        }
+      }
+    );
+  }, [submitMessage, text]);
+
+  const sendCameraAttachment = useCallback(async () => {
+    launchCamera(
+      {
+        mediaType: "mixed",
+        saveToPhotos: false,
+        videoQuality: "high",
+      },
+      async (response) => {
+        if (response?.didCancel) return;
+        if (response?.errorCode) {
+          Alert.alert("Error", response.errorMessage || "Camera capture failed");
+          return;
+        }
+
+        const asset = response.assets?.[0];
+        if (!asset?.uri) {
+          return;
+        }
+
+        try {
+          setUploading(true);
+          await submitMessage({
+            text: text.trim(),
+            file: {
+              uri: asset.uri,
+              name: asset.fileName || `camera_${Date.now()}`,
+              type: asset.type || "application/octet-stream",
+            }
+          });
+          setText("");
+          setShowTools(false);
+        } catch (error) {
+          console.log("camera message send error:", error);
+          Alert.alert("Error", getRequestErrorMessage(error, "Failed to send camera capture"));
         } finally {
           setUploading(false);
         }
@@ -320,7 +404,7 @@ const ChatScreen = ({ navigation, route }) => {
       const [file] = await pick({
         mode: "import",
         allowMultiSelection: false,
-        type: [types.images, types.pdf]
+        type: [types.allFiles]
       });
 
       if (!file?.uri) {
@@ -348,30 +432,79 @@ const ChatScreen = ({ navigation, route }) => {
       }
 
       setUploading(true);
-      const url = await uploadDocumentAsset({
-        uri: localUri,
-        name: file.name,
-        type: file.type,
-      });
-
       await submitMessage({
-        messageType: "document",
         text: text.trim(),
-        attachment: {
-          url,
-          fileName: file.name,
-          mimeType: file.type || "application/octet-stream",
+        file: {
+          uri: localUri,
+          name: file.name || `document_${Date.now()}`,
+          type: file.type || "application/octet-stream",
         }
       });
       setText("");
       setShowTools(false);
     } catch (error) {
-      const message = getDocumentPickerMessage(error);
+      const message = getDocumentPickerMessage(error) || getRequestErrorMessage(error, "Document pick failed");
       if (!message) {
         return;
       }
 
       console.log("document message send error:", error);
+      Alert.alert("Error", message);
+    } finally {
+      setUploading(false);
+    }
+  }, [submitMessage, text]);
+
+  const sendAudioAttachment = useCallback(async () => {
+    try {
+      const [file] = await pick({
+        mode: "import",
+        allowMultiSelection: false,
+        type: [types.audio]
+      });
+
+      if (!file?.uri) {
+        return;
+      }
+
+      let localUri = file.uri;
+      if (file.isVirtual || String(file.uri || "").startsWith("content://")) {
+        const [localCopy] = await keepLocalCopy({
+          destination: "cachesDirectory",
+          files: [
+            {
+              uri: file.uri,
+              fileName: file.name || `audio_${Date.now()}`,
+              convertVirtualFileToType: file.convertibleToMimeTypes?.[0]?.mimeType,
+            },
+          ],
+        });
+
+        if (!localCopy || localCopy.status !== "success") {
+          throw new Error(localCopy?.copyError || "Unable to access the selected audio file.");
+        }
+
+        localUri = localCopy.localUri;
+      }
+
+      setUploading(true);
+      await submitMessage({
+        text: text.trim(),
+        file: {
+          uri: localUri,
+          name: file.name || `audio_${Date.now()}`,
+          type: file.type || "audio/*",
+        }
+      });
+      setText("");
+      setShowTools(false);
+    } catch (error) {
+      const message = getDocumentPickerMessage(error) || getRequestErrorMessage(error, "Audio pick failed");
+      if (!message) {
+        return;
+      }
+
+      console.log("audio message send error:", error);
       Alert.alert("Error", message);
     } finally {
       setUploading(false);
@@ -385,13 +518,13 @@ const ChatScreen = ({ navigation, route }) => {
       id: "camera",
       name: "Camera",
       icon: "camera",
-      action: () => Alert.alert("Not available yet", "Camera capture is not implemented yet."),
+      action: sendCameraAttachment,
     },
     {
       id: "audio",
       name: "Audio",
       icon: "musical-notes",
-      action: () => Alert.alert("Not available yet", "Voice notes are not implemented yet."),
+      action: sendAudioAttachment,
     },
     {
       id: "gif",
@@ -405,12 +538,111 @@ const ChatScreen = ({ navigation, route }) => {
       icon: "location",
       action: () => Alert.alert("Not available yet", "Location sharing is not implemented yet."),
     },
-  ], [sendDocumentAttachment, sendImageAttachment]);
+  ], [sendAudioAttachment, sendCameraAttachment, sendDocumentAttachment, sendImageAttachment]);
+
+  const loadMoreMessages = useCallback(async () => {
+    if (!currentConversationId || !pagination?.hasMore || !pagination?.nextCursor || loadingMore) {
+      return;
+    }
+
+    try {
+      setLoadingMore(true);
+      await fetchMessages(currentConversationId, {
+        append: true,
+        cursor: pagination.nextCursor,
+        limit: pagination.limit || 30,
+      });
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [currentConversationId, fetchMessages, loadingMore, pagination]);
+
+  const handleTextChange = useCallback((value) => {
+    setText(value);
+
+    if (!currentConversationId) {
+      return;
+    }
+
+    connectSocket()
+      .then(() => {
+        socket.emit("typing", { conversationId: currentConversationId });
+      })
+      .catch((error) => {
+        console.log("Typing emit error:", error);
+      });
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit("stopTyping", { conversationId: currentConversationId });
+    }, 1200);
+  }, [currentConversationId]);
+
+  useEffect(() => () => {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentConversationId || !currentUserId || !messages.length) {
+      return;
+    }
+
+    const nextMessage = getLastIncomingUnseenMessage(messages, currentUserId);
+    if (!nextMessage?._id) {
+      return;
+    }
+
+    connectSocket()
+      .then(() => {
+        socket.emit("messageSeen", {
+          conversationId: currentConversationId,
+          messageId: nextMessage._id,
+        });
+        applyMessageSeen({
+          messageId: nextMessage._id,
+          userId: currentUserId,
+          seenAt: new Date().toISOString(),
+        });
+      })
+      .catch((error) => {
+        console.log("Message seen emit error:", error);
+      });
+  }, [applyMessageSeen, currentConversationId, currentUserId, messages]);
+
+  const reactToMessage = useCallback((messageId, emoji = "❤️") => {
+    if (!currentConversationId || !messageId) {
+      return;
+    }
+
+    connectSocket()
+      .then(() => {
+        socket.emit("reactMessage", {
+          conversationId: currentConversationId,
+          messageId,
+          emoji,
+        });
+        applyMessageReaction({
+          messageId,
+          userId: currentUserId,
+          emoji,
+        });
+      })
+      .catch((error) => {
+        console.log("Message reaction emit error:", error);
+      });
+  }, [applyMessageReaction, currentConversationId, currentUserId]);
 
   const renderMessage = ({ item }) => {
     const isMine = String(getMessageSenderId(item)) === String(currentUserId || "");
     const attachment = getMessageAttachment(item);
     const textValue = getMessageText(item);
+    const seenCount = Array.isArray(item?.seenBy) ? item.seenBy.length : 0;
+    const reactions = Array.isArray(item?.reactions) ? item.reactions : [];
 
     return (
       <View
@@ -419,7 +651,9 @@ const ChatScreen = ({ navigation, route }) => {
           isMine ? { justifyContent: "flex-end" } : { justifyContent: "flex-start" }
         ]}
       >
-        <View
+        <TouchableOpacity
+          activeOpacity={0.92}
+          onLongPress={() => reactToMessage(item?._id)}
           style={[
             styles.messageBubble,
             isMine ? styles.myMessage : styles.otherMessage
@@ -427,6 +661,27 @@ const ChatScreen = ({ navigation, route }) => {
         >
           {isImageMessage(item) && attachment?.url ? (
             <Image source={{ uri: attachment.url }} style={styles.messageImage} />
+          ) : null}
+
+          {isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url) ? (
+            <View style={styles.documentCard}>
+              <Image
+                source={{ uri: attachment.thumbnailUrl || attachment.url }}
+                style={styles.messageImage}
+              />
+              <Text style={[styles.documentName, isMine && styles.myDocumentName]} numberOfLines={1}>
+                Video attachment
+              </Text>
+            </View>
+          ) : null}
+
+          {isAudioMessage(item) && attachment?.url ? (
+            <View style={styles.documentCard}>
+              <Icon name="musical-notes-outline" size={20} color={isMine ? "#fff" : PRIMARY} />
+              <Text style={[styles.documentName, isMine && styles.myDocumentName]} numberOfLines={1}>
+                {getAttachmentDisplayName(item)}
+              </Text>
+            </View>
           ) : null}
 
           {isDocumentMessage(item) && attachment?.url ? (
@@ -443,7 +698,26 @@ const ChatScreen = ({ navigation, route }) => {
               {textValue}
             </Text>
           )}
-        </View>
+
+          {!!reactions.length && (
+            <View style={styles.reactionRow}>
+              {reactions.map((reaction) => (
+                <View
+                  key={`${item?._id || "message"}-${reaction?.emoji || "reaction"}`}
+                  style={[styles.reactionChip, isMine && styles.myReactionChip]}
+                >
+                  <Text style={styles.reactionText}>
+                    {reaction?.emoji} {Array.isArray(reaction?.users) ? reaction.users.length : 0}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {isMine && seenCount > 0 ? (
+            <Text style={styles.seenText}>Seen</Text>
+          ) : null}
+        </TouchableOpacity>
       </View>
     );
   };
@@ -460,7 +734,7 @@ const ChatScreen = ({ navigation, route }) => {
         <TouchableOpacity
           style={styles.userInfo}
           activeOpacity={0.7}
-          onPress={() => navigation.navigate("ChatDetailsScreen", { userId })}
+          onPress={() => navigation.navigate("ChatDetailsScreen", { userId, conversationId: currentConversationId })}
         >
           <Image
             source={{
@@ -473,7 +747,7 @@ const ChatScreen = ({ navigation, route }) => {
             <Text style={styles.username}>
               {user?.username || user?.name || "Loading..."}
             </Text>
-            <Text style={styles.status}>Conversation</Text>
+            <Text style={styles.status}>{typingUserId ? "Typing..." : "Conversation"}</Text>
           </View>
         </TouchableOpacity>
 
@@ -506,6 +780,21 @@ const ChatScreen = ({ navigation, route }) => {
           renderItem={renderMessage}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            pagination?.hasMore ? (
+              <TouchableOpacity
+                style={styles.loadEarlierButton}
+                onPress={loadMoreMessages}
+                disabled={loadingMore}
+              >
+                {loadingMore ? (
+                  <ActivityIndicator color={PRIMARY} />
+                ) : (
+                  <Text style={styles.loadEarlierText}>Load earlier messages</Text>
+                )}
+              </TouchableOpacity>
+            ) : null
+          }
         />
       </ImageBackground>
 
@@ -550,7 +839,7 @@ const ChatScreen = ({ navigation, route }) => {
             placeholderTextColor="#888"
             style={styles.input}
             value={text}
-            onChangeText={setText}
+            onChangeText={handleTextChange}
             editable={!sending && !uploading}
           />
         </View>
@@ -567,7 +856,7 @@ const ChatScreen = ({ navigation, route }) => {
               <Icon name="image" size={24} color={PRIMARY} />
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => Alert.alert("Not available yet", "Voice notes are not implemented yet.")}>
+            <TouchableOpacity onPress={sendAudioAttachment}>
               <Icon name="mic" size={24} color={PRIMARY} />
             </TouchableOpacity>
           </View>
@@ -623,6 +912,18 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 12
   },
+  loadEarlierButton: {
+    alignSelf: "center",
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderRadius: 999,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8
+  },
+  loadEarlierText: {
+    color: PRIMARY,
+    fontWeight: "600"
+  },
   messageRow: {
     flexDirection: "row",
     marginVertical: 4
@@ -662,6 +963,32 @@ const styles = StyleSheet.create({
     color: PRIMARY,
     fontWeight: "600",
     maxWidth: 180
+  },
+  reactionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 8
+  },
+  reactionChip: {
+    backgroundColor: "rgba(123, 63, 228, 0.12)",
+    borderRadius: 999,
+    marginRight: 6,
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4
+  },
+  myReactionChip: {
+    backgroundColor: "rgba(255,255,255,0.22)"
+  },
+  reactionText: {
+    color: "#1f1f1f",
+    fontSize: 12,
+    fontWeight: "600"
+  },
+  seenText: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 11,
+    marginTop: 8
   },
   myDocumentName: {
     color: "#fff"

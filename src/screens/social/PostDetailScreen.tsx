@@ -17,6 +17,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
 import PostCommentsSheet from "../../features/social/components/PostCommentsSheet";
 import PostShareSheet from "../../features/social/components/PostShareSheet";
+import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
@@ -196,23 +197,37 @@ function PostDetailScreen({ route, navigation }: any) {
           {post.type === "carousel" ? (
             <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
               {post.media.map((asset) => (
-                <Image
-                  key={asset.id}
-                  source={{ uri: asset.mediaType === "video" ? asset.thumbnailUrl || asset.url : asset.url }}
-                  style={styles.image}
-                />
+                asset.mediaType === "video" ? (
+                  <SocialVideo
+                    key={asset.id}
+                    uri={asset.url}
+                    posterUri={asset.thumbnailUrl}
+                    style={styles.image}
+                    controls
+                  />
+                ) : (
+                  <Image
+                    key={asset.id}
+                    source={{ uri: asset.url }}
+                    style={styles.image}
+                  />
+                )
               ))}
             </ScrollView>
           ) : (
-            <Image
-              source={{
-                uri:
-                  post.media[0]?.mediaType === "video"
-                    ? post.media[0]?.thumbnailUrl || post.media[0]?.url
-                    : post.media[0]?.url,
-              }}
-              style={styles.image}
-            />
+            post.media[0]?.mediaType === "video" ? (
+              <SocialVideo
+                uri={post.media[0]?.url}
+                posterUri={post.media[0]?.thumbnailUrl}
+                style={styles.image}
+                controls
+              />
+            ) : (
+              <Image
+                source={{ uri: post.media[0]?.url }}
+                style={styles.image}
+              />
+            )
           )}
 
           <View style={styles.body}>
@@ -222,7 +237,7 @@ function PostDetailScreen({ route, navigation }: any) {
             <View style={styles.actionRow}>
               <TouchableOpacity style={styles.actionIcon} onPress={toggleLike}>
                 <Icon name={post.liked ? "heart" : "heart-outline"} size={24} color={post.liked ? "#ef476f" : "#111"} />
-                <Text style={styles.actionCount}>{post.likesCount}</Text>
+                {!post.settings.hideLikeCount ? <Text style={styles.actionCount}>{post.likesCount}</Text> : null}
               </TouchableOpacity>
               <TouchableOpacity style={styles.actionIcon} onPress={() => setActiveSheet("comments")}>
                 <Icon name="chatbubble-outline" size={22} color="#111" />
@@ -312,7 +327,10 @@ function PostDetailScreen({ route, navigation }: any) {
             screen: "Create",
             params: {
               initialTab: "story",
-              initialMedia: nextPost.media[0]?.thumbnailUrl || nextPost.media[0]?.url,
+              initialMedia:
+                nextPost.media[0]?.mediaType === "video"
+                  ? nextPost.media[0]?.url
+                  : nextPost.media[0]?.thumbnailUrl || nextPost.media[0]?.url,
               initialMediaType: nextPost.media[0]?.mediaType || "image",
             },
           })

@@ -7,15 +7,16 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
-  Share
+  Alert
 } from "react-native";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/Ionicons";
 import Tooltip from "react-native-walkthrough-tooltip";
 import { API } from "../api/api";
+import { monetizationDisabledMessage, productFlags } from "../config/productFlags";
 import { formatPrimaryServicePrice, formatSummaryAmount } from "../utils/servicePricing";
+import { shareContentLink } from "../utils/shareLinks";
 
 const DEFAULT_COVER =
   "https://www.bcmch.org/asset/uploads/common/867349919655f1491613e4.webp";
@@ -25,7 +26,7 @@ const DEFAULT_AVATAR =
 
 const SellerDashboardScreen = ({ navigation }: any) => {
   const [expanded, setExpanded] = useState(false);
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(0);
   const [services, setServices] = useState([]);
   const [serviceLoading, setServiceLoading] = useState(true);
   const [requestSummary, setRequestSummary] = useState<any>(null);
@@ -36,11 +37,11 @@ const SellerDashboardScreen = ({ navigation }: any) => {
   const [seller, setSeller] = useState<any>(null);
 
   const next = () => setStep(step + 1);
-  const close = () => setStep(0);
-  const showUnavailableFeature = (feature: string) => {
-    Alert.alert("Not available yet", `${feature} is not implemented in the backend yet.`);
+  const close = async () => {
+    setStep(0);
+    await AsyncStorage.setItem("sellerDashboardGuideSeen", "true");
   };
-
+  const startGuide = () => setStep(1);
 const fetchServices = useCallback(async () => {
   try {
     const token = await AsyncStorage.getItem("token");
@@ -77,8 +78,15 @@ const handleDeleteService = (id: string) => {
 };
 
 const handleShareService = async (item: any) => {
-  await Share.share({
-    message: `${item.serviceName}\n${item.description}`
+  await shareContentLink({
+    originalUrl: seller?.clinicLink,
+    title: item?.serviceName || "Aline2 Service",
+    description: item?.description || "",
+    fallbackMessage: [
+      item?.serviceName || "Aline2 Service",
+      item?.description || "",
+      seller?.sellerName ? `Offered by ${seller.sellerName}` : "",
+    ].filter(Boolean).join("\n")
   });
 };
 const fetchRequestData = useCallback(async () => {
@@ -141,6 +149,25 @@ const fetchRequestData = useCallback(async () => {
     fetchServices();
     fetchRequestData();
   }, [fetchRequestData, fetchSellerProfile, fetchServices]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadGuideState = async () => {
+      const seenGuide = await AsyncStorage.getItem("sellerDashboardGuideSeen");
+      if (active && seenGuide !== "true") {
+        setStep(1);
+      }
+    };
+
+    loadGuideState().catch((error) => {
+      console.log("seller dashboard guide state error:", error);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const getVerificationLabel = () => {
     if (!seller?.verificationStatus) return "Pending";
@@ -210,6 +237,9 @@ const fetchRequestData = useCallback(async () => {
             <Icon name="settings-outline" size={22} color="#000" />
           </TouchableOpacity>
         </Tooltip>
+        <TouchableOpacity style={styles.headerBtn} onPress={startGuide}>
+          <Icon name="help-circle-outline" size={22} color="#7B4DFF" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -290,12 +320,21 @@ const fetchRequestData = useCallback(async () => {
           <View style={styles.walletCard}>
             <View style={styles.walletLeft}>
               <Icon name="wallet-outline" size={22} color="#7B4DFF" />
-              <Text style={styles.walletTitle}>Seller Wallet</Text>
+              <Text style={styles.walletTitle}>
+                {productFlags.sellerMonetizationInConsumerApp ? "Seller Wallet" : "Completed Request Value"}
+              </Text>
             </View>
 
             <Text style={styles.walletAmount}>{formatSummaryAmount(requestSummary, "completed")}</Text>
           </View>
         </Tooltip>
+
+        {!productFlags.sellerMonetizationInConsumerApp ? (
+          <View style={styles.readOnlyInfoCard}>
+            <Icon name="information-circle-outline" size={18} color="#6b7280" />
+            <Text style={styles.readOnlyInfoText}>{monetizationDisabledMessage}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.stats}>
           <View style={styles.statBox}>
@@ -677,6 +716,26 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 16,
     color: "#7B4DFF"
+  },
+  readOnlyInfoCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginHorizontal: 20,
+    marginTop: -4,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F8FAFC"
+  },
+  readOnlyInfoText: {
+    flex: 1,
+    marginLeft: 10,
+    color: "#4B5563",
+    lineHeight: 20,
+    fontSize: 13
   },
 
   stats: {

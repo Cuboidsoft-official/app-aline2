@@ -10,10 +10,30 @@ export interface SocialUser {
 }
 
 export interface StoryMusic {
+  id?: string;
   trackName: string;
   artistName?: string;
+  artworkUrl?: string;
+  previewUrl?: string;
+  source?: string;
+  isOriginal?: boolean;
   startTime?: number;
   duration?: number;
+}
+
+export interface SelectedMusicClip {
+  id: string;
+  externalId?: string;
+  title: string;
+  artist?: string;
+  artworkUrl?: string;
+  previewUrl?: string;
+  externalUrl?: string;
+  source?: string;
+  isOriginal?: boolean;
+  duration: number;
+  clipStartTime?: number;
+  clipDuration?: number;
 }
 
 export interface MediaAsset {
@@ -189,7 +209,7 @@ export interface CreatePostInput {
   caption: string;
   media: MediaAsset[];
   location?: string;
-  music?: string;
+  music?: SelectedMusicClip;
   hashtags?: string[];
   mentions?: string[];
   collaboratorIds?: string[];
@@ -210,14 +230,14 @@ export interface CreateStoryInput {
   visibleToUserIds?: string[];
   allowReplies?: boolean;
   allowSharing?: boolean;
-  music?: StoryMusic;
+  music?: SelectedMusicClip;
 }
 
 export interface CreateReelInput {
   caption: string;
   media: MediaAsset;
   thumbnailUrl?: string;
-  music?: string;
+  music?: SelectedMusicClip;
   hashtags?: string[];
   mentions?: string[];
   location?: string;

@@ -12,7 +12,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
-import { socket } from "../socket";
+import { connectSocket, socket } from "../socket";
 import { Swipeable } from "react-native-gesture-handler";
 import { getStoredToken, getStoredUserId } from "../utils/authSession";
 
@@ -44,6 +44,7 @@ interface AppNotification {
   _id: string;
   type: NotificationKind;
   createdAt: string;
+  read?: boolean;
   sender?: NotificationUser | null;
   post?: NotificationTarget | string | null;
   story?: NotificationTarget | string | null;
@@ -78,10 +79,21 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
   useEffect(() => {
     fetchNotifications();
 
+    connectSocket().catch((error) => {
+      console.log("Notification socket connect error:", error);
+    });
+
     socket.on("connect", () => console.log("Socket connected"));
 
     socket.on("receiveNotification", (data: AppNotification) => {
-      setNotifications(prev => [data, ...prev]);
+      setNotifications(prev => {
+        if (prev.some((item) => item._id === data._id)) {
+          return prev;
+        }
+
+        return [data, ...prev];
+      });
+      setUnreadCount(prev => prev + 1);
     });
 
     return () => {
@@ -98,11 +110,15 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
 
   const deleteNotification = async (id: string) => {
     try {
+      const existing = notifications.find((item) => item._id === id);
       const token = await getStoredToken();
       await API.delete(`/notifications/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setNotifications(prev => prev.filter(n => n._id !== id));
+      if (existing?.read === false) {
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
     } catch (err) {
       console.log("Notification delete error:", err);
     }
@@ -115,6 +131,12 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
         headers: { Authorization: `Bearer ${token}` }
       });
       setUnreadCount(0);
+      setNotifications((prev) =>
+        prev.map((notification) => ({
+          ...notification,
+          read: true,
+        }))
+      );
     } catch (err) {
       console.log("Notification read-all error:", err);
     }
@@ -133,6 +155,25 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
   };
 
   const handlePress = (item: AppNotification) => {
+    if (item._id && item.read === false) {
+      getStoredToken().then((token) =>
+        API.put(`/notifications/read/${item._id}`, null, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch((error) => {
+          console.log("Notification mark-read error:", error);
+        })
+      );
+
+      setNotifications((prev) =>
+        prev.map((notification) =>
+          notification._id === item._id
+            ? { ...notification, read: true }
+            : notification
+        )
+      );
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+    }
+
     const openStory = async (storyOwnerId?: string) => {
       const storyId = getTargetId(item.story);
       if (!storyId) {
@@ -305,6 +346,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
           </Text>
         </View>
 
+        {!item.read ? <View style={styles.unreadDot} /> : null}
         <Icon name={getIcon(item.type)} size={22} color="#555" />
       </TouchableOpacity>
     </Swipeable>
@@ -366,5 +408,5 @@ const styles = StyleSheet.create({
   time:{fontSize:12, color:"#999", marginTop:4},
   deleteBtn:{backgroundColor:"#ff3b30", justifyContent:"center", alignItems:"center", width:80, marginTop:10, borderTopRightRadius:0, borderBottomRightRadius:0},
   center:{flex:1, justifyContent:"center", alignItems:"center"},
-  unreadDot:{width:10, height:10, borderRadius:5, backgroundColor:"#0095f6", position:"absolute", right:40, top:26}
+  unreadDot:{width:10, height:10, borderRadius:5, backgroundColor:"#0095f6", marginRight:10}
 });

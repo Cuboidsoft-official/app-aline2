@@ -8,6 +8,7 @@ import ProfileView from "../screens/ProfileView";
 import CreatePostScreen from "../screens/CreatePostScreen";
 import AllChatsScreen from "../screens/AllChatsScreen";
 import SwipesScreen from "../screens/social/SwipesScreen";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 const Tab = createBottomTabNavigator();
 
@@ -41,15 +42,24 @@ function TabBarButton(props) {
 }
 
 export default function BottomTabs() {
+  const { colors } = useAppTheme();
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarActiveTintColor: "#7b3fe4",
-        tabBarInactiveTintColor: "#555",
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.tabInactive,
         tabBarIcon: ({ focused, color }) => renderTabIcon(route.name, focused, color),
         tabBarButton: TabBarButton,
+        tabBarStyle: {
+          backgroundColor: colors.card,
+          borderTopColor: colors.border,
+        },
+        sceneStyle: {
+          backgroundColor: colors.background,
+        },
       })}
     >
       <Tab.Screen name="Feed" component={FeedScreen} />

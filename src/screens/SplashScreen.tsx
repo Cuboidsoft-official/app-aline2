@@ -41,7 +41,7 @@ try {
  });
 
  navigation.replace("MainApp");
-} catch (error) {
+} catch (error: any) {
  console.log("Session validation failed:", error);
  console.log("Session validation error details:", {
   baseURL: API.defaults?.baseURL,

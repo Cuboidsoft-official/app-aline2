@@ -1,4 +1,4 @@
-import { Asset, ImageLibraryOptions, launchImageLibrary } from "react-native-image-picker";
+import { Asset, CameraOptions, ImageLibraryOptions, launchCamera, launchImageLibrary } from "react-native-image-picker";
 
 import { API } from "../../api/api";
 import { MediaAsset } from "./types";
@@ -81,6 +81,20 @@ export const pickComposerAssets = async (options: ImageLibraryOptions): Promise<
 
   if (result.errorCode) {
     throw new Error(result.errorMessage || "Could not access your media library.");
+  }
+
+  return (result.assets || []).map(normalizeAsset);
+};
+
+export const captureComposerAssets = async (options: CameraOptions): Promise<ComposerAsset[]> => {
+  const result = await launchCamera(options);
+
+  if (result.didCancel) {
+    return [];
+  }
+
+  if (result.errorCode) {
+    throw new Error(result.errorMessage || "Could not access your camera.");
   }
 
   return (result.assets || []).map(normalizeAsset);
