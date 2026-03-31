@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import {View,Text,Switch,StyleSheet,ActivityIndicator,Alert,TouchableOpacity} from "react-native";
+import {View,Text,Switch,StyleSheet,ActivityIndicator,Alert,TouchableOpacity,ScrollView} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
@@ -76,7 +76,7 @@ const NotificationSettingsScreen = ({ navigation }: any) => {
 
  if (loading) {
   return (
-   <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+   <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
     <View style={styles.loader}>
      <ActivityIndicator size="large" color={colors.primary} />
     </View>
@@ -85,7 +85,7 @@ const NotificationSettingsScreen = ({ navigation }: any) => {
  }
 
  return(
-  <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+  <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
    <View style={[styles.header, { borderBottomColor: colors.border }]}>
     <TouchableOpacity onPress={() => navigation.goBack()}>
      <Icon name="arrow-back" size={24} color={colors.text} />
@@ -94,24 +94,28 @@ const NotificationSettingsScreen = ({ navigation }: any) => {
     <View style={styles.headerSpacer} />
    </View>
 
-   <Text style={[styles.helper, { color: colors.mutedText }]}>
-    These settings now control which in-app notifications are created for your account.
-   </Text>
+   <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <View style={[styles.helperCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+     <Text style={[styles.helper, { color: colors.mutedText }]}>
+      These settings now control which in-app notifications are created for your account.
+     </Text>
+    </View>
 
-   <View style={styles.list}>
-    {settingItems.map((item) => (
-     <View key={item.key} style={[styles.item, { borderBottomColor: colors.border }]}>
-      <Text style={[styles.itemText, { color: colors.text }]}>{item.label}</Text>
-      <View style={styles.switchWrap}>
-       {savingKey === item.key ? <ActivityIndicator size="small" color={colors.primary} style={styles.spinner} /> : null}
-       <Switch
-        value={Boolean(settings[item.key])}
-        onValueChange={(value) => updateSetting(item.key, value)}
-       />
+    <View style={[styles.listCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+     {settingItems.map((item) => (
+      <View key={item.key} style={[styles.item, { borderBottomColor: colors.border }]}>
+       <Text style={[styles.itemText, { color: colors.text }]}>{item.label}</Text>
+       <View style={styles.switchWrap}>
+        {savingKey === item.key ? <ActivityIndicator size="small" color={colors.primary} style={styles.spinner} /> : null}
+        <Switch
+         value={Boolean(settings[item.key])}
+         onValueChange={(value) => updateSetting(item.key, value)}
+        />
+       </View>
       </View>
-     </View>
-    ))}
-   </View>
+     ))}
+    </View>
+   </ScrollView>
   </SafeAreaView>
  );
 };
@@ -120,11 +124,13 @@ export default NotificationSettingsScreen;
 
 const styles = StyleSheet.create({
  container:{flex:1},
+ content:{paddingHorizontal:20,paddingTop:18,paddingBottom:32},
  header:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",paddingHorizontal:20,paddingTop:12,paddingBottom:16,borderBottomWidth:1},
  headerTitle:{fontSize:18,fontWeight:"700"},
  headerSpacer:{width:24},
- helper:{paddingHorizontal:20,paddingTop:18,paddingBottom:8,fontSize:14,lineHeight:20},
- list:{paddingHorizontal:20,paddingTop:8},
+ helperCard:{borderWidth:1,borderRadius:18,paddingHorizontal:16,paddingVertical:14},
+ helper:{fontSize:14,lineHeight:20},
+ listCard:{marginTop:14,borderWidth:1,borderRadius:20,overflow:"hidden"},
  item:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingVertical:18,borderBottomWidth:1},
  itemText:{fontSize:15,fontWeight:"500"},
  switchWrap:{flexDirection:"row",alignItems:"center"},

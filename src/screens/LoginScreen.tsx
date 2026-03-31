@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { API } from '../api/api';
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { setStoredSession } from "../utils/authSession";
+import { isGoogleCancelledError, loginWithGoogle } from "../utils/googleAuth";
 
 import {
   Alert,
@@ -19,6 +20,8 @@ const LoginScreen = ({ navigation, route }: any) => {
 
   const [email, setEmail] = useState(presetEmail || '');
   const [password, setPassword] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   useEffect(() => {
     if (presetEmail) {
@@ -38,7 +41,9 @@ const LoginScreen = ({ navigation, route }: any) => {
 
       if (res?.data?.success) {
         await setStoredSession({
-          token: res.data.token,
+          accessToken: res.data.accessToken || res.data.token,
+          refreshToken: res.data.refreshToken,
+          session: res.data.session,
           user: res.data.user,
         });
 
@@ -58,6 +63,61 @@ const LoginScreen = ({ navigation, route }: any) => {
         responseData: error?.response?.data,
       });
       Alert.alert("Login failed", getReadableApiErrorMessage(error, "Something went wrong"));
+    }
+  };
+
+  const handleEmailOtpLogin = async () => {
+    const cleanEmail = String(email || '').trim().toLowerCase();
+
+    if (!cleanEmail) {
+      Alert.alert("Missing email", "Enter your email first to receive a login OTP.");
+      return;
+    }
+
+    try {
+      setOtpLoading(true);
+      const res = await API.post("/auth/send-otp", {
+        email: cleanEmail,
+        purpose: "login",
+      });
+
+      if (res?.data?.success) {
+        navigation.navigate("OtpVerify", {
+          email: cleanEmail,
+          purpose: "login",
+        });
+        return;
+      }
+
+      Alert.alert("Unable to send OTP", res?.data?.message || "Please try again.");
+    } catch (error: any) {
+      Alert.alert("Unable to send OTP", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      setGoogleLoading(true);
+      const result = await loginWithGoogle();
+
+      if (result.cancelled) {
+        return;
+      }
+
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "MainApp" }],
+      });
+    } catch (error: any) {
+      if (isGoogleCancelledError(error)) {
+        return;
+      }
+
+      Alert.alert("Google login failed", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -102,19 +162,23 @@ const LoginScreen = ({ navigation, route }: any) => {
           <Text style={styles.forgot}>Forgot password?</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() =>
-            navigation.navigate("FeatureInfoScreen", {
-              title: "Mobile OTP Login",
-              description:
-                "Mobile-number OTP login is not available in the current backend yet. The supported auth flows are email/password and email OTP.",
-            })
-          }
-        >
-          <Text style={styles.forgot}>Use mobile OTP</Text>
+        <TouchableOpacity onPress={handleEmailOtpLogin} disabled={otpLoading}>
+          <Text style={styles.forgot}>{otpLoading ? "Sending OTP..." : "Use email OTP instead"}</Text>
         </TouchableOpacity>
 
+        <Text style={styles.supportedHint}>Supported sign in: password or email OTP</Text>
+
         <View style={styles.divider} />
+
+        <TouchableOpacity
+          style={[styles.googleButton, googleLoading && styles.buttonDisabled]}
+          onPress={handleGoogleLogin}
+          disabled={googleLoading}
+        >
+          <Text style={styles.googleText}>
+            {googleLoading ? "Connecting Google..." : "Continue with Google"}
+          </Text>
+        </TouchableOpacity>
 
         <TouchableOpacity style={styles.signupButton} onPress={() => navigation.navigate('Signup')}>
           <Text style={styles.signupText}>Create new account</Text>
@@ -214,15 +278,42 @@ const styles = StyleSheet.create({
 
   forgot: {
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 12,
     color: '#555',
     fontWeight: '500',
+  },
+
+  supportedHint: {
+    textAlign: 'center',
+    marginBottom: 20,
+    color: '#666',
+    fontSize: 13,
   },
 
   divider: {
     height: 1,
     backgroundColor: '#ddd',
     marginVertical: 15,
+  },
+
+  googleButton: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    paddingVertical: 15,
+    borderRadius: 30,
+    alignItems: 'center',
+    marginBottom: 12,
+    backgroundColor: '#fff',
+  },
+
+  googleText: {
+    color: '#222',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+
+  buttonDisabled: {
+    opacity: 0.7,
   },
 
   signupButton: {

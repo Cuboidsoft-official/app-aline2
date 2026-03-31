@@ -11,7 +11,6 @@ import {
   Alert,
   ActivityIndicator
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { launchImageLibrary } from "react-native-image-picker";
 import {
   errorCodes,
@@ -23,13 +22,12 @@ import {
 } from "@react-native-documents/picker";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
+import { getStoredToken } from "../utils/authSession";
 import { uploadDocumentAsset, uploadImageAsset } from "../utils/uploadMedia";
+import { DEFAULT_AVATAR_URL, DEFAULT_COVER_URL } from "../constants/defaultAssets";
 
-const DEFAULT_COVER =
-  "https://www.bcmch.org/asset/uploads/common/867349919655f1491613e4.webp";
-
-const DEFAULT_AVATAR =
-  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQikGmpeh_S05yj5punOSDXG-utlTE1TRdFWQ&s";
+const DEFAULT_COVER = DEFAULT_COVER_URL;
+const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
 
 type DocumentFile = {
   uri: string;
@@ -152,7 +150,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
     const loadSellerProfile = async () => {
       try {
         setInitializing(true);
-        const token = await AsyncStorage.getItem("token");
+        const token = await getStoredToken();
         const res = await API.get("/seller/me", {
           headers: {
             Authorization: `Bearer ${token}`
@@ -383,7 +381,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
       setLoading(true);
 
-      const token = await AsyncStorage.getItem("token");
+      const token = await getStoredToken();
 
       if (!token) {
         Alert.alert("Error", "User token not found. Please login again.");

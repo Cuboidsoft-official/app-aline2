@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -18,7 +19,7 @@ import ContentActionSheet from "../../features/social/components/ContentActionSh
 import SocialVideo from "../../features/social/components/SocialVideo";
 import StoryActivitySheet from "../../features/social/components/StoryActivitySheet";
 import { socialApi } from "../../features/social/socialApi";
-import { Story } from "../../features/social/types";
+import { Story, StoryFilterPreset } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
 
 const DEFAULT_STORY_MS = 5000;
@@ -47,6 +48,26 @@ const getStoryDuration = (story: Story | undefined): number => {
 
 const isSyncedStoryId = (storyId: string | undefined): boolean =>
   typeof storyId === "string" && /^[a-fA-F0-9]{24}$/.test(storyId);
+
+const getStoryFilterOverlayStyle = (
+  preset: StoryFilterPreset | undefined,
+  intensity = 1,
+): { backgroundColor: string; opacity: number } | null => {
+  const safeIntensity = Math.min(1, Math.max(0.2, intensity));
+  switch (preset) {
+    case "warm":
+      return { backgroundColor: "#f59e0b", opacity: 0.18 * safeIntensity };
+    case "cool":
+      return { backgroundColor: "#38bdf8", opacity: 0.18 * safeIntensity };
+    case "noir":
+      return { backgroundColor: "#020617", opacity: 0.34 * safeIntensity };
+    case "dream":
+      return { backgroundColor: "#ec4899", opacity: 0.16 * safeIntensity };
+    case "none":
+    default:
+      return null;
+  }
+};
 
 function StoryViewerScreen({ route, navigation }: any) {
   const storyId = typeof route?.params?.storyId === "string" ? route.params.storyId : "";
@@ -257,6 +278,58 @@ function StoryViewerScreen({ route, navigation }: any) {
     replyInputRef.current?.focus();
   };
 
+  const openStoryLink = async () => {
+    if (!currentStory?.linkUrl) {
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(currentStory.linkUrl);
+      if (!supported) {
+        throw new Error("This link could not be opened on your device.");
+      }
+      await Linking.openURL(currentStory.linkUrl);
+    } catch (error) {
+      Alert.alert("Could not open link", toUserSafeMessage(error));
+    }
+  };
+
+  const openStoryLocation = async () => {
+    if (!currentStory?.location) {
+      return;
+    }
+
+    const query = encodeURIComponent(currentStory.location);
+    const url = `https://www.google.com/maps/search/?api=1&query=${query}`;
+
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        throw new Error("This location could not be opened on your device.");
+      }
+      await Linking.openURL(url);
+    } catch (error) {
+      Alert.alert("Could not open location", toUserSafeMessage(error));
+    }
+  };
+
+  const openStoryHashtag = (tag: string) => {
+    const normalizedTag = String(tag || "").replace(/^#/, "").trim();
+    if (!normalizedTag) {
+      return;
+    }
+
+    navigation.navigate("HashtagResultsScreen", { hashtag: normalizedTag });
+  };
+
+  const openStoryMention = (userId?: string) => {
+    if (!userId) {
+      return;
+    }
+
+    navigation.navigate("ProfilePreviewScreen", { userId });
+  };
+
   const openOwnerActivity = (tab: "views" | "likes" | "replies") => {
     setOwnerActivityTab(tab);
     setShowOwnerActivity(true);
@@ -356,6 +429,90 @@ function StoryViewerScreen({ route, navigation }: any) {
     return null;
   };
 
+  const renderFloatingStickers = () => {
+    if (!currentStory?.stickers.length) {
+      return null;
+    }
+
+    return (
+      <View pointerEvents="none" style={styles.floatingStickerLayer}>
+        {currentStory.stickers.map((sticker) => {
+          const baseStyle = {
+            left: `${Math.max(0, Math.min(1, sticker.position.x)) * 100}%`,
+            top: `${Math.max(0, Math.min(1, sticker.position.y)) * 100}%`,
+            width: `${Math.max(0.12, Math.min(1, sticker.position.width)) * 100}%`,
+            minHeight: `${Math.max(0.08, Math.min(1, sticker.position.height)) * 100}%`,
+            transform: [
+              { rotate: `${sticker.position.rotation || 0}deg` },
+              { scale: sticker.position.scale || 1 },
+            ],
+          } as const;
+
+          if (sticker.type === "emoji") {
+            return (
+              <View key={sticker.id} style={[styles.floatingEmojiSticker, baseStyle]}>
+                <Text
+                  style={[
+                    styles.floatingEmojiText,
+                    sticker.style?.fontSize ? { fontSize: sticker.style.fontSize } : null,
+                  ]}
+                >
+                  {sticker.text}
+                </Text>
+              </View>
+            );
+          }
+
+          return (
+            <View
+              key={sticker.id}
+              style={[
+                styles.floatingTextSticker,
+                baseStyle,
+                sticker.style?.backgroundColor ? { backgroundColor: sticker.style.backgroundColor } : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.floatingTextStickerText,
+                  sticker.style?.color ? { color: sticker.style.color } : null,
+                  sticker.style?.fontSize ? { fontSize: sticker.style.fontSize } : null,
+                  sticker.style?.alignment ? { textAlign: sticker.style.alignment } : null,
+                ]}
+              >
+                {sticker.text}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
+  const renderStoryFilterOverlay = () => {
+    if (!currentStory?.media) {
+      return null;
+    }
+
+    const filterStyle = getStoryFilterOverlayStyle(currentStory.filterPreset, currentStory.filterIntensity);
+    if (!filterStyle) {
+      return null;
+    }
+
+    return (
+      <View
+        pointerEvents="none"
+        style={[
+          styles.storyFilterOverlay,
+          {
+            backgroundColor: filterStyle.backgroundColor,
+            opacity: filterStyle.opacity,
+          },
+        ]}
+      />
+    );
+  };
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -379,6 +536,8 @@ function StoryViewerScreen({ route, navigation }: any) {
   return (
     <SafeAreaView style={styles.container}>
       {renderStoryBody()}
+      {renderStoryFilterOverlay()}
+      {renderFloatingStickers()}
       <LinearGradient colors={["rgba(0,0,0,0.72)", "rgba(0,0,0,0.15)", "transparent"]} style={styles.topFade} />
       <LinearGradient colors={["transparent", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.82)"]} style={styles.bottomFade} />
 
@@ -436,11 +595,49 @@ function StoryViewerScreen({ route, navigation }: any) {
           </View>
         ) : null}
         {currentStory.linkUrl ? (
-          <View style={styles.metaChip}>
+          <TouchableOpacity style={styles.metaChip} onPress={openStoryLink}>
             <Icon name="link-outline" size={14} color="#fff" />
             <Text style={styles.metaChipText}>Tap link available</Text>
-          </View>
+          </TouchableOpacity>
         ) : null}
+        {currentStory.location ? (
+          <TouchableOpacity style={styles.metaChip} onPress={openStoryLocation}>
+            <Icon name="location-outline" size={14} color="#fff" />
+            <Text style={styles.metaChipText}>{currentStory.location}</Text>
+          </TouchableOpacity>
+        ) : null}
+        {currentStory.hashtags.slice(0, 2).map((tag) => (
+          <TouchableOpacity key={`story-tag-${tag}`} style={styles.metaChip} onPress={() => openStoryHashtag(tag)}>
+            <Icon name="pricetag-outline" size={14} color="#fff" />
+            <Text style={styles.metaChipText}>#{tag}</Text>
+          </TouchableOpacity>
+        ))}
+        {(currentStory.mentionTargets && currentStory.mentionTargets.length
+          ? currentStory.mentionTargets
+          : currentStory.mentions.map((mention) => ({ id: undefined, username: mention })))
+          .slice(0, 2)
+          .map((mention) => {
+            const content = (
+              <>
+                <Icon name="at-outline" size={14} color="#fff" />
+                <Text style={styles.metaChipText}>@{mention.username}</Text>
+              </>
+            );
+
+            return mention.id ? (
+              <TouchableOpacity
+                key={`story-mention-${mention.id}-${mention.username}`}
+                style={styles.metaChip}
+                onPress={() => openStoryMention(mention.id)}
+              >
+                {content}
+              </TouchableOpacity>
+            ) : (
+              <View key={`story-mention-${mention.username}`} style={styles.metaChip}>
+                {content}
+              </View>
+            );
+          })}
       </View>
 
       <Pressable
@@ -610,6 +807,34 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     textAlign: "center",
     lineHeight: 38,
+  },
+  floatingStickerLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  storyFilterOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  floatingEmojiSticker: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  floatingEmojiText: {
+    fontSize: 34,
+    textAlign: "center",
+  },
+  floatingTextSticker: {
+    position: "absolute",
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "rgba(15,23,42,0.55)",
+    justifyContent: "center",
+  },
+  floatingTextStickerText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
   },
   progressRow: {
     flexDirection: "row",

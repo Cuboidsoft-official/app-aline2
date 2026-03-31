@@ -2,13 +2,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import { API } from "../api/api";
@@ -74,9 +77,14 @@ const ForgotPasswordScreen = ({ navigation, route }: any) => {
       });
 
       if (res?.data?.success) {
-        setStep("reset");
-        setPassword("");
-        setConfirmPassword("");
+        if (res?.data?.nextStep === "reset_password") {
+          setStep("reset");
+          setPassword("");
+          setConfirmPassword("");
+          return;
+        }
+
+        Alert.alert("OTP verification failed", "The server returned an unexpected verification state. Please request a new OTP.");
         return;
       }
 
@@ -151,77 +159,79 @@ const ForgotPasswordScreen = ({ navigation, route }: any) => {
         <View style={styles.headerSpacer} />
       </View>
 
-      <View style={styles.content}>
-        <Text style={[styles.title, { color: colors.text }]}>Recover your account</Text>
-        <Text style={[styles.subtitle, { color: colors.mutedText }]}>
-          {step === "request"
-            ? "Enter your email and we’ll send you a verification code."
-            : step === "verify"
-              ? "Enter the 6 digit OTP sent to your email."
-              : "Create a new password for your account."}
-        </Text>
+      <KeyboardAvoidingView style={styles.flexFill} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <Text style={[styles.title, { color: colors.text }]}>Recover your account</Text>
+          <Text style={[styles.subtitle, { color: colors.mutedText }]}>
+            {step === "request"
+              ? "Enter your email and we’ll send you a verification code."
+              : step === "verify"
+                ? "Enter the 6 digit OTP sent to your email."
+                : "Create a new password for your account."}
+          </Text>
 
-        <TextInput
-          placeholder="Email address"
-          style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          value={email}
-          onChangeText={setEmail}
-          editable={!loading && step === "request"}
-          placeholderTextColor={colors.placeholder}
-        />
-
-        {step !== "request" ? (
           <TextInput
-            placeholder="Enter OTP"
+            placeholder="Email address"
             style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-            keyboardType="number-pad"
-            maxLength={6}
-            value={otp}
-            onChangeText={setOtp}
-            editable={!loading && step === "verify"}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            value={email}
+            onChangeText={setEmail}
+            editable={!loading && step === "request"}
             placeholderTextColor={colors.placeholder}
           />
-        ) : null}
 
-        {step === "reset" ? (
-          <>
+          {step === "verify" ? (
             <TextInput
-              placeholder="New password"
+              placeholder="Enter OTP"
               style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
+              keyboardType="number-pad"
+              maxLength={6}
+              value={otp}
+              onChangeText={setOtp}
               editable={!loading}
               placeholderTextColor={colors.placeholder}
             />
-            <TextInput
-              placeholder="Confirm new password"
-              style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-              secureTextEntry
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              editable={!loading}
-              placeholderTextColor={colors.placeholder}
-            />
-          </>
-        ) : null}
+          ) : null}
 
-        <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={handlePrimaryAction} disabled={loading}>
-          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>{actionLabel}</Text>}
-        </TouchableOpacity>
+          {step === "reset" ? (
+            <>
+              <TextInput
+                placeholder="New password"
+                style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+                editable={!loading}
+                placeholderTextColor={colors.placeholder}
+              />
+              <TextInput
+                placeholder="Confirm new password"
+                style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+                secureTextEntry
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                editable={!loading}
+                placeholderTextColor={colors.placeholder}
+              />
+            </>
+          ) : null}
 
-        {step === "verify" ? (
-          <TouchableOpacity style={styles.secondaryButton} onPress={() => sendOtp().catch(() => {})} disabled={loading}>
-            <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Resend OTP</Text>
+          <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={handlePrimaryAction} disabled={loading}>
+            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>{actionLabel}</Text>}
           </TouchableOpacity>
-        ) : null}
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => navigation.replace("Login", { email: normalizedEmail || presetEmail })} disabled={loading}>
-          <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Back to Login</Text>
-        </TouchableOpacity>
-      </View>
+          {step === "verify" ? (
+            <TouchableOpacity style={styles.secondaryButton} onPress={() => sendOtp().catch(() => {})} disabled={loading}>
+              <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Resend OTP</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => navigation.replace("Login", { email: normalizedEmail || presetEmail })} disabled={loading}>
+            <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Back to Login</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -232,6 +242,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#fff",
+  },
+  flexFill: {
+    flex: 1,
   },
   header: {
     flexDirection: "row",
@@ -250,9 +263,9 @@ const styles = StyleSheet.create({
     width: 24,
   },
   content: {
-    flex: 1,
     paddingHorizontal: 24,
     paddingTop: 24,
+    paddingBottom: 32,
   },
   title: {
     fontSize: 24,

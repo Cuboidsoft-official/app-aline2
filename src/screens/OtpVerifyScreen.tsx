@@ -1,206 +1,254 @@
-import React, { useState, useRef } from 'react';
+import React, { useRef, useState } from "react";
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-  Alert,
-  ActivityIndicator
-} from 'react-native';
-import { API } from '../api/api';
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { setStoredSession } from "../utils/authSession";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 const OtpVerifyScreen = ({ route, navigation }: any) => {
-
+  const { colors } = useAppTheme();
   const email = route?.params?.email || null;
-  const [otp, setOtp] = useState('');
+  const purpose = route?.params?.purpose === "login" ? "login" : "signup";
+  const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<TextInput>(null);
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswordCard, setShowPasswordCard] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
 
   const verifyOtp = async () => {
-
     if (!email) {
-      Alert.alert("Error", "Email not found. Please signup again.");
+      Alert.alert("Error", "Email not found. Please start again.");
       return;
     }
 
-    if (!otp || otp.length !== 6) {
-      Alert.alert("Error", "Please enter valid 6 digit OTP");
+    if (String(otp || "").trim().length !== 6) {
+      Alert.alert("Error", "Please enter a valid 6 digit OTP.");
       return;
     }
 
-    if (loading) return;
+    if (loading) {
+      return;
+    }
 
     try {
       setLoading(true);
 
-      console.log("Sending OTP verify request:", { email, otp });
-
       const res = await API.post("/auth/verify-otp", {
         email,
-        otp: String(otp)
+        otp: String(otp).trim(),
       });
 
-      console.log("Verify Response:", res?.data);
-
-      if (res?.data?.success) {
-
-       setShowPasswordModal(true);
-
-       setOtp('');
-
-      } else {
-        Alert.alert("Error", res?.data?.message || "Invalid OTP");
+      if (!res?.data?.success) {
+        Alert.alert("Verification Failed", res?.data?.message || "Invalid OTP");
+        return;
       }
 
-    } catch (err: any) {
+      if (res?.data?.token && res?.data?.user) {
+        await setStoredSession({
+          accessToken: res.data.accessToken || res.data.token,
+          refreshToken: res.data.refreshToken,
+          session: res.data.session,
+          user: res.data.user,
+        });
 
-      console.log("Verify OTP Error Full:", err);
-      console.log("Server Response:", err?.response?.data);
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "MainApp" }],
+        });
+        return;
+      }
 
-      Alert.alert(
-        "Verification Failed",
-        getReadableApiErrorMessage(
-          err,
-          "Server error. Please try again."
-        )
-      );
+      if (res?.data?.nextStep === "reset_password") {
+        navigation.replace("ForgotPassword", { email });
+        return;
+      }
 
+      if (res?.data?.nextStep === "set_password" || purpose === "signup") {
+        setShowPasswordCard(true);
+        setOtp("");
+        return;
+      }
+
+      Alert.alert("Verification Failed", "The server returned an unexpected verification state.");
+    } catch (error: any) {
+      Alert.alert("Verification Failed", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setLoading(false);
     }
   };
 
-const handleSetPassword = async () => {
+  const handleSetPassword = async () => {
+    if (!password || password.length < 6) {
+      Alert.alert("Error", "Password must be at least 6 characters.");
+      return;
+    }
 
-  if (!password || password.length < 6) {
-    Alert.alert("Error", "Password must be at least 6 characters");
-    return;
-  }
+    if (password !== confirmPassword) {
+      Alert.alert("Error", "Passwords do not match.");
+      return;
+    }
 
-  if (password !== confirmPassword) {
-    Alert.alert("Error", "Passwords do not match");
-    return;
-  }
+    try {
+      setPasswordLoading(true);
 
-  try {
-    setPasswordLoading(true);
-
-    const res = await API.post("/auth/set-password", {
-      email,
-      password
-    });
-
-    if (res?.data?.success) {
-      const loginRes = await API.post("/auth/login", {
+      const res = await API.post("/auth/set-password", {
         email,
-        password
+        password,
       });
 
-      if (!loginRes?.data?.success || !loginRes?.data?.token || !loginRes?.data?.user) {
+      if (!res?.data?.success) {
+        Alert.alert("Error", res?.data?.message || "Something went wrong.");
+        return;
+      }
+
+      const loginRes = await API.post("/auth/login", { email, password });
+
+      if (!loginRes?.data?.success || !loginRes?.data?.user) {
         Alert.alert("Almost there", "Password was set, but we could not sign you in automatically. Please log in.");
         navigation.replace("Login", { email });
         return;
       }
 
       await setStoredSession({
-        token: loginRes.data.token,
-        user: loginRes.data.user
+        accessToken: loginRes.data.accessToken || loginRes.data.token,
+        refreshToken: loginRes.data.refreshToken,
+        session: loginRes.data.session,
+        user: loginRes.data.user,
       });
 
-      setShowPasswordModal(false);
       navigation.reset({
         index: 0,
-        routes: [{ name: "MainApp" }]
+        routes: [{ name: "MainApp" }],
       });
-    } else {
-      Alert.alert("Error", res?.data?.message || "Something went wrong");
+    } catch (error: any) {
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Server error"));
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  const resendOtp = async () => {
+    if (!email || resendLoading) {
+      return;
     }
 
-  } catch (error: any) {
-    Alert.alert("Error", getReadableApiErrorMessage(error, "Server error"));
-  } finally {
-    setPasswordLoading(false);
-  }
-};
+    try {
+      setResendLoading(true);
+      const res = await API.post("/auth/send-otp", {
+        email,
+        purpose,
+      });
+
+      if (res?.data?.success) {
+        Alert.alert("OTP sent", res?.data?.message || "A fresh verification code has been sent.");
+        return;
+      }
+
+      Alert.alert("Unable to resend OTP", res?.data?.message || "Please try again.");
+    } catch (error: any) {
+      Alert.alert("Unable to resend OTP", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setResendLoading(false);
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <KeyboardAvoidingView style={styles.flexFill} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Text style={[styles.backArrow, { color: colors.text }]}>← Back</Text>
+          </TouchableOpacity>
 
-      <Text style={styles.title}>Verify OTP</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Verify OTP</Text>
+          <Text style={[styles.subtitle, { color: colors.mutedText }]}>
+            {purpose === "login" ? "Login code sent to " : "OTP sent to "} {email || "your email"}
+          </Text>
 
-      <Text style={styles.subtitle}>
-        OTP sent to {email || "your email"}
-      </Text>
+          <TextInput
+            ref={inputRef}
+            placeholder="Enter 6 digit OTP"
+            value={otp}
+            onChangeText={setOtp}
+            style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+            keyboardType="number-pad"
+            maxLength={6}
+            autoFocus
+            placeholderTextColor={colors.placeholder}
+          />
 
-      <TextInput
-        ref={inputRef}
-        placeholder="Enter 6 digit OTP"
-        value={otp}
-        onChangeText={setOtp}
-        style={styles.input}
-        keyboardType="number-pad"
-        maxLength={6}
-        autoFocus
-      />
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: colors.primary }, loading && styles.disabledButton]}
+            onPress={verifyOtp}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>{purpose === "login" ? "Log in with OTP" : "Verify"}</Text>
+            )}
+          </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[styles.button, loading && { opacity: 0.7 }]}
-        onPress={verifyOtp}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Verify</Text>
-        )}
-      </TouchableOpacity>
-
-      {showPasswordModal && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-
-            <Text style={styles.modalTitle}>Set Your Password</Text>
-
-            <TextInput
-              placeholder="Enter Password"
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-              style={styles.modalInput}
-            />
-
-            <TextInput
-              placeholder="Confirm Password"
-              secureTextEntry
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              style={styles.modalInput}
-            />
-
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={handleSetPassword}
-              disabled={passwordLoading}
-            >
-              {passwordLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.modalButtonText}>Save Password</Text>
-              )}
+          {!showPasswordCard ? (
+            <TouchableOpacity style={styles.secondaryButton} onPress={resendOtp} disabled={resendLoading || loading}>
+              <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>
+                {resendLoading ? "Sending..." : "Resend OTP"}
+              </Text>
             </TouchableOpacity>
+          ) : null}
 
-          </View>
-        </View>
-      )}
+          {showPasswordCard ? (
+            <View style={[styles.passwordCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.passwordCardTitle, { color: colors.text }]}>Set your password</Text>
+              <Text style={[styles.passwordCardSubtitle, { color: colors.mutedText }]}>
+                Finish signup by saving a password you can use on future logins.
+              </Text>
 
+              <TextInput
+                placeholder="Enter password"
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+                style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+                placeholderTextColor={colors.placeholder}
+              />
+
+              <TextInput
+                placeholder="Confirm password"
+                secureTextEntry
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+                placeholderTextColor={colors.placeholder}
+              />
+
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: colors.primary }, passwordLoading && styles.disabledButton]}
+                onPress={handleSetPassword}
+                disabled={passwordLoading}
+              >
+                {passwordLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Save password</Text>}
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -208,95 +256,89 @@ const handleSetPassword = async () => {
 export default OtpVerifyScreen;
 
 const styles = StyleSheet.create({
-
   container: {
     flex: 1,
-    padding: 20,
-    backgroundColor: '#fff',
-    justifyContent: 'flex-start'
   },
-
+  flexFill: {
+    flex: 1,
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 32,
+  },
+  backArrow: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
   title: {
     fontSize: 26,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginBottom: 10,
-    marginTop: 60
+    marginTop: 18,
   },
-
   subtitle: {
     fontSize: 14,
-    color: '#666',
     marginBottom: 25,
+    lineHeight: 20,
   },
-
   input: {
     height: 55,
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 12,
     paddingHorizontal: 15,
     fontSize: 16,
-    marginBottom: 25,
+    marginBottom: 20,
   },
-
   button: {
     height: 55,
-    backgroundColor: 'black',
     borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
-
+  disabledButton: {
+    opacity: 0.7,
+  },
   buttonText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
-modalOverlay: {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  backgroundColor: 'rgba(0,0,0,0.5)',
-  justifyContent: 'center',
-  alignItems: 'center',
-},
-
-modalContainer: {
-  width: '85%',
-  backgroundColor: '#fff',
-  padding: 25,
-  borderRadius: 20,
-},
-
-modalTitle: {
-  fontSize: 18,
-  fontWeight: 'bold',
-  marginBottom: 20,
-  textAlign: 'center'
-},
-
-modalInput: {
-  borderWidth: 1,
-  borderColor: '#ddd',
-  borderRadius: 12,
-  paddingHorizontal: 15,
-  height: 50,
-  marginBottom: 15,
-},
-
-modalButton: {
-  backgroundColor: 'black',
-  height: 50,
-  borderRadius: 25,
-  justifyContent: 'center',
-  alignItems: 'center',
-},
-
-modalButtonText: {
-  color: '#fff',
-  fontWeight: '600',
-}
-
+  passwordCard: {
+    marginTop: 18,
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 20,
+  },
+  secondaryButton: {
+    marginTop: 14,
+    alignItems: "center",
+  },
+  secondaryButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  passwordCardTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  passwordCardSubtitle: {
+    marginTop: 6,
+    marginBottom: 16,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    height: 50,
+    marginBottom: 15,
+  },
+  modalButton: {
+    height: 50,
+    borderRadius: 25,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 });

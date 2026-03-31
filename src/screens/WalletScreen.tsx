@@ -4,39 +4,39 @@ import {
  Text,
  StyleSheet,
  TouchableOpacity,
- Image,
- Alert,
  ScrollView,
  StatusBar,
- ActivityIndicator
+ ActivityIndicator,
+ Alert,
 } from "react-native";
 
 import Icon from "react-native-vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { API } from "../api/api";
 import { monetizationDisabledMessage, productFlags } from "../config/productFlags";
-import { formatSummaryAmount } from "../utils/servicePricing";
+import { formatCurrencyAmount, formatSummaryAmount } from "../utils/servicePricing";
 
-const paymentMethods = [
- {
-  name: "PhonePe",
-  icon: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/phonepe-icon.png",
- },
- {
-  name: "Google Pay",
-  icon: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/google-pay-icon.png",
- },
- {
-  name: "Paytm",
-  icon: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/paytm-icon.png",
- },
-];
-
-type PaymentMethod = (typeof paymentMethods)[number]["name"];
+type LedgerRequest = {
+ _id: string;
+ status?: string;
+ createdAt?: string;
+ pricing?: {
+  amount?: number;
+  currency?: string;
+ };
+ service?: {
+  serviceName?: string;
+ };
+ user?: {
+  name?: string;
+  username?: string;
+ };
+};
 
 function WalletScreen({ navigation }:any) {
 
  const [summary, setSummary] = useState<any>(null);
+ const [recentRequests, setRecentRequests] = useState<LedgerRequest[]>([]);
  const [loading, setLoading] = useState(true);
 
  useFocusEffect(
@@ -46,15 +46,24 @@ function WalletScreen({ navigation }:any) {
    const loadSummary = async () => {
     try {
      setLoading(true);
-     const res = await API.get("/service-requests/summary", {
-      params: { role: "user" }
-     });
+     const [summaryRes, requestsRes] = await Promise.all([
+      API.get("/service-requests/summary", {
+       params: { role: "seller" }
+      }),
+      API.get("/service-requests", {
+       params: { role: "seller" }
+      })
+     ]);
 
      if (active) {
-      setSummary(res.data?.summary || null);
+      setSummary(summaryRes.data?.summary || null);
+      setRecentRequests((requestsRes.data?.requests || []).slice(0, 8));
      }
     } catch (error) {
      console.log("wallet summary error:", error);
+     if (active) {
+      Alert.alert("Error", "Failed to load seller earnings");
+     }
     } finally {
      if (active) {
       setLoading(false);
@@ -69,10 +78,6 @@ function WalletScreen({ navigation }:any) {
    };
   }, [])
  );
-
- const handleRecharge = (method: PaymentMethod) => {
-  Alert.alert("Not available yet", `${method} recharge depends on payment-gateway integration and is deferred for later.`);
- };
 
  if (!productFlags.sellerMonetizationInConsumerApp) {
   return (
@@ -111,35 +116,45 @@ function WalletScreen({ navigation }:any) {
       <Icon name="arrow-back" size={24} color="#fff" />
      </TouchableOpacity>
 
-     <Text style={styles.title}>My Wallet</Text>
+     <Text style={styles.title}>Seller Earnings</Text>
 
      <View style={{ width: 24 }} />
     </View>
 
     {/* BALANCE */}
     <View style={styles.balanceBox}>
-     <Text style={styles.balanceLabel}>Completed Request Value</Text>
+     <Text style={styles.balanceLabel}>Awaiting Settlement</Text>
      {loading ? (
       <ActivityIndicator color="#fff" style={{ marginVertical: 8 }} />
      ) : (
-      <Text style={styles.balance}>{formatSummaryAmount(summary, "completed")}</Text>
+      <Text style={styles.balance}>
+       {formatSummaryAmount(
+        {
+         settlementPendingAmount: summary?.settlementPendingAmount,
+         settlementPendingAmountByCurrency: summary?.settlementPendingAmountByCurrency,
+         settlementPendingDisplayCurrency: summary?.settlementPendingDisplayCurrency,
+         displayCurrency: summary?.displayCurrency
+        },
+        "settlementPending"
+       )}
+      </Text>
      )}
 
-     <TouchableOpacity style={styles.addMoneyBtn} onPress={() => Alert.alert("Deferred", "Wallet top-up and settlement require payment-provider integration and are intentionally deferred.")}>
-      <Icon name="add-circle-outline" size={18} color="#fff" />
-      <Text style={styles.addMoneyText}>Provider Needed</Text>
-     </TouchableOpacity>
+     <View style={styles.addMoneyBtn}>
+      <Icon name="checkmark-circle-outline" size={18} color="#fff" />
+      <Text style={styles.addMoneyText}>Manual settlement workflow</Text>
+     </View>
     </View>
    </View>
 
    <View style={styles.summaryStrip}>
     <View style={styles.summaryCard}>
-     <Text style={styles.summaryLabel}>Pending</Text>
-     <Text style={styles.summaryValue}>{summary?.pending || 0}</Text>
+     <Text style={styles.summaryLabel}>Paid</Text>
+     <Text style={styles.summaryValue}>{summary?.paid || 0}</Text>
     </View>
     <View style={styles.summaryCard}>
-     <Text style={styles.summaryLabel}>Accepted</Text>
-     <Text style={styles.summaryValue}>{summary?.accepted || 0}</Text>
+     <Text style={styles.summaryLabel}>Confirmed</Text>
+     <Text style={styles.summaryValue}>{summary?.confirmed || summary?.accepted || 0}</Text>
     </View>
     <View style={styles.summaryCard}>
      <Text style={styles.summaryLabel}>Completed</Text>
@@ -147,28 +162,46 @@ function WalletScreen({ navigation }:any) {
     </View>
    </View>
 
-   {/* PAYMENT METHODS */}
-   <Text style={styles.sectionTitle}>Deferred Payment Integrations</Text>
-
-   {paymentMethods.map((item, index) => (
-    <TouchableOpacity
-     key={index}
-     style={styles.paymentCard}
-     onPress={() => handleRecharge(item.name)}
-    >
-     <View style={styles.left}>
-      <Image source={{ uri: item.icon }} style={styles.paymentIcon} />
-      <Text style={styles.paymentText}>{item.name}</Text>
-     </View>
-
-     <Icon name="chevron-forward" size={20} color="#aaa" />
-    </TouchableOpacity>
-   ))}
-
-   <Text style={styles.sectionTitle}>What works now</Text>
+   <Text style={styles.sectionTitle}>Settlement status</Text>
    <View style={styles.infoBox}>
-    <Text style={styles.infoText}>Service requests, pricing selection, seller responses, and completion tracking are live.</Text>
-    <Text style={[styles.infoText, styles.infoTextSecondary]}>Wallet settlement, recharge, and payout flows stay deferred until payment-provider integration is approved.</Text>
+    <Text style={styles.infoText}>Customer payments are captured during booking checkout and tracked against each appointment.</Text>
+    <Text style={[styles.infoText, styles.infoTextSecondary]}>Seller payouts are still reviewed and settled manually for this launch, so this screen shows earnings and settlement exposure instead of fake withdrawal controls.</Text>
+   </View>
+
+   <View style={styles.summaryStrip}>
+    <View style={styles.summaryCard}>
+     <Text style={styles.summaryLabel}>Gross Paid</Text>
+     <Text style={styles.summaryValue}>{formatSummaryAmount(summary, "paid")}</Text>
+    </View>
+    <View style={styles.summaryCard}>
+     <Text style={styles.summaryLabel}>Completed</Text>
+     <Text style={styles.summaryValue}>{formatSummaryAmount(summary, "completed")}</Text>
+    </View>
+    <View style={styles.summaryCard}>
+     <Text style={styles.summaryLabel}>Refund Review</Text>
+     <Text style={styles.summaryValue}>{summary?.refund_needed || 0}</Text>
+    </View>
+   </View>
+
+   <Text style={styles.sectionTitle}>Recent transactions</Text>
+   <View style={styles.infoBox}>
+    {recentRequests.length ? (
+     recentRequests.map((request) => (
+      <View key={request._id} style={styles.transactionRow}>
+       <View style={styles.transactionMeta}>
+        <Text style={styles.transactionTitle}>{request.service?.serviceName || "Appointment"}</Text>
+        <Text style={styles.transactionSubtitle}>
+         {request.user?.name || request.user?.username || "Customer"} • {String(request.status || "").replace(/_/g, " ")}
+        </Text>
+       </View>
+       <Text style={styles.transactionAmount}>
+        {formatCurrencyAmount(request.pricing?.amount || 0, request.pricing?.currency || "INR")}
+       </Text>
+      </View>
+     ))
+    ) : (
+     <Text style={styles.infoText}>Paid and confirmed seller bookings will appear here as they move through completion and settlement review.</Text>
+    )}
    </View>
 
   </ScrollView>
@@ -320,6 +353,31 @@ const styles = StyleSheet.create({
  infoTextSecondary: {
   marginTop: 8,
   color: "#777"
+ },
+ transactionRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  paddingVertical: 10,
+  borderBottomWidth: 1,
+  borderBottomColor: "#F1F1F4"
+ },
+ transactionMeta: {
+  flex: 1,
+  paddingRight: 12
+ },
+ transactionTitle: {
+  color: "#1F2937",
+  fontWeight: "700"
+ },
+ transactionSubtitle: {
+  marginTop: 4,
+  color: "#6B7280",
+  textTransform: "capitalize"
+ },
+ transactionAmount: {
+  color: "#7C3AED",
+  fontWeight: "700"
  },
  readOnlyCard: {
   marginHorizontal: 20,

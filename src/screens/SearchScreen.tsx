@@ -14,6 +14,7 @@ import { API } from "../api/api";
 import Icon from "react-native-vector-icons/Ionicons";
 import { getStoredUserId } from "../utils/authSession";
 import { formatPrimaryServicePrice } from "../utils/servicePricing";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 
 type UserItem = {
   _id: string;
@@ -61,7 +62,6 @@ type TrendingHashtag = {
   count: number;
 };
 
-const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 const TAB_LABELS = {
   users: "users",
   sellers: "sellers",
@@ -222,7 +222,7 @@ const SearchScreen = ({ navigation }: any) => {
     >
       <Image
         source={{
-          uri: item.profilePic || DEFAULT_AVATAR
+          uri: item.profilePic || DEFAULT_AVATAR_URL
         }}
         style={styles.avatar}
       />
@@ -258,7 +258,7 @@ const SearchScreen = ({ navigation }: any) => {
     >
       <Image
         source={{
-          uri: item.profilePic || DEFAULT_AVATAR
+          uri: item.profilePic || DEFAULT_AVATAR_URL
         }}
         style={styles.avatar}
       />
@@ -293,7 +293,7 @@ const SearchScreen = ({ navigation }: any) => {
     >
       <Image
         source={{
-          uri: item.image || item?.seller?.profilePic || DEFAULT_AVATAR
+          uri: item.image || item?.seller?.profilePic || DEFAULT_AVATAR_URL
         }}
         style={styles.serviceImage}
       />
@@ -331,7 +331,7 @@ const SearchScreen = ({ navigation }: any) => {
             style={styles.suggestionRow}
             onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: item._id })}
           >
-            <Image source={{ uri: item.profilePic || DEFAULT_AVATAR }} style={styles.suggestionAvatar} />
+            <Image source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }} style={styles.suggestionAvatar} />
             <View style={styles.cardContent}>
               <Text style={styles.username}>{item.username || "user"}</Text>
               <Text style={styles.name}>{item.name || "Aline2 user"}</Text>

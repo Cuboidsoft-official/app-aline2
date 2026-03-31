@@ -1,7 +1,6 @@
 import { API } from "../../api/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getStoredUserId } from "../../utils/authSession";
-import { cloneFeed, clonePostById, cloneReels, cloneStories, getUsers, state } from "./mockData";
 import {
   ContentKind,
   Comment,
@@ -19,14 +18,17 @@ import {
   SocialApi,
   SocialUser,
   Story,
+  StoryStickerTextAlignment,
+  StoryStickerPlacement,
+  StoryTextStickerTheme,
   StoryViewerEntry,
   StoryReply,
   StorySequenceResponse,
   UpdatePostInput,
   UpdateStoryInput,
+  DeleteCommentResult,
 } from "./types";
 import {
-  cloneComment,
   normalizeReportNote,
   normalizeCommentText,
   normalizePostInput,
@@ -36,16 +38,6 @@ import {
   normalizeUpdateStoryInput,
 } from "./validation";
 
-const SOCIAL_API_MODE: "mock" | "remote" =
-  (globalThis as { __SOCIAL_API_MODE__?: "mock" | "remote" }).__SOCIAL_API_MODE__ || "remote";
-const REQUEST_DELAY_MS = 180;
-
-const wait = (ms: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-
-const buildId = (prefix: string): string => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 const POST_DELETE_OWNER_ERROR = "You can only delete your own posts.";
 const STORY_OWNER_ERROR = "You can only manage your own stories.";
 const STORY_INSIGHTS_OWNER_ERROR = "Story insights are only available for your own stories.";
@@ -53,14 +45,6 @@ const STORY_REPLIES_OWNER_ERROR = "Story replies are only available for your own
 const SYNC_REQUIRED_POST_ERROR = "This post is not synced with the server yet.";
 const SYNC_REQUIRED_STORY_ERROR = "This story is not synced with the server yet.";
 
-const postComments = new Map<string, Comment[]>();
-const reelComments = new Map<string, ReelComment[]>();
-const storyComments = new Map<string, Comment[]>();
-const commentReplies = new Map<string, Comment[]>();
-const storyViewers = new Map<string, StoryViewerEntry[]>();
-const storyLikers = new Map<string, SocialUser[]>();
-const archivedStoryIds = new Set<string>();
-const archivedPostIds = new Set<string>();
 const mutedUserIds = new Set<string>();
 const blockedUserIds = new Set<string>();
 const hiddenContentKeys = new Set<string>();
@@ -92,24 +76,20 @@ const loadModerationPrefs = async (): Promise<void> => {
   }
 
   try {
-    if (SOCIAL_API_MODE === "remote") {
-      const res = await API.get("/user/content-preferences");
-      applyModerationPrefsPayload(res?.data?.preferences || {});
-      await persistModerationPrefs();
-      moderationPrefsLoaded = true;
-      return;
-    }
-
-    const raw = await AsyncStorage.getItem(LOCAL_MODERATION_PREFS_KEY);
-    if (!raw) {
-      moderationPrefsLoaded = true;
-      return;
-    }
-
-    const parsed = JSON.parse(raw);
-    applyModerationPrefsPayload(parsed);
+    const res = await API.get("/user/content-preferences");
+    applyModerationPrefsPayload(res?.data?.preferences || {});
+    await persistModerationPrefs();
   } catch {
-    applyModerationPrefsPayload({});
+    try {
+      const raw = await AsyncStorage.getItem(LOCAL_MODERATION_PREFS_KEY);
+      if (!raw) {
+        applyModerationPrefsPayload({});
+      } else {
+        applyModerationPrefsPayload(JSON.parse(raw));
+      }
+    } catch {
+      applyModerationPrefsPayload({});
+    }
   } finally {
     moderationPrefsLoaded = true;
   }
@@ -145,34 +125,6 @@ const normalizeContentKind = (kind: ContentKind): "post" | "swipe" | "story" => 
 };
 
 const buildContentKey = (kind: ContentKind, id: string): string => `${normalizeContentKind(kind)}:${id}`;
-const seedCommentSnippets = [
-  "Loved this shot.",
-  "This is super clean.",
-  "Need the full breakdown for this.",
-  "Saved this for later.",
-];
-
-const cloneComments = (items: Comment[]): Comment[] => items.map(cloneComment);
-const cloneReelComment = (comment: ReelComment): ReelComment => ({ ...comment, user: { ...comment.user } });
-const cloneReelComments = (items: ReelComment[]): ReelComment[] => items.map(cloneReelComment);
-const cloneUsers = (items: SocialUser[]): SocialUser[] => items.map((user) => ({ ...user }));
-const cloneStoryRecord = (story: Story): Story => ({
-  ...story,
-  user: { ...story.user },
-  media: story.media ? { ...story.media } : undefined,
-  poll: story.poll
-    ? {
-        question: story.poll.question,
-        options: [...story.poll.options] as [string, string],
-        votes: [...story.poll.votes] as [number, number],
-        selectedIndex: story.poll.selectedIndex,
-      }
-    : undefined,
-  question: story.question ? { ...story.question } : undefined,
-  mentions: [...story.mentions],
-  hashtags: [...story.hashtags],
-  music: story.music ? { ...story.music } : undefined,
-});
 
 const formatMusicLabel = (music: any): string | undefined => {
   if (!music) {
@@ -192,6 +144,46 @@ const formatMusicLabel = (music: any): string | undefined => {
   }
 
   return artist ? `${title} • ${artist}` : title;
+};
+
+const storyStickerPositions: Record<StoryStickerPlacement, { x: number; y: number }> = {
+  top_left: { x: 0.12, y: 0.18 },
+  top_right: { x: 0.68, y: 0.18 },
+  center: { x: 0.22, y: 0.44 },
+  bottom_left: { x: 0.12, y: 0.72 },
+  bottom_right: { x: 0.68, y: 0.72 },
+};
+
+const resolveStoryStickerPosition = (
+  customPosition: { x: number; y: number } | undefined,
+  placement: StoryStickerPlacement | undefined,
+  type: "text" | "emoji",
+  scale: number | undefined,
+  rotation: number | undefined,
+) => {
+  const safeScale = typeof scale === "number" ? scale : 1;
+  const safeRotation = typeof rotation === "number" ? rotation : 0;
+  if (customPosition && typeof customPosition.x === "number" && typeof customPosition.y === "number") {
+    return {
+      x: customPosition.x,
+      y: customPosition.y,
+      width: type === "emoji" ? 0.16 : 0.64,
+      height: type === "emoji" ? 0.12 : 0.12,
+      rotation: safeRotation,
+      scale: safeScale,
+    };
+  }
+
+  const base = storyStickerPositions[placement || (type === "text" ? "bottom_left" : "top_right")];
+
+  return {
+    x: base.x,
+    y: base.y,
+    width: type === "emoji" ? 0.16 : 0.64,
+    height: type === "emoji" ? 0.12 : 0.12,
+    rotation: safeRotation,
+    scale: safeScale,
+  };
 };
 
 const mapStoryMusicDetails = (music: any, musicConfig?: any) => {
@@ -268,1285 +260,50 @@ const buildStoryMusicSticker = (music: any) => {
   };
 };
 
-const getCurrentUserId = (): string => getUsers()[0]?.id || "";
-const assertCurrentUserOwns = (ownerId: string, message: string): void => {
-  if (!ownerId || ownerId !== getCurrentUserId()) {
-    throw new Error(message);
-  }
-};
-
-const ensurePostComments = (postId: string): Comment[] => {
-  const existing = postComments.get(postId);
-  if (existing) {
-    return existing;
-  }
-
-  const post = state.posts.find((item) => item.id === postId);
-  if (!post) {
-    throw new Error("Post not found");
-  }
-
-  const users = getUsers();
-  const now = Date.now();
-  const seeded: Comment[] = users.slice(1, 4).map((user, index) => ({
-    id: `seed_${postId}_${index + 1}`,
-    postId,
-    user,
-    text: seedCommentSnippets[index % seedCommentSnippets.length],
-    createdAt: now - (index + 1) * 1000 * 60 * 13,
-    liked: false,
-    likesCount: 2 + index * 3,
-    canDelete: false,
-  }));
-
-  const yourComment: Comment = {
-    id: `seed_${postId}_self`,
-    postId,
-    user: users[0],
-    text: "Looks great.",
-    createdAt: now - 1000 * 60 * 6,
-    liked: true,
-    likesCount: 1,
-    canDelete: true,
-  };
-
-  const all = [yourComment, ...seeded];
-  postComments.set(postId, all);
-  return all;
-};
-
-const ensureReelComments = (reelId: string): ReelComment[] => {
-  const existing = reelComments.get(reelId);
-  if (existing) {
-    return existing;
-  }
-
-  const reel = state.reels.find((item) => item.id === reelId);
-  if (!reel) {
-    throw new Error("Swipe not found");
-  }
-
-  const users = getUsers();
-  const now = Date.now();
-  const seeded: ReelComment[] = users.slice(1, 4).map((user, index) => ({
-    id: `seed_reel_${reelId}_${index + 1}`,
-    reelId,
-    user,
-    text: seedCommentSnippets[(index + 1) % seedCommentSnippets.length],
-    createdAt: now - (index + 1) * 1000 * 60 * 11,
-    liked: false,
-    likesCount: 1 + index * 2,
-    canDelete: false,
-  }));
-
-  const self: ReelComment = {
-    id: `seed_reel_${reelId}_self`,
-    reelId,
-    user: users[0],
-    text: "This is fire.",
-    createdAt: now - 1000 * 60 * 4,
-    liked: false,
-    likesCount: 0,
-    canDelete: true,
-  };
-
-  const all = [self, ...seeded];
-  reelComments.set(reelId, all);
-  return all;
-};
-
-const ensureStoryViewers = (storyId: string): StoryViewerEntry[] => {
-  const existing = storyViewers.get(storyId);
-  if (existing) {
-    return existing;
-  }
-
-  const viewers: StoryViewerEntry[] = getUsers()
-    .slice(1)
-    .map((user, index) => ({
-      user,
-      viewedAt: Date.now() - (index + 1) * 1000 * 60 * 6,
-      liked: index % 2 === 0,
-    }));
-
-  storyViewers.set(storyId, viewers);
-  storyLikers.set(
-    storyId,
-    viewers.filter((entry) => entry.liked).map((entry) => entry.user),
-  );
-  return viewers;
-};
-
-const ensureStoryComments = (storyId: string): Comment[] => {
-  const existing = storyComments.get(storyId);
-  if (existing) {
-    return existing;
-  }
-
-  const story = state.stories.find((item) => item.id === storyId);
-  if (!story) {
-    throw new Error("Story not found");
-  }
-
-  const users = getUsers();
-  const now = Date.now();
-  const seeded: Comment[] = users.slice(1, 4).map((user, index) => ({
-    id: `seed_story_${storyId}_${index + 1}`,
-    storyId,
-    user,
-    text:
-      index === 0
-        ? "This story is clean."
-        : index === 1
-          ? "Need the full details on this."
-          : "Dropping a reaction because this is good.",
-    createdAt: now - (index + 1) * 1000 * 60 * 9,
-    liked: index === 0,
-    likesCount: index + 1,
-    canDelete: false,
-    replyCount: index === 0 ? 1 : 0,
-    mentions: [],
-  }));
-
-  const firstReply: Comment = {
-    id: `seed_story_reply_${storyId}_1`,
-    storyId,
-    parentCommentId: seeded[0]?.id,
-    user: users[0],
-    text: `@${seeded[0]?.user.username || "user"} Thanks for watching.`,
-    createdAt: now - 1000 * 60 * 4,
-    liked: false,
-    likesCount: 0,
-    canDelete: true,
-    replyCount: 0,
-    mentions: seeded[0]?.user.username ? [seeded[0].user.username] : [],
-  };
-
-  if (seeded[0]) {
-    commentReplies.set(seeded[0].id, [firstReply]);
-  }
-
-  storyComments.set(storyId, seeded);
-  return seeded;
-};
-
-const getStoryReplyTotal = (storyId: string): number => {
-  const topLevel = ensureStoryComments(storyId);
-  let total = topLevel.length;
-
-  topLevel.forEach((comment) => {
-    total += (commentReplies.get(comment.id) || []).length;
-  });
-
-  return total;
-};
-
-const syncMockStoryMeta = (story: Story): Story => {
-  const viewers = ensureStoryViewers(story.id);
-  const likers = storyLikers.get(story.id) || [];
-
-  return {
-    ...cloneStoryRecord(story),
-    isOwner: story.user.id === getCurrentUserId(),
-    allowReplies: story.allowReplies !== false,
-    allowSharing: story.allowSharing !== false,
-    viewCount: viewers.length,
-    reactionCount: likers.length || story.reactionCount,
-    replyCount: getStoryReplyTotal(story.id),
-  };
-};
-
-class MockSocialApi implements SocialApi {
-  async getFeed(): Promise<FeedResponse> {
-    await loadModerationPrefs();
-    await wait(REQUEST_DELAY_MS);
-    const feed = cloneFeed();
-    return {
-      stories: applyContentVisibilityFilters(
-        feed.stories.filter((item) => !archivedStoryIds.has(item.id)),
-        "story",
-      ),
-      posts: applyContentVisibilityFilters(
-        feed.posts.filter((item) => !archivedPostIds.has(item.id)),
-        "post",
-      ),
-    };
-  }
-
-  async getReels(): Promise<Reel[]> {
-    await loadModerationPrefs();
-    await wait(REQUEST_DELAY_MS);
-    return applyContentVisibilityFilters(cloneReels(), "swipe");
-  }
-
-  async getSwipes(): Promise<Reel[]> {
-    return this.getReels();
-  }
-
-  async getStorySequence(storyId: string, _options?: GetStorySequenceOptions): Promise<StorySequenceResponse> {
-    await loadModerationPrefs();
-    await wait(REQUEST_DELAY_MS);
-    const stories = applyContentVisibilityFilters(
-      cloneStories().filter((item) => !archivedStoryIds.has(item.id)),
-      "story",
-    ).map(syncMockStoryMeta);
-    const story = stories.find((item) => item.id === storyId);
-
-    if (!story) {
-      throw new Error("Story not found or no longer available.");
-    }
-
-    const sameUserStories = stories.filter((item) => item.user.id === story.user.id);
-    const remainingUserIds = Array.from(
-      new Set(stories.filter((item) => item.user.id !== story.user.id).map((item) => item.user.id)),
-    );
-    const others = remainingUserIds.flatMap((userId) => stories.filter((item) => item.user.id === userId));
-    const list = [...sameUserStories, ...others];
-    const startIndex = list.findIndex((item) => item.id === storyId);
-
-    return {
-      stories: list,
-      startIndex: startIndex >= 0 ? startIndex : 0,
-    };
-  }
-
-  async getStory(storyId: string): Promise<Story> {
-    await loadModerationPrefs();
-    await wait(80);
-    const story = state.stories.find((item) => item.id === storyId);
-
-    if (!story) {
-      throw new Error("Story not found");
-    }
-    if (
-      archivedStoryIds.has(story.id) ||
-      blockedUserIds.has(story.user.id) ||
-      mutedUserIds.has(story.user.id) ||
-      hiddenContentKeys.has(buildContentKey("story", story.id))
-    ) {
-      throw new Error("Story not available");
-    }
-
-    return syncMockStoryMeta(story);
-  }
-
-  async getPost(postId: string): Promise<Post> {
-    await loadModerationPrefs();
-    await wait(80);
-    const cloned = clonePostById(postId);
-
-    if (!cloned) {
-      throw new Error("Post not found");
-    }
-    if (
-      archivedPostIds.has(cloned.id) ||
-      blockedUserIds.has(cloned.user.id) ||
-      mutedUserIds.has(cloned.user.id) ||
-      hiddenContentKeys.has(buildContentKey("post", cloned.id))
-    ) {
-      throw new Error("Post not available");
-    }
-
-    return cloned;
-  }
-
-  async getStoryArchive(): Promise<Story[]> {
-    await wait(120);
-    return cloneStories()
-      .filter(
-        (item) =>
-          archivedStoryIds.has(item.id) &&
-          !blockedUserIds.has(item.user.id) &&
-          !hiddenContentKeys.has(buildContentKey("story", item.id)),
-      )
-      .map(syncMockStoryMeta)
-      .sort((a, b) => b.createdAt - a.createdAt);
-  }
-
-  async getPostArchive(): Promise<Post[]> {
-    await wait(120);
-    return state.posts
-      .filter((item) => archivedPostIds.has(item.id))
-      .map((item) => clonePostById(item.id))
-      .filter(Boolean) as Post[];
-  }
-
-  async markStoryViewed(storyId: string): Promise<Story> {
-    await wait(80);
-    const target = state.stories.find((item) => item.id === storyId);
-
-    if (!target) {
-      throw new Error("Story not found");
-    }
-
-    if (target.user.id === getCurrentUserId()) {
-      return syncMockStoryMeta(target);
-    }
-
-    target.viewed = true;
-
-    const currentUser = getUsers()[0];
-    const viewers = ensureStoryViewers(storyId);
-    const existingViewer = viewers.find((entry) => entry.user.id === currentUser.id);
-    if (!existingViewer) {
-      viewers.unshift({
-        user: currentUser,
-        viewedAt: Date.now(),
-        liked: target.liked,
-      });
-    }
-
-    storyViewers.set(storyId, viewers);
-    return syncMockStoryMeta(target);
-  }
-
-  async toggleStoryLike(storyId: string): Promise<Story> {
-    await wait(120);
-    const target = state.stories.find((item) => item.id === storyId);
-
-    if (!target) {
-      throw new Error("Story not found");
-    }
-
-    if (target.liked) {
-      return syncMockStoryMeta(target);
-    }
-
-    target.liked = true;
-    target.viewed = true;
-    target.reactionCount = Math.max(0, target.reactionCount + 1);
-
-    const viewers = ensureStoryViewers(storyId);
-    const currentUserId = getCurrentUserId();
-    const existing = viewers.find((entry) => entry.user.id === currentUserId);
-    if (existing) {
-      existing.liked = target.liked;
-      existing.viewedAt = Date.now();
-    } else {
-      viewers.unshift({
-        user: getUsers()[0],
-        viewedAt: Date.now(),
-        liked: target.liked,
-      });
-    }
-
-    storyViewers.set(storyId, viewers);
-    storyLikers.set(
-      storyId,
-      viewers.filter((entry) => entry.liked).map((entry) => entry.user),
-    );
-    return syncMockStoryMeta(target);
-  }
-
-  async voteStoryPoll(storyId: string, optionIndex: 0 | 1): Promise<Story> {
-    await wait(120);
-    const target = state.stories.find((item) => item.id === storyId);
-
-    if (!target || !target.poll) {
-      throw new Error("Poll story not found");
-    }
-
-    if (target.poll.selectedIndex === undefined) {
-      target.poll.votes[optionIndex] += 1;
-    } else if (target.poll.selectedIndex !== optionIndex) {
-      target.poll.votes[target.poll.selectedIndex] = Math.max(0, target.poll.votes[target.poll.selectedIndex] - 1);
-      target.poll.votes[optionIndex] += 1;
-    }
-
-    target.poll.selectedIndex = optionIndex;
-
-    return syncMockStoryMeta(target);
-  }
-
-  async replyToStory(storyId: string, text: string): Promise<StoryReply> {
-    const reply = await this.addStoryReply(storyId, text);
-    return {
-      id: reply.id,
-      storyId,
-      fromUser: { ...reply.user },
-      text: reply.text,
-      createdAt: reply.createdAt,
-    };
-  }
-
-  async getStoryReplies(storyId: string): Promise<Comment[]> {
-    await wait(100);
-    const story = state.stories.find((item) => item.id === storyId);
-    if (!story) {
-      throw new Error("Story not found");
-    }
-
-    assertCurrentUserOwns(story.user.id, STORY_REPLIES_OWNER_ERROR);
-    return cloneComments(ensureStoryComments(storyId)).sort((a, b) => b.createdAt - a.createdAt);
-  }
-
-  async addStoryReply(storyId: string, text: string, parentCommentId?: string): Promise<Comment> {
-    await wait(120);
-    const target = state.stories.find((item) => item.id === storyId);
-
-    if (!target) {
-      throw new Error("Story not found");
-    }
-
-    const comment: Comment = {
-      id: buildId(parentCommentId ? "scr" : "sc"),
-      storyId,
-      parentCommentId: parentCommentId || null,
-      user: getUsers()[0],
-      text: normalizeCommentText(text),
-      createdAt: Date.now(),
-      liked: false,
-      likesCount: 0,
-      canDelete: true,
-      replyCount: 0,
-      mentions: [],
-    };
-
-    if (parentCommentId) {
-      const replies = commentReplies.get(parentCommentId) || [];
-      replies.push(comment);
-      commentReplies.set(parentCommentId, replies);
-
-      const parent = ensureStoryComments(storyId).find((item) => item.id === parentCommentId);
-      if (parent) {
-        parent.replyCount = (parent.replyCount || 0) + 1;
-      }
-    } else {
-      const comments = ensureStoryComments(storyId);
-      comments.unshift(comment);
-      storyComments.set(storyId, comments);
-    }
-
-    if (target.question) {
-      target.question.responseCount += 1;
-    }
-
-    return cloneComment(comment);
-  }
-
-  async getCommentReplies(commentId: string): Promise<Comment[]> {
-    await wait(90);
-    return cloneComments(commentReplies.get(commentId) || []).sort((a, b) => a.createdAt - b.createdAt);
-  }
-
-  async toggleStoryReplyLike(storyId: string, commentId: string): Promise<Comment> {
-    await wait(80);
-    const topLevel = ensureStoryComments(storyId);
-    const nested = Array.from(commentReplies.values()).flat();
-    const target = [...topLevel, ...nested].find((item) => item.id === commentId);
-
-    if (!target) {
-      throw new Error("Reply not found");
-    }
-
-    target.liked = !target.liked;
-    target.likesCount = Math.max(0, target.likesCount + (target.liked ? 1 : -1));
-    return cloneComment(target);
-  }
-
-  async deleteStoryReply(storyId: string, commentId: string): Promise<void> {
-    await wait(90);
-
-    const topLevel = ensureStoryComments(storyId);
-    const topLevelIndex = topLevel.findIndex((item) => item.id === commentId);
-    if (topLevelIndex >= 0) {
-      topLevel.splice(topLevelIndex, 1);
-      storyComments.set(storyId, topLevel);
-      commentReplies.delete(commentId);
-      return;
-    }
-
-    for (const [parentId, replies] of commentReplies.entries()) {
-      const replyIndex = replies.findIndex((item) => item.id === commentId);
-      if (replyIndex >= 0) {
-        replies.splice(replyIndex, 1);
-        commentReplies.set(parentId, replies);
-        const parent = topLevel.find((item) => item.id === parentId);
-        if (parent) {
-          parent.replyCount = Math.max(0, (parent.replyCount || 0) - 1);
-        }
-        return;
-      }
-    }
-
-    throw new Error("Reply not found");
-  }
-
-  async togglePostLike(postId: string): Promise<Post> {
-    await wait(120);
-    const target = state.posts.find((item) => item.id === postId);
-
-    if (!target) {
-      throw new Error("Post not found");
-    }
-
-    target.liked = !target.liked;
-    target.likesCount = Math.max(0, target.likesCount + (target.liked ? 1 : -1));
-
-    const cloned = clonePostById(postId);
-    if (!cloned) {
-      throw new Error("Post not found");
-    }
-
-    return cloned;
-  }
-
-  async togglePostSave(postId: string): Promise<Post> {
-    await wait(120);
-    const target = state.posts.find((item) => item.id === postId);
-
-    if (!target) {
-      throw new Error("Post not found");
-    }
-
-    target.saved = !target.saved;
-
-    const cloned = clonePostById(postId);
-    if (!cloned) {
-      throw new Error("Post not found");
-    }
-
-    return cloned;
-  }
-
-  async sharePost(postId: string): Promise<Post> {
-    await wait(100);
-    const target = state.posts.find((item) => item.id === postId);
-
-    if (!target) {
-      throw new Error("Post not found");
-    }
-
-    target.sharesCount += 1;
-
-    const sharedStory: Story = {
-      id: buildId("s"),
-      user: getUsers()[0],
-      type: "media",
-      media: target.media[0],
-      text: target.caption,
-      mentions: target.mentions,
-      hashtags: target.hashtags,
-      visibility: "public",
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-      viewed: false,
-      liked: false,
-      reactionCount: 0,
-      allowReplies: true,
-      allowSharing: true,
-    };
-
-    state.stories.unshift(sharedStory);
-
-    const cloned = clonePostById(postId);
-    if (!cloned) {
-      throw new Error("Post not found");
-    }
-
-    return cloned;
-  }
-
-  async addPostComment(postId: string, text: string, parentCommentId?: string): Promise<Comment> {
-    await wait(120);
-
-    const targetPost = state.posts.find((item) => item.id === postId);
-    if (!targetPost) {
-      throw new Error("Post not found");
-    }
-
-    const comment: Comment = {
-      id: buildId("c"),
-      postId,
-      parentCommentId: parentCommentId || null,
-      user: getUsers()[0],
-      text: normalizeCommentText(text),
-      createdAt: Date.now(),
-      liked: false,
-      likesCount: 0,
-      canDelete: true,
-      replyCount: 0,
-      mentions: [],
-    };
-
-    if (parentCommentId) {
-      const replies = commentReplies.get(parentCommentId) || [];
-      replies.push(comment);
-      commentReplies.set(parentCommentId, replies);
-
-      const parent = ensurePostComments(postId).find((item) => item.id === parentCommentId);
-      if (parent) {
-        parent.replyCount = (parent.replyCount || 0) + 1;
-      }
-    } else {
-      const existing = ensurePostComments(postId);
-      existing.unshift(comment);
-      postComments.set(postId, existing);
-    }
-
-    targetPost.commentsCount += 1;
-    return cloneComment(comment);
-  }
-
-  async getPostComments(postId: string): Promise<Comment[]> {
-    await wait(100);
-    const post = state.posts.find((item) => item.id === postId);
-
-    if (!post) {
-      throw new Error("Post not found");
-    }
-
-    return cloneComments(ensurePostComments(postId)).sort((a, b) => b.createdAt - a.createdAt);
-  }
-
-  async togglePostCommentLike(postId: string, commentId: string): Promise<Comment> {
-    await wait(80);
-    const comments = ensurePostComments(postId);
-    const target =
-      comments.find((item) => item.id === commentId) ||
-      Array.from(commentReplies.values())
-        .flat()
-        .find((item) => item.postId === postId && item.id === commentId);
-
-    if (!target) {
-      throw new Error("Comment not found");
-    }
-
-    target.liked = !target.liked;
-    target.likesCount = Math.max(0, target.likesCount + (target.liked ? 1 : -1));
-
-    return cloneComment(target);
-  }
-
-  async deletePostComment(postId: string, commentId: string): Promise<void> {
-    await wait(90);
-    const comments = ensurePostComments(postId);
-    const idx = comments.findIndex((item) => item.id === commentId);
-    const comment =
-      idx >= 0
-        ? comments[idx]
-        : Array.from(commentReplies.values())
-            .flat()
-            .find((item) => item.postId === postId && item.id === commentId);
-
-    if (!comment) {
-      throw new Error("Comment not found");
-    }
-    const currentUserId = getCurrentUserId();
-
-    if (comment.user.id !== currentUserId && !comment.canDelete) {
-      throw new Error("You can only delete your own comments.");
-    }
-
-    if (idx >= 0) {
-      comments.splice(idx, 1);
-      postComments.set(postId, comments);
-      commentReplies.delete(commentId);
-    } else {
-      for (const [parentId, replies] of commentReplies.entries()) {
-        const replyIndex = replies.findIndex((item) => item.id === commentId);
-        if (replyIndex >= 0) {
-          replies.splice(replyIndex, 1);
-          commentReplies.set(parentId, replies);
-          const parent = comments.find((item) => item.id === parentId);
-          if (parent) {
-            parent.replyCount = Math.max(0, (parent.replyCount || 0) - 1);
-          }
-          break;
-        }
-      }
-    }
-
-    const post = state.posts.find((item) => item.id === postId);
-    if (post) {
-      post.commentsCount = Math.max(0, post.commentsCount - 1);
-    }
-  }
-
-  async updatePost(postId: string, input: UpdatePostInput): Promise<Post> {
-    await wait(140);
-    const target = state.posts.find((item) => item.id === postId);
-
-    if (!target) {
-      throw new Error("Post not found");
-    }
-
-    const payload = normalizeUpdatePostInput(input);
-
-    if (payload.caption !== undefined) {
-      target.caption = payload.caption;
-    }
-
-    if (payload.location !== undefined) {
-      target.location = payload.location;
-    }
-
-    if (payload.music !== undefined) {
-      target.music = payload.music;
-    }
-
-    if (payload.hashtags !== undefined) {
-      target.hashtags = payload.hashtags;
-    }
-
-    if (payload.mentions !== undefined) {
-      target.mentions = payload.mentions;
-    }
-
-    if (payload.settings) {
-      target.settings = {
-        ...target.settings,
-        ...payload.settings,
+const getTextStickerThemeStyle = (
+  theme: StoryTextStickerTheme | undefined,
+): { color: string; backgroundColor: string } => {
+  switch (theme) {
+    case "light":
+      return {
+        color: "#0f172a",
+        backgroundColor: "rgba(255,255,255,0.9)",
       };
-    }
-
-    target.editedAt = Date.now();
-
-    const cloned = clonePostById(postId);
-    if (!cloned) {
-      throw new Error("Post not found");
-    }
-
-    return cloned;
+    case "accent":
+      return {
+        color: "#ffffff",
+        backgroundColor: "rgba(219,39,119,0.84)",
+      };
+    case "outline":
+      return {
+        color: "#ffffff",
+        backgroundColor: "rgba(15,23,42,0.2)",
+      };
+    case "dark":
+    default:
+      return {
+        color: "#ffffff",
+        backgroundColor: "rgba(15,23,42,0.55)",
+      };
   }
-
-  async archivePost(postId: string): Promise<void> {
-    await wait(100);
-    const target = state.posts.find((item) => item.id === postId);
-
-    if (!target) {
-      throw new Error("Post not found");
-    }
-
-    assertCurrentUserOwns(target.user.id, POST_DELETE_OWNER_ERROR);
-    archivedPostIds.add(postId);
-  }
-
-  async restorePost(postId: string): Promise<void> {
-    await wait(100);
-    const target = state.posts.find((item) => item.id === postId);
-
-    if (!target) {
-      throw new Error("Post not found");
-    }
-
-    assertCurrentUserOwns(target.user.id, POST_DELETE_OWNER_ERROR);
-    archivedPostIds.delete(postId);
-  }
-
-  async deletePost(postId: string): Promise<void> {
-    await wait(100);
-    const idx = state.posts.findIndex((item) => item.id === postId);
-
-    if (idx < 0) {
-      throw new Error("Post not found");
-    }
-
-    assertCurrentUserOwns(state.posts[idx]?.user?.id || "", POST_DELETE_OWNER_ERROR);
-    state.posts.splice(idx, 1);
-    archivedPostIds.delete(postId);
-    postComments.delete(postId);
-  }
-
-  async toggleReelLike(reelId: string): Promise<Reel> {
-    await wait(120);
-    const target = state.reels.find((item) => item.id === reelId);
-
-    if (!target) {
-      throw new Error("Swipe not found");
-    }
-
-    target.liked = !target.liked;
-    target.likesCount = Math.max(0, target.likesCount + (target.liked ? 1 : -1));
-
-    const reel = state.reels.find((item) => item.id === reelId);
-    if (!reel) {
-      throw new Error("Swipe not found");
-    }
-
-    return {
-      ...reel,
-      user: { ...reel.user },
-      media: { ...reel.media },
-      hashtags: [...reel.hashtags],
-      mentions: [...reel.mentions],
-    };
-  }
-
-  async toggleSwipeLike(swipeId: string): Promise<Reel> {
-    return this.toggleReelLike(swipeId);
-  }
-
-  async toggleReelSave(reelId: string): Promise<Reel> {
-    await wait(90);
-    const target = state.reels.find((item) => item.id === reelId);
-
-    if (!target) {
-      throw new Error("Swipe not found");
-    }
-
-    target.saved = !target.saved;
-
-    return {
-      ...target,
-      user: { ...target.user },
-      media: { ...target.media },
-      hashtags: [...target.hashtags],
-      mentions: [...target.mentions],
-    };
-  }
-
-  async toggleSwipeSave(swipeId: string): Promise<Reel> {
-    return this.toggleReelSave(swipeId);
-  }
-
-  async shareReel(reelId: string): Promise<Reel> {
-    await wait(80);
-    const target = state.reels.find((item) => item.id === reelId);
-
-    if (!target) {
-      throw new Error("Swipe not found");
-    }
-
-    target.sharesCount += 1;
-
-    return {
-      ...target,
-      user: { ...target.user },
-      media: { ...target.media },
-      hashtags: [...target.hashtags],
-      mentions: [...target.mentions],
-    };
-  }
-
-  async shareSwipe(swipeId: string): Promise<Reel> {
-    return this.shareReel(swipeId);
-  }
-
-  async getReelComments(reelId: string): Promise<ReelComment[]> {
-    await wait(100);
-    const reel = state.reels.find((item) => item.id === reelId);
-    if (!reel) {
-      throw new Error("Swipe not found");
-    }
-
-    return cloneReelComments(ensureReelComments(reelId)).sort((a, b) => b.createdAt - a.createdAt);
-  }
-
-  async getSwipeComments(swipeId: string): Promise<ReelComment[]> {
-    return this.getReelComments(swipeId);
-  }
-
-  async addReelComment(reelId: string, text: string, parentCommentId?: string): Promise<ReelComment> {
-    await wait(110);
-    const reel = state.reels.find((item) => item.id === reelId);
-    if (!reel) {
-      throw new Error("Swipe not found");
-    }
-
-    const comment: ReelComment = {
-      id: buildId("rc"),
-      reelId,
-      parentCommentId: parentCommentId || null,
-      user: getUsers()[0],
-      text: normalizeCommentText(text),
-      createdAt: Date.now(),
-      liked: false,
-      likesCount: 0,
-      canDelete: true,
-      replyCount: 0,
-    };
-
-    if (parentCommentId) {
-      const replies = commentReplies.get(parentCommentId) || [];
-      replies.push({
-        id: comment.id,
-        postId: reelId,
-        parentCommentId,
-        user: comment.user,
-        text: comment.text,
-        createdAt: comment.createdAt,
-        liked: comment.liked,
-        likesCount: comment.likesCount,
-        canDelete: comment.canDelete,
-        replyCount: 0,
-        mentions: [],
-      });
-      commentReplies.set(parentCommentId, replies);
-
-      const parent = ensureReelComments(reelId).find((item) => item.id === parentCommentId);
-      if (parent) {
-        parent.replyCount = (parent.replyCount || 0) + 1;
-      }
-    } else {
-      const comments = ensureReelComments(reelId);
-      comments.unshift(comment);
-      reelComments.set(reelId, comments);
-    }
-    reel.commentsCount += 1;
-    return cloneReelComment(comment);
-  }
-
-  async addSwipeComment(swipeId: string, text: string, parentCommentId?: string): Promise<ReelComment> {
-    return this.addReelComment(swipeId, text, parentCommentId);
-  }
-
-  async toggleReelCommentLike(reelId: string, commentId: string): Promise<ReelComment> {
-    await wait(80);
-    const comments = ensureReelComments(reelId);
-    const target =
-      comments.find((item) => item.id === commentId) ||
-      Array.from(commentReplies.values())
-        .flat()
-        .find((item) => item.postId === reelId && item.id === commentId);
-
-    if (!target) {
-      throw new Error("Comment not found");
-    }
-
-    target.liked = !target.liked;
-    target.likesCount = Math.max(0, target.likesCount + (target.liked ? 1 : -1));
-    return cloneReelComment({
-      id: target.id,
-      reelId,
-      parentCommentId: target.parentCommentId || null,
-      user: target.user,
-      text: target.text,
-      createdAt: target.createdAt,
-      liked: target.liked,
-      likesCount: target.likesCount,
-      canDelete: target.canDelete,
-      replyCount: target.replyCount,
-    });
-  }
-
-  async toggleSwipeCommentLike(swipeId: string, commentId: string): Promise<ReelComment> {
-    return this.toggleReelCommentLike(swipeId, commentId);
-  }
-
-  async deleteReelComment(reelId: string, commentId: string): Promise<void> {
-    await wait(90);
-    const comments = ensureReelComments(reelId);
-    const idx = comments.findIndex((item) => item.id === commentId);
-    const comment =
-      idx >= 0
-        ? comments[idx]
-        : Array.from(commentReplies.values())
-            .flat()
-            .find((item) => item.postId === reelId && item.id === commentId);
-
-    if (!comment) {
-      throw new Error("Comment not found");
-    }
-    const currentUserId = getCurrentUserId();
-    if (comment.user.id !== currentUserId && !comment.canDelete) {
-      throw new Error("You can only delete your own comments.");
-    }
-
-    if (idx >= 0) {
-      comments.splice(idx, 1);
-      reelComments.set(reelId, comments);
-      commentReplies.delete(commentId);
-    } else {
-      for (const [parentId, replies] of commentReplies.entries()) {
-        const replyIndex = replies.findIndex((item) => item.id === commentId);
-        if (replyIndex >= 0) {
-          replies.splice(replyIndex, 1);
-          commentReplies.set(parentId, replies);
-          const parent = comments.find((item) => item.id === parentId);
-          if (parent) {
-            parent.replyCount = Math.max(0, (parent.replyCount || 0) - 1);
-          }
-          break;
-        }
-      }
-    }
-
-    const reel = state.reels.find((item) => item.id === reelId);
-    if (reel) {
-      reel.commentsCount = Math.max(0, reel.commentsCount - 1);
-    }
-  }
-
-  async deleteSwipeComment(swipeId: string, commentId: string): Promise<void> {
-    await this.deleteReelComment(swipeId, commentId);
-  }
-
-  async createPost(input: CreatePostInput): Promise<Post> {
-    await wait(REQUEST_DELAY_MS);
-    const payload = normalizePostInput(input);
-
-    const post: Post = {
-      id: buildId("p"),
-      user: getUsers()[0],
-      type: payload.type,
-      caption: payload.caption,
-      media: payload.media,
-      location: payload.location,
-      music: formatMusicLabel(payload.music),
-      hashtags: payload.hashtags || [],
-      mentions: payload.mentions || [],
-      collaboratorIds: payload.collaboratorIds || [],
-      settings: {
-        disableComments: payload.settings?.disableComments || false,
-        hideLikeCount: payload.settings?.hideLikeCount || false,
-        allowRemix: payload.settings?.allowRemix ?? true,
-      },
-      createdAt: Date.now(),
-      likesCount: 0,
-      commentsCount: 0,
-      sharesCount: 0,
-      liked: false,
-      saved: false,
-    };
-
-    state.posts.unshift(post);
-
-    const cloned = clonePostById(post.id);
-    if (!cloned) {
-      throw new Error("Could not create post");
-    }
-
-    return cloned;
-  }
-
-  async createStory(input: CreateStoryInput): Promise<Story> {
-    await wait(REQUEST_DELAY_MS);
-    const payload = normalizeStoryInput(input);
-
-    const story: Story = {
-      id: buildId("s"),
-      user: getUsers()[0],
-      type: payload.type,
-      media: payload.media,
-      text: payload.text,
-      backgroundColor: payload.backgroundColor,
-      poll: payload.poll
-        ? {
-            question: payload.poll.question,
-            options: payload.poll.options,
-            votes: [0, 0],
-          }
-        : undefined,
-      question: payload.question
-        ? {
-            prompt: payload.question.prompt,
-            responseCount: 0,
-          }
-        : undefined,
-      linkUrl: payload.linkUrl,
-      mentions: payload.mentions || [],
-      hashtags: payload.hashtags || [],
-      visibility: payload.visibility || "public",
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-      viewed: false,
-      liked: false,
-      reactionCount: 0,
-      allowReplies: payload.allowReplies,
-      allowSharing: payload.allowSharing,
-      music: mapStoryMusicDetails(payload.music, {
-        startTime: payload.music?.clipStartTime,
-        duration: payload.music?.clipDuration,
-      }),
-    };
-
-    state.stories.unshift(story);
-
-    const found = state.stories.find((item) => item.id === story.id);
-    if (!found) {
-      throw new Error("Could not create story");
-    }
-
-    return syncMockStoryMeta(found);
-  }
-
-  async updateStory(storyId: string, input: UpdateStoryInput): Promise<Story> {
-    await wait(130);
-    const target = state.stories.find((item) => item.id === storyId);
-
-    if (!target) {
-      throw new Error("Story not found");
-    }
-
-    const payload = normalizeUpdateStoryInput(input);
-
-    if (payload.text !== undefined) {
-      target.text = payload.text;
-    }
-
-    if (payload.backgroundColor !== undefined) {
-      target.backgroundColor = payload.backgroundColor;
-    }
-
-    if (payload.linkUrl !== undefined) {
-      target.linkUrl = payload.linkUrl;
-    }
-
-    if (payload.visibility !== undefined) {
-      target.visibility = payload.visibility;
-    }
-
-    if (payload.allowReplies !== undefined) {
-      target.allowReplies = payload.allowReplies;
-    }
-
-    if (payload.allowSharing !== undefined) {
-      target.allowSharing = payload.allowSharing;
-    }
-
-    if (payload.music !== undefined) {
-      target.music = payload.music;
-    }
-
-    return syncMockStoryMeta(target);
-  }
-
-  async archiveStory(storyId: string): Promise<void> {
-    await wait(90);
-    const target = state.stories.find((item) => item.id === storyId);
-
-    if (!target) {
-      throw new Error("Story not found");
-    }
-
-    assertCurrentUserOwns(target.user.id, STORY_OWNER_ERROR);
-    archivedStoryIds.add(storyId);
-  }
-
-  async restoreStory(storyId: string): Promise<void> {
-    await wait(90);
-    const target = state.stories.find((item) => item.id === storyId);
-
-    if (!target) {
-      throw new Error("Story not found");
-    }
-
-    assertCurrentUserOwns(target.user.id, STORY_OWNER_ERROR);
-    archivedStoryIds.delete(storyId);
-  }
-
-  async deleteStory(storyId: string): Promise<void> {
-    await wait(90);
-    const idx = state.stories.findIndex((item) => item.id === storyId);
-
-    if (idx < 0) {
-      throw new Error("Story not found");
-    }
-
-    assertCurrentUserOwns(state.stories[idx]?.user?.id || "", STORY_OWNER_ERROR);
-    state.stories.splice(idx, 1);
-    archivedStoryIds.delete(storyId);
-    storyComments.delete(storyId);
-    storyViewers.delete(storyId);
-    storyLikers.delete(storyId);
-  }
-
-  async getStoryViewers(storyId: string): Promise<StoryViewerEntry[]> {
-    await wait(100);
-    const story = state.stories.find((item) => item.id === storyId);
-    if (!story) {
-      throw new Error("Story not found");
-    }
-
-    assertCurrentUserOwns(story.user.id, STORY_INSIGHTS_OWNER_ERROR);
-    return ensureStoryViewers(storyId).map((entry) => ({ ...entry, user: { ...entry.user } }));
-  }
-
-  async getStoryLikers(storyId: string): Promise<SocialUser[]> {
-    await wait(100);
-    const story = state.stories.find((item) => item.id === storyId);
-    if (!story) {
-      throw new Error("Story not found");
-    }
-
-    assertCurrentUserOwns(story.user.id, STORY_INSIGHTS_OWNER_ERROR);
-    ensureStoryViewers(storyId);
-    return cloneUsers(storyLikers.get(storyId) || []);
-  }
-
-  async reportContent(contentType: ContentKind, contentId: string, reason: ReportReason, note?: string): Promise<void> {
-    await loadModerationPrefs();
-    await wait(90);
-    reports.push({
-      contentType,
-      contentId,
-      reason,
-      note: normalizeReportNote(note),
-      createdAt: Date.now(),
-    });
-    await persistModerationPrefs();
-  }
-
-  async muteUser(userId: string): Promise<void> {
-    await loadModerationPrefs();
-    await wait(60);
-    mutedUserIds.add(userId);
-    await persistModerationPrefs();
-  }
-
-  async blockUser(userId: string): Promise<void> {
-    await loadModerationPrefs();
-    await wait(60);
-    blockedUserIds.add(userId);
-    await persistModerationPrefs();
-  }
-
-  async unblockUser(userId: string): Promise<void> {
-    await loadModerationPrefs();
-    await wait(60);
-    blockedUserIds.delete(userId);
-    await persistModerationPrefs();
-  }
-
-  async markNotInterested(contentType: ContentKind, contentId: string): Promise<void> {
-    await loadModerationPrefs();
-    await wait(60);
-    hiddenContentKeys.add(buildContentKey(contentType, contentId));
-    await persistModerationPrefs();
-  }
-
-  async createReel(input: CreateReelInput): Promise<Reel> {
-    await wait(REQUEST_DELAY_MS);
-    const payload = normalizeReelInput(input);
-
-    const reel: Reel = {
-      id: buildId("r"),
-      user: getUsers()[0],
-      caption: payload.caption,
-      media: payload.media,
-      thumbnailUrl: payload.thumbnailUrl || payload.media.thumbnailUrl || payload.media.url,
-      music: formatMusicLabel(payload.music),
-      hashtags: payload.hashtags || [],
-      mentions: payload.mentions || [],
-      location: payload.location,
-      createdAt: Date.now(),
-      likesCount: 0,
-      commentsCount: 0,
-      sharesCount: 0,
-      liked: false,
-      saved: false,
-    };
-
-    state.reels.unshift(reel);
-
-    return {
-      ...reel,
-      user: { ...reel.user },
-      media: { ...reel.media },
-      hashtags: [...reel.hashtags],
-      mentions: [...reel.mentions],
-    };
-  }
-
-  async createSwipe(input: CreateSwipeInput): Promise<Reel> {
-    return this.createReel(input);
-  }
-}
+};
+
+const buildTextStickerStyle = (
+  scale: number | undefined,
+  theme: StoryTextStickerTheme | undefined,
+  alignment: StoryStickerTextAlignment | undefined,
+) => {
+  const themeStyle = getTextStickerThemeStyle(theme);
+  return {
+    color: themeStyle.color,
+    backgroundColor: themeStyle.backgroundColor,
+    fontSize: Math.round(18 * (scale || 1)),
+    alignment: alignment || "center",
+  } as const;
+};
 
 class RemoteSocialApi implements SocialApi {
-  private readonly mock = new MockSocialApi();
-  private readonly fallbackAvatarUrl = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+  private readonly fallbackAvatarUrl = "https://aline2.com/asstes/images/logo/logo.jpeg";
   private readonly postCache = new Map<string, Post>();
   private readonly storyCache = new Map<string, Story>();
   private readonly reelCache = new Map<string, Reel>();
@@ -1778,6 +535,8 @@ class RemoteSocialApi implements SocialApi {
     const stickers = Array.isArray(story?.stickers) ? story.stickers : [];
     const pollSticker = stickers.find((item: any) => item?.type === "poll");
     const questionSticker = stickers.find((item: any) => item?.type === "question");
+    const locationSticker = stickers.find((item: any) => item?.type === "location" && item?.text);
+    const mentionStickers = stickers.filter((item: any) => item?.type === "mention" && item?.text);
     const storyType = pollSticker ? "poll" : questionSticker ? "question" : !story?.mediaUrl && story?.caption ? "text" : "media";
 
     return {
@@ -1791,7 +550,18 @@ class RemoteSocialApi implements SocialApi {
         duration: story.duration,
       }, 0, "story_media") : undefined,
       text: storyType === "text" ? story?.caption || "" : undefined,
-      backgroundColor: undefined,
+      backgroundColor: typeof story?.backgroundColor === "string" ? story.backgroundColor : undefined,
+      filterPreset:
+        story?.filterPreset === "warm" ||
+        story?.filterPreset === "cool" ||
+        story?.filterPreset === "noir" ||
+        story?.filterPreset === "dream"
+          ? story.filterPreset
+          : "none",
+      filterIntensity:
+        typeof story?.filterIntensity === "number"
+          ? Math.min(1, Math.max(0.2, story.filterIntensity))
+          : 1,
       poll: pollSticker
         ? {
             question: pollSticker?.text || "Poll",
@@ -1811,10 +581,36 @@ class RemoteSocialApi implements SocialApi {
             responseCount: 0,
           }
         : undefined,
-      linkUrl: undefined,
-      mentions: stickers
-        .filter((item: any) => item?.type === "mention" && item?.text)
-        .map((item: any) => item.text),
+      linkUrl: typeof story?.linkUrl === "string" ? story.linkUrl : undefined,
+      location: locationSticker?.text || undefined,
+      stickers: stickers
+        .filter((item: any) => (item?.type === "text" || item?.type === "emoji") && item?.text)
+        .map((item: any, index: number) => ({
+          id: this.getId(item) || `${this.getId(story)}_story_sticker_${index}`,
+          type: item.type,
+          text: item.text,
+          position: {
+            x: typeof item?.position?.x === "number" ? item.position.x : 0.18,
+            y: typeof item?.position?.y === "number" ? item.position.y : 0.22 + index * 0.12,
+            width: typeof item?.position?.width === "number" ? item.position.width : item?.type === "emoji" ? 0.18 : 0.56,
+            height: typeof item?.position?.height === "number" ? item.position.height : item?.type === "emoji" ? 0.14 : 0.12,
+            rotation: typeof item?.position?.rotation === "number" ? item.position.rotation : 0,
+            scale: typeof item?.position?.scale === "number" ? item.position.scale : 1,
+          },
+          style: item?.style
+            ? {
+                color: typeof item.style.color === "string" ? item.style.color : undefined,
+                backgroundColor: typeof item.style.backgroundColor === "string" ? item.style.backgroundColor : undefined,
+                fontSize: typeof item.style.fontSize === "number" ? item.style.fontSize : undefined,
+                alignment: item.style.alignment,
+              }
+            : undefined,
+        })),
+      mentions: mentionStickers.map((item: any) => item.text),
+      mentionTargets: mentionStickers.map((item: any) => ({
+        id: item?.userId ? String(item.userId) : undefined,
+        username: String(item.text),
+      })),
       hashtags: stickers
         .filter((item: any) => item?.type === "hashtag" && item?.text)
         .map((item: any) => item.text),
@@ -1847,7 +643,7 @@ class RemoteSocialApi implements SocialApi {
       user: this.mapUser(comment?.user),
       text: comment?.text || "",
       createdAt: this.toTimestamp(comment?.createdAt),
-      liked: false,
+      liked: !!comment?.likedByViewer,
       likesCount: typeof comment?.likes === "number" ? comment.likes : 0,
       canDelete: this.getId(comment?.user) === currentUserId,
       replyCount: typeof comment?.replyCount === "number" ? comment.replyCount : 0,
@@ -1896,6 +692,15 @@ class RemoteSocialApi implements SocialApi {
   private cacheComments(comments: Array<Comment | ReelComment>) {
     comments.forEach((comment) => this.commentCache.set(comment.id, comment));
     return comments;
+  }
+
+  private removeCommentFromReplyCaches(commentId: string) {
+    this.commentReplyCache.forEach((items, parentId) => {
+      this.commentReplyCache.set(
+        parentId,
+        items.filter((item) => item.id !== commentId),
+      );
+    });
   }
 
   private async getCurrentUserId(): Promise<string> {
@@ -2060,7 +865,7 @@ class RemoteSocialApi implements SocialApi {
   async getStorySequence(storyId: string, options?: GetStorySequenceOptions): Promise<StorySequenceResponse> {
     await loadModerationPrefs();
     if (!this.isBackendObjectId(storyId)) {
-      return this.getCachedStorySequence(storyId);
+      throw new Error(SYNC_REQUIRED_STORY_ERROR);
     }
 
     const [groups, currentUserId] = await Promise.all([this.getStoryFeedGroups(), this.getCurrentUserId()]);
@@ -2186,14 +991,7 @@ class RemoteSocialApi implements SocialApi {
 
   async markStoryViewed(storyId: string): Promise<Story> {
     if (!this.isBackendObjectId(storyId)) {
-      const cached = this.getCachedStory(storyId);
-      const updated = {
-        ...cached,
-        viewed: true,
-      };
-
-      this.storyCache.set(storyId, updated);
-      return updated;
+      throw new Error(SYNC_REQUIRED_STORY_ERROR);
     }
 
     const cached = this.getCachedStory(storyId);
@@ -2211,21 +1009,7 @@ class RemoteSocialApi implements SocialApi {
 
   async toggleStoryLike(storyId: string): Promise<Story> {
     if (!this.isBackendObjectId(storyId)) {
-      const cached = this.getCachedStory(storyId);
-
-      if (cached.liked) {
-        return cached;
-      }
-
-      const updated = {
-        ...cached,
-        liked: true,
-        viewed: true,
-        reactionCount: Math.max(0, cached.reactionCount + 1),
-      };
-
-      this.storyCache.set(storyId, updated);
-      return updated;
+      throw new Error(SYNC_REQUIRED_STORY_ERROR);
     }
 
     const cached = this.getCachedStory(storyId);
@@ -2321,51 +1105,7 @@ class RemoteSocialApi implements SocialApi {
 
   async addStoryReply(storyId: string, text: string, parentCommentId?: string): Promise<Comment> {
     if (!this.isBackendObjectId(storyId)) {
-      const currentUserId = await this.getCurrentUserId();
-      const cachedStory = this.storyCache.get(storyId);
-      const comment: Comment = {
-        id: buildId(parentCommentId ? "scr" : "sc"),
-        storyId,
-        parentCommentId: parentCommentId || null,
-        user: cachedStory?.user.id === currentUserId ? { ...cachedStory.user } : {
-          id: currentUserId || "local_user",
-          username: "you",
-          name: "You",
-          avatarUrl: this.fallbackAvatarUrl,
-        },
-        text: normalizeCommentText(text),
-        createdAt: Date.now(),
-        liked: false,
-        likesCount: 0,
-        canDelete: true,
-        replyCount: 0,
-        mentions: [],
-      };
-
-      this.commentCache.set(comment.id, comment);
-
-      if (parentCommentId) {
-        const replies = this.commentReplyCache.get(parentCommentId) || [];
-        this.commentReplyCache.set(parentCommentId, [...replies, comment]);
-      } else {
-        const existing = this.storyReplyCache.get(storyId) || [];
-        this.storyReplyCache.set(storyId, [comment, ...existing]);
-      }
-
-      if (cachedStory) {
-        this.storyCache.set(storyId, {
-          ...cachedStory,
-          replyCount: (cachedStory.replyCount || 0) + 1,
-          question: cachedStory.question
-            ? {
-                ...cachedStory.question,
-                responseCount: cachedStory.question.responseCount + 1,
-              }
-            : undefined,
-        });
-      }
-
-      return comment;
+      throw new Error(SYNC_REQUIRED_STORY_ERROR);
     }
 
     const cleanText = normalizeCommentText(text);
@@ -2452,28 +1192,43 @@ class RemoteSocialApi implements SocialApi {
     return updated;
   }
 
-  async deleteStoryReply(storyId: string, commentId: string): Promise<void> {
+  async deleteStoryReply(storyId: string, commentId: string): Promise<DeleteCommentResult> {
     await this.requireOwnedStory(storyId, STORY_REPLIES_OWNER_ERROR);
-    await API.delete(`/comments/${commentId}`);
+    const res = await API.delete(`/comments/${commentId}`);
+    const deletedCount = Math.max(1, Number(res?.data?.deletedCount || 1));
+    const parentCommentId =
+      typeof res?.data?.parentCommentId === "string" && res.data.parentCommentId
+        ? res.data.parentCommentId
+        : null;
     this.commentCache.delete(commentId);
     this.storyReplyCache.set(
       storyId,
       (this.storyReplyCache.get(storyId) || []).filter((item) => item.id !== commentId),
     );
-    this.commentReplyCache.forEach((items, parentId) => {
-      this.commentReplyCache.set(
-        parentId,
-        items.filter((item) => item.id !== commentId),
-      );
-    });
+    this.removeCommentFromReplyCaches(commentId);
 
     const cached = this.storyCache.get(storyId);
     if (cached) {
       this.storyCache.set(storyId, {
         ...cached,
-        replyCount: Math.max(0, (cached.replyCount || 0) - 1),
+        replyCount: Math.max(0, (cached.replyCount || 0) - deletedCount),
       });
     }
+
+    if (parentCommentId) {
+      const cachedParent = this.commentCache.get(parentCommentId);
+      if (cachedParent && "user" in cachedParent) {
+        this.commentCache.set(parentCommentId, {
+          ...cachedParent,
+          replyCount: Math.max(0, ((cachedParent as Comment).replyCount || 0) - 1),
+        });
+      }
+    }
+
+    return {
+      deletedCount,
+      parentCommentId,
+    };
   }
 
   async getStoryLikers(storyId: string): Promise<SocialUser[]> {
@@ -2585,9 +1340,38 @@ class RemoteSocialApi implements SocialApi {
     return updated;
   }
 
-  async deletePostComment(postId: string, commentId: string): Promise<void> {
-    await API.delete(`/comments/${commentId}`);
+  async deletePostComment(postId: string, commentId: string): Promise<DeleteCommentResult> {
+    const res = await API.delete(`/comments/${commentId}`);
+    const deletedCount = Math.max(1, Number(res?.data?.deletedCount || 1));
+    const parentCommentId =
+      typeof res?.data?.parentCommentId === "string" && res.data.parentCommentId
+        ? res.data.parentCommentId
+        : null;
     this.commentCache.delete(commentId);
+    this.removeCommentFromReplyCaches(commentId);
+
+    if (parentCommentId) {
+      const parent = this.commentCache.get(parentCommentId) as Comment | undefined;
+      if (parent) {
+        this.commentCache.set(parentCommentId, {
+          ...parent,
+          replyCount: Math.max(0, (parent.replyCount || 0) - 1),
+        });
+      }
+    }
+
+    const cachedPost = this.postCache.get(postId);
+    if (cachedPost) {
+      this.postCache.set(postId, {
+        ...cachedPost,
+        commentsCount: Math.max(0, cachedPost.commentsCount - deletedCount),
+      });
+    }
+
+    return {
+      deletedCount,
+      parentCommentId,
+    };
   }
 
   async updatePost(postId: string, input: UpdatePostInput): Promise<Post> {
@@ -2664,8 +1448,17 @@ class RemoteSocialApi implements SocialApi {
   }
 
   async shareSwipe(swipeId: string): Promise<Reel> {
-    await API.post(`/posts/${swipeId}/share`);
     const cached = this.getCachedReel(swipeId);
+    await API.post(`/posts/${swipeId}/share`, {
+      shareType: "story",
+      storyData: cached.media
+        ? {
+            mediaType: cached.media.mediaType,
+            mediaUrl: cached.media.url,
+            thumbnailUrl: cached.thumbnailUrl || cached.media.thumbnailUrl,
+          }
+        : undefined,
+    });
     const updated = {
       ...cached,
       sharesCount: cached.sharesCount + 1,
@@ -2739,13 +1532,42 @@ class RemoteSocialApi implements SocialApi {
     return updated;
   }
 
-  async deleteReelComment(reelId: string, commentId: string): Promise<void> {
-    await this.deleteSwipeComment(reelId, commentId);
+  async deleteReelComment(reelId: string, commentId: string): Promise<DeleteCommentResult> {
+    return this.deleteSwipeComment(reelId, commentId);
   }
 
-  async deleteSwipeComment(swipeId: string, commentId: string): Promise<void> {
-    await API.delete(`/comments/${commentId}`);
+  async deleteSwipeComment(swipeId: string, commentId: string): Promise<DeleteCommentResult> {
+    const res = await API.delete(`/comments/${commentId}`);
+    const deletedCount = Math.max(1, Number(res?.data?.deletedCount || 1));
+    const parentCommentId =
+      typeof res?.data?.parentCommentId === "string" && res.data.parentCommentId
+        ? res.data.parentCommentId
+        : null;
     this.commentCache.delete(commentId);
+    this.removeCommentFromReplyCaches(commentId);
+
+    if (parentCommentId) {
+      const parent = this.commentCache.get(parentCommentId) as ReelComment | undefined;
+      if (parent) {
+        this.commentCache.set(parentCommentId, {
+          ...parent,
+          replyCount: Math.max(0, (parent.replyCount || 0) - 1),
+        });
+      }
+    }
+
+    const cachedSwipe = this.reelCache.get(swipeId);
+    if (cachedSwipe) {
+      this.reelCache.set(swipeId, {
+        ...cachedSwipe,
+        commentsCount: Math.max(0, cachedSwipe.commentsCount - deletedCount),
+      });
+    }
+
+    return {
+      deletedCount,
+      parentCommentId,
+    };
   }
 
   async createPost(input: CreatePostInput): Promise<Post> {
@@ -2767,6 +1589,8 @@ class RemoteSocialApi implements SocialApi {
       commentsDisabled: payload.settings?.disableComments || false,
       likesHidden: payload.settings?.hideLikeCount || false,
       collaborators: payload.collaboratorIds || [],
+      hashtags: payload.hashtags,
+      mentions: payload.mentions,
       ...buildMusicRequestPayload(payload.music),
     });
 
@@ -2777,10 +1601,6 @@ class RemoteSocialApi implements SocialApi {
 
   async createStory(input: CreateStoryInput): Promise<Story> {
     const payload = normalizeStoryInput(input);
-
-    if (payload.type === "text") {
-      throw new Error("Text stories are not supported by the current backend.");
-    }
 
     const stickers: any[] =
       payload.type === "poll" && payload.poll
@@ -2822,8 +1642,94 @@ class RemoteSocialApi implements SocialApi {
       stickers.push(musicSticker);
     }
 
+    if (payload.location) {
+      stickers.push({
+        type: "location",
+        text: payload.location,
+        position: {
+          x: 0.22,
+          y: 0.14,
+          width: 0.34,
+          height: 0.08,
+          rotation: 0,
+          scale: 1,
+        },
+      });
+    }
+
+    if (payload.customTextSticker) {
+      stickers.push({
+        type: "text",
+        text: payload.customTextSticker,
+        position: resolveStoryStickerPosition(
+          payload.customTextStickerPosition,
+          payload.customTextStickerPlacement,
+          "text",
+          payload.customTextStickerScale,
+          payload.customTextStickerRotation,
+        ),
+        style: buildTextStickerStyle(
+          payload.customTextStickerScale,
+          payload.customTextStickerTheme,
+          payload.customTextStickerAlignment,
+        ),
+      });
+    }
+
+    if (payload.customEmojiSticker) {
+      stickers.push({
+        type: "emoji",
+        text: payload.customEmojiSticker,
+        position: resolveStoryStickerPosition(
+          payload.customEmojiStickerPosition,
+          payload.customEmojiStickerPlacement,
+          "emoji",
+          payload.customEmojiStickerScale,
+          payload.customEmojiStickerRotation,
+        ),
+        style: {
+          fontSize: Math.round(36 * (payload.customEmojiStickerScale || 1)),
+          alignment: "center",
+        },
+      });
+    }
+
+    (payload.hashtags || []).slice(0, 3).forEach((tag, index) => {
+      stickers.push({
+        type: "hashtag",
+        text: tag,
+        position: {
+          x: 0.22 + Math.min(index, 1) * 0.22,
+          y: 0.24 + Math.floor(index / 2) * 0.08,
+          width: 0.22,
+          height: 0.07,
+          rotation: 0,
+          scale: 1,
+        },
+      });
+    });
+
+    (payload.mentions || []).slice(0, 3).forEach((mention, index) => {
+      stickers.push({
+        type: "mention",
+        text: mention,
+        position: {
+          x: 0.22 + Math.min(index, 1) * 0.24,
+          y: 0.34 + Math.floor(index / 2) * 0.08,
+          width: 0.24,
+          height: 0.07,
+          rotation: 0,
+          scale: 1,
+        },
+      });
+    });
+
     if (payload.type === "media" && !payload.media) {
       throw new Error("Media stories require an image or video.");
+    }
+
+    if (payload.type === "text" && !payload.text?.trim()) {
+      throw new Error("Text stories require text.");
     }
 
     if (payload.visibility === "custom" && !(payload.visibleToUserIds || []).length) {
@@ -2831,12 +1737,16 @@ class RemoteSocialApi implements SocialApi {
     }
 
     const res = await API.post("/story/create", {
-      mediaType: payload.media?.mediaType || "image",
+      mediaType: payload.media?.mediaType,
       mediaUrl: payload.media?.url,
       thumbnailUrl: payload.media?.thumbnailUrl,
       duration: payload.media?.durationMs ? Math.ceil(payload.media.durationMs / 1000) : undefined,
       caption: payload.text,
+      backgroundColor: payload.backgroundColor,
+      filterPreset: payload.filterPreset || "none",
+      filterIntensity: payload.filterIntensity ?? 1,
       stickers,
+      linkUrl: payload.linkUrl,
       visibility: payload.visibility || "public",
       visibleTo: payload.visibility === "custom" ? payload.visibleToUserIds || [] : undefined,
       isCloseFriends: payload.visibility === "close_friends",
@@ -2871,6 +1781,8 @@ class RemoteSocialApi implements SocialApi {
       ],
       postType: "reel",
       location: payload.location ? { name: payload.location } : undefined,
+      hashtags: payload.hashtags,
+      mentions: payload.mentions,
       ...buildMusicRequestPayload(payload.music),
     });
 
@@ -2883,6 +1795,9 @@ class RemoteSocialApi implements SocialApi {
     const payload = normalizeUpdateStoryInput(input);
     const res = await API.put(`/story/${storyId}`, {
       text: payload.text,
+      backgroundColor: payload.backgroundColor,
+      filterPreset: payload.filterPreset,
+      filterIntensity: payload.filterIntensity,
       visibility: payload.visibility,
       allowReplies: payload.allowReplies,
       allowSharing: payload.allowSharing,
@@ -2966,5 +1881,4 @@ class RemoteSocialApi implements SocialApi {
   }
 }
 
-export const socialApi: SocialApi =
-  SOCIAL_API_MODE === "remote" ? new RemoteSocialApi() : new MockSocialApi();
+export const socialApi: SocialApi = new RemoteSocialApi();

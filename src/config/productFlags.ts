@@ -1,5 +1,5 @@
 export const productFlags = {
-  sellerMonetizationInConsumerApp: false,
+  sellerMonetizationInConsumerApp: true,
 } as const;
 
 export const monetizationDisabledMessage =

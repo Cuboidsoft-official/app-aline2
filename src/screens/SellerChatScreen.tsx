@@ -5,17 +5,21 @@ import {
   StyleSheet,
   Image,
   FlatList,
+  RefreshControl,
   TextInput,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   Modal,
   ScrollView,
   ActivityIndicator,
-  Alert
+  Alert,
+  Linking,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import {
   errorCodes,
@@ -47,14 +51,41 @@ import {
   fetchConversationMessages,
   sendChatMessage,
 } from "../utils/chatApi";
+import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import {
   getLastIncomingUnseenMessage,
   mergeMessageReaction,
   mergeMessageSeen,
 } from "../utils/chatRealtime";
+import { getStoredUser } from "../utils/authSession";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { useAppTheme } from "../theme/AppThemeContext";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 
 const PRIMARY = "#7B4DFF";
-const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+const LOCATION_MESSAGE_LABEL = "Shared location:";
+
+const buildLocationMessage = (query: string): string => {
+  const cleanQuery = String(query || "").trim();
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanQuery)}`;
+  return `${LOCATION_MESSAGE_LABEL} ${cleanQuery}\n${mapsUrl}`;
+};
+
+const parseLocationMessage = (value: string | undefined): { label: string; url: string } | null => {
+  if (typeof value !== "string" || !value.startsWith(LOCATION_MESSAGE_LABEL)) {
+    return null;
+  }
+
+  const [labelLine, urlLine] = value.split("\n");
+  const label = labelLine.replace(LOCATION_MESSAGE_LABEL, "").trim();
+  const url = String(urlLine || "").trim();
+
+  if (!label || !/^https?:\/\//.test(url)) {
+    return null;
+  }
+
+  return { label, url };
+};
 
 type SellerProfile = {
   _id: string;
@@ -180,10 +211,9 @@ const getDocumentPickerMessage = (error: unknown): string => {
   }
 };
 
-const getRequestErrorMessage = (error: any, fallbackMessage: string): string =>
-  error?.response?.data?.message || error?.message || fallbackMessage;
-
 const SellerChatScreen = ({ route, navigation }: any) => {
+  const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const {
     sellerId,
     sellerUserId: initialSellerUserId,
@@ -201,16 +231,21 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [services, setServices] = useState<SellerService[]>([]);
   const [selectedService, setSelectedService] = useState<SellerService | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [processingBookingPayment, setProcessingBookingPayment] = useState(false);
   const [selectedAppointmentStart, setSelectedAppointmentStart] = useState("");
   const [appointmentSlots, setAppointmentSlots] = useState<AppointmentSlot[]>([]);
   const [loadingAppointmentSlots, setLoadingAppointmentSlots] = useState(false);
   const [appointmentSlotFallback, setAppointmentSlotFallback] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagination, setPagination] = useState({ nextCursor: null, hasMore: false, limit: 30 });
   const [typingUserId, setTypingUserId] = useState("");
+  const [showLocationComposer, setShowLocationComposer] = useState(false);
+  const [locationDraft, setLocationDraft] = useState("");
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const quickOptions = useMemo(
@@ -236,19 +271,13 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   }, [initialSellerUserId, seller]);
 
   const fetchSeller = useCallback(async () => {
-    const token = await AsyncStorage.getItem("token");
-    const res = await API.get(`/seller/${sellerId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await API.get(`/seller/${sellerId}`);
     setSeller(res.data.seller);
     return res.data.seller as SellerProfile;
   }, [sellerId]);
 
   const fetchServices = useCallback(async () => {
-    const token = await AsyncStorage.getItem("token");
-    const res = await API.get(`/service/seller/${sellerId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await API.get(`/service/seller/${sellerId}`);
     const nextServices = res.data.services || [];
     setServices(nextServices);
 
@@ -290,6 +319,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     const nextMessages = data?.messages || [];
     setPagination(data?.pagination || { nextCursor: null, hasMore: false, limit: 30 });
     setMessages((prev) => (options.append ? [...nextMessages, ...prev] : nextMessages));
+    setErrorMessage("");
   }, []);
 
   const resolveConversation = useCallback(async (targetServiceId?: string | null, options: { force?: boolean } = {}) => {
@@ -314,6 +344,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     if (nextConversationId) {
       setCurrentConversationId(nextConversationId);
       setConversationServiceId(normalizedServiceId);
+      setErrorMessage("");
     }
 
     return nextConversationId;
@@ -345,8 +376,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     const resolvedConversationId = await ensureConversation();
 
     if (!resolvedConversationId) {
-      Alert.alert("Unavailable", "Seller chat is not ready yet for this profile.");
-      return;
+      throw new Error("Unable to start this seller conversation right now.");
     }
 
     const res = await sendChatMessage({
@@ -376,7 +406,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       setText("");
     } catch (error) {
       console.log("seller chat send error:", error);
-      Alert.alert("Error", getRequestErrorMessage(error, "Failed to send message"));
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send message"));
     } finally {
       setSending(false);
     }
@@ -392,6 +422,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     try {
       const resolvedConversationId = await ensureConversation();
       const pricingModel = getPrimaryPricingOption(targetService)?.model;
+      setProcessingBookingPayment(true);
       const res = await API.post("/service-requests", {
         serviceId: targetService._id,
         conversationId: resolvedConversationId || undefined,
@@ -401,13 +432,34 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         appointmentTimezone: getLocalTimeZone(),
       });
 
-      if (res?.data?.systemMessage) {
-        appendMessage(res.data.systemMessage as ChatMessage);
+      const requestId = res?.data?.request?._id;
+      const paymentPayload = res?.data?.payment;
+
+      if (!requestId || !paymentPayload) {
+        throw new Error("Payment payload is missing for this booking");
+      }
+
+      let checkoutResult;
+      try {
+        checkoutResult = await openRazorpayCheckout(paymentPayload);
+      } catch (checkoutError: any) {
+        const cancellationCode = Number(checkoutError?.code);
+        if (cancellationCode === 0 || /cancel/i.test(String(checkoutError?.description || checkoutError?.message || ""))) {
+          Alert.alert("Payment Pending", "Your booking was saved. You can complete payment later from My Appointments.");
+          return;
+        }
+        throw checkoutError;
+      }
+
+      const verifyRes = await API.post(`/service-requests/${requestId}/payment/verify`, checkoutResult);
+
+      if (verifyRes?.data?.systemMessage) {
+        appendMessage(verifyRes.data.systemMessage as ChatMessage);
         if (resolvedConversationId) {
           await connectSocket();
           socket.emit("sendMessage", {
             conversationId: resolvedConversationId,
-            message: res.data.systemMessage
+            message: verifyRes.data.systemMessage
           });
         }
       }
@@ -415,10 +467,12 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       setShowPaymentModal(false);
       setSelectedAppointmentStart("");
       setText("");
-      Alert.alert("Appointment Requested", "Your appointment request has been sent to the seller for confirmation.");
+      Alert.alert("Payment Complete", "Your booking has been paid and sent to the seller for confirmation.");
     } catch (error: any) {
       console.log("seller booking request error:", error?.response?.data || error);
-      Alert.alert("Error", error?.response?.data?.message || "Failed to create service request");
+      Alert.alert("Error", getReadableApiErrorMessage(error, error?.description || "Failed to start booking payment"));
+    } finally {
+      setProcessingBookingPayment(false);
     }
   }, [appendMessage, ensureConversation, selectedAppointmentStart, selectedService, serviceName, text]);
 
@@ -453,7 +507,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           setText("");
         } catch (error) {
           console.log("seller image send error:", error);
-          Alert.alert("Error", getRequestErrorMessage(error, "Failed to send attachment"));
+          Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send attachment"));
         } finally {
           setUploading(false);
         }
@@ -493,7 +547,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           setText("");
         } catch (error) {
           console.log("seller camera send error:", error);
-          Alert.alert("Error", getRequestErrorMessage(error, "Failed to send camera capture"));
+          Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send camera capture"));
         } finally {
           setUploading(false);
         }
@@ -558,7 +612,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       });
       setText("");
     } catch (error) {
-      const message = getDocumentPickerMessage(error) || getRequestErrorMessage(error, "Document pick failed");
+      const message = getDocumentPickerMessage(error) || getReadableApiErrorMessage(error, "Document pick failed");
       if (!message) {
         return;
       }
@@ -594,7 +648,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       });
       setText("");
     } catch (error) {
-      const message = getDocumentPickerMessage(error) || getRequestErrorMessage(error, "Audio pick failed");
+      const message = getDocumentPickerMessage(error) || getReadableApiErrorMessage(error, "Audio pick failed");
       if (!message) {
         return;
       }
@@ -606,13 +660,59 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     }
   }, [normalizePickedDocument, submitMessage, text]);
 
+  const sendLocationMessage = useCallback(async () => {
+    const cleanLocation = String(locationDraft || "").trim();
+
+    if (!cleanLocation) {
+      Alert.alert("Add a place", "Enter a place, address, or landmark to share.");
+      return;
+    }
+
+    try {
+      setUploading(true);
+      await submitMessage({
+        text: buildLocationMessage(cleanLocation),
+      });
+      setLocationDraft("");
+      setShowLocationComposer(false);
+      setText("");
+    } catch (error) {
+      console.log("seller location send error:", error);
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to share location"));
+    } finally {
+      setUploading(false);
+    }
+  }, [locationDraft, submitMessage]);
+
+  const loadSellerChat = useCallback(async ({ refresh = false }: { refresh?: boolean } = {}) => {
+    try {
+      if (refresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
+      setErrorMessage("");
+      await Promise.all([fetchSeller(), fetchServices()]);
+    } catch (error) {
+      console.log("seller chat init error:", error);
+      setMessages([]);
+      setErrorMessage(getReadableApiErrorMessage(error, "Failed to load seller chat."));
+    } finally {
+      if (refresh) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
+    }
+  }, [fetchSeller, fetchServices]);
+
   useEffect(() => {
     let mounted = true;
 
     const loadCurrentUser = async () => {
       try {
-        const rawUser = await AsyncStorage.getItem("user");
-        const parsedUser = rawUser ? JSON.parse(rawUser) : null;
+        const parsedUser = await getStoredUser();
         const nextUserId = parsedUser?._id || parsedUser?.id || "";
 
         if (!mounted) {
@@ -639,29 +739,25 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
   useEffect(() => {
     let active = true;
-
-    const initializeChat = async () => {
-      try {
-        setLoading(true);
-        await Promise.all([fetchSeller(), fetchServices()]);
-      } catch (error) {
-        console.log("seller chat init error:", error);
-        if (active) {
-          Alert.alert("Error", "Failed to load seller chat");
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
+    loadSellerChat().catch((error) => {
+      if (!active) {
+        return;
       }
-    };
-
-    initializeChat();
+      console.log("seller chat init effect error:", error);
+    });
 
     return () => {
       active = false;
     };
-  }, [fetchSeller, fetchServices]);
+  }, [loadSellerChat]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadSellerChat({ refresh: true }).catch((error) => {
+        console.log("seller chat focus refresh error:", error);
+      });
+    }, [loadSellerChat])
+  );
 
   useEffect(() => {
     let active = true;
@@ -691,10 +787,12 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         await fetchMessages(nextConversationId);
         await connectSocket();
         socket.emit("joinConversation", nextConversationId);
+        setErrorMessage("");
       } catch (error) {
         console.log("seller chat conversation sync error:", error);
         if (active) {
-          Alert.alert("Error", "Failed to load the selected service conversation.");
+          setMessages([]);
+          setErrorMessage(getReadableApiErrorMessage(error, "Failed to load the selected service conversation."));
         }
       } finally {
         if (active) {
@@ -874,6 +972,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     const isMine = String(getMessageSenderId(item)) === String(currentUserId || "");
     const attachment = getMessageAttachment(item);
     const textValue = getMessageText(item);
+    const locationPayload = parseLocationMessage(textValue);
     const seenCount = Array.isArray(item?.seenBy) ? item.seenBy.length : 0;
     const reactions = Array.isArray(item?.reactions) ? item.reactions : [];
 
@@ -943,11 +1042,34 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             </View>
           ) : null}
 
-          {!!textValue && (
+          {!locationPayload && !!textValue && (
             <Text style={isMine ? styles.myText : styles.otherText}>
               {textValue}
             </Text>
           )}
+
+          {locationPayload ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                Linking.openURL(locationPayload.url).catch((error) => {
+                  console.log("seller open location error:", error);
+                  Alert.alert("Unable to open map", "Please try again.");
+                });
+              }}
+              style={[styles.locationCard, isMine ? styles.myLocationCard : null]}
+            >
+              <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
+              <View style={styles.locationBody}>
+                <Text style={isMine ? styles.myLocationTitle : styles.locationTitle}>
+                  {locationPayload.label}
+                </Text>
+                <Text style={isMine ? styles.myLocationLink : styles.locationLink}>
+                  Open in Maps
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
 
           {!!reactions.length && (
             <View style={styles.reactionRow}>
@@ -994,18 +1116,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     setSelectedAppointmentStart("");
   }, [appointmentSlots, showPaymentModal]);
 
-  const openFeatureInfo = (title: string, description: string) => {
-    navigation.navigate("FeatureInfoScreen", {
-      title,
-      description,
-    });
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
       <StatusBar barStyle="light-content" backgroundColor={PRIMARY} />
 
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -1019,7 +1134,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         >
           <Image
             source={{
-              uri: seller?.profilePic || DEFAULT_AVATAR
+              uri: seller?.profilePic || DEFAULT_AVATAR_URL
             }}
             style={styles.avatar}
           />
@@ -1034,16 +1149,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
         <View style={styles.rightIcons}>
           <TouchableOpacity
-            style={{ marginRight: 15 }}
-            onPress={() => openFeatureInfo("Voice Call", "Voice calling is not available in the current backend yet.")}
+            onPress={() =>
+              navigation.navigate("SellerDetailsScreen", { sellerId })
+            }
           >
-            <Icon name="call" size={20} color="#fff" />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => openFeatureInfo("Video Call", "Video calling is not available in the current backend yet.")}
-          >
-            <Icon name="videocam" size={22} color="#fff" />
+            <Icon name="ellipsis-vertical" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>
@@ -1109,17 +1219,24 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   </Text>
 
                   <TouchableOpacity
-                    style={[styles.bookNowBtn, !isSelected ? styles.bookNowBtnMuted : null]}
+                    style={[
+                      styles.bookNowBtn,
+                      !isSelected ? styles.bookNowBtnMuted : null,
+                      seller?.availabilityStatus === false ? styles.bookNowBtnDisabled : null,
+                    ]}
                     onPress={() => {
-                      if (seller?.availabilityStatus === false) {
-                        Alert.alert("Unavailable", "This seller is not accepting appointment requests right now.");
-                        return;
-                      }
                       setSelectedService(item);
                       setShowPaymentModal(true);
                     }}
+                    disabled={seller?.availabilityStatus === false}
                   >
-                    <Text style={styles.bookNowText}>{isSelected ? "Request in Chat" : "Select & Request"}</Text>
+                    <Text style={styles.bookNowText}>
+                      {seller?.availabilityStatus === false
+                        ? "Unavailable"
+                        : isSelected
+                          ? "Request in Chat"
+                          : "Select & Request"}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </TouchableOpacity>
@@ -1135,6 +1252,19 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         </Text>
       </View>
 
+      {seller?.availabilityStatus === false ? (
+        <View style={styles.unavailableBanner}>
+          <Text style={styles.unavailableBannerText}>
+            This seller is not accepting appointment requests right now. You can still continue the chat.
+          </Text>
+        </View>
+      ) : null}
+
+      <KeyboardAvoidingView
+        style={styles.flexFill}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+      >
       <View style={{ flex: 1 }}>
         {loading ? (
           <View style={styles.loaderWrap}>
@@ -1145,7 +1275,19 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             data={messages}
             renderItem={renderMessage}
             keyExtractor={(item, index) => item._id || index.toString()}
-            contentContainerStyle={{ padding: 12, paddingBottom: 20 }}
+            contentContainerStyle={{ padding: 12, paddingBottom: 20 + insets.bottom }}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => {
+                  loadSellerChat({ refresh: true }).catch((error) => {
+                    console.log("seller chat refresh error:", error);
+                  });
+                }}
+                tintColor={colors.primary}
+              />
+            }
             ListHeaderComponent={
               pagination?.hasMore ? (
                 <TouchableOpacity
@@ -1163,9 +1305,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             }
             ListEmptyComponent={
               <View style={styles.emptyWrap}>
-                <Text style={styles.emptyTitle}>No messages yet</Text>
+                <Text style={styles.emptyTitle}>
+                  {errorMessage ? "Conversation unavailable" : "No messages yet"}
+                </Text>
                 <Text style={styles.emptyText}>
-                  Start the conversation here. Booking requests are handled through chat.
+                  {errorMessage || "Start the conversation here. Booking requests are handled through chat."}
                 </Text>
               </View>
             }
@@ -1191,25 +1335,30 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         </View>
       </View>
 
-      <View style={styles.inputWrap}>
+      <View style={[styles.inputWrap, { backgroundColor: colors.card, paddingBottom: 10 + insets.bottom, borderTopColor: colors.border }]}>
         <TouchableOpacity style={styles.attachButton} onPress={sendCameraAttachment} disabled={uploading || loading}>
-          <Icon name="camera-outline" size={22} color={PRIMARY} />
+          <Icon name="camera-outline" size={22} color={colors.primary} />
         </TouchableOpacity>
 
         <TouchableOpacity onPress={sendImageAttachment} disabled={uploading || loading}>
-          <Icon name="image-outline" size={22} color={PRIMARY} />
+          <Icon name="image-outline" size={22} color={colors.primary} />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.attachButton} onPress={sendDocumentAttachment} disabled={uploading || loading}>
-          <Icon name="document-outline" size={22} color={PRIMARY} />
+          <Icon name="document-outline" size={22} color={colors.primary} />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.attachButton} onPress={() => setShowLocationComposer(true)} disabled={uploading || loading}>
+          <Icon name="location-outline" size={22} color={colors.primary} />
         </TouchableOpacity>
 
         <TextInput
           placeholder={uploading ? "Uploading attachment..." : "Message..."}
           value={text}
           onChangeText={handleTextChange}
-          style={styles.input}
+          style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
           editable={!loading && !sending && !uploading}
+          placeholderTextColor={colors.placeholder}
         />
 
         {uploading ? (
@@ -1228,15 +1377,58 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           </TouchableOpacity>
         ) : (
           <TouchableOpacity onPress={sendAudioAttachment} disabled={uploading || loading}>
-            <Icon name="mic-outline" size={24} color={PRIMARY} />
+            <Icon name="mic-outline" size={24} color={colors.primary} />
           </TouchableOpacity>
         )}
       </View>
+      </KeyboardAvoidingView>
+
+      <Modal visible={showLocationComposer} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.locationModalBox}>
+            <Text style={styles.modalTitle}>Share Location</Text>
+            <Text style={styles.locationModalText}>
+              Enter a place, address, or landmark. A Maps link will be sent in this chat.
+            </Text>
+
+            <TextInput
+              value={locationDraft}
+              onChangeText={setLocationDraft}
+              style={styles.locationInput}
+              placeholder="Cafe, airport, clinic, MG Road..."
+              placeholderTextColor="#999"
+              editable={!uploading}
+            />
+
+            <TouchableOpacity
+              style={[styles.payBtn, uploading && styles.payBtnDisabled]}
+              onPress={() => {
+                sendLocationMessage().catch((error) => {
+                  console.log("seller location send error:", error);
+                });
+              }}
+              disabled={uploading}
+            >
+              {uploading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.payBtnText}>Send Location</Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                setShowLocationComposer(false);
+                setLocationDraft("");
+              }}
+              disabled={uploading}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={showPaymentModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Request Appointment</Text>
+            <Text style={styles.modalTitle}>Book & Pay</Text>
 
             <Text style={styles.modalService}>
               {selectedService?.serviceName || serviceName || "Selected service"}
@@ -1279,28 +1471,32 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 : appointmentSlots.length
                   ? appointmentSlotFallback
                     ? "Seller slots could not be loaded right now, so suggested fallback times are shown."
-                    : "This sends a preferred appointment slot to the seller. The seller can accept, decline, or complete it from the requests screen."
+                    : "Payment is collected now. After payment, the seller can confirm, reschedule, or move the booking into refund review if needed."
                   : "This seller does not have any bookable slots available right now."}
             </Text>
 
             <TouchableOpacity
               style={[
                 styles.payBtn,
-                (loadingAppointmentSlots || !appointmentSlots.length) && styles.payBtnDisabled,
+                (loadingAppointmentSlots || !appointmentSlots.length || processingBookingPayment) && styles.payBtnDisabled,
               ]}
               onPress={() => {
               sendBookingRequest().catch((error) => {
                 console.log("seller booking request error:", error);
               });
             }}
-              disabled={loadingAppointmentSlots || !appointmentSlots.length}
+              disabled={loadingAppointmentSlots || !appointmentSlots.length || processingBookingPayment}
             >
-              <Text style={{ color: "#fff", fontWeight: "700" }}>
-                Send Request
-              </Text>
+              {processingBookingPayment ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={{ color: "#fff", fontWeight: "700" }}>
+                  Pay & Send Booking
+                </Text>
+              )}
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => setShowPaymentModal(false)}>
+            <TouchableOpacity onPress={() => setShowPaymentModal(false)} disabled={processingBookingPayment}>
               <Text style={{ marginTop: 10, color: "#777" }}>
                 Cancel
               </Text>
@@ -1316,9 +1512,9 @@ export default SellerChatScreen;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F4F5FA" },
+  flexFill: { flex: 1 },
   header: {
     backgroundColor: PRIMARY,
-    paddingTop: StatusBar.currentHeight || 40,
     paddingBottom: 10,
     paddingHorizontal: 12,
     flexDirection: "row",
@@ -1412,6 +1608,9 @@ const styles = StyleSheet.create({
   bookNowBtnMuted: {
     backgroundColor: "#8F78DB",
   },
+  bookNowBtnDisabled: {
+    opacity: 0.55,
+  },
   selectedServiceBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -1425,6 +1624,18 @@ const styles = StyleSheet.create({
   selectedServiceBannerText: {
     marginLeft: 8,
     color: "#47356B",
+    fontWeight: "600",
+  },
+  unavailableBanner: {
+    backgroundColor: "#FEF3C7",
+    borderBottomWidth: 1,
+    borderBottomColor: "#FDE68A",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  unavailableBannerText: {
+    color: "#92400E",
+    fontSize: 12,
     fontWeight: "600",
   },
   loaderWrap: {
@@ -1486,6 +1697,41 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     maxWidth: 180
   },
+  locationCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    borderRadius: 12,
+    padding: 10,
+    backgroundColor: "rgba(123, 77, 255, 0.08)",
+  },
+  myLocationCard: {
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  locationBody: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  locationTitle: {
+    color: "#111",
+    fontWeight: "700",
+  },
+  myLocationTitle: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+  locationLink: {
+    marginTop: 2,
+    color: PRIMARY,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  myLocationLink: {
+    marginTop: 2,
+    color: "#E9DEFF",
+    fontSize: 12,
+    fontWeight: "600",
+  },
   reactionRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1531,7 +1777,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     padding: 10,
     backgroundColor: "#fff",
-    alignItems: "center"
+    alignItems: "center",
+    borderTopWidth: 1,
   },
   attachButton: {
     marginLeft: 10,
@@ -1566,9 +1813,29 @@ const styles = StyleSheet.create({
     padding: 22,
     alignItems: "center"
   },
+  locationModalBox: {
+    width: "85%",
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 22,
+  },
   modalTitle: { fontSize: 16, fontWeight: "700" },
   modalService: { marginTop: 10, fontWeight: "600" },
   modalPrice: { marginTop: 6, color: PRIMARY, fontWeight: "700" },
+  locationModalText: {
+    marginTop: 8,
+    color: "#666",
+    lineHeight: 20,
+  },
+  locationInput: {
+    marginTop: 16,
+    height: 48,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    color: "#111",
+  },
   modalDuration: {
     marginTop: 4,
     color: "#666",
@@ -1625,5 +1892,15 @@ const styles = StyleSheet.create({
   },
   payBtnDisabled: {
     opacity: 0.5
+  },
+  payBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  modalCancelText: {
+    marginTop: 10,
+    color: "#777",
+    textAlign: "center",
   }
 });

@@ -9,6 +9,7 @@ import {
   UpdatePostInput,
   UpdateStoryInput,
 } from "./types";
+import { getReadableApiErrorMessage } from "../../api/networkErrors";
 
 const MAX_CAPTION_LENGTH = 350;
 const MAX_LOCATION_LENGTH = 80;
@@ -177,10 +178,6 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
   const location = cleanText(input.location);
   const music = normalizeSelectedMusic(input.music);
 
-  if (!caption) {
-    throw new SocialValidationError("validation_error", "Caption is required.");
-  }
-
   assertLength(caption, MAX_CAPTION_LENGTH, "Caption");
   assertLength(location, MAX_LOCATION_LENGTH, "Location");
 
@@ -223,12 +220,38 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
   const media = input.media ? normalizeMedia(input.media) : undefined;
   const text = cleanText(input.text);
   const linkUrl = cleanText(input.linkUrl);
+  const location = cleanText(input.location);
+  const filterPreset = input.filterPreset;
+  const filterIntensity = input.filterIntensity;
+  const customTextSticker = cleanText(input.customTextSticker);
+  const customEmojiSticker = cleanText(input.customEmojiSticker);
+  const customTextStickerPlacement = input.customTextStickerPlacement;
+  const customEmojiStickerPlacement = input.customEmojiStickerPlacement;
+  const customTextStickerPosition = input.customTextStickerPosition;
+  const customEmojiStickerPosition = input.customEmojiStickerPosition;
+  const customTextStickerScale = input.customTextStickerScale;
+  const customEmojiStickerScale = input.customEmojiStickerScale;
+  const customTextStickerRotation = input.customTextStickerRotation;
+  const customEmojiStickerRotation = input.customEmojiStickerRotation;
+  const customTextStickerTheme = input.customTextStickerTheme;
+  const customTextStickerAlignment = input.customTextStickerAlignment;
   const hashtags = normalizeTagList(input.hashtags, MAX_HASHTAGS, "hashtags");
   const mentions = normalizeTagList(input.mentions, MAX_MENTIONS, "mentions");
   const music = normalizeSelectedMusic(input.music);
 
   if (linkUrl && !URL_PROTOCOL_PATTERN.test(linkUrl)) {
     throw new SocialValidationError("validation_error", "Story link must be http/https.");
+  }
+
+  if (filterPreset !== undefined && !["none", "warm", "cool", "noir", "dream"].includes(filterPreset)) {
+    throw new SocialValidationError("validation_error", "Invalid story filter.");
+  }
+
+  if (
+    filterIntensity !== undefined &&
+    (typeof filterIntensity !== "number" || filterIntensity < 0.2 || filterIntensity > 1)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid story filter intensity.");
   }
 
   if (type === "media" && !media) {
@@ -259,11 +282,109 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
     }
   }
 
+  assertLength(customTextSticker, 60, "Story text sticker");
+  assertLength(customEmojiSticker, 16, "Story emoji sticker");
+
+  if (
+    customTextStickerPlacement !== undefined &&
+    !["top_left", "top_right", "center", "bottom_left", "bottom_right"].includes(customTextStickerPlacement)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid text sticker placement.");
+  }
+
+  if (
+    customEmojiStickerPlacement !== undefined &&
+    !["top_left", "top_right", "center", "bottom_left", "bottom_right"].includes(customEmojiStickerPlacement)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid emoji sticker placement.");
+  }
+
+  if (
+    customTextStickerPosition &&
+    (typeof customTextStickerPosition.x !== "number" ||
+      typeof customTextStickerPosition.y !== "number" ||
+      customTextStickerPosition.x < 0 ||
+      customTextStickerPosition.x > 1 ||
+      customTextStickerPosition.y < 0 ||
+      customTextStickerPosition.y > 1)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid text sticker position.");
+  }
+
+  if (
+    customEmojiStickerPosition &&
+    (typeof customEmojiStickerPosition.x !== "number" ||
+      typeof customEmojiStickerPosition.y !== "number" ||
+      customEmojiStickerPosition.x < 0 ||
+      customEmojiStickerPosition.x > 1 ||
+      customEmojiStickerPosition.y < 0 ||
+      customEmojiStickerPosition.y > 1)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid emoji sticker position.");
+  }
+
+  if (
+    customTextStickerScale !== undefined &&
+    (typeof customTextStickerScale !== "number" || customTextStickerScale < 0.6 || customTextStickerScale > 2)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid text sticker size.");
+  }
+
+  if (
+    customEmojiStickerScale !== undefined &&
+    (typeof customEmojiStickerScale !== "number" || customEmojiStickerScale < 0.6 || customEmojiStickerScale > 2)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid emoji sticker size.");
+  }
+
+  if (
+    customTextStickerRotation !== undefined &&
+    (typeof customTextStickerRotation !== "number" || customTextStickerRotation < -180 || customTextStickerRotation > 180)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid text sticker rotation.");
+  }
+
+  if (
+    customTextStickerTheme !== undefined &&
+    !["dark", "light", "accent", "outline"].includes(customTextStickerTheme)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid text sticker theme.");
+  }
+
+  if (
+    customTextStickerAlignment !== undefined &&
+    !["left", "center", "right"].includes(customTextStickerAlignment)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid text sticker alignment.");
+  }
+
+  if (
+    customEmojiStickerRotation !== undefined &&
+    (typeof customEmojiStickerRotation !== "number" || customEmojiStickerRotation < -180 || customEmojiStickerRotation > 180)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid emoji sticker rotation.");
+  }
+
   return {
     ...input,
     media,
     text,
     linkUrl: linkUrl || undefined,
+    location: location || undefined,
+    filterPreset,
+    filterIntensity,
+    customTextSticker: customTextSticker || undefined,
+    customTextStickerPlacement,
+    customTextStickerPosition,
+    customTextStickerScale,
+    customTextStickerRotation,
+    customTextStickerTheme,
+    customTextStickerAlignment,
+    customEmojiSticker: customEmojiSticker || undefined,
+    customEmojiStickerPlacement,
+    customEmojiStickerPosition,
+    customEmojiStickerScale,
+    customEmojiStickerRotation,
     hashtags,
     mentions,
     allowReplies: input.allowReplies !== false,
@@ -276,10 +397,6 @@ export const normalizeReelInput = (input: CreateReelInput): CreateReelInput => {
   const caption = cleanText(input.caption);
   const music = normalizeSelectedMusic(input.music);
   const location = cleanText(input.location);
-
-  if (!caption) {
-    throw new SocialValidationError("validation_error", "Caption is required.");
-  }
 
   assertLength(caption, MAX_CAPTION_LENGTH, "Caption");
   assertLength(location, MAX_LOCATION_LENGTH, "Location");
@@ -355,6 +472,8 @@ export const normalizeUpdatePostInput = (input: UpdatePostInput): UpdatePostInpu
 export const normalizeUpdateStoryInput = (input: UpdateStoryInput): UpdateStoryInput => {
   const linkUrl = input.linkUrl !== undefined ? cleanText(input.linkUrl) : undefined;
   const text = input.text !== undefined ? cleanText(input.text) : undefined;
+  const filterPreset = input.filterPreset;
+  const filterIntensity = input.filterIntensity;
 
   if (linkUrl && !URL_PROTOCOL_PATTERN.test(linkUrl)) {
     throw new SocialValidationError("validation_error", "Story link must be http/https.");
@@ -364,10 +483,23 @@ export const normalizeUpdateStoryInput = (input: UpdateStoryInput): UpdateStoryI
     assertLength(text, MAX_STORY_TEXT_LENGTH, "Story text");
   }
 
+  if (filterPreset !== undefined && !["none", "warm", "cool", "noir", "dream"].includes(filterPreset)) {
+    throw new SocialValidationError("validation_error", "Invalid story filter.");
+  }
+
+  if (
+    filterIntensity !== undefined &&
+    (typeof filterIntensity !== "number" || filterIntensity < 0.2 || filterIntensity > 1)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid story filter intensity.");
+  }
+
   return {
     text,
     backgroundColor: input.backgroundColor !== undefined ? cleanText(input.backgroundColor) : undefined,
     linkUrl,
+    filterPreset,
+    filterIntensity,
     visibility: input.visibility,
     allowReplies: input.allowReplies,
     allowSharing: input.allowSharing,
@@ -387,7 +519,21 @@ export const toUserSafeMessage = (error: unknown): string => {
     return error.message;
   }
 
+  if (typeof error === "object" && error !== null) {
+    const maybeAxiosError = error as {
+      response?: { data?: { message?: string } };
+      message?: string;
+    };
+
+    if (maybeAxiosError.response?.data?.message) {
+      return String(maybeAxiosError.response.data.message);
+    }
+  }
+
   if (error instanceof Error && error.message) {
+    if (typeof (error as any)?.response !== "undefined") {
+      return getReadableApiErrorMessage(error, error.message);
+    }
     return error.message;
   }
 

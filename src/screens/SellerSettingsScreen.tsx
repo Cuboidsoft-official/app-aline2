@@ -6,15 +6,16 @@ import {
   TouchableOpacity,
   ScrollView,
   Switch,
-  Image,
   Alert,
   ActivityIndicator
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { API } from "../api/api"; // ✅ USE THIS
+import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { monetizationDisabledMessage, productFlags } from "../config/productFlags";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 type ApiLikeError = {
   response?: { data?: unknown };
@@ -50,6 +51,7 @@ const formatMinutes = (minutes: number) => {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const SellerSettingsScreen = ({ navigation }: any) => {
+  const { colors } = useAppTheme();
 
   const [isAvailable, setIsAvailable] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -62,13 +64,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
     try {
       setLoading(true);
 
-      const token = await AsyncStorage.getItem("token");
-
-      const res = await API.get("/seller/me", {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
+      const res = await API.get("/seller/me");
 
       setIsAvailable(res.data.seller.availabilityStatus);
       setAvailabilityTimezone(res.data.seller?.availabilityTimezone || "Asia/Kolkata");
@@ -81,7 +77,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
     } catch (error) {
       const apiError = error as ApiLikeError;
       console.log("FETCH ERROR:", apiError.response?.data || apiError.message);
-      Alert.alert("Error", "Failed to load seller data");
+      Alert.alert("Unable to load seller data", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setLoading(false);
     }
@@ -91,23 +87,19 @@ const SellerSettingsScreen = ({ navigation }: any) => {
     fetchSeller();
   }, []);
 
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchSeller().catch(() => {});
+    }, [])
+  );
+
   // ✅ TOGGLE AVAILABILITY
   const toggleAvailability = async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
-
       const newStatus = !isAvailable;
       setIsAvailable(newStatus);
 
-      const res = await API.put(
-        "/seller/update-availability",
-        { availabilityStatus: newStatus },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        }
-      );
+      const res = await API.put("/seller/update-availability", { availabilityStatus: newStatus });
 
       console.log("SUCCESS:", res.data);
 
@@ -122,7 +114,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
 
       setIsAvailable(!isAvailable); // rollback
 
-      Alert.alert("Error", "Update failed");
+      Alert.alert("Unable to update availability", getReadableApiErrorMessage(error, "Please try again."));
     }
   };
 
@@ -163,26 +155,16 @@ const SellerSettingsScreen = ({ navigation }: any) => {
   const saveAvailabilitySchedule = async () => {
     try {
       setSavingSchedule(true);
-      const token = await AsyncStorage.getItem("token");
-
-      await API.put(
-        "/seller/availability-schedule",
-        {
-          availabilityTimezone,
-          weeklyAvailability,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        }
-      );
+      await API.put("/seller/availability-schedule", {
+        availabilityTimezone,
+        weeklyAvailability,
+      });
 
       Alert.alert("Saved", "Your weekly availability has been updated.");
     } catch (error) {
       const apiError = error as ApiLikeError;
       console.log("SCHEDULE ERROR:", apiError.response?.data || apiError.message);
-      Alert.alert("Error", "Failed to update availability schedule");
+      Alert.alert("Unable to update schedule", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setSavingSchedule(false);
     }
@@ -199,67 +181,63 @@ const SellerSettingsScreen = ({ navigation }: any) => {
     );
   };
 
-  const showUnavailableFeature = (feature: string) => {
-    Alert.alert("Not available yet", `${feature} is not implemented in the backend yet.`);
-  };
-
   if (loading) {
     return (
-      <View style={styles.loader}>
-        <ActivityIndicator size="large" color="#ab2aeb" />
+      <View style={[styles.loader, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
 
       {/* HEADER */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderColor: colors.border, backgroundColor: colors.card }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color="#000" />
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>Seller Settings</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Seller Settings</Text>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
 
         {/* PROFILE */}
-        <Text style={styles.section}>Seller Profile</Text>
+        <Text style={[styles.section, { color: colors.mutedText }]}>Seller Profile</Text>
 
         <TouchableOpacity
-          style={styles.item}
+          style={[styles.item, { borderColor: colors.border }]}
           onPress={() => navigation.navigate("SellerRegistration", { mode: "edit" })}
         >
-          <Text style={styles.text}>Update Profile</Text>
-          <Icon name="chevron-forward" size={20} />
+          <Text style={[styles.text, { color: colors.text }]}>Update Profile</Text>
+          <Icon name="chevron-forward" size={20} color={colors.mutedText} />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.item}
+          style={[styles.item, { borderColor: colors.border }]}
           onPress={() => navigation.navigate("Profile")}
         >
-          <Text style={styles.text}>Switch to User Profile</Text>
-          <Icon name="person-outline" size={20} />
+          <Text style={[styles.text, { color: colors.text }]}>Switch to User Profile</Text>
+          <Icon name="person-outline" size={20} color={colors.mutedText} />
         </TouchableOpacity>
 
         {/* AVAILABILITY */}
-        <Text style={styles.section}>Availability</Text>
+        <Text style={[styles.section, { color: colors.mutedText }]}>Availability</Text>
 
-        <View style={styles.item}>
-          <Text style={styles.text}>Seller Availability</Text>
+        <View style={[styles.item, { borderColor: colors.border }]}>
+          <Text style={[styles.text, { color: colors.text }]}>Seller Availability</Text>
 
           <Switch
             value={isAvailable}
             onValueChange={toggleAvailability}
-            thumbColor={isAvailable ? "#ab2aeb" : "#ccc"}
+            thumbColor={isAvailable ? colors.primary : "#ccc"}
           />
         </View>
 
-        <View style={styles.scheduleCard}>
-          <Text style={styles.scheduleTitle}>Weekly Booking Schedule</Text>
-          <Text style={styles.scheduleSubtitle}>
+        <View style={[styles.scheduleCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          <Text style={[styles.scheduleTitle, { color: colors.text }]}>Weekly Booking Schedule</Text>
+          <Text style={[styles.scheduleSubtitle, { color: colors.mutedText }]}>
             Buyers will see slots only on the enabled days below. Working hours are currently {formatMinutes(600)} to {formatMinutes(1080)} in {availabilityTimezone}.
           </Text>
 
@@ -267,40 +245,40 @@ const SellerSettingsScreen = ({ navigation }: any) => {
             .slice()
             .sort((a, b) => a.dayOfWeek - b.dayOfWeek)
             .map((entry) => (
-              <View key={entry.dayOfWeek} style={styles.scheduleRow}>
+              <View key={entry.dayOfWeek} style={[styles.scheduleRow, { borderBottomColor: colors.border }]}>
                 <View style={styles.scheduleMeta}>
-                  <Text style={styles.scheduleDay}>{DAY_LABELS[entry.dayOfWeek]}</Text>
-                  <Text style={styles.scheduleHours}>
+                  <Text style={[styles.scheduleDay, { color: colors.text }]}>{DAY_LABELS[entry.dayOfWeek]}</Text>
+                  <Text style={[styles.scheduleHours, { color: colors.mutedText }]}>
                     {formatMinutes(entry.startMinutes)} - {formatMinutes(entry.endMinutes)}
                   </Text>
                   <View style={styles.timeAdjustRow}>
-                    <Text style={styles.timeAdjustLabel}>Start</Text>
+                    <Text style={[styles.timeAdjustLabel, { color: colors.mutedText }]}>Start</Text>
                     <TouchableOpacity
-                      style={styles.timeAdjustButton}
+                      style={[styles.timeAdjustButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
                       onPress={() => adjustWeekdayTime(entry.dayOfWeek, "startMinutes", -30)}
                     >
-                      <Text style={styles.timeAdjustButtonText}>-30m</Text>
+                      <Text style={[styles.timeAdjustButtonText, { color: colors.primary }]}>-30m</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.timeAdjustButton}
+                      style={[styles.timeAdjustButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
                       onPress={() => adjustWeekdayTime(entry.dayOfWeek, "startMinutes", 30)}
                     >
-                      <Text style={styles.timeAdjustButtonText}>+30m</Text>
+                      <Text style={[styles.timeAdjustButtonText, { color: colors.primary }]}>+30m</Text>
                     </TouchableOpacity>
                   </View>
                   <View style={styles.timeAdjustRow}>
-                    <Text style={styles.timeAdjustLabel}>End</Text>
+                    <Text style={[styles.timeAdjustLabel, { color: colors.mutedText }]}>End</Text>
                     <TouchableOpacity
-                      style={styles.timeAdjustButton}
+                      style={[styles.timeAdjustButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
                       onPress={() => adjustWeekdayTime(entry.dayOfWeek, "endMinutes", -30)}
                     >
-                      <Text style={styles.timeAdjustButtonText}>-30m</Text>
+                      <Text style={[styles.timeAdjustButtonText, { color: colors.primary }]}>-30m</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.timeAdjustButton}
+                      style={[styles.timeAdjustButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
                       onPress={() => adjustWeekdayTime(entry.dayOfWeek, "endMinutes", 30)}
                     >
-                      <Text style={styles.timeAdjustButtonText}>+30m</Text>
+                      <Text style={[styles.timeAdjustButtonText, { color: colors.primary }]}>+30m</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -308,13 +286,13 @@ const SellerSettingsScreen = ({ navigation }: any) => {
                 <Switch
                   value={entry.enabled}
                   onValueChange={() => toggleWeekday(entry.dayOfWeek)}
-                  thumbColor={entry.enabled ? "#ab2aeb" : "#ccc"}
+                  thumbColor={entry.enabled ? colors.primary : "#ccc"}
                 />
               </View>
             ))}
 
           <TouchableOpacity
-            style={[styles.scheduleSaveButton, savingSchedule && styles.scheduleSaveButtonDisabled]}
+            style={[styles.scheduleSaveButton, { backgroundColor: colors.primary }, savingSchedule && styles.scheduleSaveButtonDisabled]}
             onPress={saveAvailabilitySchedule}
             disabled={savingSchedule}
           >
@@ -332,38 +310,8 @@ const SellerSettingsScreen = ({ navigation }: any) => {
               style={styles.item}
               onPress={() => navigation.navigate("WalletScreen")}
             >
-              <Text style={styles.text}>Recharge Wallet</Text>
+              <Text style={styles.text}>Seller Earnings</Text>
               <Icon name="wallet-outline" size={20} />
-            </TouchableOpacity>
-
-            <View style={styles.paymentRow}>
-              <Image source={{ uri: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/phonepe-icon.png" }} style={styles.paymentIcon}/>
-              <Image source={{ uri: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/google-pay-icon.png" }} style={styles.paymentIcon}/>
-              <Image source={{ uri: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/paytm-icon.png" }} style={styles.paymentIcon}/>
-            </View>
-
-            <Text style={styles.section}>Ads & Promotions</Text>
-
-            <TouchableOpacity
-              style={styles.item}
-              onPress={() => showUnavailableFeature("Profile promotion")}
-            >
-              <View style={styles.row}>
-                <Icon name="trending-up-outline" size={20} color="#ab2aeb" />
-                <Text style={styles.textSpacing}>Promote Profile</Text>
-              </View>
-              <Text style={styles.badge}>NEW</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.item}
-              onPress={() => showUnavailableFeature("Campaign boosting")}
-            >
-              <View style={styles.row}>
-                <Icon name="megaphone-outline" size={20} color="#ab2aeb" />
-                <Text style={styles.textSpacing}>Boost Ads / Campaign</Text>
-              </View>
-              <Icon name="chevron-forward" size={20} />
             </TouchableOpacity>
           </>
         ) : (
@@ -371,15 +319,15 @@ const SellerSettingsScreen = ({ navigation }: any) => {
             <Text style={styles.section}>Business Tools</Text>
             <View style={styles.infoCard}>
               <Icon name="information-circle-outline" size={18} color="#6b7280" />
-              <Text style={styles.infoText}>{monetizationDisabledMessage}</Text>
+              <Text style={[styles.infoText, { color: colors.mutedText }]}>{monetizationDisabledMessage}</Text>
             </View>
           </>
         )}
 
         {/* ACCOUNT */}
-        <Text style={styles.section}>Account</Text>
+        <Text style={[styles.section, { color: colors.mutedText }]}>Account</Text>
 
-        <TouchableOpacity style={styles.item} onPress={deleteSellerProfile}>
+        <TouchableOpacity style={[styles.item, { borderColor: colors.border }]} onPress={deleteSellerProfile}>
           <Text style={styles.deleteText}>Delete Seller Profile</Text>
         </TouchableOpacity>
 
@@ -425,26 +373,9 @@ const styles = StyleSheet.create({
 
   text: { fontSize: 16 },
 
-  textSpacing: {
-    fontSize: 16,
-    marginLeft: 10
-  },
-
   deleteText: {
     fontSize: 16,
     color: "red"
-  },
-
-  row: {
-    flexDirection: "row",
-    alignItems: "center"
-  },
-
-  paymentRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 15
   },
   infoCard: {
     marginHorizontal: 15,
@@ -541,22 +472,6 @@ const styles = StyleSheet.create({
   scheduleSaveText: {
     color: "#fff",
     fontWeight: "700"
-  },
-
-  paymentIcon: {
-    width: 60,
-    height: 30,
-    resizeMode: "contain"
-  },
-
-  badge: {
-    backgroundColor: "#ab2aeb",
-    color: "#fff",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    fontSize: 10,
-    fontWeight: "bold"
   },
 
   loader: {

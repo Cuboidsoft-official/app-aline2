@@ -1,18 +1,22 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
- View,
- Text,
- StyleSheet,
+ ActivityIndicator,
  FlatList,
  Image,
+ RefreshControl,
+ StyleSheet,
+ Text,
+ TextInput,
  TouchableOpacity,
- ActivityIndicator,
- TextInput
+ View,
 } from "react-native";
-
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
+
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 type FollowTab = "followers" | "following";
 
@@ -21,273 +25,348 @@ interface FollowUser {
  username?: string;
  name?: string;
  profilePic?: string;
+ isVerified?: boolean;
 }
 
-const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigation: any }) => {
+const getSearchableText = (user: FollowUser) =>
+ `${user.username || ""} ${user.name || ""}`.trim().toLowerCase();
 
+const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigation: any }) => {
+ const { colors } = useAppTheme();
  const { userId, type } = route.params as { userId: string; type: FollowTab };
 
  const [users, setUsers] = useState<FollowUser[]>([]);
- const [filteredUsers, setFilteredUsers] = useState<FollowUser[]>([]);
  const [activeTab, setActiveTab] = useState<FollowTab>(type);
  const [search, setSearch] = useState("");
  const [loading, setLoading] = useState(true);
+ const [refreshing, setRefreshing] = useState(false);
+ const [errorMessage, setErrorMessage] = useState("");
 
- const fetchUsers = useCallback(async (tabType: FollowTab) => {
+ const filteredUsers = useMemo(() => {
+  const normalizedQuery = search.trim().toLowerCase();
 
-  try {
-
-   const token = await AsyncStorage.getItem("token");
-
-   const res = await API.get(`/auth/${tabType}/${userId}`, {
-    headers: { Authorization: `Bearer ${token}` }
-   });
-
-   console.log("FOLLOW API:", res.data);
-
-   const list =
-    tabType === "followers"
-     ? res.data.followers
-     : res.data.following;
-
-   setUsers((list || []) as FollowUser[]);
-   setFilteredUsers((list || []) as FollowUser[]);
-
-  } catch (err) {
-   console.log("FOLLOW ERROR:", err);
-  } finally {
-   setLoading(false);
+  if (!normalizedQuery) {
+   return users;
   }
 
+  return users.filter((user) => getSearchableText(user).includes(normalizedQuery));
+ }, [search, users]);
+
+ const fetchUsers = useCallback(async (tabType: FollowTab, isRefreshing = false) => {
+  if (isRefreshing) {
+   setRefreshing(true);
+  } else {
+   setLoading(true);
+  }
+
+  try {
+   const res = await API.get(`/auth/${tabType}/${userId}`);
+   const list = tabType === "followers" ? res.data?.followers : res.data?.following;
+
+   setUsers(Array.isArray(list) ? (list as FollowUser[]) : []);
+   setErrorMessage("");
+  } catch (error) {
+   setUsers([]);
+   setErrorMessage(getReadableApiErrorMessage(error, `Unable to load ${tabType} right now.`));
+  } finally {
+   if (isRefreshing) {
+    setRefreshing(false);
+   } else {
+    setLoading(false);
+   }
+  }
  }, [userId]);
 
  useEffect(() => {
-  fetchUsers(activeTab);
+  fetchUsers(activeTab).catch(() => {});
  }, [activeTab, fetchUsers]);
 
- const handleSearch = (text: string) => {
-
-  setSearch(text);
-
-  const filtered = users.filter((u) =>
-   u.username?.toLowerCase().includes(text.toLowerCase())
-  );
-
-  setFilteredUsers(filtered);
- };
-
  const renderUser = ({ item }: { item: FollowUser }) => (
-
   <TouchableOpacity
-   style={styles.userItem}
+   activeOpacity={0.8}
+   style={[styles.userItem, { borderColor: colors.border }]}
    onPress={() =>
     navigation.navigate("ProfilePreviewScreen", {
-     userId: item._id
+     userId: item._id,
     })
    }
   >
-
    <Image
-    source={{
-     uri:
-      item.profilePic ||
-      "https://cdn-icons-png.flaticon.com/512/149/149071.png"
-    }}
+    source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }}
     style={styles.avatar}
    />
 
    <View style={styles.userMeta}>
-    <Text style={styles.username}>{item.username}</Text>
-    <Text style={styles.name}>{item.name}</Text>
+    <View style={styles.userTitleRow}>
+     <Text numberOfLines={1} style={[styles.username, { color: colors.text }]}>
+      {item.username || "unknown"}
+     </Text>
+
+     {item.isVerified ? (
+      <Icon name="checkmark-circle" size={15} color={colors.primary} style={styles.verifiedIcon} />
+     ) : null}
+    </View>
+
+    {item.name ? (
+     <Text numberOfLines={1} style={[styles.name, { color: colors.mutedText }]}>
+      {item.name}
+     </Text>
+    ) : null}
    </View>
 
+   <Icon name="chevron-forward" size={18} color={colors.mutedText} />
   </TouchableOpacity>
  );
 
  if (loading) {
   return (
-   <View style={styles.center}>
-    <ActivityIndicator size="large" />
-   </View>
+   <SafeAreaView style={[styles.center, { backgroundColor: colors.background }]} edges={["top"]}>
+    <ActivityIndicator size="large" color={colors.primary} />
+   </SafeAreaView>
   );
  }
 
  return (
-
-  <View style={styles.container}>
-
-   {/* HEADER */}
-
-   <View style={styles.header}>
-
-    <TouchableOpacity onPress={() => navigation.goBack()}>
-     <Icon name="arrow-back" size={26} />
+  <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+   <View style={[styles.header, { borderColor: colors.border }]}>
+    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
+     <Icon name="arrow-back" size={24} color={colors.text} />
     </TouchableOpacity>
 
-    <Text style={styles.headerTitle}>Connections</Text>
+    <Text style={[styles.headerTitle, { color: colors.text }]}>Connections</Text>
 
     <View style={styles.headerSpacer} />
-
    </View>
 
-   {/* TABS */}
+   <View style={[styles.tabs, { borderColor: colors.border }]}>
+    {(["followers", "following"] as const).map((tab) => {
+     const isActive = activeTab === tab;
 
-   <View style={styles.tabs}>
-
-    <TouchableOpacity
-     style={styles.tab}
-     onPress={() => setActiveTab("followers")}
-    >
-     <Text
-      style={
-       activeTab === "followers"
-        ? styles.activeTab
-        : styles.inactiveTab
-      }
-     >
-      Followers
-     </Text>
-    </TouchableOpacity>
-
-    <TouchableOpacity
-     style={styles.tab}
-     onPress={() => setActiveTab("following")}
-    >
-     <Text
-      style={
-       activeTab === "following"
-        ? styles.activeTab
-        : styles.inactiveTab
-      }
-     >
-      Following
-     </Text>
-    </TouchableOpacity>
-
+     return (
+      <TouchableOpacity
+       key={tab}
+       activeOpacity={0.8}
+       style={[styles.tab, isActive && { borderBottomColor: colors.primary }]}
+       onPress={() => setActiveTab(tab)}
+      >
+       <Text
+        style={[
+         styles.tabLabel,
+         {
+          color: isActive ? colors.text : colors.tabInactive,
+          fontWeight: isActive ? "700" : "500",
+         },
+        ]}
+       >
+        {tab === "followers" ? "Followers" : "Following"}
+       </Text>
+      </TouchableOpacity>
+     );
+    })}
    </View>
 
-   {/* SEARCH */}
-
-   <View style={styles.searchContainer}>
-
-    <Icon name="search" size={18} color="#666" />
-
+   <View style={[styles.searchContainer, { backgroundColor: colors.input, borderColor: colors.border }]}>
+    <Icon name="search" size={18} color={colors.placeholder} />
     <TextInput
-     placeholder="Search"
+     placeholder={`Search ${activeTab}`}
+     placeholderTextColor={colors.placeholder}
      value={search}
-     onChangeText={handleSearch}
-     style={styles.searchInput}
+     onChangeText={setSearch}
+     style={[styles.searchInput, { color: colors.text }]}
     />
-
    </View>
 
-   {/* USER LIST */}
+   {errorMessage ? (
+    <View style={[styles.messageCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+     <Text style={[styles.messageTitle, { color: colors.text }]}>Couldn’t load {activeTab}</Text>
+     <Text style={[styles.messageBody, { color: colors.mutedText }]}>{errorMessage}</Text>
+     <TouchableOpacity
+      activeOpacity={0.8}
+      style={[styles.retryButton, { backgroundColor: colors.primary }]}
+      onPress={() => fetchUsers(activeTab).catch(() => {})}
+     >
+      <Text style={styles.retryButtonText}>Retry</Text>
+     </TouchableOpacity>
+    </View>
+   ) : null}
 
-   <FlatList
-    data={filteredUsers}
-    renderItem={renderUser}
-    keyExtractor={(item) => item._id}
-    showsVerticalScrollIndicator={false}
-   />
+   {!errorMessage && filteredUsers.length === 0 ? (
+    <View style={styles.emptyState}>
+     <Icon name="people-outline" size={34} color={colors.mutedText} />
+     <Text style={[styles.emptyTitle, { color: colors.text }]}>
+      {search.trim() ? "No matches found" : `No ${activeTab} yet`}
+     </Text>
+     <Text style={[styles.emptyBody, { color: colors.mutedText }]}>
+      {search.trim()
+       ? "Try a different username or name."
+       : activeTab === "followers"
+        ? "This account doesn’t have any visible followers yet."
+        : "This account isn’t following anyone visible yet."}
+     </Text>
+    </View>
+   ) : null}
 
-  </View>
+   {!errorMessage && filteredUsers.length > 0 ? (
+    <FlatList
+     data={filteredUsers}
+     renderItem={renderUser}
+     keyExtractor={(item) => item._id}
+     refreshControl={
+      <RefreshControl
+       refreshing={refreshing}
+       onRefresh={() => fetchUsers(activeTab, true).catch(() => {})}
+       tintColor={colors.primary}
+      />
+     }
+     keyboardShouldPersistTaps="handled"
+     contentContainerStyle={styles.listContent}
+     showsVerticalScrollIndicator={false}
+    />
+   ) : null}
+  </SafeAreaView>
  );
 };
 
 export default FollowersFollowingScreen;
 
 const styles = StyleSheet.create({
-
- container:{
-  flex:1,
-  backgroundColor:"#fff"
+ container: {
+  flex: 1,
  },
-
- header:{
-  flexDirection:"row",
-  alignItems:"center",
-  justifyContent:"space-between",
-  paddingTop:50,
-  paddingHorizontal:15,
-  paddingBottom:10,
-  borderBottomWidth:1,
-  borderColor:"#eee"
+ center: {
+  flex: 1,
+  justifyContent: "center",
+  alignItems: "center",
  },
-
- headerTitle:{
-  fontSize:18,
-  fontWeight:"600"
+ header: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  paddingHorizontal: 16,
+  paddingBottom: 12,
+  borderBottomWidth: StyleSheet.hairlineWidth,
  },
-
- tabs:{
-  flexDirection:"row",
-  borderBottomWidth:1,
-  borderColor:"#eee"
+ headerIconBtn: {
+  width: 32,
+  height: 32,
+  alignItems: "center",
+  justifyContent: "center",
  },
-
- tab:{
-  flex:1,
-  alignItems:"center",
-  padding:12
+ headerTitle: {
+  fontSize: 18,
+  fontWeight: "700",
  },
-
- activeTab:{
-  fontWeight:"bold",
-  fontSize:15
+ headerSpacer: {
+  width: 32,
  },
-
- inactiveTab:{
-  color:"#777"
+ tabs: {
+  flexDirection: "row",
+  borderBottomWidth: StyleSheet.hairlineWidth,
  },
-
- searchContainer:{
-  flexDirection:"row",
-  alignItems:"center",
-  backgroundColor:"#f2f2f2",
-  margin:10,
-  borderRadius:8,
-  paddingHorizontal:10
+ tab: {
+  flex: 1,
+  alignItems: "center",
+  paddingVertical: 14,
+  borderBottomWidth: 2,
+  borderBottomColor: "transparent",
  },
-
- searchInput:{
-  flex:1,
-  padding:8,
-  marginLeft:6
+ tabLabel: {
+  fontSize: 15,
  },
-
- userItem:{
-  flexDirection:"row",
-  alignItems:"center",
-  padding:15
+ searchContainer: {
+  flexDirection: "row",
+  alignItems: "center",
+  marginHorizontal: 16,
+  marginTop: 16,
+  marginBottom: 8,
+  paddingHorizontal: 12,
+  borderRadius: 14,
+  borderWidth: StyleSheet.hairlineWidth,
  },
-
- userMeta:{
-  flex:1
+ searchInput: {
+  flex: 1,
+  paddingVertical: 12,
+  marginLeft: 8,
+  fontSize: 15,
  },
-
- avatar:{
-  width:50,
-  height:50,
-  borderRadius:25,
-  marginRight:15
+ listContent: {
+  paddingHorizontal: 16,
+  paddingBottom: 32,
  },
-
- username:{
-  fontWeight:"600"
+ userItem: {
+  flexDirection: "row",
+  alignItems: "center",
+  paddingVertical: 14,
+  borderBottomWidth: StyleSheet.hairlineWidth,
  },
-
- name:{
-  color:"#666"
+ avatar: {
+  width: 52,
+  height: 52,
+  borderRadius: 26,
+  marginRight: 14,
  },
-
- center:{
-  flex:1,
-  justifyContent:"center",
-  alignItems:"center"
+ userMeta: {
+  flex: 1,
  },
-
- headerSpacer:{
-  width:26
- }
-
+ userTitleRow: {
+  flexDirection: "row",
+  alignItems: "center",
+ },
+ username: {
+  flexShrink: 1,
+  fontSize: 15,
+  fontWeight: "700",
+ },
+ verifiedIcon: {
+  marginLeft: 6,
+ },
+ name: {
+  marginTop: 2,
+  fontSize: 13,
+ },
+ messageCard: {
+  marginHorizontal: 16,
+  marginTop: 12,
+  padding: 16,
+  borderRadius: 16,
+  borderWidth: StyleSheet.hairlineWidth,
+ },
+ messageTitle: {
+  fontSize: 16,
+  fontWeight: "700",
+ },
+ messageBody: {
+  marginTop: 6,
+  fontSize: 14,
+  lineHeight: 20,
+ },
+ retryButton: {
+  alignSelf: "flex-start",
+  marginTop: 14,
+  borderRadius: 999,
+  paddingHorizontal: 16,
+  paddingVertical: 10,
+ },
+ retryButtonText: {
+  color: "#FFFFFF",
+  fontWeight: "700",
+ },
+ emptyState: {
+  flex: 1,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 28,
+ },
+ emptyTitle: {
+  marginTop: 14,
+  fontSize: 18,
+  fontWeight: "700",
+  textAlign: "center",
+ },
+ emptyBody: {
+  marginTop: 8,
+  fontSize: 14,
+  lineHeight: 21,
+  textAlign: "center",
+ },
 });

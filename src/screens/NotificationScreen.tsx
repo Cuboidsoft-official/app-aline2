@@ -6,15 +6,20 @@ import {
   Image,
   StyleSheet,
   TouchableOpacity,
-  ActivityIndicator
+  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { connectSocket, socket } from "../socket";
 import { Swipeable } from "react-native-gesture-handler";
-import { getStoredToken, getStoredUserId } from "../utils/authSession";
+import { getStoredUserId } from "../utils/authSession";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 type NotificationKind =
   | "follow"
@@ -54,25 +59,39 @@ interface NotificationScreenProps {
   navigation: any;
 }
 
-const FALLBACK_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+const FALLBACK_AVATAR = DEFAULT_AVATAR_URL;
 
 const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
+  const { colors } = useAppTheme();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [unreadCount, setUnreadCount] = useState(0);
 
-  const fetchNotifications = useCallback(async () => {
+  const fetchNotifications = useCallback(async (isRefresh = false) => {
     try {
-      const token = await getStoredToken();
-      const res = await API.get("/notifications", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
+      const res = await API.get("/notifications");
       setNotifications((res.data?.notifications || []) as AppNotification[]);
       setUnreadCount(Number(res.data?.unreadCount) || 0);
+      setErrorMessage("");
     } catch (err) {
       console.log("Notification fetch error:", err);
+      setNotifications([]);
+      setUnreadCount(0);
+      setErrorMessage(getReadableApiErrorMessage(err, "Failed to load notifications."));
     } finally {
-      setLoading(false);
+      if (isRefresh) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -111,10 +130,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
   const deleteNotification = async (id: string) => {
     try {
       const existing = notifications.find((item) => item._id === id);
-      const token = await getStoredToken();
-      await API.delete(`/notifications/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await API.delete(`/notifications/${id}`);
       setNotifications(prev => prev.filter(n => n._id !== id));
       if (existing?.read === false) {
         setUnreadCount(prev => Math.max(0, prev - 1));
@@ -126,10 +142,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
 
   const markAllRead = async () => {
     try {
-      const token = await getStoredToken();
-      await API.put("/notifications/read-all", null, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await API.put("/notifications/read-all");
       setUnreadCount(0);
       setNotifications((prev) =>
         prev.map((notification) => ({
@@ -156,13 +169,9 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
 
   const handlePress = (item: AppNotification) => {
     if (item._id && item.read === false) {
-      getStoredToken().then((token) =>
-        API.put(`/notifications/read/${item._id}`, null, {
-          headers: { Authorization: `Bearer ${token}` }
-        }).catch((error) => {
-          console.log("Notification mark-read error:", error);
-        })
-      );
+      API.put(`/notifications/read/${item._id}`, null).catch((error) => {
+        console.log("Notification mark-read error:", error);
+      });
 
       setNotifications((prev) =>
         prev.map((notification) =>
@@ -327,17 +336,17 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
 
   const renderNotification = ({ item }: { item: AppNotification }) => (
     <Swipeable renderRightActions={() => renderRightActions(item._id)}>
-      <TouchableOpacity style={styles.card} onPress={() => handlePress(item)}>
+      <TouchableOpacity style={[styles.card, { backgroundColor: colors.card }]} onPress={() => handlePress(item)}>
         <Image
           source={{ uri: item.sender?.profilePic || FALLBACK_AVATAR }}
           style={styles.avatar}
         />
         <View style={styles.content}>
-          <Text style={styles.title}>
+          <Text style={[styles.title, { color: colors.text }]}>
             {item.sender?.username || "Someone"}
-            <Text style={styles.msg}> {getNotificationText(item)}</Text>
+            <Text style={[styles.msg, { color: colors.mutedText }]}> {getNotificationText(item)}</Text>
           </Text>
-          <Text style={styles.time}>
+          <Text style={[styles.time, { color: colors.mutedText }]}>
             {new Date(item.createdAt).toLocaleTimeString([], {
               hour: "numeric",
               minute: "numeric",
@@ -347,45 +356,62 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
         </View>
 
         {!item.read ? <View style={styles.unreadDot} /> : null}
-        <Icon name={getIcon(item.type)} size={22} color="#555" />
+        <Icon name={getIcon(item.type)} size={22} color={colors.mutedText} />
       </TouchableOpacity>
     </Swipeable>
   );
 
   if (loading) {
-    return <View style={styles.center}><ActivityIndicator size="large" /></View>;
+    return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+      <View style={[styles.header, { borderColor: colors.border, backgroundColor: colors.card }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} />
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerCopy}>
-          <Text style={styles.headerTitle}>Notifications</Text>
-          <Text style={styles.headerSubtitle}>
-            {unreadCount > 0 ? `${unreadCount} unread` : "All caught up"}
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Notifications</Text>
+          <Text style={[styles.headerSubtitle, { color: colors.mutedText }]}>
+            {errorMessage || (unreadCount > 0 ? `${unreadCount} unread` : "All caught up")}
           </Text>
         </View>
-        <TouchableOpacity style={styles.headerAction} onPress={markAllRead}>
-          <Text style={styles.headerActionText}>Read all</Text>
+        <TouchableOpacity style={[styles.headerAction, { backgroundColor: colors.surface }]} onPress={markAllRead}>
+          <Text style={[styles.headerActionText, { color: colors.primary }]}>Read all</Text>
         </TouchableOpacity>
       </View>
 
       <FlatList<string>
         data={groupKeys}
         keyExtractor={(item) => item}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => fetchNotifications(true).catch(() => {})}
+            tintColor={colors.primary}
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.center}>
+            <Text style={[styles.headerTitle, { color: colors.text, fontSize: 17 }]}>
+              {errorMessage ? "Notifications unavailable" : "No notifications yet"}
+            </Text>
+            <Text style={[styles.headerSubtitle, { color: colors.mutedText, textAlign: "center", marginTop: 8 }]}>
+              {errorMessage || "Your latest follows, likes, comments, and requests will appear here."}
+            </Text>
+          </View>
+        }
         renderItem={({ item }) => (
           <View>
-            <Text style={styles.groupTitle}>{item}</Text>
+            <Text style={[styles.groupTitle, { color: colors.mutedText }]}>{item}</Text>
             {grouped[item].map((notification) => (
               <View key={notification._id}>{renderNotification({ item: notification })}</View>
             ))}
           </View>
         )}
       />
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -393,7 +419,7 @@ export default NotificationScreen;
 
 const styles = StyleSheet.create({
   container:{flex:1, backgroundColor:"#f7f7f7"},
-  header:{flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:18, paddingTop:55, paddingBottom:14, borderBottomWidth:1, borderColor:"#eee", backgroundColor:"#fff"},
+  header:{flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:18, paddingBottom:14, borderBottomWidth:1, borderColor:"#eee", backgroundColor:"#fff"},
   headerCopy:{flex:1, marginLeft:14},
   headerTitle:{fontSize:19, fontWeight:"600", letterSpacing:0.3},
   headerSubtitle:{marginTop:4, fontSize:12, color:"#777"},

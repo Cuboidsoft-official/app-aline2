@@ -10,9 +10,13 @@ import {
  Alert,
  ActivityIndicator
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
+import { appConfig } from "../config/env";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { shareContentLink } from "../utils/shareLinks";
 import { getStoredToken } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
@@ -42,6 +46,10 @@ interface ProfileUser {
  isPrivate?: boolean;
 }
 
+type ProfileTab = "posts" | "swipes" | "tagged";
+
+const isReelPost = (post: ProfilePost) => post.postType === "reel";
+
 const getErrorMessage = (error: unknown) => {
  if (typeof error === "object" && error !== null) {
   const maybeError = error as { response?: { data?: { message?: string } }; message?: string };
@@ -53,13 +61,14 @@ const getErrorMessage = (error: unknown) => {
 
 const ProfileScreen = ({navigation}: any) => {
  const { colors, isDarkMode } = useAppTheme();
+ const insets = useSafeAreaInsets();
 
  const [user, setUser] = useState<ProfileUser | null>(null);
  const [allPosts, setAllPosts] = useState<ProfilePost[]>([]);
  const [taggedPosts, setTaggedPosts] = useState<ProfilePost[]>([]);
  const [loading, setLoading] = useState(true);
  const [privateLoading, setPrivateLoading] = useState(false);
- const [activeTab, setActiveTab] = useState("posts");
+ const [activeTab, setActiveTab] = useState<ProfileTab>("posts");
  const [isPrivate, setIsPrivate] = useState(false);
 
  const fetchProfile = useCallback(async () => {
@@ -108,28 +117,34 @@ const ProfileScreen = ({navigation}: any) => {
   fetchProfile();
  }, [fetchProfile]);
 
+ useFocusEffect(
+  useCallback(() => {
+   fetchProfile().catch(() => {});
+  }, [fetchProfile]),
+ );
+
  const posts = useMemo(() => {
   if (activeTab === "swipes") {
-   return allPosts.filter((post) => post.postType === "reel");
+   return allPosts.filter((post) => isReelPost(post));
   }
 
   if (activeTab === "tagged") {
-   return taggedPosts.filter((post) => post.postType !== "reel");
+   return taggedPosts;
   }
 
-  return allPosts.filter((post) => post.postType !== "reel");
+  return allPosts.filter((post) => !isReelPost(post));
  }, [activeTab, allPosts, taggedPosts]);
 
  const totalPostCount = useMemo(
-  () => allPosts.filter((post) => post.postType !== "reel").length,
+  () => allPosts.filter((post) => !isReelPost(post)).length,
   [allPosts],
  );
 
- const getPostPreviewUrl = (post: ProfilePost): string =>
+const getPostPreviewUrl = (post: ProfilePost): string =>
   post.media?.[0]?.thumbnailUrl ||
   post.media?.[0]?.url ||
   post.image ||
-  "https://picsum.photos/300";
+  DEFAULT_AVATAR_URL;
 
  const togglePrivateProfile = async () => {
   if (privateLoading) {
@@ -163,13 +178,17 @@ const ProfileScreen = ({navigation}: any) => {
 
  const handleShareProfile = async () => {
   try {
+   const profileSlug = user?.username ? user.username : user?._id;
+   const shareBase = (appConfig.publicShareBaseUrl || "https://aline2.com").replace(/\/+$/, "");
+   const profileUrl = profileSlug ? `${shareBase}/profile/${profileSlug}` : shareBase;
+
    await shareContentLink({
-    originalUrl: user?.link,
+    originalUrl: profileUrl,
     title: user?.name || "Aline2 Profile",
     description: user?.bio || "",
     fallbackMessage: user?.name
-     ? `Check out ${user.name}'s profile on Aline2`
-     : "Check out this profile on Aline2",
+     ? `Check out ${user.name}'s profile on Aline2\n\n${profileUrl}`
+     : `Check out this profile on Aline2\n\n${profileUrl}`,
    });
   } catch (error) {
    console.log("Profile share error:", getErrorMessage(error));
@@ -180,6 +199,7 @@ const ProfileScreen = ({navigation}: any) => {
  const renderPost = ({ item }: { item: ProfilePost }) => (
   <TouchableOpacity
    activeOpacity={0.9}
+   style={styles.postCard}
    onPress={() => navigation.navigate("PostDetail", { postId: item._id })}
   >
    <Image
@@ -193,7 +213,7 @@ const ProfileScreen = ({navigation}: any) => {
 
  const renderHeader = () => (
   <>
-   <View style={styles.topHeader}>
+   <View style={[styles.topHeader, { paddingTop: Math.max(insets.top, 16), borderColor: colors.border }]}>
 
    <TouchableOpacity onPress={() => navigation.goBack()}>
      <Icon name="arrow-back" size={26} color={colors.text} />
@@ -219,10 +239,10 @@ const ProfileScreen = ({navigation}: any) => {
 
      <Image
       source={{
-       uri:
+        uri:
         user?.profilePic
          ? user.profilePic
-         : "https://cdn-icons-png.flaticon.com/512/149/149071.png"
+         : DEFAULT_AVATAR_URL
       }}
       style={styles.profilePic}
      />
@@ -249,8 +269,8 @@ const ProfileScreen = ({navigation}: any) => {
     <View style={styles.stats}>
 
      <View style={styles.stat}>
-      <Text style={styles.statNumber}>{totalPostCount}</Text>
-      <Text style={styles.statText}>Posts</Text>
+     <Text style={[styles.statNumber, { color: colors.text }]}>{totalPostCount}</Text>
+      <Text style={[styles.statText, { color: colors.mutedText }]}>Posts</Text>
      </View>
 
      <TouchableOpacity
@@ -262,8 +282,8 @@ const ProfileScreen = ({navigation}: any) => {
        })
       }
      >
-     <Text style={styles.statNumber}>{user?.followers?.length || 0}</Text>
-     <Text style={styles.statText}>Followers</Text>
+     <Text style={[styles.statNumber, { color: colors.text }]}>{user?.followers?.length || 0}</Text>
+     <Text style={[styles.statText, { color: colors.mutedText }]}>Followers</Text>
      </TouchableOpacity>
 
      <TouchableOpacity
@@ -275,8 +295,8 @@ const ProfileScreen = ({navigation}: any) => {
        })
       }
      >
-     <Text style={styles.statNumber}>{user?.following?.length || 0}</Text>
-     <Text style={styles.statText}>Following</Text>
+     <Text style={[styles.statNumber, { color: colors.text }]}>{user?.following?.length || 0}</Text>
+     <Text style={[styles.statText, { color: colors.mutedText }]}>Following</Text>
      </TouchableOpacity>
 
     </View>
@@ -386,6 +406,7 @@ const ProfileScreen = ({navigation}: any) => {
    renderItem={renderPost}
    keyExtractor={(item) => item._id}
    numColumns={3}
+   extraData={activeTab}
    style={[styles.container, { backgroundColor: colors.background }]}
    contentContainerStyle={styles.listContent}
    ListHeaderComponent={renderHeader}
@@ -425,7 +446,7 @@ const styles = StyleSheet.create({
   alignItems:"center",
   justifyContent:"space-between",
   paddingHorizontal:15,
-  paddingTop:50,
+  paddingTop:16,
   paddingBottom:10,
   borderBottomWidth:1,
   borderColor:"#eee"
@@ -608,8 +629,12 @@ bioSection: {
  },
 
  postImage:{
-  width:"33.33%",
-  height:130
+  width:"100%",
+  aspectRatio:1
+ },
+ postCard:{
+  width:"33.3333%",
+  padding:1
  },
  emptyState:{
   paddingHorizontal:24,

@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
@@ -22,8 +23,11 @@ import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { getStoredUserId } from "../../utils/authSession";
+import { useAppTheme } from "../../theme/AppThemeContext";
 
 function PostDetailScreen({ route, navigation }: any) {
+  const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const postId = typeof route?.params?.postId === "string" ? route.params.postId : "";
 
   const [post, setPost] = useState<Post | null>(null);
@@ -163,31 +167,31 @@ function PostDetailScreen({ route, navigation }: any) {
 
   if (loading || !post) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#7b3fe4" />
-      </View>
+      <SafeAreaView style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </SafeAreaView>
     );
   }
 
   const canManagePost = !!currentUserId && post.user.id === currentUserId;
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.container}>
-        <View style={styles.header}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={["top"]}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12), borderColor: colors.border, backgroundColor: colors.card }]}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Icon name="arrow-back" size={24} color="#111" />
+            <Icon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.title}>Post Details</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Post Details</Text>
           <View style={styles.headerActions}>
             {!editing && post ? (
               <TouchableOpacity style={styles.headerActionGap} onPress={() => setActiveSheet("actions")}>
-                <Icon name="ellipsis-horizontal" size={20} color="#111" />
+                <Icon name="ellipsis-horizontal" size={20} color={colors.text} />
               </TouchableOpacity>
             ) : null}
             {canManagePost ? (
               <TouchableOpacity onPress={() => (editing ? saveChanges() : setEditing(true))}>
-                <Text style={styles.editButton}>{editing ? "Save" : "Edit"}</Text>
+                <Text style={[styles.editButton, { color: colors.primary }]}>{editing ? "Save" : "Edit"}</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -231,78 +235,83 @@ function PostDetailScreen({ route, navigation }: any) {
           )}
 
           <View style={styles.body}>
-            <Text style={styles.meta}>Type: {post.type}</Text>
-            {post.editedAt ? <Text style={styles.meta}>Edited</Text> : null}
+            <Text style={[styles.meta, { color: colors.mutedText }]}>Type: {post.type}</Text>
+            {post.editedAt ? <Text style={[styles.meta, { color: colors.mutedText }]}>Edited</Text> : null}
 
             <View style={styles.actionRow}>
               <TouchableOpacity style={styles.actionIcon} onPress={toggleLike}>
-                <Icon name={post.liked ? "heart" : "heart-outline"} size={24} color={post.liked ? "#ef476f" : "#111"} />
-                {!post.settings.hideLikeCount ? <Text style={styles.actionCount}>{post.likesCount}</Text> : null}
+                <Icon name={post.liked ? "heart" : "heart-outline"} size={24} color={post.liked ? "#ef476f" : colors.text} />
+                {!post.settings.hideLikeCount ? <Text style={[styles.actionCount, { color: colors.text }]}>{post.likesCount}</Text> : null}
               </TouchableOpacity>
               <TouchableOpacity style={styles.actionIcon} onPress={() => setActiveSheet("comments")}>
-                <Icon name="chatbubble-outline" size={22} color="#111" />
-                <Text style={styles.actionCount}>{post.commentsCount}</Text>
+                <Icon name="chatbubble-outline" size={22} color={colors.text} />
+                <Text style={[styles.actionCount, { color: colors.text }]}>{post.commentsCount}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.actionIcon} onPress={() => setActiveSheet("share")}>
-                <Icon name="paper-plane-outline" size={22} color="#111" />
-                <Text style={styles.actionCount}>{post.sharesCount}</Text>
+                <Icon name="paper-plane-outline" size={22} color={colors.text} />
+                <Text style={[styles.actionCount, { color: colors.text }]}>{post.sharesCount}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.bookmarkIcon} onPress={toggleSave}>
-                <Icon name={post.saved ? "bookmark" : "bookmark-outline"} size={22} color="#111" />
+                <Icon name={post.saved ? "bookmark" : "bookmark-outline"} size={22} color={colors.text} />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.label}>Caption</Text>
+            <Text style={[styles.label, { color: colors.text }]}>Caption</Text>
             <TextInput
-              style={[styles.input, !editing && styles.inputReadOnly]}
+              style={[
+                styles.input,
+                { borderColor: colors.border, color: colors.text, backgroundColor: editing ? colors.card : colors.surface },
+                !editing && styles.inputReadOnly,
+              ]}
               value={caption}
               onChangeText={setCaption}
               editable={editing}
               multiline
+              placeholderTextColor={colors.placeholder}
             />
 
-            <Text style={styles.helperText}>The current backend allows editing caption, hidden likes, and comment settings only.</Text>
+            <Text style={[styles.helperText, { color: colors.mutedText }]}>The current backend allows editing caption, hidden likes, and comment settings only.</Text>
 
-            <Text style={styles.label}>Location</Text>
-            <View style={styles.readOnlyField}>
-              <Text style={styles.readOnlyText}>{post.location || "Not set"}</Text>
+            <Text style={[styles.label, { color: colors.text }]}>Location</Text>
+            <View style={[styles.readOnlyField, { borderColor: colors.border, backgroundColor: colors.card }]}>
+              <Text style={[styles.readOnlyText, { color: colors.text }]}>{post.location || "Not set"}</Text>
             </View>
 
-            <Text style={styles.label}>Music</Text>
-            <View style={styles.readOnlyField}>
-              <Text style={styles.readOnlyText}>{post.music || "Not set"}</Text>
+            <Text style={[styles.label, { color: colors.text }]}>Music</Text>
+            <View style={[styles.readOnlyField, { borderColor: colors.border, backgroundColor: colors.card }]}>
+              <Text style={[styles.readOnlyText, { color: colors.text }]}>{post.music || "Not set"}</Text>
             </View>
 
             {post.hashtags.length ? (
               <>
-                <Text style={styles.label}>Hashtags</Text>
-                <Text style={styles.entityLine}>{post.hashtags.map((tag) => `#${tag}`).join(" ")}</Text>
+                <Text style={[styles.label, { color: colors.text }]}>Hashtags</Text>
+                <Text style={[styles.entityLine, { color: colors.primary }]}>{post.hashtags.map((tag) => `#${tag}`).join(" ")}</Text>
               </>
             ) : null}
 
             {post.mentions.length ? (
               <>
-                <Text style={styles.label}>Mentions</Text>
-                <Text style={styles.entityLine}>{post.mentions.map((mention) => `@${mention}`).join(" ")}</Text>
+                <Text style={[styles.label, { color: colors.text }]}>Mentions</Text>
+                <Text style={[styles.entityLine, { color: colors.mutedText }]}>{post.mentions.map((mention) => `@${mention}`).join(" ")}</Text>
               </>
             ) : null}
 
             <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Hide like count</Text>
+              <Text style={[styles.switchLabel, { color: colors.text }]}>Hide like count</Text>
               <Switch value={hideLikeCount} onValueChange={setHideLikeCount} disabled={!editing} />
             </View>
 
             <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Disable comments</Text>
+              <Text style={[styles.switchLabel, { color: colors.text }]}>Disable comments</Text>
               <Switch value={disableComments} onValueChange={setDisableComments} disabled={!editing} />
             </View>
 
-            <TouchableOpacity style={styles.commentsButton} onPress={() => setActiveSheet("comments")}>
+            <TouchableOpacity style={[styles.commentsButton, { backgroundColor: colors.primary }]} onPress={() => setActiveSheet("comments")}>
               <Text style={styles.commentsButtonText}>Open comments ({post.commentsCount})</Text>
             </TouchableOpacity>
 
             {canManagePost ? (
-              <TouchableOpacity style={styles.deleteButton} onPress={deletePost}>
+              <TouchableOpacity style={[styles.deleteButton, { borderColor: colors.danger }]} onPress={deletePost}>
                 <Text style={styles.deleteText}>Delete Post</Text>
               </TouchableOpacity>
             ) : null}
@@ -356,7 +365,7 @@ function PostDetailScreen({ route, navigation }: any) {
           }
         }}
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -365,11 +374,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
-    paddingTop: 44,
     paddingHorizontal: 14,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#ddd",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",

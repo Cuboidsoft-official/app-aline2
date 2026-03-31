@@ -5,20 +5,24 @@ import {
   TouchableOpacity,
   TextInput,
   StyleSheet,
-  SafeAreaView,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Alert
 } from 'react-native';
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { API } from '../api/api';
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { isGoogleCancelledError, loginWithGoogle } from "../utils/googleAuth";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 const SignupScreen = ({ navigation }: any) => {
+  const { colors } = useAppTheme();
 
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const sendOtp = async () => {
 
@@ -40,15 +44,14 @@ const SignupScreen = ({ navigation }: any) => {
       setLoading(true);
 
       const res = await API.post("/auth/send-otp", {
-        email: cleanEmail
+        email: cleanEmail,
+        purpose: "signup"
       });
 
       if (res?.data?.success) {
-
-        Alert.alert("Success", "OTP Sent Successfully ✅");
-
         navigation.navigate("OtpVerify", {
-          email: cleanEmail
+          email: cleanEmail,
+          purpose: "signup",
         });
 
       } else {
@@ -77,7 +80,7 @@ const SignupScreen = ({ navigation }: any) => {
       }
 
       Alert.alert(
-        "Network Error",
+        "Unable to send OTP",
         getReadableApiErrorMessage(err, "Something went wrong. Try again.")
       );
 
@@ -86,20 +89,44 @@ const SignupScreen = ({ navigation }: any) => {
     }
   };
 
+  const handleGoogleSignup = async () => {
+    try {
+      setGoogleLoading(true);
+      const result = await loginWithGoogle();
+
+      if (result.cancelled) {
+        return;
+      }
+
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "MainApp" }],
+      });
+    } catch (error: any) {
+      if (isGoogleCancelledError(error)) {
+        return;
+      }
+
+      Alert.alert("Google sign up failed", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
 
         <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-          <Text style={styles.backArrow}>← Back</Text>
+          <Text style={[styles.backArrow, { color: colors.text }]}>← Back</Text>
         </TouchableOpacity>
 
-        <Text style={styles.title}>What's your email address?</Text>
+        <Text style={[styles.title, { color: colors.text }]}>What's your email address?</Text>
 
-        <Text style={styles.subtitle}>
+        <Text style={[styles.subtitle, { color: colors.mutedText }]}>
           Enter the email address at which you can be contacted.
           {'\n'}No one will see this on your profile.
         </Text>
@@ -108,8 +135,8 @@ const SignupScreen = ({ navigation }: any) => {
           placeholder="Email address"
           value={email}
           onChangeText={setEmail}
-          style={styles.input}
-          placeholderTextColor="#888"
+          style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+          placeholderTextColor={colors.placeholder}
           keyboardType="email-address"
           autoCapitalize="none"
         />
@@ -117,7 +144,8 @@ const SignupScreen = ({ navigation }: any) => {
         <TouchableOpacity
           style={[
             styles.nextButton,
-            loading && { opacity: 0.7 }
+            { backgroundColor: colors.primary },
+            loading && styles.buttonDisabled
           ]}
           onPress={sendOtp}
           disabled={loading}
@@ -129,18 +157,15 @@ const SignupScreen = ({ navigation }: any) => {
           )}
         </TouchableOpacity>
 
+        <Text style={[styles.supportedHint, { color: colors.mutedText }]}>Supported sign up: email OTP verification</Text>
+
         <TouchableOpacity
-          style={styles.mobileButton}
-          onPress={() =>
-            navigation.navigate("FeatureInfoScreen", {
-              title: "Mobile OTP Sign Up",
-              description:
-                "The current backend supports email OTP only. Mobile-number OTP can be added once SMS delivery is configured server-side.",
-            })
-          }
+          style={[styles.googleButton, { borderColor: colors.border, backgroundColor: colors.card }, googleLoading && styles.buttonDisabled]}
+          onPress={handleGoogleSignup}
+          disabled={googleLoading}
         >
-          <Text style={styles.mobileText}>
-            Sign up with mobile number
+          <Text style={[styles.googleText, { color: colors.text }]}>
+            {googleLoading ? "Connecting Google..." : "Continue with Google"}
           </Text>
         </TouchableOpacity>
 
@@ -212,18 +237,32 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  mobileButton: {
+  supportedHint: {
+    textAlign: 'center',
+    color: '#666',
+    fontSize: 13,
+    marginBottom: 12,
+  },
+
+  googleButton: {
     height: 55,
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 30,
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 16,
+    backgroundColor: '#fff',
   },
 
-  mobileText: {
+  googleText: {
     fontSize: 15,
-    color: '#333',
+    color: '#222',
+    fontWeight: '600',
+  },
+
+  buttonDisabled: {
+    opacity: 0.7,
   },
 
   bottomContainer: {

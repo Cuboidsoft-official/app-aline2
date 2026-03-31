@@ -144,9 +144,12 @@ function PostCommentsSheet({
         style: "destructive",
         onPress: async () => {
           try {
-            await socialApi.deletePostComment(post.id, comment.id);
+            const result = await socialApi.deletePostComment(post.id, comment.id);
             setComments((prev) => prev.filter((item) => item.id !== comment.id));
-            onPostUpdate({ ...post, commentsCount: Math.max(0, post.commentsCount - 1) });
+            onPostUpdate({
+              ...post,
+              commentsCount: Math.max(0, post.commentsCount - Math.max(1, result.deletedCount || 1)),
+            });
           } catch (error) {
             Alert.alert("Could not delete comment", toUserSafeMessage(error));
           }
@@ -202,7 +205,10 @@ function PostCommentsSheet({
                     <Text style={styles.commentText}>{item.text}</Text>
                     <View style={styles.actionRow}>
                       <TouchableOpacity onPress={() => onToggleLike(item.id)}>
-                        <Text style={styles.actionText}>{item.liked ? "Unlike" : "Like"}</Text>
+                        <Text style={styles.actionText}>
+                          {item.liked ? "Unlike" : "Like"}
+                          {item.likesCount ? ` (${item.likesCount})` : ""}
+                        </Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         onPress={() => {
@@ -230,6 +236,9 @@ function PostCommentsSheet({
                         <TouchableOpacity onPress={() => onDelete(item)}>
                           <Text style={[styles.actionText, styles.deleteText]}>Delete</Text>
                         </TouchableOpacity>
+                      ) : null}
+                      {(item.likesCount || 0) > 0 ? (
+                        <Text style={styles.metaText}>{item.likesCount} likes</Text>
                       ) : null}
                     </View>
                   </View>
@@ -316,6 +325,7 @@ const styles = StyleSheet.create({
   commentText: { marginTop: 2, color: "#111827", lineHeight: 19 },
   actionRow: { flexDirection: "row", alignItems: "center", marginTop: 6, flexWrap: "wrap" },
   actionText: { color: "#4b5563", fontWeight: "600", marginRight: 14, fontSize: 12.5, marginBottom: 4 },
+  metaText: { color: "#6b7280", fontSize: 12.5, marginBottom: 4 },
   deleteText: { color: "#b91c1c" },
   emptyText: { textAlign: "center", color: "#6b7280", paddingVertical: 30 },
   composer: {

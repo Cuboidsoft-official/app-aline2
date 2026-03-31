@@ -7,16 +7,18 @@ FlatList,
 Image,
 TouchableOpacity,
 ActivityIndicator,
-Alert
+RefreshControl,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useFocusEffect } from "@react-navigation/native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import Icon from "react-native-vector-icons/Ionicons";
 import { getStoredUserId } from "../utils/authSession";
 import { fetchChatConversations } from "../utils/chatApi";
 import { getConversationPreview } from "../utils/chatPresentation";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 
 interface ChatUser {
@@ -55,20 +57,24 @@ const AllChatsScreen = ({ navigation }: any) => {
   const [users,setUsers] = useState<ChatUser[]>([]);
 const [conversations,setConversations] = useState<Conversation[]>([]);
 const [loading,setLoading] = useState(true);
+const [refreshing,setRefreshing] = useState(false);
+const [errorMessage,setErrorMessage] = useState("");
 const [activeTab,setActiveTab] = useState("regular"); // regular / seller
 
-const fetchChatData = useCallback(async ()=>{
+const fetchChatData = useCallback(async (isRefresh = false)=>{
 
  try{
-  setLoading(true);
+  if (isRefresh) {
+   setRefreshing(true);
+  } else {
+   setLoading(true);
+  }
 
-  const token = await AsyncStorage.getItem("token");
   const currentUserId = await getStoredUserId();
   const conversationType = activeTab === "seller" ? "seller" : "direct";
 
   const [usersRes, conversationsRes] = await Promise.all([
    API.get("/auth/users",{
-    headers:{ Authorization:`Bearer ${token}` },
     params: activeTab === "seller"
      ? { category:"Seller" }
      : { excludeCategory:"Seller" }
@@ -82,14 +88,22 @@ const fetchChatData = useCallback(async ()=>{
 
   setUsers(fetchedUsers);
   setConversations((conversationsRes?.conversations || []) as Conversation[]);
+  setErrorMessage("");
 
  }catch(err){
 
   console.log("Chats Error:",err);
+  setUsers([]);
+  setConversations([]);
+  setErrorMessage(getReadableApiErrorMessage(err, "Failed to load chats."));
 
  }finally{
 
-  setLoading(false);
+  if (isRefresh) {
+   setRefreshing(false);
+  } else {
+   setLoading(false);
+  }
 
  }
 
@@ -136,13 +150,6 @@ const orderedSellerConversations = useMemo(() => {
   });
 }, [conversations]);
 
-	const handleCreateGroupPress = () => {
-	 Alert.alert(
-	  "Not available yet",
-	  "Group chat is not implemented in the backend yet."
-	 );
-	};
-
 	const renderChat = ({item}: { item: ChatUser })=>{
  const conversation = conversationMap.get(item._id);
  const subtitle = getConversationPreview(conversation)
@@ -163,7 +170,7 @@ const orderedSellerConversations = useMemo(() => {
 
  <Image
  source={{
- uri:item.profilePic || "https://cdn-icons-png.flaticon.com/512/149/149071.png"
+ uri:item.profilePic || DEFAULT_AVATAR_URL
  }}
  style={styles.avatar}
  />
@@ -205,16 +212,16 @@ const orderedSellerConversations = useMemo(() => {
  const renderSellerConversation = ({ item }: { item: Conversation }) => {
   const sellerUserId = item?.sellerUser?._id || item?.otherUser?._id || "";
   const sellerId = item?.service?.seller?._id || item?.otherUser?.sellerProfile || "";
-  const sellerName = item?.service?.seller?.sellerName || item?.otherUser?.username || item?.otherUser?.name || "Seller";
-  const profilePic = item?.otherUser?.profilePic || item?.sellerUser?.profilePic || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+ const sellerName = item?.service?.seller?.sellerName || item?.otherUser?.username || item?.otherUser?.name || "Seller";
+  const profilePic = item?.otherUser?.profilePic || item?.sellerUser?.profilePic || DEFAULT_AVATAR_URL;
+  const hasSellerLink = Boolean(sellerUserId && sellerId);
   const subtitleParts = [
    item?.service?.serviceName ? `Service: ${item.service.serviceName}` : "",
    getConversationPreview(item),
   ].filter(Boolean);
 
   const handlePress = () => {
-   if (!sellerUserId || !sellerId) {
-    Alert.alert("Unavailable", "This seller conversation is missing profile details.");
+   if (!hasSellerLink) {
     return;
    }
 
@@ -228,7 +235,16 @@ const orderedSellerConversations = useMemo(() => {
   };
 
   return (
-   <TouchableOpacity style={[styles.chatCard, { borderColor: colors.border, backgroundColor: colors.card }]} onPress={handlePress}>
+   <TouchableOpacity
+    style={[
+     styles.chatCard,
+     { borderColor: colors.border, backgroundColor: colors.card },
+     !hasSellerLink ? styles.chatCardDisabled : null,
+    ]}
+    onPress={handlePress}
+    disabled={!hasSellerLink}
+    activeOpacity={hasSellerLink ? 0.85 : 1}
+   >
     <View style={styles.avatarContainer}>
      <Image
       source={{
@@ -246,7 +262,9 @@ const orderedSellerConversations = useMemo(() => {
      </Text>
 
      <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={2}>
-      {subtitleParts.join(" • ") || "Tap to open seller conversation"}
+      {hasSellerLink
+       ? subtitleParts.join(" • ") || "Tap to open seller conversation"
+       : "This seller conversation is temporarily unavailable while profile details finish syncing."}
      </Text>
     </View>
 
@@ -259,7 +277,11 @@ const orderedSellerConversations = useMemo(() => {
       </View>
      )}
 
-     <Icon name="chevron-forward-outline" size={20} color={colors.mutedText}/>
+     <Icon
+      name={hasSellerLink ? "chevron-forward-outline" : "alert-circle-outline"}
+      size={20}
+      color={hasSellerLink ? colors.mutedText : colors.placeholder}
+     />
     </View>
    </TouchableOpacity>
   );
@@ -269,122 +291,87 @@ const orderedSellerConversations = useMemo(() => {
  const renderListItem = activeTab === "seller" ? renderSellerConversation : renderChat;
  const keyExtractor = (item: ChatUser | Conversation) => item._id;
 
-if(loading){
+ if (loading) {
+  return (
+   <View style={[styles.center, { backgroundColor: colors.background }]}>
+    <ActivityIndicator size="large" color={colors.primary} />
+   </View>
+  );
+ }
 
- return(
+ return (
+  <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+   <View style={styles.header}>
+    <Text style={[styles.headerTitle, { color: colors.text }]}>Chats</Text>
 
- <View style={[styles.center, { backgroundColor: colors.background }]}>
- <ActivityIndicator size="large" color={colors.primary}/>
- </View>
+    <View style={styles.headerActions}>
+     <TouchableOpacity onPress={() => navigation.navigate("Search")}>
+      <Icon name="search-outline" size={24} color={colors.text} />
+     </TouchableOpacity>
+    </View>
+   </View>
 
+   <View style={[styles.tabs, { backgroundColor: isDarkMode ? colors.surface : "#f2f2f2" }]}>
+    <TouchableOpacity
+     style={[styles.tab, activeTab === "regular" && styles.activeTab]}
+     onPress={() => setActiveTab("regular")}
+    >
+     <Text
+      style={[
+       styles.tabText,
+       activeTab === "regular" && styles.activeTabText,
+       { color: activeTab === "regular" ? "#fff" : colors.mutedText },
+      ]}
+     >
+      Regular Chats
+     </Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+     style={[styles.tab, activeTab === "seller" && styles.activeTab]}
+     onPress={() => setActiveTab("seller")}
+    >
+     <Text
+      style={[
+       styles.tabText,
+       activeTab === "seller" && styles.activeTabText,
+       { color: activeTab === "seller" ? "#fff" : colors.mutedText },
+      ]}
+     >
+      Seller Chats
+     </Text>
+    </TouchableOpacity>
+   </View>
+
+   <FlatList
+    data={listData}
+    keyExtractor={keyExtractor}
+    renderItem={renderListItem}
+    showsVerticalScrollIndicator={false}
+   ListEmptyComponent={
+     <View style={styles.emptyState}>
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+       {errorMessage
+        ? activeTab === "seller" ? "Seller chats unavailable" : "Chats unavailable"
+        : activeTab === "seller" ? "No seller chats yet" : "No chats yet"}
+      </Text>
+      <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+       {errorMessage || (activeTab === "seller"
+        ? "Start a seller conversation from a seller profile to see it here."
+        : "Start a direct conversation from a user profile or this tab.")}
+      </Text>
+     </View>
+    }
+    refreshControl={
+     <RefreshControl
+      refreshing={refreshing}
+      onRefresh={() => fetchChatData(true).catch(() => {})}
+      tintColor={colors.primary}
+     />
+    }
+   />
+  </SafeAreaView>
  );
-
-}
-
-return(
-
-<View style={[styles.container, { backgroundColor: colors.background }]}>
-
-{/* HEADER */}
-
-<View style={styles.header}>
-
-<Text style={[styles.headerTitle, { color: colors.text }]}>
-Chats
-</Text>
-
-<View style={styles.headerActions}>
-
-	<TouchableOpacity
-	style={styles.headerActionButton}
-	onPress={handleCreateGroupPress}
-	>
-<Icon name="people-outline" size={24} color={colors.text}/>
-</TouchableOpacity>
-
-<TouchableOpacity
-onPress={()=>navigation.navigate("Search")}
->
-<Icon name="search-outline" size={24} color={colors.text}/>
-</TouchableOpacity>
-
-</View>
-
-</View>
-
-{/* TABS */}
-
-<View style={[styles.tabs, { backgroundColor: isDarkMode ? colors.surface : "#f2f2f2" }]}>
-
-<TouchableOpacity
-style={[
-styles.tab,
-activeTab === "regular" && styles.activeTab
-]}
-onPress={()=>setActiveTab("regular")}
->
-<Text style={[
-styles.tabText,
-activeTab === "regular" && styles.activeTabText,
-{ color: activeTab === "regular" ? "#fff" : colors.mutedText }
-]}>
-Regular Chats
-</Text>
-</TouchableOpacity>
-
-<TouchableOpacity
-style={[
-styles.tab,
-activeTab === "seller" && styles.activeTab
-]}
-onPress={()=>setActiveTab("seller")}
->
-<Text style={[
-styles.tabText,
-activeTab === "seller" && styles.activeTabText,
-{ color: activeTab === "seller" ? "#fff" : colors.mutedText }
-]}>
-Seller Chats
-</Text>
-</TouchableOpacity>
-
-</View>
-
-{/* CHAT LIST */}
-
-<FlatList
-data={listData}
-keyExtractor={keyExtractor}
-renderItem={renderListItem}
-showsVerticalScrollIndicator={false}
-ListEmptyComponent={
- <View style={styles.emptyState}>
-  <Text style={[styles.emptyTitle, { color: colors.text }]}>
-   {activeTab === "seller" ? "No seller chats yet" : "No chats yet"}
-  </Text>
-  <Text style={[styles.emptyText, { color: colors.mutedText }]}>
-   {activeTab === "seller"
-    ? "Start a seller conversation from a seller profile to see it here."
-    : "Start a direct conversation from a user profile or this tab."}
-  </Text>
- </View>
-}
-/>
-
-{/* CREATE GROUP FLOAT BUTTON */}
-
-	<TouchableOpacity
-	style={styles.groupButton}
-	onPress={handleCreateGroupPress}
-	>
-
-<Icon name="people" size={24} color="#fff"/>
-
-</TouchableOpacity>
-
-</View>
-
-);
 
 };
 
@@ -394,8 +381,7 @@ const styles = StyleSheet.create({
 
 container:{
  flex:1,
- backgroundColor:"#fff",
- paddingTop:50
+ backgroundColor:"#fff"
 },
 
 header:{
@@ -455,6 +441,10 @@ chatCard:{
  padding:15,
  borderBottomWidth:1,
  borderColor:"#eee"
+},
+
+chatCardDisabled:{
+ opacity:0.72,
 },
 
 avatarContainer:{

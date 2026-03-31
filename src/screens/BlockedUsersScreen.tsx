@@ -1,10 +1,13 @@
 import React, { useCallback, useState } from "react";
-import {View,Text,StyleSheet,FlatList,Image,TouchableOpacity,ActivityIndicator,Alert} from "react-native";
+import {View,Text,StyleSheet,FlatList,Image,TouchableOpacity,ActivityIndicator,Alert,RefreshControl} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { useFocusEffect } from "@react-navigation/native";
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { socialApi } from "../features/social/socialApi";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 
 type BlockedUser = {
  _id: string;
@@ -17,17 +20,29 @@ const BlockedUsersScreen = ({ navigation }: any) => {
  const { colors } = useAppTheme();
  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
  const [loading, setLoading] = useState(true);
+ const [refreshing, setRefreshing] = useState(false);
+ const [errorMessage, setErrorMessage] = useState("");
 
- const loadBlockedUsers = useCallback(async () => {
+ const loadBlockedUsers = useCallback(async (isRefresh = false) => {
   try {
-   setLoading(true);
+   if (isRefresh) {
+    setRefreshing(true);
+   } else {
+    setLoading(true);
+   }
    const res = await API.get("/user/blocked");
    setBlockedUsers(res.data?.users || []);
+   setErrorMessage("");
   } catch (error) {
    console.log("blocked users error:", error);
    setBlockedUsers([]);
+   setErrorMessage(getReadableApiErrorMessage(error, "Failed to load blocked users."));
   } finally {
-   setLoading(false);
+   if (isRefresh) {
+    setRefreshing(false);
+   } else {
+    setLoading(false);
+   }
   }
  }, []);
 
@@ -44,12 +59,12 @@ const BlockedUsersScreen = ({ navigation }: any) => {
    Alert.alert("Unblocked", "This account can interact with you again.");
   } catch (error) {
    console.log("unblock user error:", error);
-   Alert.alert("Unable to unblock", "Please try again.");
+   Alert.alert("Unable to unblock", getReadableApiErrorMessage(error, "Please try again."));
   }
  };
 
  return(
-  <View style={[styles.container, { backgroundColor: colors.background }]}>
+  <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
    {loading ? (
     <View style={styles.loader}>
      <ActivityIndicator size="large" color={colors.primary} />
@@ -61,11 +76,18 @@ const BlockedUsersScreen = ({ navigation }: any) => {
     ListEmptyComponent={
      <View style={styles.emptyState}>
       <Icon name="shield-outline" size={42} color={colors.primary} />
-      <Text style={[styles.emptyTitle, { color: colors.text }]}>No blocked users</Text>
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>{errorMessage ? "Blocked users unavailable" : "No blocked users"}</Text>
       <Text style={[styles.emptyText, { color: colors.mutedText }]}>
-       Accounts you block will appear here and can be unblocked at any time.
+       {errorMessage || "Accounts you block will appear here and can be unblocked at any time."}
       </Text>
      </View>
+    }
+    refreshControl={
+     <RefreshControl
+      refreshing={refreshing}
+      onRefresh={() => loadBlockedUsers(true).catch(() => {})}
+      tintColor={colors.primary}
+     />
     }
     renderItem={({item})=>(
      <View style={[styles.user, { borderBottomColor: colors.border }]}>
@@ -74,7 +96,7 @@ const BlockedUsersScreen = ({ navigation }: any) => {
        onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: item._id })}
       >
        <Image
-        source={{ uri: item.profilePic || "https://cdn-icons-png.flaticon.com/512/149/149071.png" }}
+        source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }}
         style={styles.avatar}
        />
        <View style={styles.copy}>
@@ -88,7 +110,7 @@ const BlockedUsersScreen = ({ navigation }: any) => {
      </View>
     )}
    />
-  </View>
+  </SafeAreaView>
  );
 };
 

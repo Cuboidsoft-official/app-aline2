@@ -90,6 +90,37 @@ export interface StoryQuestion {
   responseCount: number;
 }
 
+export type StoryStickerType = "text" | "emoji";
+export type StoryStickerPlacement = "top_left" | "top_right" | "center" | "bottom_left" | "bottom_right";
+export type StoryStickerTextAlignment = "left" | "center" | "right";
+export type StoryTextStickerTheme = "dark" | "light" | "accent" | "outline";
+export type StoryFilterPreset = "none" | "warm" | "cool" | "noir" | "dream";
+
+export interface StorySticker {
+  id: string;
+  type: StoryStickerType;
+  text: string;
+  position: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation?: number;
+    scale?: number;
+  };
+  style?: {
+    color?: string;
+    backgroundColor?: string;
+    fontSize?: number;
+    alignment?: "left" | "center" | "right";
+  };
+}
+
+export interface StoryMentionTarget {
+  id?: string;
+  username: string;
+}
+
 export interface Story {
   id: string;
   user: SocialUser;
@@ -97,10 +128,15 @@ export interface Story {
   media?: MediaAsset;
   text?: string;
   backgroundColor?: string;
+  filterPreset?: StoryFilterPreset;
+  filterIntensity?: number;
   poll?: StoryPoll;
   question?: StoryQuestion;
   linkUrl?: string;
+  location?: string;
+  stickers: StorySticker[];
   mentions: string[];
+  mentionTargets?: StoryMentionTarget[];
   hashtags: string[];
   visibility: Visibility;
   createdAt: number;
@@ -224,6 +260,21 @@ export interface CreateStoryInput {
   poll?: { question: string; options: [string, string] };
   question?: { prompt: string };
   linkUrl?: string;
+  location?: string;
+  filterPreset?: StoryFilterPreset;
+  filterIntensity?: number;
+  customTextSticker?: string;
+  customTextStickerPlacement?: StoryStickerPlacement;
+  customTextStickerPosition?: { x: number; y: number };
+  customTextStickerScale?: number;
+  customTextStickerRotation?: number;
+  customTextStickerTheme?: StoryTextStickerTheme;
+  customTextStickerAlignment?: StoryStickerTextAlignment;
+  customEmojiSticker?: string;
+  customEmojiStickerPlacement?: StoryStickerPlacement;
+  customEmojiStickerPosition?: { x: number; y: number };
+  customEmojiStickerScale?: number;
+  customEmojiStickerRotation?: number;
   mentions?: string[];
   hashtags?: string[];
   visibility?: Visibility;
@@ -258,10 +309,17 @@ export interface UpdateStoryInput {
   text?: string;
   backgroundColor?: string;
   linkUrl?: string;
+  filterPreset?: StoryFilterPreset;
+  filterIntensity?: number;
   visibility?: Visibility;
   allowReplies?: boolean;
   allowSharing?: boolean;
   music?: StoryMusic;
+}
+
+export interface DeleteCommentResult {
+  deletedCount: number;
+  parentCommentId?: string | null;
 }
 
 export interface SocialApi {
@@ -282,7 +340,7 @@ export interface SocialApi {
   addStoryReply(storyId: string, text: string, parentCommentId?: string): Promise<Comment>;
   getCommentReplies(commentId: string): Promise<Comment[]>;
   toggleStoryReplyLike(storyId: string, commentId: string): Promise<Comment>;
-  deleteStoryReply(storyId: string, commentId: string): Promise<void>;
+  deleteStoryReply(storyId: string, commentId: string): Promise<DeleteCommentResult>;
 
   togglePostLike(postId: string): Promise<Post>;
   togglePostSave(postId: string): Promise<Post>;
@@ -290,7 +348,7 @@ export interface SocialApi {
   addPostComment(postId: string, text: string, parentCommentId?: string): Promise<Comment>;
   getPostComments(postId: string): Promise<Comment[]>;
   togglePostCommentLike(postId: string, commentId: string): Promise<Comment>;
-  deletePostComment(postId: string, commentId: string): Promise<void>;
+  deletePostComment(postId: string, commentId: string): Promise<DeleteCommentResult>;
   updatePost(postId: string, input: UpdatePostInput): Promise<Post>;
   archivePost(postId: string): Promise<void>;
   restorePost(postId: string): Promise<void>;
@@ -308,8 +366,8 @@ export interface SocialApi {
   addSwipeComment(swipeId: string, text: string, parentCommentId?: string): Promise<SwipeComment>;
   toggleReelCommentLike(reelId: string, commentId: string): Promise<ReelComment>;
   toggleSwipeCommentLike(swipeId: string, commentId: string): Promise<SwipeComment>;
-  deleteReelComment(reelId: string, commentId: string): Promise<void>;
-  deleteSwipeComment(swipeId: string, commentId: string): Promise<void>;
+  deleteReelComment(reelId: string, commentId: string): Promise<DeleteCommentResult>;
+  deleteSwipeComment(swipeId: string, commentId: string): Promise<DeleteCommentResult>;
 
   createPost(input: CreatePostInput): Promise<Post>;
   createStory(input: CreateStoryInput): Promise<Story>;

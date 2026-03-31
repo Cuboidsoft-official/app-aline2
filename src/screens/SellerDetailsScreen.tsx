@@ -8,12 +8,17 @@ import {
   ScrollView,
   Alert
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 
 import Icon from "react-native-vector-icons/Ionicons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { formatPrimaryServicePrice, getServicePricingOptions } from "../utils/servicePricing";
 import { shareContentLink } from "../utils/shareLinks";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { appConfig } from "../config/env";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 const PRIMARY = "#7B4DFF";
 
@@ -46,50 +51,74 @@ type SellerService = {
 };
 
 const SellerDetailsScreen = ({ route, navigation }: any) => {
+  const { colors } = useAppTheme();
 
   const { sellerId } = route.params;
 
   const [seller, setSeller] = useState<SellerProfile | null>(null);
   const [services, setServices] = useState<SellerService[]>([]);
   const [media, setMedia] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   // ================= API =================
 
   const fetchSeller = useCallback(async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
-
-      const res = await API.get(`/seller/${sellerId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await API.get(`/seller/${sellerId}`);
 
       setSeller(res.data.seller);
       setMedia(res.data.seller?.media || []);
+      setErrorMessage("");
 
     } catch (err) {
       console.log("Seller error:", err);
+      setSeller(null);
+      setMedia([]);
+      setErrorMessage(getReadableApiErrorMessage(err, "Failed to load seller profile."));
     }
   }, [sellerId]);
 
   const fetchServices = useCallback(async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
-
-      const res = await API.get(`/service/seller/${sellerId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await API.get(`/service/seller/${sellerId}`);
 
       setServices(res.data.services || []);
 
     } catch (err) {
       console.log("Service error:", err);
+      setServices([]);
+      setErrorMessage((current) => current || getReadableApiErrorMessage(err, "Failed to load seller services."));
     }
   }, [sellerId]);
 
   useEffect(() => {
-    fetchSeller();
-    fetchServices();
+    const load = async () => {
+      try {
+        setLoading(true);
+        await Promise.all([fetchSeller(), fetchServices()]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load().catch(() => {});
   }, [fetchSeller, fetchServices]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const load = async () => {
+        try {
+          setLoading(true);
+          await Promise.all([fetchSeller(), fetchServices()]);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      load().catch(() => {});
+    }, [fetchSeller, fetchServices])
+  );
 
   const resolveSellerUserId = () => {
     const rawUserId = seller?.user;
@@ -101,11 +130,10 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
     return typeof rawUserId === "string" ? rawUserId : rawUserId._id || null;
   };
 
-  const openSellerChat = (service?: SellerService) => {
-    const sellerUserId = resolveSellerUserId();
+  const sellerUserId = resolveSellerUserId();
 
+  const openSellerChat = (service?: SellerService) => {
     if (!sellerUserId) {
-      Alert.alert("Unavailable", "This seller profile is missing its linked user account.");
       return;
     }
 
@@ -119,12 +147,19 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
 
   const shareSellerProfile = async () => {
     try {
+      const sellerProfileSlug =
+        typeof seller?.user === "string"
+          ? seller.user
+          : seller?.user?._id;
+      const shareBase = (appConfig.publicShareBaseUrl || "https://aline2.com").replace(/\/+$/, "");
+      const profileUrl = sellerProfileSlug ? `${shareBase}/profile/${sellerProfileSlug}` : shareBase;
+
       await shareContentLink({
-        originalUrl: seller?.clinicLink,
+        originalUrl: profileUrl,
         title: seller?.sellerName || "Aline2 Seller",
         description: seller?.bio || "",
         fallbackMessage: seller?.sellerName
-          ? `Check out ${seller.sellerName} on Aline2`
+          ? `Check out ${seller.sellerName} on Aline2\n\n${profileUrl}`
           : "Check out this seller on Aline2",
       });
     } catch (error) {
@@ -132,18 +167,8 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
     }
   };
 
-  const openFeatureInfo = (title: string, description: string) => {
-    navigation.navigate("FeatureInfoScreen", {
-      title,
-      description,
-    });
-  };
-
   const blockSeller = async () => {
-    const sellerUserId = resolveSellerUserId();
-
     if (!sellerUserId) {
-      Alert.alert("Unavailable", "This seller profile is missing its linked user account.");
       return;
     }
 
@@ -157,15 +182,12 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
           style: "destructive",
           onPress: async () => {
             try {
-              const token = await AsyncStorage.getItem("token");
-              await API.post(`/user/block/${sellerUserId}`, {}, {
-                headers: { Authorization: `Bearer ${token}` }
-              });
+              await API.post(`/user/block/${sellerUserId}`, {});
               Alert.alert("Blocked", "This seller has been blocked.");
               navigation.goBack();
             } catch (error) {
               console.log("block seller error:", error);
-              Alert.alert("Unable to block seller", "Please try again.");
+              Alert.alert("Unable to block seller", getReadableApiErrorMessage(error, "Please try again."));
             }
           }
         }
@@ -175,11 +197,36 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
 
   // ================= UI =================
 
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+        <View style={styles.loaderWrap}>
+          <Icon name="storefront-outline" size={38} color={colors.mutedText} />
+          <Text style={[styles.loaderText, { color: colors.text }]}>Loading seller details...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!seller) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+        <View style={styles.loaderWrap}>
+          <Icon name="alert-circle-outline" size={38} color={colors.mutedText} />
+          <Text style={[styles.loaderText, { color: colors.text }]}>Seller unavailable</Text>
+          <Text style={[styles.inlineNotice, { color: colors.mutedText, textAlign: "center" }]}>
+            {errorMessage || "This seller profile could not be loaded right now."}
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
 
       {/* HEADER */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: PRIMARY }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -201,7 +248,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
               source={{
                 uri:
                   seller?.profilePic ||
-                  "https://cdn-icons-png.flaticon.com/512/149/149071.png"
+                  DEFAULT_AVATAR_URL
               }}
               style={styles.avatar}
             />
@@ -221,27 +268,33 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
         <View style={styles.actions}>
 
           <Action
-            icon="call-outline"
-            title="Call"
-            onPress={() => openFeatureInfo("Voice Call", "Voice calling is not available in the current backend yet.")}
-          />
-          <Action
-            icon="videocam-outline"
-            title="Video"
-            onPress={() => openFeatureInfo("Video Call", "Video calling is not available in the current backend yet.")}
+            icon="calendar-outline"
+            title="Request"
+            onPress={() => openSellerChat()}
+            disabled={!sellerUserId}
           />
           <Action
             icon="chatbubble-outline"
             title="Chat"
             onPress={() => openSellerChat()}
+            disabled={!sellerUserId}
           />
           <Action
             icon="share-social-outline"
             title="Share"
             onPress={shareSellerProfile}
           />
+          <Action
+            icon="close-circle-outline"
+            title="Block"
+            onPress={blockSeller}
+            disabled={!sellerUserId}
+          />
 
         </View>
+        {!sellerUserId ? (
+          <Text style={styles.inlineNotice}>This seller profile is missing its linked account, so chat and block actions are temporarily unavailable.</Text>
+        ) : null}
 
         {/* SERVICES */}
         <View style={styles.section}>
@@ -279,7 +332,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
             ))
 
           ) : (
-            <Text style={{ color: "#999" }}>No services available</Text>
+            <Text style={[styles.emptyLabel, { color: colors.mutedText }]}>No services available</Text>
           )}
 
         </View>
@@ -299,7 +352,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
               ))}
             </View>
           ) : (
-            <Text style={{ color: "#999" }}>No media files</Text>
+            <Text style={[styles.emptyLabel, { color: colors.mutedText }]}>No media files</Text>
           )}
 
         </View>
@@ -307,9 +360,8 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
         {/* SETTINGS */}
         <View style={styles.optionBox}>
           <Option icon="notifications-outline" title="Notifications" onPress={() => navigation.navigate("NotificationSettingsScreen")} />
-          <Option icon="color-palette-outline" title="Chat Theme" onPress={() => openFeatureInfo("Chat Theme", "Custom seller chat themes are not available yet, but this setting is now routed correctly.")} />
-          <Option icon="time-outline" title="Disappearing Messages" onPress={() => openFeatureInfo("Disappearing Messages", "Disappearing messages need backend support before they can be enabled.")} />
-          <Option icon="shield-checkmark-outline" title="Encryption" onPress={() => openFeatureInfo("Encryption", "End-to-end encryption details are not exposed by the current backend yet.")} />
+          <Option icon="calendar-outline" title="Open booking chat" onPress={() => openSellerChat()} />
+          <Option icon="share-social-outline" title="Share seller profile" onPress={shareSellerProfile} />
         </View>
 
         {/* BLOCK */}
@@ -324,7 +376,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
         </TouchableOpacity>
 
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -339,13 +391,15 @@ export default SellerDetailsScreen;
 const Action = ({
   icon,
   title,
-  onPress
+  onPress,
+  disabled = false,
 }: {
   icon: string;
   title: string;
   onPress?: () => void;
+  disabled?: boolean;
 }) => (
-  <TouchableOpacity style={styles.actionItem} onPress={onPress}>
+  <TouchableOpacity style={[styles.actionItem, disabled ? styles.actionItemDisabled : null]} onPress={onPress} disabled={disabled}>
     <View style={styles.actionIcon}>
       <Icon name={icon} size={24} color={PRIMARY} />
     </View>
@@ -380,6 +434,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#F6F7FB"
+  },
+  loaderWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+  loaderText: {
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: "600",
   },
 
   header: {
@@ -451,6 +516,9 @@ const styles = StyleSheet.create({
   actionText: {
     marginTop: 6,
     fontSize: 12
+  },
+  actionItemDisabled: {
+    opacity: 0.45
   },
 
   section: {
@@ -539,6 +607,17 @@ const styles = StyleSheet.create({
     color: "#ef4444",
     marginLeft: 8,
     fontWeight: "600"
-  }
+  },
+  inlineNotice: {
+    marginHorizontal: 20,
+    marginTop: 8,
+    color: "#6B7280",
+    lineHeight: 18,
+    fontSize: 12
+  },
+  emptyLabel: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
 
 });

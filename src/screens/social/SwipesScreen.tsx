@@ -270,17 +270,19 @@ function SwipesScreen({ navigation }: any) {
         style: "destructive",
         onPress: async () => {
           try {
-            await socialApi.deleteSwipeComment(selectedSwipe.id, comment.id);
+            const result = await socialApi.deleteSwipeComment(selectedSwipe.id, comment.id);
             setSheetComments((prev) => prev.filter((item) => item.id !== comment.id));
             setSwipes((prev) =>
               prev.map((item) =>
                 item.id === selectedSwipe.id
-                  ? { ...item, commentsCount: Math.max(0, item.commentsCount - 1) }
+                  ? { ...item, commentsCount: Math.max(0, item.commentsCount - Math.max(1, result.deletedCount || 1)) }
                   : item,
               ),
             );
             setSelectedSwipe((prev) =>
-              prev ? { ...prev, commentsCount: Math.max(0, prev.commentsCount - 1) } : prev,
+              prev
+                ? { ...prev, commentsCount: Math.max(0, prev.commentsCount - Math.max(1, result.deletedCount || 1)) }
+                : prev,
             );
           } catch (error) {
             Alert.alert("Could not delete comment", toUserSafeMessage(error));

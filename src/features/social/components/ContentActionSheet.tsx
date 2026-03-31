@@ -104,6 +104,7 @@ function ContentActionSheet({
   const displayTitle =
     title || (contentType === "story" ? "Story options" : contentType === "swipe" ? "Swipe options" : "Post options");
   const isOwner = !!userId && !!currentUserId && String(userId) === String(currentUserId);
+  const canModerateUser = Boolean(userId);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -142,10 +143,9 @@ function ContentActionSheet({
 
               <TouchableOpacity
                 style={styles.actionRow}
-                disabled={!!busyAction || !userId}
+                disabled={!!busyAction || !canModerateUser}
                 onPress={() => {
                   if (!userId) {
-                    Alert.alert("Unavailable", "User action is not available for this item.");
                     return;
                   }
                   runAction("mute", () => socialApi.muteUser(userId));
@@ -158,10 +158,9 @@ function ContentActionSheet({
 
               <TouchableOpacity
                 style={styles.actionRow}
-                disabled={!!busyAction || !userId}
+                disabled={!!busyAction || !canModerateUser}
                 onPress={() => {
                   if (!userId) {
-                    Alert.alert("Unavailable", "User action is not available for this item.");
                     return;
                   }
                   runAction("block", () => socialApi.blockUser(userId));
@@ -171,6 +170,12 @@ function ContentActionSheet({
                 <Text style={[styles.actionText, styles.dangerText]}>Block {userLabel ? `@${userLabel}` : "user"}</Text>
                 {busyAction === "block" ? <ActivityIndicator size="small" color="#b91c1c" /> : null}
               </TouchableOpacity>
+
+              {!canModerateUser ? (
+                <Text style={styles.helperText}>
+                  User moderation options are unavailable for this item until its owner details finish syncing.
+                </Text>
+              ) : null}
 
               <Text style={styles.reportTitle}>Report {contentType}</Text>
               <View style={styles.reasonWrap}>
@@ -256,6 +261,7 @@ const styles = StyleSheet.create({
   },
   actionText: { marginLeft: 12, marginRight: "auto", color: "#111827", fontWeight: "600", fontSize: 14 },
   dangerText: { color: "#b91c1c" },
+  helperText: { marginTop: 8, color: "#6b7280", fontSize: 13, lineHeight: 18 },
   reportTitle: { marginTop: 16, marginBottom: 10, color: "#111827", fontWeight: "800" },
   reasonWrap: { flexDirection: "row", flexWrap: "wrap" },
   reasonPill: {

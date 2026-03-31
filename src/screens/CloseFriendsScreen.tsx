@@ -16,6 +16,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 
 import { API } from "../api/api";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 
 type UserRow = {
   _id: string;
@@ -24,7 +25,7 @@ type UserRow = {
   profilePic?: string;
 };
 
-const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
 
 function CloseFriendsScreen({ navigation }: any) {
   const { colors } = useAppTheme();

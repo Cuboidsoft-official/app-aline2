@@ -9,32 +9,39 @@ import {
   ActivityIndicator,
   Alert
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/Ionicons";
 import Tooltip from "react-native-walkthrough-tooltip";
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { monetizationDisabledMessage, productFlags } from "../config/productFlags";
+import { appConfig } from "../config/env";
 import { formatPrimaryServicePrice, formatSummaryAmount } from "../utils/servicePricing";
 import { shareContentLink } from "../utils/shareLinks";
+import { DEFAULT_AVATAR_URL, DEFAULT_COVER_URL } from "../constants/defaultAssets";
+import { useAppTheme } from "../theme/AppThemeContext";
 
-const DEFAULT_COVER =
-  "https://www.bcmch.org/asset/uploads/common/867349919655f1491613e4.webp";
-
-const DEFAULT_AVATAR =
-  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQikGmpeh_S05yj5punOSDXG-utlTE1TRdFWQ&s";
+const DEFAULT_COVER = DEFAULT_COVER_URL;
+const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
 
 const SellerDashboardScreen = ({ navigation }: any) => {
+  const { colors } = useAppTheme();
   const [expanded, setExpanded] = useState(false);
   const [step, setStep] = useState(0);
   const [services, setServices] = useState([]);
   const [serviceLoading, setServiceLoading] = useState(true);
+  const [serviceError, setServiceError] = useState("");
   const [requestSummary, setRequestSummary] = useState<any>(null);
   const [recentRequests, setRecentRequests] = useState<any[]>([]);
   const [requestLoading, setRequestLoading] = useState(true);
+  const [requestError, setRequestError] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [seller, setSeller] = useState<any>(null);
+  const [sellerError, setSellerError] = useState("");
 
   const next = () => setStep(step + 1);
   const close = async () => {
@@ -44,17 +51,16 @@ const SellerDashboardScreen = ({ navigation }: any) => {
   const startGuide = () => setStep(1);
 const fetchServices = useCallback(async () => {
   try {
-    const token = await AsyncStorage.getItem("token");
+    setServiceLoading(true);
 
-    const res = await API.get("/service/my-services", {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
+    const res = await API.get("/service/my-services");
 
     setServices(res.data.services || []);
+    setServiceError("");
   } catch (error) {
     console.log("services error:", error);
+    setServices([]);
+    setServiceError(getReadableApiErrorMessage(error, "Failed to load services."));
   } finally {
     setServiceLoading(false);
   }
@@ -65,27 +71,31 @@ const handleDeleteService = (id: string) => {
     {
       text: "Delete",
       onPress: async () => {
-        const token = await AsyncStorage.getItem("token");
-
-        await API.delete(`/service/delete/${id}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-
-        fetchServices();
+        try {
+          await API.delete(`/service/delete/${id}`);
+          fetchServices().catch(() => {});
+        } catch (error) {
+          Alert.alert("Unable to delete service", getReadableApiErrorMessage(error, "Please try again."));
+        }
       }
     }
   ]);
 };
 
 const handleShareService = async (item: any) => {
+  const sellerProfileSlug = seller?.user?.username || seller?.user?._id;
+  const shareBase = (appConfig.publicShareBaseUrl || "https://aline2.com").replace(/\/+$/, "");
+  const profileUrl = sellerProfileSlug ? `${shareBase}/profile/${sellerProfileSlug}` : shareBase;
+
   await shareContentLink({
-    originalUrl: seller?.clinicLink,
+    originalUrl: profileUrl,
     title: item?.serviceName || "Aline2 Service",
     description: item?.description || "",
     fallbackMessage: [
       item?.serviceName || "Aline2 Service",
       item?.description || "",
       seller?.sellerName ? `Offered by ${seller.sellerName}` : "",
+      profileUrl,
     ].filter(Boolean).join("\n")
   });
 };
@@ -99,8 +109,12 @@ const fetchRequestData = useCallback(async () => {
 
     setRequestSummary(summaryRes.data?.summary || null);
     setRecentRequests((requestsRes.data?.requests || []).slice(0, 3));
+    setRequestError("");
   } catch (error) {
     console.log("request data error:", error);
+    setRequestSummary(null);
+    setRecentRequests([]);
+    setRequestError(getReadableApiErrorMessage(error, "Failed to load appointment data."));
   } finally {
     setRequestLoading(false);
   }
@@ -109,36 +123,24 @@ const fetchRequestData = useCallback(async () => {
     try {
       setLoading(true);
 
-      const token = await AsyncStorage.getItem("token");
-
-      if (!token) {
-        Alert.alert("Error", "Please login again");
-        navigation.goBack();
-        return;
-      }
-
-      const res = await API.get("/seller/me", {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
+      const res = await API.get("/seller/me");
 
       if (res?.data?.success) {
         setSeller(res.data.seller);
+        setSellerError("");
       } else {
-        Alert.alert("Info", "Seller profile not found");
         navigation.replace("SellerRegistration");
       }
     } catch (error: any) {
       console.log("fetchSellerProfile error:", error?.response?.data || error.message);
 
       if (error?.response?.status === 404) {
-        Alert.alert("Info", "Please complete seller registration first");
         navigation.replace("SellerRegistration");
         return;
       }
 
-      Alert.alert("Error", "Failed to load seller profile");
+      setSeller(null);
+      setSellerError(getReadableApiErrorMessage(error, "Failed to load seller profile."));
     } finally {
       setLoading(false);
     }
@@ -149,6 +151,14 @@ const fetchRequestData = useCallback(async () => {
     fetchServices();
     fetchRequestData();
   }, [fetchRequestData, fetchSellerProfile, fetchServices]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchSellerProfile().catch(() => {});
+      fetchServices().catch(() => {});
+      fetchRequestData().catch(() => {});
+    }, [fetchRequestData, fetchSellerProfile, fetchServices])
+  );
 
   useEffect(() => {
     let active = true;
@@ -195,24 +205,42 @@ const fetchRequestData = useCallback(async () => {
 
   if (loading) {
     return (
-      <View style={styles.loaderContainer}>
-        <ActivityIndicator size="large" color="#7B4DFF" />
-        <Text style={styles.loaderText}>Loading seller profile...</Text>
-      </View>
+      <SafeAreaView style={[styles.loaderContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loaderText, { color: colors.mutedText }]}>Loading seller profile...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (!seller) {
+    return (
+      <SafeAreaView style={[styles.loaderContainer, { backgroundColor: colors.background }]}>
+        <Icon name="storefront-outline" size={42} color={colors.mutedText} />
+        <Text style={[styles.loaderText, { color: colors.text, marginTop: 16 }]}>Seller profile unavailable</Text>
+        <Text style={[styles.errorBody, { color: colors.mutedText }]}>
+          {sellerError || "We couldn't load your seller profile right now."}
+        </Text>
+        <TouchableOpacity
+          style={[styles.primaryBtn, { marginTop: 18, backgroundColor: colors.primary }]}
+          onPress={() => fetchSellerProfile().catch(() => {})}
+        >
+          <Text style={styles.btnText}>Try Again</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#fff" }}>
-      <View style={styles.header}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
+      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.headerBtn}
         >
-          <Icon name="arrow-back" size={22} color="#000" />
+          <Icon name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>Seller Profile</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Seller Profile</Text>
 
         <Tooltip
           isVisible={step === 1}
@@ -224,21 +252,21 @@ const fetchRequestData = useCallback(async () => {
                 <Text style={styles.guideBtn}>Next</Text>
               </TouchableOpacity>
             </View>
-          }
-        >
-          <TouchableOpacity
-            style={styles.headerBtn}
+            }
+          >
+            <TouchableOpacity
+              style={styles.headerBtn}
             onPress={() =>
               navigation.navigate("SellerSettingsScreen", {
                 seller
               })
             }
           >
-            <Icon name="settings-outline" size={22} color="#000" />
+            <Icon name="settings-outline" size={22} color={colors.text} />
           </TouchableOpacity>
         </Tooltip>
         <TouchableOpacity style={styles.headerBtn} onPress={startGuide}>
-          <Icon name="help-circle-outline" size={22} color="#7B4DFF" />
+          <Icon name="help-circle-outline" size={22} color={colors.primary} />
         </TouchableOpacity>
       </View>
 
@@ -317,15 +345,15 @@ const fetchRequestData = useCallback(async () => {
             </View>
           }
         >
-          <View style={styles.walletCard}>
+          <View style={[styles.walletCard, { backgroundColor: colors.card }]}>
             <View style={styles.walletLeft}>
-              <Icon name="wallet-outline" size={22} color="#7B4DFF" />
-              <Text style={styles.walletTitle}>
+              <Icon name="wallet-outline" size={22} color={colors.primary} />
+              <Text style={[styles.walletTitle, { color: colors.text }]}>
                 {productFlags.sellerMonetizationInConsumerApp ? "Seller Wallet" : "Completed Request Value"}
               </Text>
             </View>
 
-            <Text style={styles.walletAmount}>{formatSummaryAmount(requestSummary, "completed")}</Text>
+            <Text style={[styles.walletAmount, { color: colors.text }]}>{formatSummaryAmount(requestSummary, "completed")}</Text>
           </View>
         </Tooltip>
 
@@ -404,12 +432,14 @@ const fetchRequestData = useCallback(async () => {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Requests</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Requests</Text>
 
           {requestLoading ? (
             <ActivityIndicator style={{ marginTop: 16 }} />
+          ) : requestError ? (
+            <Text style={[styles.emptyRequestText, { color: colors.mutedText }]}>{requestError}</Text>
           ) : recentRequests.length === 0 ? (
-            <Text style={styles.emptyRequestText}>No pending requests right now.</Text>
+            <Text style={[styles.emptyRequestText, { color: colors.mutedText }]}>No pending requests right now.</Text>
           ) : (
             recentRequests.map((item: any) => (
               <View key={item._id} style={styles.requestCard}>
@@ -426,7 +456,7 @@ const fetchRequestData = useCallback(async () => {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>About Seller</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>About Seller</Text>
 
           <Text
             numberOfLines={expanded ? undefined : 3}
@@ -447,7 +477,7 @@ const fetchRequestData = useCallback(async () => {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Professional Details</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Professional Details</Text>
 
           <View style={styles.infoCard}>
             <View style={styles.infoRow}>
@@ -508,7 +538,7 @@ const fetchRequestData = useCallback(async () => {
 
        <View style={styles.section}>
          <View style={styles.serviceHeader}>
-           <Text style={styles.sectionTitle}>All Services</Text>
+           <Text style={[styles.sectionTitle, { color: colors.text }]}>All Services</Text>
 
            <TouchableOpacity
              onPress={() =>
@@ -524,6 +554,8 @@ const fetchRequestData = useCallback(async () => {
          {/* LOADING */}
          {serviceLoading ? (
            <ActivityIndicator style={{ marginTop: 20 }} />
+         ) : serviceError ? (
+           <Text style={[styles.noServiceSub, { color: colors.mutedText }]}>{serviceError}</Text>
          ) : services.length === 0 ? (
            <View style={styles.emptyService}>
              <Icon name="briefcase-outline" size={40} color="#bbb" />
@@ -584,7 +616,7 @@ const fetchRequestData = useCallback(async () => {
          )}
        </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -602,6 +634,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 15,
     color: "#666"
+  },
+  errorBody: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: "center",
+    paddingHorizontal: 28,
   },
 
   header: {

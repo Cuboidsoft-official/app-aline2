@@ -13,7 +13,7 @@ import { useIsFocused } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
-import { clearStoredSession } from "../utils/authSession";
+import { clearStoredSession, getStoredToken } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
 
 const SettingsScreen = ({ navigation }: any) => {
@@ -31,7 +31,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
    try {
 
-    const token = await AsyncStorage.getItem("token");
+    const token = await getStoredToken();
 
      const res = await API.get(
      "/auth/profile",
@@ -68,6 +68,16 @@ const SettingsScreen = ({ navigation }: any) => {
 
  // LOGOUT
  const logout = async () => {
+  const token = await getStoredToken();
+  if (token) {
+   try {
+    await API.post("/auth/logout", {}, {
+     headers: { Authorization: `Bearer ${token}` }
+    });
+   } catch (error) {
+    console.log("logout API error:", error);
+   }
+  }
   await clearStoredSession();
   navigation.replace("Login");
  };
@@ -81,7 +91,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
    setLoading(true);
 
-   const token = await AsyncStorage.getItem("token");
+   const token = await getStoredToken();
 
    const res = await API.post(
     "/auth/toggle-private",
@@ -120,13 +130,6 @@ const SettingsScreen = ({ navigation }: any) => {
 
 	 };
 
-	 const openFeatureInfo = (title: string, description: string) => {
-	  navigation.navigate("FeatureInfoScreen", {
-	   title,
-	   description
-	  });
-	 };
-
  const toggleDarkMode = async () => {
   const nextValue = !isDarkMode;
   await setDarkModePreference(nextValue);
@@ -149,6 +152,14 @@ const SettingsScreen = ({ navigation }: any) => {
    <ScrollView showsVerticalScrollIndicator={false}>
 
     <Text style={[styles.section, isDarkMode ? styles.sectionDark : null]}>Your account</Text>
+
+    <TouchableOpacity
+     style={[styles.item, isDarkMode ? styles.itemDark : null]}
+     onPress={() => navigation.navigate("AccountCenterScreen")}
+    >
+     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Account Center</Text>
+     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
+    </TouchableOpacity>
 
     <View style={[styles.item, isDarkMode ? styles.itemDark : null]}>
      <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Private account</Text>
@@ -197,14 +208,6 @@ const SettingsScreen = ({ navigation }: any) => {
      onPress={() => navigation.navigate("NotificationSettingsScreen")}
     >
      <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Notifications</Text>
-     <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
-    </TouchableOpacity>
-
-	    <TouchableOpacity
-	     style={[styles.item, isDarkMode ? styles.itemDark : null]}
-	     onPress={() => openFeatureInfo("Account Center", "Account Center is not connected to a backend service yet, but this page is now routed correctly.")}
-	    >
-     <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Account center</Text>
      <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>
     </TouchableOpacity>
 
@@ -264,11 +267,9 @@ const SettingsScreen = ({ navigation }: any) => {
      />
     </View>
 
-    <Text style={[styles.section, isDarkMode ? styles.sectionDark : null]}>Support</Text>
-
     <TouchableOpacity
      style={[styles.item, isDarkMode ? styles.itemDark : null]}
-     onPress={() => openFeatureInfo("Help & Support", "Help and support resources will be available here in a future update.")}
+     onPress={() => navigation.navigate("HelpSupportScreen")}
     >
      <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Help & Support</Text>
      <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"}/>

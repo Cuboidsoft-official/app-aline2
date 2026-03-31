@@ -18,6 +18,7 @@ import { toUserSafeMessage } from "../validation";
 import { createChatConversation, sendChatMessage } from "../../../utils/chatApi";
 import { createShortShareUrl, shareContentLink } from "../../../utils/shareLinks";
 import { appConfig } from "../../../config/env";
+import { API } from "../../../api/api";
 
 interface PostShareSheetProps {
   visible: boolean;
@@ -68,8 +69,10 @@ function PostShareSheet({
 
     try {
       setBusy("story");
+      const updated = await socialApi.sharePost(post.id);
+      onPostUpdate(updated);
       onClose();
-      onOpenStoryComposer(post);
+      onOpenStoryComposer(updated);
     } catch (error) {
       Alert.alert("Could not share post", toUserSafeMessage(error));
     } finally {
@@ -165,6 +168,16 @@ function PostShareSheet({
               await sendChatMessage({
                 conversationId,
                 text: await buildPostShareMessage(post),
+              });
+
+              await API.post(`/posts/${post.id}/share`, {
+                shareType: "conversation",
+                conversationId,
+              });
+
+              onPostUpdate({
+                ...post,
+                sharesCount: post.sharesCount + 1,
               });
 
               Alert.alert("Sent", `Post sent to @${target.username}.`);

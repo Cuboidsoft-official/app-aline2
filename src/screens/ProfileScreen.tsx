@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   Image,
   KeyboardAvoidingView,
@@ -13,15 +12,18 @@ import {
   ActivityIndicator,
   Alert
 } from 'react-native';
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { API } from '../api/api';
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
-import { getStoredUser, getStoredToken, setStoredSession } from "../utils/authSession";
+import { getStoredRefreshToken, getStoredSessionMeta, getStoredUser, getStoredToken, setStoredSession } from "../utils/authSession";
 import { uploadImageAsset } from "../utils/uploadMedia";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 const ProfileScreen = ({ navigation }: any) => {
+  const { colors } = useAppTheme();
 
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
@@ -137,9 +139,15 @@ const ProfileScreen = ({ navigation }: any) => {
       );
 
       if (res.data.success) {
-        const storedUser = await getStoredUser();
+        const [storedUser, refreshToken, session] = await Promise.all([
+          getStoredUser(),
+          getStoredRefreshToken(),
+          getStoredSessionMeta(),
+        ]);
         await setStoredSession({
-          token,
+          accessToken: token,
+          refreshToken,
+          session,
           user: {
             ...(storedUser || {}),
             name,
@@ -177,16 +185,16 @@ const ProfileScreen = ({ navigation }: any) => {
 
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
 
       {/* Header */}
       <View style={styles.headerContainer}>
 
            <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} />
+          <Icon name="arrow-back" size={24} color={colors.text} />
            </TouchableOpacity>
 
-        <Text style={styles.header}>Edit Profile</Text>
+        <Text style={[styles.header, { color: colors.text }]}>Edit Profile</Text>
 
         <View style={styles.headerSpacer} />
 
@@ -211,31 +219,31 @@ const ProfileScreen = ({ navigation }: any) => {
               source={{
                 uri:
                   profilePic ||
-                  "https://cdn-icons-png.flaticon.com/512/149/149071.png"
+                  "https://aline2.com/asstes/images/logo/logo.jpeg"
               }}
               style={styles.profileImage}
             />
 
             <TouchableOpacity onPress={pickImage}>
-              <Text style={styles.changePhoto}>
+              <Text style={[styles.changePhoto, { color: colors.primary }]}>
                 Change profile photo
               </Text>
             </TouchableOpacity>
 
           </View>
 
-          {renderInput("Name", name, setName)}
-          {renderInput("Username", username, (value) => setUsername(String(value || "").toLowerCase().replace(/\s+/g, "")))}
-          {renderInput("Bio", bio, setBio, true)}
-          {renderInput("Interests (comma separated)", interests, setInterests, true)}
-          {renderInput("Pronouns", pronouns, setPronouns)}
-          {renderInput("Gender", gender, setGender)}
-          {renderInput("Link", link, setLink)}
-          {renderReadonlyField("Account Type", accountTypeLabel)}
-          <Text style={styles.helperText}>
+          {renderInput("Name", name, setName, false, colors)}
+          {renderInput("Username", username, (value) => setUsername(String(value || "").toLowerCase().replace(/\s+/g, "")), false, colors)}
+          {renderInput("Bio", bio, setBio, true, colors)}
+          {renderInput("Interests (comma separated)", interests, setInterests, true, colors)}
+          {renderInput("Pronouns", pronouns, setPronouns, false, colors)}
+          {renderInput("Gender", gender, setGender, false, colors)}
+          {renderInput("Link", link, setLink, false, colors)}
+          {renderReadonlyField("Account Type", accountTypeLabel, colors)}
+          <Text style={[styles.helperText, { color: colors.mutedText }]}>
             Account type is managed server-side, so special account states are assigned outside the app.
           </Text>
-          <Text style={styles.helperText}>
+          <Text style={[styles.helperText, { color: colors.mutedText }]}>
             Usernames use 3-30 lowercase letters, numbers, dots, or underscores.
           </Text>
 
@@ -249,6 +257,7 @@ const ProfileScreen = ({ navigation }: any) => {
           <TouchableOpacity
             style={[
               styles.saveButton,
+              { backgroundColor: colors.primary },
               loading && styles.saveButtonDisabled
             ]}
             onPress={updateProfile}
@@ -279,32 +288,42 @@ const renderInput = (
   label: string,
   value: string,
   setter: Dispatch<SetStateAction<string>>,
-  multiline = false
+  multiline = false,
+  colors: { text: string; border: string; surface: string; placeholder: string }
 ) => (
   <View style={styles.inputGroup}>
 
-    <Text style={styles.label}>{label}</Text>
+    <Text style={[styles.label, { color: colors.text }]}>{label}</Text>
 
     <TextInput
       style={[
         styles.input,
-        multiline && styles.multilineInput
+        multiline && styles.multilineInput,
+        {
+          color: colors.text,
+          borderColor: colors.border,
+          backgroundColor: colors.surface,
+        }
       ]}
       value={value}
       onChangeText={setter}
       placeholder={`Enter ${label}`}
-      placeholderTextColor="#888"
+      placeholderTextColor={colors.placeholder}
       multiline={multiline}
     />
 
   </View>
 );
 
-const renderReadonlyField = (label: string, value: string) => (
+const renderReadonlyField = (
+  label: string,
+  value: string,
+  colors: { text: string; border: string; surface: string }
+) => (
   <View style={styles.inputGroup}>
-    <Text style={styles.label}>{label}</Text>
-    <View style={styles.readonlyField}>
-      <Text style={styles.readonlyValue}>{value}</Text>
+    <Text style={[styles.label, { color: colors.text }]}>{label}</Text>
+    <View style={[styles.readonlyField, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+      <Text style={[styles.readonlyValue, { color: colors.text }]}>{value}</Text>
     </View>
   </View>
 );

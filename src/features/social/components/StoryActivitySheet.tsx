@@ -281,7 +281,7 @@ function StoryActivitySheet({
         style: "destructive",
         onPress: async () => {
           try {
-            await socialApi.deleteStoryReply(storyId, comment.id);
+            const result = await socialApi.deleteStoryReply(storyId, comment.id);
             setComments((prev) => prev.filter((item) => item.id !== comment.id));
             setCommentReplies((prev) => {
               const next: Record<string, Comment[]> = {};
@@ -292,7 +292,7 @@ function StoryActivitySheet({
             });
             updateStory((current) => ({
               ...current,
-              replyCount: Math.max(0, (current.replyCount || 0) - 1),
+              replyCount: Math.max(0, (current.replyCount || 0) - Math.max(1, result.deletedCount || 1)),
             }));
             if (replyTarget?.id === comment.id) {
               setReplyTarget(null);

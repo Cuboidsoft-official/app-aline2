@@ -8,9 +8,8 @@ Animated,
 Dimensions
 } from "react-native";
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
-import { clearStoredSession } from "../utils/authSession";
+import { clearStoredSession, getStoredToken } from "../utils/authSession";
 
 const { height } = Dimensions.get("window");
 
@@ -24,7 +23,7 @@ const circleAnim = useRef(new Animated.Value(0)).current;
 
 const checkLogin = useCallback(async () => {
 
-const token = await AsyncStorage.getItem("token");
+const token = await getStoredToken();
 
 setTimeout(async () => {
 

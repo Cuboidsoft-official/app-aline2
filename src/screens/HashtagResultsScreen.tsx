@@ -13,6 +13,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import { API } from "../api/api";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 
 type HashtagPost = {
   _id: string;
@@ -35,7 +36,7 @@ type HashtagPost = {
   };
 };
 
-const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
 
 const getPreviewUrl = (post: HashtagPost) =>
   post.media?.[0]?.thumbnailUrl || post.media?.[0]?.url || post.image || DEFAULT_AVATAR;

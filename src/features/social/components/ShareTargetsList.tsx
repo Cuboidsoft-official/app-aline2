@@ -12,6 +12,7 @@ import {
 import { API } from "../../../api/api";
 import { SocialUser } from "../types";
 import { getStoredUserId } from "../../../utils/authSession";
+import { DEFAULT_AVATAR_URL } from "../../../constants/defaultAssets";
 
 interface ShareTarget {
   id: string;
@@ -102,7 +103,7 @@ function ShareTargetsList({ onSend }: ShareTargetsListProps) {
         renderItem={({ item }) => (
           <View style={styles.card}>
             <Image
-              source={{ uri: item.avatarUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png" }}
+              source={{ uri: item.avatarUrl || DEFAULT_AVATAR_URL }}
               style={styles.avatar}
             />
             <Text style={styles.name} numberOfLines={1}>

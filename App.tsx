@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useEffect } from 'react';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
@@ -18,12 +18,13 @@ import ChatScreen from './src/screens/ChatScreen';
 import ChatDetailsScreen from './src/screens/ChatDetailsScreen';
 import AllChatsScreen from './src/screens/AllChatsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import AccountCenterScreen from './src/screens/AccountCenterScreen';
 import BlockedUsersScreen from './src/screens/BlockedUsersScreen';
 import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
 import CommentControlsScreen from './src/screens/CommentControlsScreen';
 import TagsMentionsScreen from './src/screens/TagsMentionsScreen';
 import DeleteAccountScreen from './src/screens/DeleteAccountScreen';
-import FeatureInfoScreen from './src/screens/FeatureInfoScreen';
+import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import SellerRegistration from './src/screens/SellerRegistration';
 import SellerDashboardScreen from './src/screens/SellerDashboardScreen';
@@ -53,8 +54,10 @@ import CloseFriendsScreen from './src/screens/CloseFriendsScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
 import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
+import { setSessionInvalidationHandler } from './src/utils/authSession';
 
 const Stack = createNativeStackNavigator();
+const navigationRef = createNavigationContainerRef();
 const rootStyle = { flex: 1 } as const;
 const transparentSheetOptions = {
   presentation: 'transparentModal' as const,
@@ -65,8 +68,19 @@ const transparentSheetOptions = {
 function AppNavigator() {
   const { navigationTheme } = useAppTheme();
 
+  useEffect(() => {
+    return setSessionInvalidationHandler(() => {
+      if (navigationRef.isReady()) {
+        navigationRef.resetRoot({
+          index: 0,
+          routes: [{ name: "Login" as never }],
+        });
+      }
+    });
+  }, []);
+
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer ref={navigationRef} theme={navigationTheme}>
       <Stack.Navigator
         initialRouteName="Splash"
         screenOptions={{ headerShown: false }}
@@ -97,13 +111,14 @@ function AppNavigator() {
         <Stack.Screen name="ChatDetailsScreen" component={ChatDetailsScreen} />
         <Stack.Screen name="AllChatsScreen" component={AllChatsScreen} />
         <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
+        <Stack.Screen name="AccountCenterScreen" component={AccountCenterScreen} />
         <Stack.Screen name="BlockedUsersScreen" component={BlockedUsersScreen} />
         <Stack.Screen name="NotificationSettingsScreen" component={NotificationSettingsScreen} />
         <Stack.Screen name="CommentControlsScreen" component={CommentControlsScreen} />
         <Stack.Screen name="TagsMentionsScreen" component={TagsMentionsScreen} />
         <Stack.Screen name="CloseFriendsScreen" component={CloseFriendsScreen} />
         <Stack.Screen name="DeleteAccountScreen" component={DeleteAccountScreen} />
-        <Stack.Screen name="FeatureInfoScreen" component={FeatureInfoScreen} />
+        <Stack.Screen name="HelpSupportScreen" component={HelpSupportScreen} />
         <Stack.Screen name="Search" component={SearchScreen} />
         <Stack.Screen name="HashtagResultsScreen" component={HashtagResultsScreen} />
         <Stack.Screen name="SellerRegistration" component={SellerRegistration} />

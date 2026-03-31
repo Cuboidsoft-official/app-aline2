@@ -1,6 +1,7 @@
 import { Asset, CameraOptions, ImageLibraryOptions, launchCamera, launchImageLibrary } from "react-native-image-picker";
 
 import { API } from "../../api/api";
+import { getReadableApiErrorMessage } from "../../api/networkErrors";
 import { MediaAsset } from "./types";
 
 export type ComposerAsset = {
@@ -101,60 +102,88 @@ export const captureComposerAssets = async (options: CameraOptions): Promise<Com
 };
 
 const uploadSingleImage = async (asset: ComposerAsset): Promise<MediaAsset> => {
-  const body = new FormData();
-  body.append("image", toFormDataFile(asset) as never);
+  try {
+    const body = new FormData();
+    body.append("image", toFormDataFile(asset) as never);
 
-  const res = await API.post("/upload/image", body, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
+    const res = await API.post("/upload/image", body, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
 
-  return {
-    id: asset.id,
-    mediaType: "image",
-    url: res?.data?.url,
-    width: asset.width,
-    height: asset.height,
-  };
+    if (!res?.data?.url) {
+      throw new Error("Image upload did not return a usable URL.");
+    }
+
+    return {
+      id: asset.id,
+      mediaType: "image",
+      url: res.data.url,
+      width: asset.width,
+      height: asset.height,
+    };
+  } catch (error) {
+    throw new Error(getReadableApiErrorMessage(error, "Image upload failed."));
+  }
 };
 
 const uploadMultipleImages = async (assets: ComposerAsset[]): Promise<MediaAsset[]> => {
-  const body = new FormData();
-  assets.forEach((asset) => {
-    body.append("images", toFormDataFile(asset) as never);
-  });
+  try {
+    const body = new FormData();
+    assets.forEach((asset) => {
+      body.append("images", toFormDataFile(asset) as never);
+    });
 
-  const res = await API.post("/upload/images", body, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
+    const res = await API.post("/upload/images", body, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
 
-  const uploaded = Array.isArray(res?.data?.urls) ? res.data.urls : [];
-  return assets.map((asset, index) => ({
-    id: asset.id,
-    mediaType: "image",
-    url: uploaded[index]?.url,
-    width: asset.width,
-    height: asset.height,
-  }));
+    const uploaded = Array.isArray(res?.data?.urls) ? res.data.urls : [];
+
+    if (
+      uploaded.length !== assets.length
+      || uploaded.some((item: { url?: string } | undefined) => !item?.url)
+    ) {
+      throw new Error("Carousel upload did not return all uploaded image URLs.");
+    }
+
+    return assets.map((asset, index) => ({
+      id: asset.id,
+      mediaType: "image",
+      url: uploaded[index].url,
+      width: asset.width,
+      height: asset.height,
+    }));
+  } catch (error) {
+    throw new Error(getReadableApiErrorMessage(error, "Image upload failed."));
+  }
 };
 
 const uploadSingleVideo = async (asset: ComposerAsset): Promise<MediaAsset> => {
-  const body = new FormData();
-  body.append("video", toFormDataFile(asset) as never);
+  try {
+    const body = new FormData();
+    body.append("video", toFormDataFile(asset) as never);
 
-  const res = await API.post("/upload/video", body, {
-    headers: { "Content-Type": "multipart/form-data" },
-    timeout: 120000,
-  });
+    const res = await API.post("/upload/video", body, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 120000,
+    });
 
-  return {
-    id: asset.id,
-    mediaType: "video",
-    url: res?.data?.url,
-    thumbnailUrl: res?.data?.thumbnailUrl,
-    durationMs: typeof res?.data?.duration === "number" ? res.data.duration * 1000 : asset.durationMs,
-    width: typeof res?.data?.width === "number" ? res.data.width : asset.width,
-    height: typeof res?.data?.height === "number" ? res.data.height : asset.height,
-  };
+    if (!res?.data?.url) {
+      throw new Error("Video upload did not return a usable playback URL.");
+    }
+
+    return {
+      id: asset.id,
+      mediaType: "video",
+      url: res.data.url,
+      thumbnailUrl: res?.data?.thumbnailUrl,
+      durationMs: typeof res?.data?.duration === "number" ? res.data.duration * 1000 : asset.durationMs,
+      width: typeof res?.data?.width === "number" ? res.data.width : asset.width,
+      height: typeof res?.data?.height === "number" ? res.data.height : asset.height,
+    };
+  } catch (error) {
+    throw new Error(getReadableApiErrorMessage(error, "Video upload failed."));
+  }
 };
 
 export const uploadComposerAssets = async (assets: ComposerAsset[]): Promise<MediaAsset[]> => {
@@ -174,15 +203,20 @@ export const uploadComposerAssets = async (assets: ComposerAsset[]): Promise<Med
     throw new Error("Please upload one media type at a time.");
   }
 
-  const mediaType = localAssets[0]?.mediaType;
+  const firstLocalAsset = localAssets[0];
+  if (!firstLocalAsset) {
+    return remoteAssets;
+  }
+
+  const mediaType = firstLocalAsset.mediaType;
   let uploadedLocalAssets: MediaAsset[] = [];
 
   if (mediaType === "image" && localAssets.length > 1) {
     uploadedLocalAssets = await uploadMultipleImages(localAssets);
   } else if (mediaType === "image") {
-    uploadedLocalAssets = [await uploadSingleImage(localAssets[0])];
+    uploadedLocalAssets = [await uploadSingleImage(firstLocalAsset)];
   } else {
-    uploadedLocalAssets = [await uploadSingleVideo(localAssets[0])];
+    uploadedLocalAssets = [await uploadSingleVideo(firstLocalAsset)];
   }
 
   return [...remoteAssets, ...uploadedLocalAssets];

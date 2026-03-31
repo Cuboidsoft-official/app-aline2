@@ -9,11 +9,17 @@ import {
   Alert,
   Image,
   Modal,
+  RefreshControl,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
 import { formatCurrencyAmount, formatSummaryAmount } from "../utils/servicePricing";
+import { openRazorpayCheckout } from "../utils/razorpayCheckout";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 type RequestParty = {
   _id?: string;
@@ -26,7 +32,7 @@ type RequestParty = {
 
 type ServiceRequestRecord = {
   _id: string;
-  status: "pending" | "accepted" | "declined" | "completed" | "cancelled";
+  status: "pending" | "pending_payment" | "payment_failed" | "paid" | "accepted" | "confirmed" | "rescheduled" | "declined" | "completed" | "cancelled" | "refund_needed" | "refunded";
   createdAt: string;
   note?: string;
   responseNote?: string;
@@ -40,6 +46,7 @@ type ServiceRequestRecord = {
     currency?: string;
     durationMinutes?: number;
   };
+  paymentStatus?: "pending" | "failed" | "paid" | "refund_needed" | "refunded" | "not_required";
   user?: RequestParty;
   service?: {
     _id?: string;
@@ -54,21 +61,37 @@ type SlotOption = {
   label?: string;
 };
 
-const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
 
 const statusColorMap: Record<string, string> = {
   pending: "#D97706",
+  pending_payment: "#D97706",
+  payment_failed: "#DC2626",
+  paid: "#7C3AED",
   accepted: "#2563EB",
+  confirmed: "#2563EB",
+  rescheduled: "#8B5CF6",
   declined: "#DC2626",
   completed: "#059669",
   cancelled: "#6B7280",
+  refund_needed: "#EA580C",
+  refunded: "#2563EB",
 };
 
+const formatStatusLabel = (status = "") =>
+  String(status || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase())
+    .replace("Accepted", "Confirmed");
+
 const ServiceRequestsScreen = ({ navigation, route }: any) => {
+  const { colors } = useAppTheme();
   const mode = route?.params?.mode === "seller" ? "seller" : "user";
   const [requests, setRequests] = useState<ServiceRequestRecord[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [updatingId, setUpdatingId] = useState("");
   const [slotModalVisible, setSlotModalVisible] = useState(false);
   const [slotModalLoading, setSlotModalLoading] = useState(false);
@@ -77,9 +100,13 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
   const [selectedSlot, setSelectedSlot] = useState("");
   const [slotSubmitMode, setSlotSubmitMode] = useState<"accept" | "reschedule">("accept");
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async ({ refresh = false } = {}) => {
     try {
-      setLoading(true);
+      if (refresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       const [requestsRes, summaryRes] = await Promise.all([
         API.get("/service-requests", { params: { role: mode } }),
         API.get("/service-requests/summary", { params: { role: mode } }),
@@ -87,11 +114,18 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
 
       setRequests((requestsRes.data?.requests || []) as ServiceRequestRecord[]);
       setSummary(summaryRes.data?.summary || null);
+      setErrorMessage("");
     } catch (error) {
       console.log("service requests fetch error:", error);
-      Alert.alert("Error", "Failed to load service requests");
+      setRequests([]);
+      setSummary(null);
+      setErrorMessage(getReadableApiErrorMessage(error, "Failed to load service requests."));
     } finally {
-      setLoading(false);
+      if (refresh) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, [mode]);
 
@@ -108,7 +142,7 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
       await fetchData();
     } catch (error: any) {
       console.log("service request update error:", error?.response?.data || error);
-      Alert.alert("Error", error?.response?.data?.message || "Failed to update request");
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to update request"));
     } finally {
       setUpdatingId("");
     }
@@ -162,7 +196,7 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
       console.log("slot modal fetch error:", error);
       setSlotOptions([]);
       setSelectedSlot("");
-      Alert.alert("Error", "Failed to load seller slots");
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to load seller slots"));
     } finally {
       setSlotModalLoading(false);
     }
@@ -186,7 +220,7 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
       setUpdatingId(slotModalRequest._id);
       if (slotSubmitMode === "accept") {
         await API.put(`/service-requests/${slotModalRequest._id}/status`, {
-          status: "accepted",
+          status: "confirmed",
           appointmentStart: selectedSlot,
           appointmentTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata",
         });
@@ -201,31 +235,59 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
       await fetchData();
     } catch (error: any) {
       console.log("slot submit error:", error?.response?.data || error);
-      Alert.alert("Error", error?.response?.data?.message || "Failed to update appointment");
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to update appointment"));
     } finally {
       setUpdatingId("");
     }
   }, [closeSlotModal, fetchData, selectedSlot, slotModalRequest?._id, slotSubmitMode]);
 
+  const payNow = useCallback(async (item: ServiceRequestRecord) => {
+    try {
+      setUpdatingId(item._id);
+      const orderRes = await API.post(`/service-requests/${item._id}/payment/order`);
+      const payment = orderRes.data?.payment;
+      if (!payment) {
+        throw new Error("Payment payload is missing");
+      }
+
+      const checkoutResult = await openRazorpayCheckout(payment);
+      await API.post(`/service-requests/${item._id}/payment/verify`, checkoutResult);
+      await fetchData();
+      Alert.alert("Payment Complete", "Your booking has been paid and sent to the seller.");
+    } catch (error: any) {
+      const message = getReadableApiErrorMessage(
+        error,
+        error?.description || error?.message || "Failed to complete payment",
+      );
+      if (/cancel/i.test(message)) {
+        Alert.alert("Payment Pending", "You can come back and pay for this booking at any time.");
+      } else {
+        Alert.alert("Error", message);
+      }
+    } finally {
+      setUpdatingId("");
+    }
+  }, [fetchData]);
+
   const renderActions = (item: ServiceRequestRecord) => {
     if (mode === "seller") {
-      if (item.status === "pending") {
+      if (item.status === "pending" || item.status === "paid") {
         return (
           <View style={styles.actionRow}>
-            <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]} onPress={() => updateStatus(item._id, "accepted")} disabled={updatingId === item._id}>
-              <Text style={styles.actionBtnText}>Accept</Text>
+            <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]} onPress={() => updateStatus(item._id, "confirmed")} disabled={updatingId === item._id}>
+              <Text style={styles.actionBtnText}>{item.status === "paid" ? "Confirm" : "Accept"}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.actionBtn, styles.rescheduleBtn]} onPress={() => openSlotModal(item, "accept")} disabled={updatingId === item._id}>
               <Text style={styles.actionBtnText}>Change Time</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, styles.declineBtn]} onPress={() => updateStatus(item._id, "declined")} disabled={updatingId === item._id}>
-              <Text style={styles.actionBtnText}>Decline</Text>
+            <TouchableOpacity style={[styles.actionBtn, styles.declineBtn]} onPress={() => updateStatus(item._id, item.status === "paid" ? "refund_needed" : "declined")} disabled={updatingId === item._id}>
+              <Text style={styles.actionBtnText}>{item.status === "paid" ? "Refund Review" : "Decline"}</Text>
             </TouchableOpacity>
           </View>
         );
       }
 
-      if (item.status === "accepted") {
+      if (item.status === "accepted" || item.status === "confirmed") {
         return (
           <View style={styles.actionRow}>
             <TouchableOpacity style={[styles.actionBtn, styles.rescheduleBtn]} onPress={() => openSlotModal(item, "reschedule")} disabled={updatingId === item._id}>
@@ -237,13 +299,47 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
           </View>
         );
       }
+
+      if (item.status === "refund_needed") {
+        return (
+          <TouchableOpacity style={[styles.actionBtn, styles.completeBtn]} onPress={() => updateStatus(item._id, "refunded")} disabled={updatingId === item._id}>
+            <Text style={styles.actionBtnText}>Mark Refunded</Text>
+          </TouchableOpacity>
+        );
+      }
     }
 
-    if (mode === "user" && (item.status === "pending" || item.status === "accepted")) {
+    if (mode === "user" && (item.status === "pending_payment" || item.status === "payment_failed")) {
+      return (
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]} onPress={() => payNow(item)} disabled={updatingId === item._id}>
+            <Text style={styles.actionBtnText}>Pay Now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actionBtn, styles.cancelBtn]} onPress={() => updateStatus(item._id, "cancelled")} disabled={updatingId === item._id}>
+            <Text style={styles.actionBtnText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (mode === "user" && (item.status === "paid" || item.status === "accepted" || item.status === "confirmed")) {
       return (
         <TouchableOpacity style={[styles.actionBtn, styles.cancelBtn]} onPress={() => updateStatus(item._id, "cancelled")} disabled={updatingId === item._id}>
-          <Text style={styles.actionBtnText}>Cancel Request</Text>
+          <Text style={styles.actionBtnText}>Cancel Booking</Text>
         </TouchableOpacity>
+      );
+    }
+
+    if (mode === "user" && item.status === "rescheduled") {
+      return (
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]} onPress={() => updateStatus(item._id, "confirmed")} disabled={updatingId === item._id}>
+            <Text style={styles.actionBtnText}>Accept New Time</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actionBtn, styles.cancelBtn]} onPress={() => updateStatus(item._id, "cancelled")} disabled={updatingId === item._id}>
+            <Text style={styles.actionBtnText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
       );
     }
 
@@ -258,7 +354,7 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
       : "Quoted later";
     const statusColor = statusColorMap[item.status] || "#6B7280";
     const appointmentText = formatAppointmentText(item);
-    const appointmentLabel = item.status === "accepted" || item.status === "completed"
+    const appointmentLabel = item.status === "accepted" || item.status === "confirmed" || item.status === "completed"
       ? "Scheduled for"
       : "Preferred slot";
 
@@ -271,7 +367,7 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
             <Text style={styles.cardSubtitle}>{displayName}</Text>
           </View>
           <View style={[styles.statusPill, { backgroundColor: `${statusColor}18` }]}>
-            <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
+            <Text style={[styles.statusText, { color: statusColor }]}>{formatStatusLabel(item.status)}</Text>
           </View>
         </View>
 
@@ -292,6 +388,11 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
 
         {!!item.note && <Text style={styles.noteText}>Note: {item.note}</Text>}
         {!!item.responseNote && <Text style={styles.noteText}>Response: {item.responseNote}</Text>}
+        {!!item.paymentStatus && (
+          <Text style={styles.metaLine}>
+            Payment: {formatStatusLabel(item.paymentStatus)}
+          </Text>
+        )}
 
         <Text style={styles.timeText}>
           {new Date(item.createdAt).toLocaleString()}
@@ -304,34 +405,36 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color="#111" />
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{mode === "seller" ? "Appointments" : "My Appointments"}</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{mode === "seller" ? "Appointments" : "My Appointments"}</Text>
         <View style={{ width: 24 }} />
       </View>
 
       <View style={styles.summaryRow}>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Total</Text>
-          <Text style={styles.summaryValue}>{summary?.total || 0}</Text>
+        <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.summaryLabel, { color: colors.mutedText }]}>Total</Text>
+          <Text style={[styles.summaryValue, { color: colors.text }]}>{summary?.total || 0}</Text>
         </View>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>{mode === "seller" ? "Active Value" : "Active Spend"}</Text>
-          <Text style={styles.summaryValue}>{formatSummaryAmount(summary, "active")}</Text>
+        <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.summaryLabel, { color: colors.mutedText }]}>{mode === "seller" ? "Gross Paid" : "Paid"}</Text>
+          <Text style={[styles.summaryValue, { color: colors.text }]}>{formatSummaryAmount(summary, "paid")}</Text>
         </View>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>{mode === "seller" ? "Completed" : "Spent"}</Text>
-          <Text style={styles.summaryValue}>{formatSummaryAmount(summary, "completed")}</Text>
+        <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.summaryLabel, { color: colors.mutedText }]}>{mode === "seller" ? "Completed" : "Spent"}</Text>
+          <Text style={[styles.summaryValue, { color: colors.text }]}>{formatSummaryAmount(summary, "completed")}</Text>
         </View>
       </View>
 
@@ -340,13 +443,26 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
         keyExtractor={(item) => item._id}
         renderItem={renderRequest}
         contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              fetchData({ refresh: true }).catch((error) => {
+                console.log("service requests refresh error:", error);
+              });
+            }}
+            tintColor={colors.primary}
+          />
+        }
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No appointments yet</Text>
-            <Text style={styles.emptyText}>
-              {mode === "seller"
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>
+              {errorMessage ? "Appointments unavailable" : "No appointments yet"}
+            </Text>
+            <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+              {errorMessage || (mode === "seller"
                 ? "Appointment requests from users will appear here."
-                : "Request an appointment with a seller to see it here."}
+                : "Request an appointment with a seller to see it here.")}
             </Text>
           </View>
         }
@@ -354,11 +470,11 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
 
       <Modal visible={slotModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
               {slotSubmitMode === "accept" ? "Pick a slot and accept" : "Reschedule appointment"}
             </Text>
-            <Text style={styles.modalSubtitle}>
+            <Text style={[styles.modalSubtitle, { color: colors.mutedText }]}>
               {slotModalRequest?.service?.serviceName || "Appointment"}
             </Text>
 
@@ -382,7 +498,7 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
                 })}
               </View>
             ) : (
-              <Text style={styles.modalEmptyText}>No bookable slots are available right now.</Text>
+              <Text style={[styles.modalEmptyText, { color: colors.mutedText }]}>No bookable slots are available right now.</Text>
             )}
 
             <TouchableOpacity
@@ -400,12 +516,12 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
             </TouchableOpacity>
 
             <TouchableOpacity onPress={closeSlotModal}>
-              <Text style={styles.modalCancelText}>Cancel</Text>
+              <Text style={[styles.modalCancelText, { color: colors.mutedText }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -414,15 +530,13 @@ export default ServiceRequestsScreen;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F7F8FC" },
   header: {
-    paddingTop: 54,
+    paddingTop: 12,
     paddingBottom: 16,
     paddingHorizontal: 18,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#eee"
   },
   headerTitle: { fontSize: 18, fontWeight: "700", color: "#111" },
   summaryRow: {
@@ -432,10 +546,10 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     flex: 1,
-    backgroundColor: "#fff",
     marginHorizontal: 4,
     borderRadius: 14,
-    padding: 14
+    padding: 14,
+    borderWidth: 1,
   },
   summaryLabel: { color: "#666", fontSize: 12, marginBottom: 6 },
   summaryValue: { color: "#111", fontSize: 17, fontWeight: "700" },

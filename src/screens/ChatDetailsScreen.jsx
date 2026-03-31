@@ -11,9 +11,11 @@ import {
   TextInput,
   Linking,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import {
   createChatConversation,
   fetchConversationMedia,
@@ -26,23 +28,25 @@ import {
   isImageMessage,
   isVideoMessage,
 } from "../utils/chatPresentation";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { useAppTheme } from "../theme/AppThemeContext";
 
-const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+const PRIMARY = "#7b3fe4";
 
-const Action = ({ icon, title, onPress }) => (
+const Action = ({ icon, title, onPress, colors }) => (
   <TouchableOpacity style={styles.actionItem} onPress={onPress}>
-    <View style={styles.actionIcon}>
+    <View style={[styles.actionIcon, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <Icon name={icon} size={24} color="#7b3fe4" />
     </View>
-    <Text style={styles.actionText}>{title}</Text>
+    <Text style={[styles.actionText, { color: colors.text }]}>{title}</Text>
   </TouchableOpacity>
 );
 
-const Option = ({ icon, title, onPress }) => (
-  <TouchableOpacity style={styles.optionRow} onPress={onPress}>
-    <Icon name={icon} size={22} style={styles.optionIcon} />
-    <Text style={styles.optionLabel}>{title}</Text>
-    <Icon name="chevron-forward" />
+const Option = ({ icon, title, onPress, colors }) => (
+  <TouchableOpacity style={[styles.optionRow, { borderBottomColor: colors.border }]} onPress={onPress}>
+    <Icon name={icon} size={22} style={[styles.optionIcon, { color: colors.text }]} />
+    <Text style={[styles.optionLabel, { color: colors.text }]}>{title}</Text>
+    <Icon name="chevron-forward" color={colors.mutedText} />
   </TouchableOpacity>
 );
 
@@ -92,6 +96,7 @@ const SearchResult = ({ item }) => {
 };
 
 const ChatDetailsScreen = ({ route, navigation }) => {
+  const { colors } = useAppTheme();
   const { userId, conversationId } = route.params || {};
   const [user, setUser] = useState(null);
   const [media, setMedia] = useState([]);
@@ -104,10 +109,7 @@ const ChatDetailsScreen = ({ route, navigation }) => {
 
   const fetchUser = useCallback(async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
-      const res = await API.get(`/auth/user/${userId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await API.get(`/auth/user/${userId}`);
       setUser(res.data.user);
     } catch (err) {
       console.log("chat details user error:", err?.response?.data || err);
@@ -161,12 +163,12 @@ const ChatDetailsScreen = ({ route, navigation }) => {
     loadMedia();
   }, [fetchUser, loadMedia]);
 
-  const openFeatureInfo = (title, description) => {
-    navigation.navigate("FeatureInfoScreen", {
-      title,
-      description,
-    });
-  };
+  useFocusEffect(
+    useCallback(() => {
+      fetchUser().catch(() => {});
+      loadMedia().catch(() => {});
+    }, [fetchUser, loadMedia]),
+  );
 
   const blockUser = async () => {
     Alert.alert(
@@ -179,15 +181,12 @@ const ChatDetailsScreen = ({ route, navigation }) => {
           style: "destructive",
           onPress: async () => {
             try {
-              const token = await AsyncStorage.getItem("token");
-              await API.post(`/user/block/${userId}`, {}, {
-                headers: { Authorization: `Bearer ${token}` }
-              });
+              await API.post(`/user/block/${userId}`, {});
               Alert.alert("Blocked", "This user has been blocked.");
               navigation.goBack();
             } catch (error) {
               console.log("block user error:", error);
-              Alert.alert("Unable to block user", "Please try again.");
+              Alert.alert("Unable to block user", getReadableApiErrorMessage(error, "Please try again."));
             }
           }
         }
@@ -219,7 +218,7 @@ const ChatDetailsScreen = ({ route, navigation }) => {
       const nextConversationId = await ensureConversation();
 
       if (!nextConversationId) {
-        Alert.alert("Search unavailable", "This conversation could not be loaded.");
+        Alert.alert("Search unavailable", "Conversation details are still syncing. Please open the chat once and try again.");
         return;
       }
 
@@ -230,7 +229,7 @@ const ChatDetailsScreen = ({ route, navigation }) => {
       setSearchResults(Array.isArray(res?.messages) ? res.messages : []);
     } catch (err) {
       console.log("chat search error:", err?.response?.data || err);
-      Alert.alert("Search failed", "Please try again.");
+      Alert.alert("Search failed", getReadableApiErrorMessage(err, "Please try again."));
     } finally {
       setSearching(false);
     }
@@ -260,13 +259,13 @@ const ChatDetailsScreen = ({ route, navigation }) => {
       await Linking.openURL(targetUrl);
     } catch (error) {
       console.log("attachment open error:", error);
-      Alert.alert("Unable to open attachment", "This file could not be opened on the device.");
+      Alert.alert("Unable to open attachment", getReadableApiErrorMessage(error, "This file could not be opened on the device."));
     }
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+      <View style={[styles.header, { backgroundColor: PRIMARY }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -280,38 +279,38 @@ const ChatDetailsScreen = ({ route, navigation }) => {
 
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.profileSection}>
-          <View style={styles.avatarRing}>
+          <View style={[styles.avatarRing, { backgroundColor: colors.surface }]}>
             <Image
               source={{
-                uri: user?.profilePic || DEFAULT_AVATAR
+                uri: user?.profilePic || DEFAULT_AVATAR_URL
               }}
               style={styles.avatar}
             />
           </View>
 
-          <Text style={styles.username}>{user?.name || user?.username || "User"}</Text>
-          <Text style={styles.phone}>
+          <Text style={[styles.username, { color: colors.text }]}>{user?.name || user?.username || "User"}</Text>
+          <Text style={[styles.phone, { color: colors.mutedText }]}>
             {user?.username ? `@${user.username}` : user?.phone || "Conversation details"}
           </Text>
         </View>
 
         <View style={styles.actions}>
-          <Action icon="call-outline" title="Audio" onPress={() => openFeatureInfo("Voice Call", "Voice calling is not available in the current backend yet.")} />
-          <Action icon="videocam-outline" title="Video" onPress={() => openFeatureInfo("Video Call", "Video calling is not available in the current backend yet.")} />
-          <Action icon="search-outline" title="Search" onPress={toggleSearch} />
-          <Action icon="close-circle-outline" title="Block" onPress={blockUser} />
+          <Action icon="search-outline" title="Search" onPress={toggleSearch} colors={colors} />
+          <Action icon="images-outline" title="Media" onPress={loadMedia} colors={colors} />
+          <Action icon="notifications-outline" title="Alerts" onPress={() => navigation.navigate("NotificationSettingsScreen")} colors={colors} />
+          <Action icon="close-circle-outline" title="Block" onPress={blockUser} colors={colors} />
         </View>
 
         {searchVisible ? (
-          <View style={styles.searchCard}>
-            <Text style={styles.sectionTitle}>Search in conversation</Text>
+          <View style={[styles.searchCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Search in conversation</Text>
             <View style={styles.searchInputRow}>
               <TextInput
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 placeholder="Search messages"
-                placeholderTextColor="#9ca3af"
-                style={styles.searchInput}
+                placeholderTextColor={colors.placeholder}
+                style={[styles.searchInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 returnKeyType="search"
                 onSubmitEditing={runSearch}
               />
@@ -327,7 +326,7 @@ const ChatDetailsScreen = ({ route, navigation }) => {
                 ))}
               </View>
             ) : (
-              <Text style={styles.searchHint}>
+              <Text style={[styles.searchHint, { color: colors.mutedText }]}>
                 {searching ? "Searching..." : "Search results will appear here."}
               </Text>
             )}
@@ -335,8 +334,8 @@ const ChatDetailsScreen = ({ route, navigation }) => {
         ) : null}
 
         <View style={styles.mediaSection}>
-          <Text style={styles.sectionTitle}>Shared media</Text>
-          <Text style={styles.mediaSummary}>{mediaSummary}</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Shared media</Text>
+          <Text style={[styles.mediaSummary, { color: colors.mutedText }]}>{mediaSummary}</Text>
 
           {loadingMedia ? (
             <View style={styles.noMediaBox}>
@@ -351,24 +350,23 @@ const ChatDetailsScreen = ({ route, navigation }) => {
           ) : (
             <View style={styles.noMediaBox}>
               <Icon name="images-outline" size={30} color="#aaa" />
-              <Text style={styles.noMediaText}>No shared media files</Text>
+              <Text style={[styles.noMediaText, { color: colors.mutedText }]}>No shared media files</Text>
             </View>
           )}
         </View>
 
-        <View style={styles.optionBox}>
-          <Option icon="notifications-outline" title="Notifications" onPress={() => navigation.navigate("NotificationSettingsScreen")} />
-          <Option icon="color-palette-outline" title="Chat theme" onPress={() => openFeatureInfo("Chat Theme", "Custom chat themes are not available in the current backend yet.")} />
-          <Option icon="time-outline" title="Disappearing messages" onPress={() => openFeatureInfo("Disappearing Messages", "Disappearing messages are not supported by the current backend yet.")} />
-          <Option icon="shield-checkmark-outline" title="Encryption" onPress={() => openFeatureInfo("Encryption", "Encryption details are not exposed by the current backend yet.")} />
+        <View style={[styles.optionBox, { backgroundColor: colors.card }]}>
+          <Option icon="notifications-outline" title="Notifications" onPress={() => navigation.navigate("NotificationSettingsScreen")} colors={colors} />
+          <Option icon="images-outline" title="Refresh shared media" onPress={loadMedia} colors={colors} />
+          <Option icon="search-outline" title="Search messages" onPress={toggleSearch} colors={colors} />
         </View>
 
-        <TouchableOpacity style={styles.blockButton} onPress={blockUser}>
+        <TouchableOpacity style={[styles.blockButton, { borderColor: colors.danger }]} onPress={blockUser}>
           <Icon name="close-circle-outline" size={20} color="#ef4444" />
           <Text style={styles.blockText}>Block {user?.name || "User"}</Text>
         </TouchableOpacity>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 

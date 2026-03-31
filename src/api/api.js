@@ -1,6 +1,14 @@
 import axios from "axios";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 import { appConfig } from "../config/env";
+import {
+  clearStoredSession,
+  getStoredRefreshToken,
+  getStoredToken,
+  getStoredUser,
+  notifySessionInvalidation,
+  setStoredSession,
+} from "../utils/authSession";
 
 const connectionCandidates =
   Array.isArray(appConfig.connectionCandidates) && appConfig.connectionCandidates.length
@@ -18,6 +26,8 @@ export const ROOT_API = axios.create({
   timeout: 10000,
 });
 
+let refreshPromise = null;
+
 const applyConnectionCandidate = (index) => {
   const nextIndex = Math.max(0, Math.min(index, connectionCandidates.length - 1));
   activeConnectionIndex = nextIndex;
@@ -30,13 +40,19 @@ const getClientBaseUrl = (kind) =>
 
 const attachAuthInterceptor = (client) => {
   client.interceptors.request.use(async (config) => {
-    const token = await AsyncStorage.getItem("token");
+    const token = await getStoredToken();
 
     if (client === ROOT_API) {
       config.baseURL = getClientBaseUrl("socket");
     } else {
       config.baseURL = getClientBaseUrl("api");
     }
+
+    config.headers = {
+      ...config.headers,
+      "x-device-platform": Platform.OS,
+      "x-device-name": `${Platform.OS}-${String(Platform.Version || "unknown")}`,
+    };
 
     if (token) {
       config.headers = {
@@ -49,13 +65,75 @@ const attachAuthInterceptor = (client) => {
   });
 };
 
+const refreshAccessToken = async () => {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const refreshToken = await getStoredRefreshToken();
+      const user = await getStoredUser();
+
+      if (!refreshToken) {
+        throw new Error("No refresh token available");
+      }
+
+      const response = await API.post("/auth/refresh", { refreshToken }, {
+        __skipAuthRefresh: true,
+      });
+
+      if (!response?.data?.success || !response?.data?.accessToken) {
+        throw new Error(response?.data?.message || "Session refresh failed");
+      }
+
+      await setStoredSession({
+        accessToken: response.data.accessToken,
+        refreshToken: response.data.refreshToken,
+        session: response.data.session,
+        user: response.data.user || user,
+      });
+
+      return response.data.accessToken;
+    })().finally(() => {
+      refreshPromise = null;
+    });
+  }
+
+  return refreshPromise;
+};
+
 const attachConnectionFailover = (client, kind) => {
   client.interceptors.response.use(
     (response) => response,
     async (error) => {
       const originalConfig = error?.config;
 
-      if (error?.response || !originalConfig) {
+      if (!originalConfig) {
+        return Promise.reject(error);
+      }
+
+      if (
+        error?.response?.status === 401
+        && !originalConfig.__isRetryAfterRefresh
+        && !originalConfig.__skipAuthRefresh
+        && !String(originalConfig.url || "").includes("/auth/login")
+        && !String(originalConfig.url || "").includes("/auth/refresh")
+      ) {
+        try {
+          const nextAccessToken = await refreshAccessToken();
+          return client.request({
+            ...originalConfig,
+            __isRetryAfterRefresh: true,
+            headers: {
+              ...originalConfig.headers,
+              Authorization: `Bearer ${nextAccessToken}`,
+            },
+          });
+        } catch (refreshError) {
+          await clearStoredSession();
+          notifySessionInvalidation();
+          return Promise.reject(refreshError);
+        }
+      }
+
+      if (error?.response) {
         return Promise.reject(error);
       }
 

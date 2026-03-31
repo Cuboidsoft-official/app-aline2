@@ -133,9 +133,12 @@ function SwipeCommentsSheet({
         style: "destructive",
         onPress: async () => {
           try {
-            await socialApi.deleteSwipeComment(swipe.id, comment.id);
+            const result = await socialApi.deleteSwipeComment(swipe.id, comment.id);
             setComments((prev) => prev.filter((item) => item.id !== comment.id));
-            onSwipeUpdate({ ...swipe, commentsCount: Math.max(0, swipe.commentsCount - 1) });
+            onSwipeUpdate({
+              ...swipe,
+              commentsCount: Math.max(0, swipe.commentsCount - Math.max(1, result.deletedCount || 1)),
+            });
           } catch (error) {
             Alert.alert("Could not delete comment", toUserSafeMessage(error));
           }

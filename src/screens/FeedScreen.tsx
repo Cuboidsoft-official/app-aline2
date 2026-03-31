@@ -24,6 +24,7 @@ import { socialApi } from "../features/social/socialApi";
 import { FeedResponse, Post, Story } from "../features/social/types";
 import { toUserSafeMessage } from "../features/social/validation";
 import { getStoredUser } from "../utils/authSession";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 
 const initialFeed: FeedResponse = {
   stories: [],
@@ -396,7 +397,7 @@ function FeedScreen({ navigation }: any) {
   const renderHeader = () => {
     const ownStory = feed.stories.find((item) => item.isOwner || (currentUser?.id && item.user.id === currentUser.id));
     const ownStoryOwnerId = ownStory?.user.id || currentUser?.id || "";
-    const ownStoryAvatar = ownStory?.user.avatarUrl || currentUser?.avatarUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+    const ownStoryAvatar = ownStory?.user.avatarUrl || currentUser?.avatarUrl || DEFAULT_AVATAR_URL;
 
     return (
       <>

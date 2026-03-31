@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Switch,
@@ -28,6 +29,10 @@ import {
   CreateStoryInput,
   PostType,
   SelectedMusicClip,
+  StoryFilterPreset,
+  StoryStickerTextAlignment,
+  StoryStickerPlacement,
+  StoryTextStickerTheme,
   StoryType,
   Visibility,
 } from "../features/social/types";
@@ -45,8 +50,98 @@ type ComposerTab = "post" | "story" | "swipe";
 
 const tabs: ComposerTab[] = ["post", "story", "swipe"];
 const postModes: PostType[] = ["photo", "video", "carousel"];
-const storyModes: StoryType[] = ["media", "poll", "question"];
+const storyModes: StoryType[] = ["media", "text", "poll", "question"];
 const MAX_CAROUSEL_ITEMS = 10;
+const textStoryColors = ["#1f2937", "#7c3aed", "#db2777", "#0f766e", "#b45309", "#2563eb"];
+const storyStickerPlacements: StoryStickerPlacement[] = ["top_left", "top_right", "center", "bottom_left", "bottom_right"];
+const storyTextStickerThemes: StoryTextStickerTheme[] = ["dark", "light", "accent", "outline"];
+const storyTextStickerThemeLabels: Record<StoryTextStickerTheme, string> = {
+  dark: "Dark",
+  light: "Light",
+  accent: "Accent",
+  outline: "Outline",
+};
+const storyTextStickerAlignments: StoryStickerTextAlignment[] = ["left", "center", "right"];
+const storyTextStickerAlignmentLabels: Record<StoryStickerTextAlignment, string> = {
+  left: "Left",
+  center: "Center",
+  right: "Right",
+};
+const storyFilterPresets: StoryFilterPreset[] = ["none", "warm", "cool", "noir", "dream"];
+const storyFilterPresetLabels: Record<StoryFilterPreset, string> = {
+  none: "Original",
+  warm: "Warm",
+  cool: "Cool",
+  noir: "Noir",
+  dream: "Dream",
+};
+const storyStickerPlacementLabels: Record<StoryStickerPlacement, string> = {
+  top_left: "Top Left",
+  top_right: "Top Right",
+  center: "Center",
+  bottom_left: "Bottom Left",
+  bottom_right: "Bottom Right",
+};
+const storyStickerPresetPositions: Record<StoryStickerPlacement, { x: number; y: number }> = {
+  top_left: { x: 0.12, y: 0.18 },
+  top_right: { x: 0.68, y: 0.18 },
+  center: { x: 0.18, y: 0.44 },
+  bottom_left: { x: 0.12, y: 0.72 },
+  bottom_right: { x: 0.68, y: 0.72 },
+};
+const storyStickerDimensions = {
+  text: { width: 0.64, height: 0.12 },
+  emoji: { width: 0.16, height: 0.12 },
+} as const;
+const clampStickerScale = (value: number): number => Math.min(2, Math.max(0.6, Math.round(value * 10) / 10));
+const clampStickerRotation = (value: number): number => Math.min(180, Math.max(-180, Math.round(value)));
+const getStoryFilterOverlayStyle = (
+  preset: StoryFilterPreset,
+  intensity = 1,
+): { backgroundColor: string; opacity: number } | null => {
+  const safeIntensity = Math.min(1, Math.max(0.2, intensity));
+  switch (preset) {
+    case "warm":
+      return { backgroundColor: "#f59e0b", opacity: 0.18 * safeIntensity };
+    case "cool":
+      return { backgroundColor: "#38bdf8", opacity: 0.18 * safeIntensity };
+    case "noir":
+      return { backgroundColor: "#020617", opacity: 0.34 * safeIntensity };
+    case "dream":
+      return { backgroundColor: "#ec4899", opacity: 0.16 * safeIntensity };
+    case "none":
+    default:
+      return null;
+  }
+};
+
+const getStoryTextStickerThemeStyle = (
+  theme: StoryTextStickerTheme,
+): { color: string; backgroundColor: string } => {
+  switch (theme) {
+    case "light":
+      return {
+        color: "#0f172a",
+        backgroundColor: "rgba(255,255,255,0.9)",
+      };
+    case "accent":
+      return {
+        color: "#ffffff",
+        backgroundColor: "rgba(219,39,119,0.84)",
+      };
+    case "outline":
+      return {
+        color: "#ffffff",
+        backgroundColor: "rgba(15,23,42,0.2)",
+      };
+    case "dark":
+    default:
+      return {
+        color: "#ffffff",
+        backgroundColor: "rgba(15,23,42,0.56)",
+      };
+  }
+};
 
 type AudienceCandidate = {
   id: string;
@@ -117,17 +212,39 @@ function CreatePostScreen({ navigation, route }: any) {
 
   const [hashtagsRaw, setHashtagsRaw] = useState("");
   const [mentionsRaw, setMentionsRaw] = useState("");
-  const [collabsRaw, setCollabsRaw] = useState("");
 
   const [disableComments, setDisableComments] = useState(false);
   const [hideLikeCount, setHideLikeCount] = useState(false);
-  const [allowRemix, setAllowRemix] = useState(true);
 
   const [selectedAssets, setSelectedAssets] = useState<ComposerAsset[]>(
     initialMedia ? [createRemoteComposerAsset(initialMedia, initialMediaType)] : [],
   );
 
   const [storyCaption, setStoryCaption] = useState("");
+  const [storyBackgroundColor, setStoryBackgroundColor] = useState("#1f2937");
+  const [storyFilterPreset, setStoryFilterPreset] = useState<StoryFilterPreset>("none");
+  const [storyFilterIntensity, setStoryFilterIntensity] = useState(1);
+  const [storyLinkUrl, setStoryLinkUrl] = useState("");
+  const [storyLocation, setStoryLocation] = useState("");
+  const [storyHashtagsRaw, setStoryHashtagsRaw] = useState("");
+  const [storyMentionsRaw, setStoryMentionsRaw] = useState("");
+  const [storyStickerText, setStoryStickerText] = useState("");
+  const [storyStickerTextPlacement, setStoryStickerTextPlacement] = useState<StoryStickerPlacement>("bottom_left");
+  const [storyStickerTextPosition, setStoryStickerTextPosition] = useState<{ x: number; y: number } | null>(
+    storyStickerPresetPositions.bottom_left,
+  );
+  const [storyStickerTextScale, setStoryStickerTextScale] = useState(1);
+  const [storyStickerTextRotation, setStoryStickerTextRotation] = useState(0);
+  const [storyStickerTextTheme, setStoryStickerTextTheme] = useState<StoryTextStickerTheme>("dark");
+  const [storyStickerTextAlignment, setStoryStickerTextAlignment] = useState<StoryStickerTextAlignment>("center");
+  const [storyStickerEmoji, setStoryStickerEmoji] = useState("");
+  const [storyStickerEmojiPlacement, setStoryStickerEmojiPlacement] = useState<StoryStickerPlacement>("top_right");
+  const [storyStickerEmojiPosition, setStoryStickerEmojiPosition] = useState<{ x: number; y: number } | null>(
+    storyStickerPresetPositions.top_right,
+  );
+  const [storyStickerEmojiScale, setStoryStickerEmojiScale] = useState(1);
+  const [storyStickerEmojiRotation, setStoryStickerEmojiRotation] = useState(0);
+  const [storyPreviewSize, setStoryPreviewSize] = useState({ width: 0, height: 0 });
   const [storyVisibility, setStoryVisibility] = useState<Visibility>("public");
   const [storyVisibleToUserIds, setStoryVisibleToUserIds] = useState<string[]>([]);
   const [storyAudienceCandidates, setStoryAudienceCandidates] = useState<AudienceCandidate[]>([]);
@@ -149,6 +266,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const [musicImportingId, setMusicImportingId] = useState("");
   const [musicError, setMusicError] = useState("");
   const [musicBrowseMode, setMusicBrowseMode] = useState<MusicBrowseMode>("trending");
+  const textStickerDragStartRef = useRef(storyStickerPresetPositions.bottom_left);
+  const emojiStickerDragStartRef = useRef(storyStickerPresetPositions.top_right);
 
   useEffect(() => {
     const routeTab = route?.params?.initialTab as ComposerTab | undefined;
@@ -176,6 +295,81 @@ function CreatePostScreen({ navigation, route }: any) {
   }, [navigation, route?.params]);
 
   const primaryAsset = useMemo(() => selectedAssets[0] || null, [selectedAssets]);
+
+  const getStickerPosition = useCallback(
+    (type: "text" | "emoji") =>
+      type === "text"
+        ? storyStickerTextPosition || storyStickerPresetPositions[storyStickerTextPlacement]
+        : storyStickerEmojiPosition || storyStickerPresetPositions[storyStickerEmojiPlacement],
+    [storyStickerEmojiPlacement, storyStickerEmojiPosition, storyStickerTextPlacement, storyStickerTextPosition],
+  );
+
+  const clampStickerPosition = useCallback((type: "text" | "emoji", x: number, y: number) => {
+    const bounds = storyStickerDimensions[type];
+    return {
+      x: Math.min(Math.max(0, x), 1 - bounds.width),
+      y: Math.min(Math.max(0, y), 1 - bounds.height),
+    };
+  }, []);
+
+  const updateStickerPosition = useCallback((type: "text" | "emoji", position: { x: number; y: number }) => {
+    const clamped = clampStickerPosition(type, position.x, position.y);
+    if (type === "text") {
+      setStoryStickerTextPosition(clamped);
+      return;
+    }
+    setStoryStickerEmojiPosition(clamped);
+  }, [clampStickerPosition]);
+
+  const handleStoryPreviewLayout = (width: number, height: number) => {
+    if (width > 0 && height > 0) {
+      setStoryPreviewSize({ width, height });
+    }
+  };
+
+  const textStickerPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !!storyStickerText.trim(),
+        onMoveShouldSetPanResponder: () => !!storyStickerText.trim(),
+        onPanResponderGrant: () => {
+          textStickerDragStartRef.current = getStickerPosition("text");
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          if (!storyPreviewSize.width || !storyPreviewSize.height) {
+            return;
+          }
+
+          updateStickerPosition("text", {
+            x: textStickerDragStartRef.current.x + gestureState.dx / storyPreviewSize.width,
+            y: textStickerDragStartRef.current.y + gestureState.dy / storyPreviewSize.height,
+          });
+        },
+      }),
+    [getStickerPosition, storyPreviewSize.height, storyPreviewSize.width, storyStickerText, updateStickerPosition],
+  );
+
+  const emojiStickerPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !!storyStickerEmoji.trim(),
+        onMoveShouldSetPanResponder: () => !!storyStickerEmoji.trim(),
+        onPanResponderGrant: () => {
+          emojiStickerDragStartRef.current = getStickerPosition("emoji");
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          if (!storyPreviewSize.width || !storyPreviewSize.height) {
+            return;
+          }
+
+          updateStickerPosition("emoji", {
+            x: emojiStickerDragStartRef.current.x + gestureState.dx / storyPreviewSize.width,
+            y: emojiStickerDragStartRef.current.y + gestureState.dy / storyPreviewSize.height,
+          });
+        },
+      }),
+    [getStickerPosition, storyPreviewSize.height, storyPreviewSize.width, storyStickerEmoji, updateStickerPosition],
+  );
 
   useEffect(() => {
     if (activeTab !== "story" || storyVisibility !== "custom" || storyAudienceCandidates.length || storyAudienceLoading) {
@@ -496,27 +690,55 @@ function CreatePostScreen({ navigation, route }: any) {
       music: musicSelections.post || undefined,
       hashtags,
       mentions,
-      collaboratorIds: splitTokens(collabsRaw),
+      collaboratorIds: [],
       settings: {
         disableComments,
         hideLikeCount,
-        allowRemix,
+        allowRemix: false,
       },
     };
   };
 
   const prepareStoryPayload = async (): Promise<CreateStoryInput> => {
-    const assets = requireAssets("Choose media before publishing this story.");
-    const [background] = await uploadComposerAssets([assets[0]]);
+    let background: CreateStoryInput["media"];
 
-    if (storyType !== "media" && background.mediaType !== "image") {
+    if (storyType !== "text") {
+      const assets = requireAssets("Choose media before publishing this story.");
+      const [uploadedBackground] = await uploadComposerAssets([assets[0]]);
+      background = uploadedBackground;
+    }
+
+    if ((storyType === "poll" || storyType === "question") && background?.mediaType !== "image") {
       throw new Error("Poll and question stories currently require an image background.");
+    }
+
+    if (storyType === "text" && !storyCaption.trim()) {
+      throw new Error("Write something before publishing a text story.");
     }
 
     const base: CreateStoryInput = {
       type: storyType,
       media: background,
       text: storyCaption.trim() || undefined,
+      backgroundColor: storyType === "text" ? storyBackgroundColor : undefined,
+      filterPreset: storyType === "text" ? undefined : storyFilterPreset,
+      filterIntensity: storyType === "text" || storyFilterPreset === "none" ? undefined : storyFilterIntensity,
+      linkUrl: storyLinkUrl.trim() || undefined,
+      location: storyLocation.trim() || undefined,
+      customTextSticker: storyStickerText.trim() || undefined,
+      customTextStickerPlacement: storyStickerTextPlacement,
+      customTextStickerPosition: storyStickerText.trim() ? getStickerPosition("text") : undefined,
+      customTextStickerScale: storyStickerText.trim() ? storyStickerTextScale : undefined,
+      customTextStickerRotation: storyStickerText.trim() ? storyStickerTextRotation : undefined,
+      customTextStickerTheme: storyStickerText.trim() ? storyStickerTextTheme : undefined,
+      customTextStickerAlignment: storyStickerText.trim() ? storyStickerTextAlignment : undefined,
+      customEmojiSticker: storyStickerEmoji.trim() || undefined,
+      customEmojiStickerPlacement: storyStickerEmojiPlacement,
+      customEmojiStickerPosition: storyStickerEmoji.trim() ? getStickerPosition("emoji") : undefined,
+      customEmojiStickerScale: storyStickerEmoji.trim() ? storyStickerEmojiScale : undefined,
+      customEmojiStickerRotation: storyStickerEmoji.trim() ? storyStickerEmojiRotation : undefined,
+      hashtags: splitTokens(storyHashtagsRaw),
+      mentions: splitTokens(storyMentionsRaw),
       visibility: storyVisibility,
       visibleToUserIds: storyVisibility === "custom" ? storyVisibleToUserIds : undefined,
       allowReplies: storyAllowReplies,
@@ -586,6 +808,72 @@ function CreatePostScreen({ navigation, route }: any) {
   };
 
   const renderMediaPreview = () => {
+    const textStickerPosition = getStickerPosition("text");
+    const emojiStickerPosition = getStickerPosition("emoji");
+    const textStickerThemeStyle = getStoryTextStickerThemeStyle(storyStickerTextTheme);
+    const storyFilterStyle =
+      activeTab === "story" ? getStoryFilterOverlayStyle(storyFilterPreset, storyFilterIntensity) : null;
+    const previewStickers =
+      activeTab === "story" && (storyStickerText.trim() || storyStickerEmoji.trim()) ? (
+        <View style={styles.storyPreviewStickerLayer}>
+          {storyStickerEmoji.trim() ? (
+            <View
+              style={[
+                styles.storyPreviewEmojiSticker,
+                {
+                  left: `${emojiStickerPosition.x * 100}%`,
+                  top: `${emojiStickerPosition.y * 100}%`,
+                  transform: [{ rotate: `${storyStickerEmojiRotation}deg` }, { scale: storyStickerEmojiScale }],
+                },
+              ]}
+              {...emojiStickerPanResponder.panHandlers}
+            >
+              <Text style={styles.storyPreviewEmojiText}>{storyStickerEmoji.trim()}</Text>
+            </View>
+          ) : null}
+          {storyStickerText.trim() ? (
+            <View
+              style={[
+                styles.storyPreviewTextSticker,
+                {
+                  left: `${textStickerPosition.x * 100}%`,
+                  top: `${textStickerPosition.y * 100}%`,
+                  backgroundColor: textStickerThemeStyle.backgroundColor,
+                  transform: [{ rotate: `${storyStickerTextRotation}deg` }, { scale: storyStickerTextScale }],
+                },
+              ]}
+              {...textStickerPanResponder.panHandlers}
+            >
+              <Text
+                style={[
+                  styles.storyPreviewTextStickerText,
+                  {
+                    color: textStickerThemeStyle.color,
+                    textAlign: storyStickerTextAlignment,
+                  },
+                ]}
+              >
+                {storyStickerText.trim()}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null;
+
+    if (activeTab === "story" && storyType === "text") {
+      return (
+        <View
+          style={[styles.textStoryPreview, { backgroundColor: storyBackgroundColor }]}
+          onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
+        >
+          <Text style={styles.textStoryPreviewText}>
+            {storyCaption.trim() || "Type your story text"}
+          </Text>
+          {previewStickers}
+        </View>
+      );
+    }
+
     if (!primaryAsset) {
       return (
         <View style={styles.emptyPreview}>
@@ -606,7 +894,30 @@ function CreatePostScreen({ navigation, route }: any) {
       );
     }
 
-    return (
+    return activeTab === "story" ? (
+        <View
+          style={styles.storyPreviewFrame}
+          onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
+        >
+          <Image
+            source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }}
+            style={styles.preview}
+          />
+          {storyFilterStyle ? (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.storyFilterOverlay,
+                {
+                  backgroundColor: storyFilterStyle.backgroundColor,
+                  opacity: storyFilterStyle.opacity,
+                },
+              ]}
+            />
+          ) : null}
+          {previewStickers}
+        </View>
+    ) : (
       <Image
         source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }}
         style={styles.preview}
@@ -816,12 +1127,8 @@ function CreatePostScreen({ navigation, route }: any) {
       <Text style={styles.sectionLabel}>Mentions (comma separated)</Text>
       <TextInput style={styles.inputSingle} value={mentionsRaw} onChangeText={setMentionsRaw} placeholder="alice, bob" />
 
-      <Text style={styles.sectionLabel}>Collaborators (comma separated user ids)</Text>
-      <TextInput style={styles.inputSingle} value={collabsRaw} onChangeText={setCollabsRaw} placeholder="u2, u3" />
-
       <View style={styles.switchRow}><Text style={styles.switchLabel}>Disable comments</Text><Switch value={disableComments} onValueChange={setDisableComments} /></View>
       <View style={styles.switchRow}><Text style={styles.switchLabel}>Hide like count</Text><Switch value={hideLikeCount} onValueChange={setHideLikeCount} /></View>
-      <View style={styles.switchRow}><Text style={styles.switchLabel}>Allow remix</Text><Switch value={allowRemix} onValueChange={setAllowRemix} /></View>
 
       <Text style={styles.helperText}>
         {postType === "carousel"
@@ -829,6 +1136,9 @@ function CreatePostScreen({ navigation, route }: any) {
           : postType === "video"
             ? "Choose a single video. It will upload through the backend media pipeline."
             : "Choose a single image for this post."}
+      </Text>
+      <Text style={styles.helperText}>
+        Basic posting is production-focused here: caption, media, location, music, hashtags, mentions, comment control, and like-count privacy are supported. Collaboration/remix controls are hidden until they are fully product-ready.
       </Text>
     </>
   );
@@ -866,16 +1176,71 @@ function CreatePostScreen({ navigation, route }: any) {
         </>
       ) : null}
 
-      <Text style={styles.sectionLabel}>Caption</Text>
+      <Text style={styles.sectionLabel}>{storyType === "text" ? "Text story" : "Caption"}</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, storyType === "text" && styles.textStoryInput]}
         value={storyCaption}
         onChangeText={setStoryCaption}
-        placeholder="Add story caption"
+        placeholder={storyType === "text" ? "Share a thought" : "Add story caption"}
+        placeholderTextColor="#9ca3af"
         maxLength={limits.caption}
         multiline
       />
       <Text style={styles.counter}>{storyCaption.length}/{limits.caption}</Text>
+
+      {storyType === "text" ? (
+        <>
+          <Text style={styles.sectionLabel}>Background</Text>
+          <View style={styles.colorRow}>
+            {textStoryColors.map((color) => {
+              const selected = storyBackgroundColor === color;
+              return (
+                <TouchableOpacity
+                  key={color}
+                  style={[styles.colorChip, { backgroundColor: color }, selected && styles.colorChipSelected]}
+                  onPress={() => setStoryBackgroundColor(color)}
+                />
+              );
+            })}
+          </View>
+        </>
+      ) : null}
+
+      {storyType !== "text" ? (
+        <>
+          <Text style={styles.sectionLabel}>Filter</Text>
+          <View style={styles.modeRow}>
+            {storyFilterPresets.map((preset) => (
+              <TouchableOpacity
+                key={`story-filter-${preset}`}
+                style={[styles.pill, storyFilterPreset === preset && styles.pillActive]}
+                onPress={() => setStoryFilterPreset(preset)}
+              >
+                <Text style={[styles.pillText, storyFilterPreset === preset && styles.pillTextActive]}>
+                  {storyFilterPresetLabels[preset]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {storyFilterPreset !== "none" ? (
+            <View style={styles.stickerScaleRow}>
+              <TouchableOpacity
+                style={styles.scaleButton}
+                onPress={() => setStoryFilterIntensity((value) => Math.max(0.2, Math.round((value - 0.1) * 10) / 10))}
+              >
+                <Text style={styles.scaleButtonText}>-</Text>
+              </TouchableOpacity>
+              <Text style={styles.scaleValueText}>Filter strength {storyFilterIntensity.toFixed(1)}x</Text>
+              <TouchableOpacity
+                style={styles.scaleButton}
+                onPress={() => setStoryFilterIntensity((value) => Math.min(1, Math.round((value + 0.1) * 10) / 10))}
+              >
+                <Text style={styles.scaleButtonText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </>
+      ) : null}
 
       <Text style={styles.sectionLabel}>Audience</Text>
       <View style={styles.modeRow}>
@@ -919,11 +1284,168 @@ function CreatePostScreen({ navigation, route }: any) {
 
       {renderMusicPicker("story")}
 
+      <Text style={styles.sectionLabel}>Link</Text>
+      <TextInput
+        style={styles.inputSingle}
+        value={storyLinkUrl}
+        onChangeText={setStoryLinkUrl}
+        placeholder="https://example.com"
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+
+      <Text style={styles.sectionLabel}>Location</Text>
+      <TextInput
+        style={styles.inputSingle}
+        value={storyLocation}
+        onChangeText={setStoryLocation}
+        placeholder="Add location sticker"
+        maxLength={limits.location}
+      />
+
+      <Text style={styles.sectionLabel}>Hashtags</Text>
+      <TextInput
+        style={styles.inputSingle}
+        value={storyHashtagsRaw}
+        onChangeText={setStoryHashtagsRaw}
+        placeholder="travel, sunrise"
+      />
+
+      <Text style={styles.sectionLabel}>Mentions</Text>
+      <TextInput
+        style={styles.inputSingle}
+        value={storyMentionsRaw}
+        onChangeText={setStoryMentionsRaw}
+        placeholder="alice, bob"
+      />
+
+      <Text style={styles.sectionLabel}>Text sticker</Text>
+      <TextInput
+        style={styles.inputSingle}
+        value={storyStickerText}
+        onChangeText={setStoryStickerText}
+        placeholder="Add a headline sticker"
+        maxLength={60}
+      />
+      {storyStickerText.trim() ? (
+        <>
+          <View style={styles.modeRow}>
+            {storyTextStickerThemes.map((theme) => (
+              <TouchableOpacity
+                key={`text-theme-${theme}`}
+                style={[styles.pill, storyStickerTextTheme === theme && styles.pillActive]}
+                onPress={() => setStoryStickerTextTheme(theme)}
+              >
+                <Text style={[styles.pillText, storyStickerTextTheme === theme && styles.pillTextActive]}>
+                  {storyTextStickerThemeLabels[theme]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.modeRow}>
+            {storyTextStickerAlignments.map((alignment) => (
+              <TouchableOpacity
+                key={`text-align-${alignment}`}
+                style={[styles.pill, storyStickerTextAlignment === alignment && styles.pillActive]}
+                onPress={() => setStoryStickerTextAlignment(alignment)}
+              >
+                <Text style={[styles.pillText, storyStickerTextAlignment === alignment && styles.pillTextActive]}>
+                  {storyTextStickerAlignmentLabels[alignment]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.modeRow}>
+            {storyStickerPlacements.map((placement) => (
+              <TouchableOpacity
+                key={`text-${placement}`}
+                style={[styles.pill, storyStickerTextPlacement === placement && styles.pillActive]}
+                onPress={() => {
+                  setStoryStickerTextPlacement(placement);
+                  setStoryStickerTextPosition(storyStickerPresetPositions[placement]);
+                }}
+              >
+                <Text style={[styles.pillText, storyStickerTextPlacement === placement && styles.pillTextActive]}>
+                  {storyStickerPlacementLabels[placement]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.stickerScaleRow}>
+            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerTextScale((value) => clampStickerScale(value - 0.1))}>
+              <Text style={styles.scaleButtonText}>A-</Text>
+            </TouchableOpacity>
+            <Text style={styles.scaleValueText}>Text size {storyStickerTextScale.toFixed(1)}x</Text>
+            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerTextScale((value) => clampStickerScale(value + 0.1))}>
+              <Text style={styles.scaleButtonText}>A+</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.stickerScaleRow}>
+            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerTextRotation((value) => clampStickerRotation(value - 15))}>
+              <Text style={styles.scaleButtonText}>↺</Text>
+            </TouchableOpacity>
+            <Text style={styles.scaleValueText}>Text angle {storyStickerTextRotation}deg</Text>
+            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerTextRotation((value) => clampStickerRotation(value + 15))}>
+              <Text style={styles.scaleButtonText}>↻</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : null}
+
+      <Text style={styles.sectionLabel}>Emoji sticker</Text>
+      <TextInput
+        style={styles.inputSingle}
+        value={storyStickerEmoji}
+        onChangeText={setStoryStickerEmoji}
+        placeholder="✨"
+        maxLength={16}
+      />
+      {storyStickerEmoji.trim() ? (
+        <>
+          <View style={styles.modeRow}>
+            {storyStickerPlacements.map((placement) => (
+              <TouchableOpacity
+                key={`emoji-${placement}`}
+                style={[styles.pill, storyStickerEmojiPlacement === placement && styles.pillActive]}
+                onPress={() => {
+                  setStoryStickerEmojiPlacement(placement);
+                  setStoryStickerEmojiPosition(storyStickerPresetPositions[placement]);
+                }}
+              >
+                <Text style={[styles.pillText, storyStickerEmojiPlacement === placement && styles.pillTextActive]}>
+                  {storyStickerPlacementLabels[placement]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.stickerScaleRow}>
+            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerEmojiScale((value) => clampStickerScale(value - 0.1))}>
+              <Text style={styles.scaleButtonText}>-</Text>
+            </TouchableOpacity>
+            <Text style={styles.scaleValueText}>Emoji size {storyStickerEmojiScale.toFixed(1)}x</Text>
+            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerEmojiScale((value) => clampStickerScale(value + 0.1))}>
+              <Text style={styles.scaleButtonText}>+</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.stickerScaleRow}>
+            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerEmojiRotation((value) => clampStickerRotation(value - 15))}>
+              <Text style={styles.scaleButtonText}>↺</Text>
+            </TouchableOpacity>
+            <Text style={styles.scaleValueText}>Emoji angle {storyStickerEmojiRotation}deg</Text>
+            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerEmojiRotation((value) => clampStickerRotation(value + 15))}>
+              <Text style={styles.scaleButtonText}>↻</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : null}
+
       <View style={styles.switchRow}><Text style={styles.switchLabel}>Allow replies</Text><Switch value={storyAllowReplies} onValueChange={setStoryAllowReplies} /></View>
       <View style={styles.switchRow}><Text style={styles.switchLabel}>Allow sharing</Text><Switch value={storyAllowSharing} onValueChange={setStoryAllowSharing} /></View>
 
       <Text style={styles.helperText}>
-        Story links and free-form mention or hashtag metadata are hidden here because the current backend does not persist them safely.
+        {storyType === "text"
+          ? "Text stories now publish without requiring media. Polls and questions still need an image background."
+          : "Links, location, hashtag, mention, custom text, and emoji story stickers now publish with draggable placement, size, and rotation controls in the preview. Polls and questions still require an image background."}
       </Text>
     </>
   );
@@ -964,21 +1486,25 @@ function CreatePostScreen({ navigation, route }: any) {
       <ScrollView contentContainerStyle={styles.content}>
         {renderMediaPreview()}
 
-        <View style={styles.mediaSectionHeader}>
-          <Text style={styles.sectionLabel}>Media</Text>
-          <View style={styles.mediaActionsRow}>
-            <TouchableOpacity style={styles.secondaryPickButton} disabled={pickingMedia} onPress={onCaptureMedia}>
-              <Icon name="camera-outline" size={18} color="#111827" />
-              <Text style={styles.secondaryPickButtonText}>Camera</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.pickButton} disabled={pickingMedia} onPress={onPickMedia}>
-              {pickingMedia ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="images-outline" size={18} color="#fff" />}
-              <Text style={styles.pickButtonText}>{selectedAssets.length ? "Replace" : "Choose"}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        {!(activeTab === "story" && storyType === "text") ? (
+          <>
+            <View style={styles.mediaSectionHeader}>
+              <Text style={styles.sectionLabel}>Media</Text>
+              <View style={styles.mediaActionsRow}>
+                <TouchableOpacity style={styles.secondaryPickButton} disabled={pickingMedia} onPress={onCaptureMedia}>
+                  <Icon name="camera-outline" size={18} color="#111827" />
+                  <Text style={styles.secondaryPickButtonText}>Camera</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.pickButton} disabled={pickingMedia} onPress={onPickMedia}>
+                  {pickingMedia ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="images-outline" size={18} color="#fff" />}
+                  <Text style={styles.pickButtonText}>{selectedAssets.length ? "Replace" : "Choose"}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
 
-        {renderSelectedAssets()}
+            {renderSelectedAssets()}
+          </>
+        ) : null}
 
         {activeTab === "post" ? renderPostControls() : null}
         {activeTab === "story" ? renderStoryControls() : null}
@@ -1056,6 +1582,13 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: "#efefef",
   },
+  storyPreviewFrame: {
+    width: "100%",
+    height: 250,
+    borderRadius: 18,
+    overflow: "hidden",
+    position: "relative",
+  },
   emptyPreview: {
     height: 250,
     borderRadius: 18,
@@ -1077,6 +1610,48 @@ const styles = StyleSheet.create({
   },
   videoPreviewTitle: { marginTop: 12, color: "#fff", fontSize: 18, fontWeight: "700" },
   videoPreviewText: { marginTop: 6, color: "#cbd5e1" },
+  textStoryPreview: {
+    minHeight: 250,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    overflow: "hidden",
+    position: "relative",
+  },
+  textStoryPreviewText: {
+    color: "#fff",
+    fontSize: 28,
+    lineHeight: 36,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  storyPreviewStickerLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  storyFilterOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  storyPreviewEmojiSticker: {
+    position: "absolute",
+  },
+  storyPreviewEmojiText: {
+    fontSize: 34,
+  },
+  storyPreviewTextSticker: {
+    position: "absolute",
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: "rgba(15,23,42,0.56)",
+  },
+  storyPreviewTextStickerText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+  },
   mediaSectionHeader: {
     marginTop: 16,
     flexDirection: "row",
@@ -1212,6 +1787,30 @@ const styles = StyleSheet.create({
   pillActive: { backgroundColor: "#111827", borderColor: "#111827" },
   pillText: { color: "#444", fontWeight: "700" },
   pillTextActive: { color: "#fff" },
+  stickerScaleRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  scaleButton: {
+    minWidth: 44,
+    height: 38,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#fff",
+  },
+  scaleButtonText: {
+    color: "#111827",
+    fontWeight: "800",
+  },
+  scaleValueText: {
+    color: "#374151",
+    fontWeight: "700",
+  },
   audienceWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   audienceChip: {
     borderWidth: 1,
@@ -1227,6 +1826,17 @@ const styles = StyleSheet.create({
   },
   audienceChipText: { color: "#374151", fontWeight: "600" },
   audienceChipTextSelected: { color: "#fff" },
+  colorRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  colorChip: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  colorChipSelected: {
+    borderColor: "#111827",
+  },
   input: {
     minHeight: 110,
     borderWidth: 1,
@@ -1235,6 +1845,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     textAlignVertical: "top",
+  },
+  textStoryInput: {
+    minHeight: 140,
   },
   inputSingle: {
     height: 48,

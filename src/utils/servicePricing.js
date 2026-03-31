@@ -43,9 +43,30 @@ export const formatCurrencyTotals = (entries = []) => {
 };
 
 export const formatSummaryAmount = (summary, key) => {
-  const amountKey = key === "active" ? "activeAmount" : "completedAmount";
-  const totalsKey = key === "active" ? "activeAmountByCurrency" : "completedAmountByCurrency";
-  const displayCurrencyKey = key === "active" ? "activeDisplayCurrency" : "completedDisplayCurrency";
+  const amountKeyMap = {
+    active: "activeAmount",
+    completed: "completedAmount",
+    paid: "paidAmount",
+    refundPending: "refundPendingAmount",
+    settlementPending: "settlementPendingAmount",
+  };
+  const totalsKeyMap = {
+    active: "activeAmountByCurrency",
+    completed: "completedAmountByCurrency",
+    paid: "paidAmountByCurrency",
+    refundPending: "refundPendingAmountByCurrency",
+    settlementPending: "settlementPendingAmountByCurrency",
+  };
+  const displayCurrencyKeyMap = {
+    active: "activeDisplayCurrency",
+    completed: "completedDisplayCurrency",
+    paid: "paidDisplayCurrency",
+    refundPending: "refundPendingDisplayCurrency",
+    settlementPending: "settlementPendingDisplayCurrency",
+  };
+  const amountKey = amountKeyMap[key] || "completedAmount";
+  const totalsKey = totalsKeyMap[key] || "completedAmountByCurrency";
+  const displayCurrencyKey = displayCurrencyKeyMap[key] || "completedDisplayCurrency";
   const totals = Array.isArray(summary?.[totalsKey]) ? summary[totalsKey] : [];
 
   if (totals.length > 1) {

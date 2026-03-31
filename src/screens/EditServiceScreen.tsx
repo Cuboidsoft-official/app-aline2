@@ -10,10 +10,10 @@ import {
   Alert,
   ActivityIndicator
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
+import { getStoredToken } from "../utils/authSession";
 import { uploadImageAsset } from "../utils/uploadMedia";
 
 type SelectedImage = {
@@ -76,7 +76,7 @@ const EditServiceScreen = ({ route, navigation }: any) => {
     try {
       setLoading(true);
 
-      const token = await AsyncStorage.getItem("token");
+      const token = await getStoredToken();
       if (!token) {
         Alert.alert("Error", "Please login again");
         return;

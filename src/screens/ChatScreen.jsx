@@ -5,18 +5,20 @@ import {
   StyleSheet,
   Image,
   FlatList,
+  RefreshControl,
   TextInput,
   TouchableOpacity,
-  ImageBackground,
   Modal,
-  SafeAreaView,
   StatusBar,
   Alert,
   ActivityIndicator,
+  Linking,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import {
   errorCodes,
@@ -47,9 +49,35 @@ import {
   mergeMessageReaction,
   mergeMessageSeen,
 } from "../utils/chatRealtime";
+import { getStoredUser } from "../utils/authSession";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { useAppTheme } from "../theme/AppThemeContext";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 
-const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 const PRIMARY = "#7b3fe4";
+const LOCATION_MESSAGE_LABEL = "Shared location:";
+
+const buildLocationMessage = (query) => {
+  const cleanQuery = String(query || "").trim();
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanQuery)}`;
+  return `${LOCATION_MESSAGE_LABEL} ${cleanQuery}\n${mapsUrl}`;
+};
+
+const parseLocationMessage = (text) => {
+  if (typeof text !== "string" || !text.startsWith(LOCATION_MESSAGE_LABEL)) {
+    return null;
+  }
+
+  const [labelLine, urlLine] = text.split("\n");
+  const label = labelLine.replace(LOCATION_MESSAGE_LABEL, "").trim();
+  const url = String(urlLine || "").trim();
+
+  if (!label || !/^https?:\/\//.test(url)) {
+    return null;
+  }
+
+  return { label, url };
+};
 
 const getDocumentPickerMessage = (error) => {
   if (!isErrorWithCode(error)) {
@@ -70,10 +98,9 @@ const getDocumentPickerMessage = (error) => {
   }
 };
 
-const getRequestErrorMessage = (error, fallbackMessage) =>
-  error?.response?.data?.message || error?.message || fallbackMessage;
-
 const ChatScreen = ({ navigation, route }) => {
+  const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { userId, conversationId, conversationType = "direct", serviceId } = route.params || {};
   const [user, setUser] = useState(null);
   const [text, setText] = useState("");
@@ -83,17 +110,19 @@ const ChatScreen = ({ navigation, route }) => {
   const [currentConversationId, setCurrentConversationId] = useState(conversationId || null);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagination, setPagination] = useState({ nextCursor: null, hasMore: false, limit: 30 });
   const [typingUserId, setTypingUserId] = useState("");
+  const [showLocationComposer, setShowLocationComposer] = useState(false);
+  const [locationDraft, setLocationDraft] = useState("");
   const typingTimeoutRef = useRef(null);
 
   const fetchUser = useCallback(async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
-      const res = await API.get(`/auth/user/${userId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await API.get(`/auth/user/${userId}`);
       setUser(res.data.user);
     } catch (err) {
       console.log("User fetch error:", err?.response?.data || err);
@@ -131,8 +160,13 @@ const ChatScreen = ({ navigation, route }) => {
       const nextMessages = data?.messages || [];
       setPagination(data?.pagination || { nextCursor: null, hasMore: false, limit: 30 });
       setMessages((prev) => (options.append ? [...nextMessages, ...prev] : nextMessages));
+      setErrorMessage("");
     } catch (err) {
       console.log("Fetch messages error:", err?.response?.data || err);
+      if (!options.append) {
+        setMessages([]);
+        setErrorMessage(getReadableApiErrorMessage(err, "Failed to load this conversation."));
+      }
     }
   }, [currentConversationId]);
 
@@ -155,13 +189,49 @@ const ChatScreen = ({ navigation, route }) => {
       const nextConversationId = res?.conversation?._id || null;
       if (nextConversationId) {
         setCurrentConversationId(nextConversationId);
+        setErrorMessage("");
       }
       return nextConversationId;
     } catch (err) {
       console.log("Ensure conversation error:", err?.response?.data || err);
+      setErrorMessage(getReadableApiErrorMessage(err, "Unable to start this conversation right now."));
       return null;
     }
   }, [conversationType, currentConversationId, serviceId, userId]);
+
+  const initializeChat = useCallback(async ({ refresh = false } = {}) => {
+    try {
+      if (refresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
+      setErrorMessage("");
+
+      if (userId) {
+        await fetchUser();
+      }
+
+      const resolvedConversationId = await ensureConversation();
+
+      if (resolvedConversationId) {
+        await fetchMessages(resolvedConversationId);
+        await connectSocket();
+        socket.emit("joinConversation", resolvedConversationId);
+      }
+    } catch (error) {
+      console.log("Initialize chat error:", error);
+      setMessages([]);
+      setErrorMessage(getReadableApiErrorMessage(error, "Failed to load this conversation."));
+    } finally {
+      if (refresh) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
+    }
+  }, [ensureConversation, fetchMessages, fetchUser, userId]);
 
   useEffect(() => {
     setCurrentConversationId(conversationId || null);
@@ -171,8 +241,7 @@ const ChatScreen = ({ navigation, route }) => {
     let mounted = true;
     const loadCurrentUser = async () => {
       try {
-        const rawUser = await AsyncStorage.getItem("user");
-        const parsedUser = rawUser ? JSON.parse(rawUser) : null;
+        const parsedUser = await getStoredUser();
         const nextUserId = parsedUser?._id || parsedUser?.id || "";
 
         if (mounted) {
@@ -198,8 +267,12 @@ const ChatScreen = ({ navigation, route }) => {
     useCallback(() => {
       if (currentConversationId) {
         fetchMessages(currentConversationId);
+      } else {
+        initializeChat({ refresh: true }).catch((error) => {
+          console.log("Chat focus refresh error:", error);
+        });
       }
-    }, [currentConversationId, fetchMessages])
+    }, [currentConversationId, fetchMessages, initializeChat])
   );
 
   useEffect(() => {
@@ -243,25 +316,16 @@ const ChatScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     let active = true;
-    const initializeChat = async () => {
-      if (userId) {
-        await fetchUser();
+    initializeChat().catch((error) => {
+      if (!active) {
+        return;
       }
-
-      const resolvedConversationId = await ensureConversation();
-
-      if (active && resolvedConversationId) {
-        await fetchMessages(resolvedConversationId);
-        await connectSocket();
-        socket.emit("joinConversation", resolvedConversationId);
-      }
-    };
-
-    initializeChat();
+      console.log("Chat initialize effect error:", error);
+    });
     return () => {
       active = false;
     };
-  }, [ensureConversation, fetchMessages, fetchUser, userId]);
+  }, [initializeChat]);
 
   useEffect(() => {
     if (!currentConversationId) {
@@ -281,8 +345,7 @@ const ChatScreen = ({ navigation, route }) => {
   const submitMessage = useCallback(async ({ text: nextText, file }) => {
     const resolvedConversationId = await ensureConversation();
     if (!resolvedConversationId) {
-      Alert.alert("Unavailable", "This conversation is not ready yet.");
-      return;
+      throw new Error("Unable to start this conversation right now.");
     }
 
     const res = await sendChatMessage({
@@ -312,7 +375,7 @@ const ChatScreen = ({ navigation, route }) => {
       setText("");
     } catch (err) {
       console.log("Send message error:", err?.response?.data || err);
-      Alert.alert("Error", getRequestErrorMessage(err, "Failed to send message"));
+      Alert.alert("Error", getReadableApiErrorMessage(err, "Failed to send message"));
     } finally {
       setSending(false);
     }
@@ -350,7 +413,7 @@ const ChatScreen = ({ navigation, route }) => {
           setShowTools(false);
         } catch (error) {
           console.log("image message send error:", error);
-          Alert.alert("Error", getRequestErrorMessage(error, "Failed to send attachment"));
+          Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send attachment"));
         } finally {
           setUploading(false);
         }
@@ -391,7 +454,7 @@ const ChatScreen = ({ navigation, route }) => {
           setShowTools(false);
         } catch (error) {
           console.log("camera message send error:", error);
-          Alert.alert("Error", getRequestErrorMessage(error, "Failed to send camera capture"));
+          Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send camera capture"));
         } finally {
           setUploading(false);
         }
@@ -443,7 +506,7 @@ const ChatScreen = ({ navigation, route }) => {
       setText("");
       setShowTools(false);
     } catch (error) {
-      const message = getDocumentPickerMessage(error) || getRequestErrorMessage(error, "Document pick failed");
+      const message = getDocumentPickerMessage(error) || getReadableApiErrorMessage(error, "Document pick failed");
       if (!message) {
         return;
       }
@@ -499,7 +562,7 @@ const ChatScreen = ({ navigation, route }) => {
       setText("");
       setShowTools(false);
     } catch (error) {
-      const message = getDocumentPickerMessage(error) || getRequestErrorMessage(error, "Audio pick failed");
+      const message = getDocumentPickerMessage(error) || getReadableApiErrorMessage(error, "Audio pick failed");
       if (!message) {
         return;
       }
@@ -510,6 +573,30 @@ const ChatScreen = ({ navigation, route }) => {
       setUploading(false);
     }
   }, [submitMessage, text]);
+
+  const sendLocationMessage = useCallback(async () => {
+    const cleanLocation = String(locationDraft || "").trim();
+
+    if (!cleanLocation) {
+      Alert.alert("Add a place", "Enter a place, address, or landmark to share.");
+      return;
+    }
+
+    try {
+      setUploading(true);
+      await submitMessage({
+        text: buildLocationMessage(cleanLocation),
+      });
+      setLocationDraft("");
+      setShowLocationComposer(false);
+      setShowTools(false);
+    } catch (error) {
+      console.log("location message send error:", error);
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to share location"));
+    } finally {
+      setUploading(false);
+    }
+  }, [locationDraft, submitMessage]);
 
   const tools = useMemo(() => [
     { id: "gallery", name: "Gallery", icon: "image", action: sendImageAttachment },
@@ -527,16 +614,13 @@ const ChatScreen = ({ navigation, route }) => {
       action: sendAudioAttachment,
     },
     {
-      id: "gif",
-      name: "GIF",
-      icon: "happy",
-      action: () => Alert.alert("Not available yet", "GIF search is not implemented yet."),
-    },
-    {
       id: "location",
       name: "Location",
       icon: "location",
-      action: () => Alert.alert("Not available yet", "Location sharing is not implemented yet."),
+      action: () => {
+        setShowTools(false);
+        setShowLocationComposer(true);
+      },
     },
   ], [sendAudioAttachment, sendCameraAttachment, sendDocumentAttachment, sendImageAttachment]);
 
@@ -641,6 +725,7 @@ const ChatScreen = ({ navigation, route }) => {
     const isMine = String(getMessageSenderId(item)) === String(currentUserId || "");
     const attachment = getMessageAttachment(item);
     const textValue = getMessageText(item);
+    const locationPayload = parseLocationMessage(textValue);
     const seenCount = Array.isArray(item?.seenBy) ? item.seenBy.length : 0;
     const reactions = Array.isArray(item?.reactions) ? item.reactions : [];
 
@@ -693,11 +778,34 @@ const ChatScreen = ({ navigation, route }) => {
             </View>
           ) : null}
 
-          {!!textValue && (
+          {!locationPayload && !!textValue && (
             <Text style={[styles.messageText, isMine && styles.myMessageText]}>
               {textValue}
             </Text>
           )}
+
+          {locationPayload ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                Linking.openURL(locationPayload.url).catch((error) => {
+                  console.log("Open location error:", error);
+                  Alert.alert("Unable to open map", "Please try again.");
+                });
+              }}
+              style={[styles.locationCard, isMine && styles.myLocationCard]}
+            >
+              <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
+              <View style={styles.locationBody}>
+                <Text style={[styles.locationTitle, isMine && styles.myLocationTitle]}>
+                  {locationPayload.label}
+                </Text>
+                <Text style={[styles.locationLink, isMine && styles.myLocationLink]}>
+                  Open in Maps
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
 
           {!!reactions.length && (
             <View style={styles.reactionRow}>
@@ -723,10 +831,10 @@ const ChatScreen = ({ navigation, route }) => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top"]}>
       <StatusBar backgroundColor={PRIMARY} barStyle="light-content" />
 
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -738,7 +846,7 @@ const ChatScreen = ({ navigation, route }) => {
         >
           <Image
             source={{
-              uri: user?.profilePic || DEFAULT_AVATAR
+              uri: user?.profilePic || DEFAULT_AVATAR_URL
             }}
             style={styles.avatar}
           />
@@ -752,51 +860,66 @@ const ChatScreen = ({ navigation, route }) => {
         </TouchableOpacity>
 
         <View style={styles.headerIcons}>
-          <TouchableOpacity style={{ marginRight: 15 }} onPress={() => Alert.alert("Not available yet", "Video calling is not implemented yet.")}>
-            <Icon name="videocam" size={22} color="#fff" />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={{ marginRight: 15 }} onPress={() => Alert.alert("Not available yet", "Voice calling is not implemented yet.")}>
-            <Icon name="call" size={20} color="#fff" />
-          </TouchableOpacity>
-
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate("ChatDetailsScreen", { userId, conversationId: currentConversationId })}>
             <Icon name="ellipsis-vertical" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>
 
-      <ImageBackground
-        source={{
-          uri: "https://img.freepik.com/free-vector/abstract-chat-box-shape-pattern-white-background_1017-59690.jpg"
-        }}
-        style={styles.chatBackground}
-        resizeMode="cover"
+      <KeyboardAvoidingView
+        style={styles.flexFill}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
-        <FlatList
-          data={messages}
-          extraData={messages}
-          keyExtractor={(item, index) => item._id || item.id || index.toString()}
-          renderItem={renderMessage}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ListHeaderComponent={
-            pagination?.hasMore ? (
-              <TouchableOpacity
-                style={styles.loadEarlierButton}
-                onPress={loadMoreMessages}
-                disabled={loadingMore}
-              >
-                {loadingMore ? (
-                  <ActivityIndicator color={PRIMARY} />
-                ) : (
-                  <Text style={styles.loadEarlierText}>Load earlier messages</Text>
-                )}
-              </TouchableOpacity>
-            ) : null
-          }
-        />
-      </ImageBackground>
+        <View style={[styles.chatBackground, { backgroundColor: colors.surface }]}>
+          <FlatList
+            data={messages}
+            extraData={messages}
+            keyExtractor={(item, index) => item._id || item.id || index.toString()}
+            renderItem={renderMessage}
+            contentContainerStyle={[styles.listContent, { paddingBottom: 16 + insets.bottom }]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => {
+                  initializeChat({ refresh: true }).catch((error) => {
+                    console.log("Chat refresh error:", error);
+                  });
+                }}
+                tintColor={colors.primary}
+              />
+            }
+            ListHeaderComponent={
+              pagination?.hasMore ? (
+                <TouchableOpacity
+                  style={styles.loadEarlierButton}
+                  onPress={loadMoreMessages}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? (
+                    <ActivityIndicator color={PRIMARY} />
+                  ) : (
+                    <Text style={styles.loadEarlierText}>Load earlier messages</Text>
+                  )}
+                </TouchableOpacity>
+              ) : null
+            }
+            ListEmptyComponent={
+              loading ? null : (
+                <View style={styles.emptyWrap}>
+                  <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                    {errorMessage ? "Conversation unavailable" : "No messages yet"}
+                  </Text>
+                  <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+                    {errorMessage || "Start the conversation here."}
+                  </Text>
+                </View>
+              )
+            }
+          />
+        </View>
 
       <Modal visible={showTools} transparent animationType="slide">
         <TouchableOpacity
@@ -828,40 +951,79 @@ const ChatScreen = ({ navigation, route }) => {
         </TouchableOpacity>
       </Modal>
 
-      <View style={styles.inputContainer}>
-        <TouchableOpacity onPress={() => setShowTools(true)} disabled={uploading}>
-          <Icon name="add" size={28} color={PRIMARY} />
-        </TouchableOpacity>
-
-        <View style={styles.inputBox}>
-          <TextInput
-            placeholder={uploading ? "Uploading attachment..." : "Message"}
-            placeholderTextColor="#888"
-            style={styles.input}
-            value={text}
-            onChangeText={handleTextChange}
-            editable={!sending && !uploading}
-          />
-        </View>
-
-        {uploading ? (
-          <ActivityIndicator color={PRIMARY} />
-        ) : text.length > 0 ? (
-          <TouchableOpacity style={styles.sendBtn} onPress={sendTextMessage} disabled={sending}>
-            <Icon name="send" size={20} color="#fff" />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.inlineActions}>
-            <TouchableOpacity style={{ marginRight: 15 }} onPress={sendImageAttachment}>
-              <Icon name="image" size={24} color={PRIMARY} />
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={sendAudioAttachment}>
-              <Icon name="mic" size={24} color={PRIMARY} />
-            </TouchableOpacity>
+      <Modal visible={showLocationComposer} transparent animationType="fade">
+        <View style={styles.locationComposerOverlay}>
+          <View style={styles.locationComposerCard}>
+            <Text style={styles.locationComposerTitle}>Share location</Text>
+            <Text style={styles.locationComposerText}>
+              Enter a place, address, or landmark. We will send a Maps link in chat.
+            </Text>
+            <TextInput
+              style={styles.locationComposerInput}
+              value={locationDraft}
+              onChangeText={setLocationDraft}
+              placeholder="Coffee shop, MG Road, airport..."
+              placeholderTextColor="#888"
+              editable={!uploading}
+            />
+            <View style={styles.locationComposerActions}>
+              <TouchableOpacity
+                style={styles.locationSecondaryButton}
+                onPress={() => {
+                  setShowLocationComposer(false);
+                  setLocationDraft("");
+                }}
+                disabled={uploading}
+              >
+                <Text style={styles.locationSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.locationPrimaryButton}
+                onPress={sendLocationMessage}
+                disabled={uploading}
+              >
+                {uploading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.locationPrimaryText}>Send</Text>}
+              </TouchableOpacity>
+            </View>
           </View>
-        )}
-      </View>
+        </View>
+      </Modal>
+
+        <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: 10 + insets.bottom }]}>
+          <TouchableOpacity onPress={() => setShowTools(true)} disabled={uploading}>
+            <Icon name="add" size={28} color={colors.primary} />
+          </TouchableOpacity>
+
+          <View style={[styles.inputBox, { backgroundColor: colors.surface }]}>
+            <TextInput
+              placeholder={uploading ? "Uploading attachment..." : "Message"}
+              placeholderTextColor={colors.placeholder}
+              style={[styles.input, { color: colors.text }]}
+              value={text}
+              onChangeText={handleTextChange}
+              editable={!sending && !uploading}
+            />
+          </View>
+
+          {uploading ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : text.length > 0 ? (
+            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: colors.primary }]} onPress={sendTextMessage} disabled={sending}>
+              <Icon name="send" size={20} color="#fff" />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.inlineActions}>
+              <TouchableOpacity style={{ marginRight: 15 }} onPress={sendImageAttachment}>
+                <Icon name="image" size={24} color={colors.primary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={sendAudioAttachment}>
+                <Icon name="mic" size={24} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -873,12 +1035,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff"
   },
+  flexFill: {
+    flex: 1,
+  },
   header: {
     backgroundColor: PRIMARY,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
-    paddingTop: (StatusBar.currentHeight || 0) + 14,
     paddingBottom: 15
   },
   userInfo: {
@@ -924,6 +1088,22 @@ const styles = StyleSheet.create({
     color: PRIMARY,
     fontWeight: "600"
   },
+  emptyWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+    paddingTop: 72,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  emptyText: {
+    marginTop: 8,
+    textAlign: "center",
+    lineHeight: 20,
+  },
   messageRow: {
     flexDirection: "row",
     marginVertical: 4
@@ -963,6 +1143,37 @@ const styles = StyleSheet.create({
     color: PRIMARY,
     fontWeight: "600",
     maxWidth: 180
+  },
+  locationCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    borderRadius: 12,
+    padding: 10,
+    backgroundColor: "rgba(123, 63, 228, 0.08)",
+  },
+  myLocationCard: {
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  locationBody: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  locationTitle: {
+    color: "#111",
+    fontWeight: "700",
+  },
+  myLocationTitle: {
+    color: "#fff",
+  },
+  locationLink: {
+    marginTop: 2,
+    color: PRIMARY,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  myLocationLink: {
+    color: "#ede9fe",
   },
   reactionRow: {
     flexDirection: "row",
@@ -1009,7 +1220,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15
   },
   input: {
-    height: 40
+    height: 40,
+    paddingVertical: 0,
   },
   sendBtn: {
     backgroundColor: PRIMARY,
@@ -1049,5 +1261,63 @@ const styles = StyleSheet.create({
   toolText: {
     color: "#444",
     fontSize: 13
-  }
+  },
+  locationComposerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  locationComposerCard: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 18,
+  },
+  locationComposerTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111",
+  },
+  locationComposerText: {
+    marginTop: 8,
+    color: "#555",
+    lineHeight: 20,
+  },
+  locationComposerInput: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    height: 48,
+    color: "#111",
+  },
+  locationComposerActions: {
+    marginTop: 16,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  locationSecondaryButton: {
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginRight: 10,
+    backgroundColor: "#f3f4f6",
+  },
+  locationSecondaryText: {
+    color: "#111",
+    fontWeight: "700",
+  },
+  locationPrimaryButton: {
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: PRIMARY,
+    minWidth: 72,
+    alignItems: "center",
+  },
+  locationPrimaryText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
 });

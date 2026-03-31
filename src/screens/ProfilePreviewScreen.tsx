@@ -7,13 +7,18 @@ import {
  TouchableOpacity,
  FlatList,
  ActivityIndicator,
- Alert
+ Alert,
+ RefreshControl,
 } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { getStoredUserId } from "../utils/authSession";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 type ProfilePreviewPost = {
  _id: string;
@@ -22,10 +27,16 @@ type ProfilePreviewPost = {
  media?: Array<{
   url?: string;
   thumbnailUrl?: string;
- }>;
+  }>;
 };
 
+type ProfilePreviewTab = "posts" | "swipes" | "tagged";
+
+const isReelPost = (post: ProfilePreviewPost) => post.postType === "reel";
+
 const ProfilePreviewScreen = ({ route, navigation }: { route: any; navigation: any }) => {
+ const { colors } = useAppTheme();
+ const insets = useSafeAreaInsets();
 
  const { userId } = route.params as { userId: string };
 
@@ -33,7 +44,9 @@ const ProfilePreviewScreen = ({ route, navigation }: { route: any; navigation: a
  const [allPosts, setAllPosts] = useState<ProfilePreviewPost[]>([]);
  const [taggedPosts, setTaggedPosts] = useState<ProfilePreviewPost[]>([]);
  const [loading, setLoading] = useState(true);
- const [activeTab, setActiveTab] = useState("posts");
+ const [refreshing, setRefreshing] = useState(false);
+ const [errorMessage, setErrorMessage] = useState("");
+ const [activeTab, setActiveTab] = useState<ProfilePreviewTab>("posts");
  const [isFollowing, setIsFollowing] = useState(false);
  const [canViewPosts, setCanViewPosts] = useState(false);
  const [actionLoading, setActionLoading] = useState(false);
@@ -42,27 +55,30 @@ const [showSuggestions, setShowSuggestions] = useState(true);
 const [myFollowing, setMyFollowing] = useState<string[]>([]);
 const suggestionListContentStyle = styles.suggestionListContent;
 
-
-const fetchProfile = useCallback(async () => {
+const fetchProfile = useCallback(async ({ refresh = false }: { refresh?: boolean } = {}) => {
  try {
+  if (refresh) {
+   setRefreshing(true);
+  } else {
+   setLoading(true);
+  }
 
-  const token = await AsyncStorage.getItem("token");
-
-  const res = await API.get(`/auth/user/${userId}`, {
-   headers: { Authorization: `Bearer ${token}` }
-  });
+  const [res, taggedResult] = await Promise.all([
+   API.get(`/auth/user/${userId}`),
+   API.get(`/posts/tagged/${userId}`).catch((error) => {
+    console.log("Tagged profile posts error:", error);
+    return null;
+   }),
+  ]);
 
   const profileUser = res.data.user;
   const me = res.data.me;
   const profilePosts = Array.isArray(res.data.posts) ? (res.data.posts as ProfilePreviewPost[]) : [];
-  const taggedRes = await API.get(`/posts/tagged/${userId}`, {
-   headers: { Authorization: `Bearer ${token}` }
-  });
   const accessGranted = Boolean(res.data?.canViewPosts);
 
   setUser(profileUser);
   setAllPosts(profilePosts);
-  setTaggedPosts(Array.isArray(taggedRes.data.posts) ? (taggedRes.data.posts as ProfilePreviewPost[]) : []);
+  setTaggedPosts(Array.isArray(taggedResult?.data?.posts) ? (taggedResult.data.posts as ProfilePreviewPost[]) : []);
 
   // 🔥 store my following list
   setMyFollowing((me?.following || []) as string[]);
@@ -73,10 +89,19 @@ const fetchProfile = useCallback(async () => {
 
   setIsFollowing(!!amIFollowing);
   setCanViewPosts(accessGranted);
+  setErrorMessage("");
  } catch (err) {
-  console.log(err);
+  console.log("Profile preview fetch error:", err);
+  setUser(null);
+  setAllPosts([]);
+  setTaggedPosts([]);
+  setErrorMessage(getReadableApiErrorMessage(err, "Failed to load this profile."));
  } finally {
-  setLoading(false);
+  if (refresh) {
+   setRefreshing(false);
+  } else {
+   setLoading(false);
+  }
  }
 }, [userId]);
 
@@ -84,12 +109,9 @@ const fetchSuggestions = useCallback(async () => {
 
  try {
 
-  const token = await AsyncStorage.getItem("token");
   const currentUserId = await getStoredUserId();
 
-  const res = await API.get("/auth/users", {
-   headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await API.get("/auth/users");
 
   const allUsers = res.data.users || [];
 
@@ -116,27 +138,36 @@ const fetchSuggestions = useCallback(async () => {
 }, [myFollowing, userId]);
 
 useEffect(() => {
- fetchProfile();
+ fetchProfile().catch(() => {});
+}, [fetchProfile]);
+
+useEffect(() => {
  fetchSuggestions();
-}, [fetchProfile, fetchSuggestions]);
+}, [fetchSuggestions]);
+
+useFocusEffect(
+ useCallback(() => {
+  fetchProfile({ refresh: true }).catch(() => {});
+ }, [fetchProfile])
+);
 
 const isPrivateLocked =
  user?.isPrivate === true && canViewPosts === false;
 
 const posts = useMemo(() => {
  if (activeTab === "swipes") {
-  return allPosts.filter((post) => post.postType === "reel");
+  return allPosts.filter((post) => isReelPost(post));
  }
 
  if (activeTab === "tagged") {
-  return taggedPosts.filter((post) => post.postType !== "reel");
+  return taggedPosts;
  }
 
- return allPosts.filter((post) => post.postType !== "reel");
+ return allPosts.filter((post) => !isReelPost(post));
 }, [activeTab, allPosts, taggedPosts]);
 
 const totalPostCount = useMemo(
- () => allPosts.filter((post) => post.postType !== "reel").length,
+ () => allPosts.filter((post) => !isReelPost(post)).length,
  [allPosts],
 );
 
@@ -144,13 +175,13 @@ const getPostPreviewUrl = (post: ProfilePreviewPost): string =>
  post.media?.[0]?.thumbnailUrl ||
  post.media?.[0]?.url ||
  post.image ||
- "https://picsum.photos/300";
+ DEFAULT_AVATAR_URL;
 
 
 const renderSuggestion = ({ item }: { item: any }) => (
 
  <TouchableOpacity
-  style={styles.suggestionCard}
+  style={[styles.suggestionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
   onPress={() =>
    navigation.push("ProfilePreviewScreen", {
     userId: item._id
@@ -160,23 +191,21 @@ const renderSuggestion = ({ item }: { item: any }) => (
 
   <Image
    source={{
-    uri:
-     item.profilePic ||
-     "https://cdn-icons-png.flaticon.com/512/149/149071.png"
+    uri: item.profilePic || DEFAULT_AVATAR_URL
    }}
    style={styles.suggestionAvatar}
   />
 
-  <Text numberOfLines={1} style={styles.suggestionUsername}>
+  <Text numberOfLines={1} style={[styles.suggestionUsername, { color: colors.text }]}>
    {item.username}
   </Text>
 
-  <Text numberOfLines={1} style={styles.suggestionName}>
+  <Text numberOfLines={1} style={[styles.suggestionName, { color: colors.mutedText }]}>
    {item.name}
   </Text>
 
 <TouchableOpacity
- style={styles.followSuggestionBtn}
+ style={[styles.followSuggestionBtn, { backgroundColor: colors.primary }]}
  onPress={() => toggleSuggestionFollow(item._id)}
 >
  <Text style={styles.followSuggestionText}>
@@ -191,24 +220,13 @@ const followUser = async () => {
  try {
 
   setActionLoading(true);
-
-  const token = await AsyncStorage.getItem("token");
-
-  await API.post(
-   `/auth/follow/${userId}`,
-   {},
-   { headers: { Authorization: `Bearer ${token}` } }
-  );
-
-  setTimeout(() => {
-   fetchProfile();
-  }, 500);
-
-  Alert.alert("Success ✅", "You are now following");
-
- } catch {
-
-  Alert.alert("Error", "Something went wrong");
+  await API.post(`/auth/follow/${userId}`);
+  await Promise.all([
+   fetchProfile(),
+   fetchSuggestions(),
+  ]);
+ } catch (error) {
+  Alert.alert("Follow failed", getReadableApiErrorMessage(error, "Please try again."));
 
  } finally {
   setActionLoading(false);
@@ -219,26 +237,18 @@ const toggleSuggestionFollow = async (targetUserId: string) => {
 
  try {
 
-  const token = await AsyncStorage.getItem("token");
-
-  await API.post(
-   `/auth/follow/${targetUserId}`,
-   {},
-   { headers: { Authorization: `Bearer ${token}` } }
-  );
+  await API.post(`/auth/follow/${targetUserId}`);
 
   // suggestion list se remove
   setSuggestions(prev =>
    prev.filter((suggestedUser) => suggestedUser._id !== targetUserId)
   );
 
-  fetchProfile();
+  await fetchProfile();
 
- } catch (err: any) {
-
-  console.log("Follow Error:", err.response?.data || err);
-
-  Alert.alert("Error", "Action failed");
+ } catch (error) {
+  console.log("Follow Error:", error);
+  Alert.alert("Follow failed", getReadableApiErrorMessage(error, "Please try again."));
 
  }
 
@@ -261,22 +271,13 @@ const unfollowUser = async () => {
      try {
 
       setActionLoading(true);
-
-      const token = await AsyncStorage.getItem("token");
-
-      await API.post(
-       `/auth/unfollow/${userId}`,
-       {},
-       { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      await fetchProfile();
-
-      Alert.alert("Done ✅", "Unfollowed");
-
-     } catch {
-
-      Alert.alert("Error", "Something went wrong");
+      await API.post(`/auth/unfollow/${userId}`);
+      await Promise.all([
+       fetchProfile(),
+       fetchSuggestions(),
+      ]);
+     } catch (error) {
+      Alert.alert("Unfollow failed", getReadableApiErrorMessage(error, "Please try again."));
 
      } finally {
       setActionLoading(false);
@@ -291,6 +292,7 @@ const unfollowUser = async () => {
 const renderPost = ({ item }: { item: any }) => (
  <TouchableOpacity
   activeOpacity={0.9}
+  style={styles.postCard}
   onPress={() => navigation.navigate("PostDetail", { postId: item._id })}
  >
   <Image
@@ -302,56 +304,59 @@ const renderPost = ({ item }: { item: any }) => (
 
  if (loading) {
   return (
-   <View style={styles.center}>
-    <ActivityIndicator size="large" />
-   </View>
+   <SafeAreaView style={[styles.center, { backgroundColor: colors.background }]} edges={["top"]}>
+    <ActivityIndicator size="large" color={colors.primary} />
+   </SafeAreaView>
+  );
+ }
+
+ if (!user) {
+  return (
+   <SafeAreaView style={[styles.center, { backgroundColor: colors.background }]} edges={["top"]}>
+    <Text style={[styles.emptyTitle, { color: colors.text }]}>Profile unavailable</Text>
+    <Text style={[styles.emptyText, { color: colors.mutedText }]}>{errorMessage || "Please try again."}</Text>
+    <TouchableOpacity
+     style={[styles.followBtn, { backgroundColor: colors.primary, marginTop: 14, width: 180 }]}
+     onPress={() => fetchProfile({ refresh: true }).catch(() => {})}
+    >
+     <Text style={styles.followText}>Retry</Text>
+    </TouchableOpacity>
+   </SafeAreaView>
   );
  }
 
  return (
-  <View style={styles.container}>
-
-   <View style={styles.topHeader}>
+  <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+   <View style={[styles.topHeader, { paddingTop: Math.max(insets.top, 12), borderColor: colors.border }]}>
     <TouchableOpacity onPress={() => navigation.goBack()}>
-     <Icon name="arrow-back" size={26} />
+     <Icon name="arrow-back" size={26} color={colors.text} />
     </TouchableOpacity>
 
-<View style={styles.headerUserRow}>
-  {user?.isPrivate && (
-    <Icon name="lock-closed-outline" size={14} style={styles.lockIcon} />
-  )}
+    <View style={styles.headerUserRow}>
+     {user?.isPrivate ? (
+      <Icon name="lock-closed-outline" size={14} style={styles.lockIcon} color={colors.mutedText} />
+     ) : null}
 
-  <Text numberOfLines={1} style={styles.headerUsername}>
-    {user?.username}
-  </Text>
-</View>
+     <Text numberOfLines={1} style={[styles.headerUsername, { color: colors.text }]}>
+      {user?.username}
+     </Text>
+    </View>
 
-    <TouchableOpacity
-      onPress={() =>
-        navigation.navigate("FeatureInfoScreen", {
-          title: "Profile Actions",
-          description: "More profile actions will appear here once moderation and blocking flows are connected end to end."
-        })
-      }
-    >
-      <Icon name="menu" size={26} />
-    </TouchableOpacity>
+    <View style={styles.headerSpacer} />
    </View>
 
    <View style={styles.header}>
     <Image
      source={{
-      uri:
-       user?.profilePic ||
-       "https://cdn-icons-png.flaticon.com/512/149/149071.png"
+      uri: user?.profilePic || DEFAULT_AVATAR_URL
      }}
      style={styles.profilePic}
     />
 
     <View style={styles.stats}>
      <View style={styles.stat}>
-      <Text style={styles.statNumber}>{totalPostCount}</Text>
-      <Text style={styles.statText}>Posts</Text>
+      <Text style={[styles.statNumber, { color: colors.text }]}>{totalPostCount}</Text>
+      <Text style={[styles.statText, { color: colors.mutedText }]}>Posts</Text>
      </View>
 
      <TouchableOpacity
@@ -370,8 +375,8 @@ const renderPost = ({ item }: { item: any }) => (
 
      }}
      >
-     <Text style={styles.statNumber}>{user?.followers?.length || 0}</Text>
-     <Text style={styles.statText}>Followers</Text>
+     <Text style={[styles.statNumber, { color: colors.text }]}>{user?.followers?.length || 0}</Text>
+     <Text style={[styles.statText, { color: colors.mutedText }]}>Followers</Text>
      </TouchableOpacity>
 
     <TouchableOpacity
@@ -390,36 +395,36 @@ const renderPost = ({ item }: { item: any }) => (
 
      }}
     >
-    <Text style={styles.statNumber}>{user?.following?.length || 0}</Text>
-    <Text style={styles.statText}>Following</Text>
+    <Text style={[styles.statNumber, { color: colors.text }]}>{user?.following?.length || 0}</Text>
+    <Text style={[styles.statText, { color: colors.mutedText }]}>Following</Text>
     </TouchableOpacity>
     </View>
    </View>
 
    <View style={styles.bioSection}>
-    <Text style={styles.name}>{user?.name}</Text>
-    <Text style={styles.bio}>{user?.bio}</Text>
+    <Text style={[styles.name, { color: colors.text }]}>{user?.name}</Text>
+    <Text style={[styles.bio, { color: colors.mutedText }]}>{user?.bio}</Text>
 
     {user?.link && (
-     <Text style={styles.link}>{user.link}</Text>
+     <Text style={[styles.link, { color: colors.primary }]}>{user.link}</Text>
     )}
    </View>
 
-<View style={styles.buttons}>
+   <View style={styles.buttons}>
 
    {isFollowing ? (
     <TouchableOpacity
      activeOpacity={0.7}
-     style={styles.unfollowBtn}
+     style={[styles.unfollowBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
      onPress={unfollowUser}
      disabled={actionLoading}
     >
-     <Text style={styles.btnText}>Following</Text>
+     <Text style={[styles.btnText, { color: colors.text }]}>Following</Text>
     </TouchableOpacity>
    ) : (
     <TouchableOpacity
      activeOpacity={0.7}
-     style={styles.followBtn}
+     style={[styles.followBtn, { backgroundColor: colors.primary }]}
      onPress={followUser}
      disabled={actionLoading}
     >
@@ -430,25 +435,25 @@ const renderPost = ({ item }: { item: any }) => (
    )}
 
  {!!user?._id && (
-  <TouchableOpacity
-   style={styles.messageBtn}
+ <TouchableOpacity
+   style={[styles.messageBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
    activeOpacity={0.7}
    onPress={() => navigation.navigate("ChatScreen", {
     userId: user?._id,
     conversationType: user?.category === "Seller" ? "seller" : "direct"
    })}
   >
-   <Icon name="chatbubble-ellipses-outline" size={20} color="#000" />
-    <Text style={styles.messageText}>Message</Text>
+   <Icon name="chatbubble-ellipses-outline" size={20} color={colors.text} />
+    <Text style={[styles.messageText, { color: colors.text }]}>Message</Text>
   </TouchableOpacity>
  )}
 
-</View>
+   </View>
 
-<View style={styles.suggestionSection}>
+   <View style={styles.suggestionSection}>
 
  <View style={styles.suggestionHeader}>
-  <Text style={styles.suggestionTitle}>
+  <Text style={[styles.suggestionTitle, { color: colors.text }]}>
    Discover People
   </Text>
 
@@ -460,6 +465,7 @@ const renderPost = ({ item }: { item: any }) => (
    <Icon
     name={showSuggestions ? "chevron-up" : "chevron-down"}
     size={22}
+    color={colors.text}
    />
   </TouchableOpacity>
  </View>
@@ -477,9 +483,9 @@ const renderPost = ({ item }: { item: any }) => (
 
  )}
 
-</View>
+   </View>
 
-   <View style={styles.tabs}>
+   <View style={[styles.tabs, { borderColor: colors.border }]}>
     <TouchableOpacity
      style={styles.tab}
      onPress={() => {
@@ -496,7 +502,7 @@ const renderPost = ({ item }: { item: any }) => (
      <Icon
       name="grid-outline"
       size={22}
-      color={activeTab === "posts" ? "#000" : "#888"}
+      color={activeTab === "posts" ? colors.text : colors.mutedText}
      />
     </TouchableOpacity>
 
@@ -516,7 +522,7 @@ const renderPost = ({ item }: { item: any }) => (
      <Icon
       name="heart-outline"
       size={22}
-      color={activeTab === "swipes" ? "#000" : "#888"}
+      color={activeTab === "swipes" ? colors.text : colors.mutedText}
      />
     </TouchableOpacity>
 
@@ -536,7 +542,7 @@ const renderPost = ({ item }: { item: any }) => (
      <Icon
       name="person-outline"
       size={22}
-      color={activeTab === "tagged" ? "#000" : "#888"}
+      color={activeTab === "tagged" ? colors.text : colors.mutedText}
     />
     </TouchableOpacity>
    </View>
@@ -545,13 +551,13 @@ const renderPost = ({ item }: { item: any }) => (
 
    <View style={styles.privateContainer}>
 
-    <Icon name="lock-closed" size={40} color="#555" />
+    <Icon name="lock-closed" size={40} color={colors.mutedText} />
 
-    <Text style={styles.privateTitle}>
+    <Text style={[styles.privateTitle, { color: colors.text }]}>
      This Account is Private
     </Text>
 
-    <Text style={styles.privateText}>
+    <Text style={[styles.privateText, { color: colors.mutedText }]}>
      Follow this account to see their posts
     </Text>
 
@@ -564,26 +570,40 @@ const renderPost = ({ item }: { item: any }) => (
    renderItem={renderPost}
    keyExtractor={(item) => item._id}
    numColumns={3}
+   extraData={activeTab}
    showsVerticalScrollIndicator={false}
+   contentContainerStyle={styles.postsContent}
+   refreshControl={
+    <RefreshControl
+     refreshing={refreshing}
+     onRefresh={() => fetchProfile({ refresh: true }).catch(() => {})}
+     tintColor={colors.primary}
+    />
+   }
    ListEmptyComponent={
     <View style={styles.emptyState}>
-     <Text style={styles.emptyTitle}>
-      {activeTab === "tagged" ? "No tagged posts yet" : activeTab === "swipes" ? "No swipes yet" : "No posts yet"}
+     <Text style={[styles.emptyTitle, { color: colors.text }]}>
+      {errorMessage
+       ? "Content unavailable"
+       : activeTab === "tagged"
+        ? "No tagged posts yet"
+        : activeTab === "swipes"
+         ? "No swipes yet"
+         : "No posts yet"}
      </Text>
-     <Text style={styles.emptyText}>
-      {activeTab === "tagged"
+     <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+      {errorMessage || (activeTab === "tagged"
        ? "Posts that tag this account will show here."
        : activeTab === "swipes"
         ? "Swipe posts will appear here."
-        : "Posts from this account will appear here."}
+        : "Posts from this account will appear here.")}
      </Text>
     </View>
    }
    />
 
   )}
-
-  </View>
+  </SafeAreaView>
  );
 };
 
@@ -702,6 +722,10 @@ headerUserRow:{
  alignItems:"center"
 },
 
+headerSpacer:{
+ width:26
+},
+
 lockIcon:{
  marginRight:1
 },
@@ -733,6 +757,10 @@ messageBtn:{
   marginTop:12
  },
 
+ postsContent:{
+  paddingBottom:32
+ },
+
  tab:{
   flex:1,
   alignItems:"center",
@@ -740,8 +768,12 @@ messageBtn:{
  },
 
  postImage:{
-  width:"33.33%",
-  height:130
+  width:"100%",
+  aspectRatio:1
+ },
+ postCard:{
+  width:"33.3333%",
+  padding:1
  },
  emptyState:{
   paddingHorizontal:24,
