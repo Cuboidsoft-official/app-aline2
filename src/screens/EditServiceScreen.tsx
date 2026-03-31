@@ -8,13 +8,16 @@ import {
   ScrollView,
   Image,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  KeyboardAvoidingView
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
-import { getStoredToken } from "../utils/authSession";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { uploadImageAsset } from "../utils/uploadMedia";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 type SelectedImage = {
   uri: string;
@@ -31,6 +34,7 @@ const PRICING_MODES = [
 ];
 
 const EditServiceScreen = ({ route, navigation }: any) => {
+  const { colors } = useAppTheme();
   const { service } = route.params;
 
   const [serviceName, setServiceName] = useState(service?.serviceName || "");
@@ -47,6 +51,12 @@ const EditServiceScreen = ({ route, navigation }: any) => {
   const [imagePreviewUri, setImagePreviewUri] = useState<string | null>(service?.image || null);
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const hasAtLeastOnePrice = () =>
+    [pricePerMin, pricePerHour, pricePerMsg, pricePerSession, packagePrice].some(
+      (value) => Number(value) > 0,
+    );
 
   const pickImage = () => {
     launchImageLibrary({ mediaType: "photo" }, res => {
@@ -73,14 +83,28 @@ const EditServiceScreen = ({ route, navigation }: any) => {
       return;
     }
 
+    if (!description.trim()) {
+      Alert.alert("Error", "Service description required");
+      return;
+    }
+
+    if (!eligibility.trim()) {
+      Alert.alert("Error", "Eligibility details required");
+      return;
+    }
+
+    if (!hasAtLeastOnePrice()) {
+      Alert.alert("Error", "Please keep at least one pricing option");
+      return;
+    }
+
+    if (pricingModel === "per_session" && Number(sessionDurationMinutes) <= 0) {
+      Alert.alert("Error", "Please enter session duration for per-session pricing");
+      return;
+    }
+
     try {
       setLoading(true);
-
-      const token = await getStoredToken();
-      if (!token) {
-        Alert.alert("Error", "Please login again");
-        return;
-      }
 
       const imageUrl = selectedImage
         ? await uploadImageAsset(selectedImage)
@@ -102,39 +126,46 @@ const EditServiceScreen = ({ route, navigation }: any) => {
         image: imageUrl
       };
 
-      const res = await API.put(`/service/update/${service._id}`, payload, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
+      const res = await API.put(`/service/update/${service._id}`, payload);
 
       if (res?.data?.success) {
+        setErrorMessage("");
         Alert.alert("Success", "Service updated successfully");
         navigation.goBack();
       } else {
+        setErrorMessage(res?.data?.message || "Update failed");
         Alert.alert("Error", res?.data?.message || "Update failed");
       }
     } catch (err: any) {
       console.log("UPDATE ERROR:", err?.response?.data || err.message);
-      Alert.alert("Error", err?.response?.data?.message || "Update failed");
+      const nextMessage = getReadableApiErrorMessage(err, "Update failed");
+      setErrorMessage(nextMessage);
+      Alert.alert("Error", nextMessage);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
+      <KeyboardAvoidingView style={styles.screen} behavior="padding">
+      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color="#111" />
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>Edit Service</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Edit Service</Text>
 
         <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        {errorMessage ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerTitle}>Service issue</Text>
+            <Text style={styles.errorBannerText}>{errorMessage}</Text>
+          </View>
+        ) : null}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Service Image</Text>
 
@@ -265,7 +296,8 @@ const EditServiceScreen = ({ route, navigation }: any) => {
           )}
         </TouchableOpacity>
       </ScrollView>
-    </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
@@ -287,6 +319,25 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: "700", color: "#111" },
   headerSpacer: { width: 24 },
   scrollContent: { paddingBottom: 40 },
+  errorBanner: {
+    marginHorizontal: 20,
+    marginTop: 20,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  errorBannerTitle: {
+    color: "#991B1B",
+    fontWeight: "800",
+    marginBottom: 4
+  },
+  errorBannerText: {
+    color: "#B91C1C",
+    lineHeight: 19
+  },
   card: {
     backgroundColor: "#fff",
     marginHorizontal: 20,

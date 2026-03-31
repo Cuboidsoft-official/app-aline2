@@ -9,8 +9,10 @@ import {
   ScrollView,
   Switch,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  KeyboardAvoidingView
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { launchImageLibrary } from "react-native-image-picker";
 import {
   errorCodes,
@@ -22,9 +24,10 @@ import {
 } from "@react-native-documents/picker";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
-import { getStoredToken } from "../utils/authSession";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { uploadDocumentAsset, uploadImageAsset } from "../utils/uploadMedia";
 import { DEFAULT_AVATAR_URL, DEFAULT_COVER_URL } from "../constants/defaultAssets";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 const DEFAULT_COVER = DEFAULT_COVER_URL;
 const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
@@ -86,10 +89,12 @@ const getDocumentPickerMessage = (error: unknown): string => {
 };
 
 const SellerRegistration = ({ navigation, route }: any) => {
+  const { colors } = useAppTheme();
   const mode: SellerRegistrationMode = route?.params?.mode === "edit" ? "edit" : "create";
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(mode === "edit");
+  const [errorMessage, setErrorMessage] = useState("");
 
   const [name, setName] = useState("");
   const [specialization, setSpecialization] = useState("");
@@ -150,21 +155,16 @@ const SellerRegistration = ({ navigation, route }: any) => {
     const loadSellerProfile = async () => {
       try {
         setInitializing(true);
-        const token = await getStoredToken();
-        const res = await API.get("/seller/me", {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        const res = await API.get("/seller/me");
 
         if (active && res?.data?.seller) {
           hydrateSellerProfile(res.data.seller as SellerProfileResponse);
+          setErrorMessage("");
         }
       } catch (error: any) {
         console.log("seller edit load error:", error?.response?.data || error?.message);
         if (active) {
-          Alert.alert("Error", "Failed to load seller profile");
-          navigation.goBack();
+          setErrorMessage(getReadableApiErrorMessage(error, "Failed to load seller profile."));
         }
       } finally {
         if (active) {
@@ -315,6 +315,10 @@ const SellerRegistration = ({ navigation, route }: any) => {
         Alert.alert("Validation", "Please enter specialization");
         return false;
       }
+      if (!bio.trim()) {
+        Alert.alert("Validation", "Please add a short professional bio");
+        return false;
+      }
     }
 
     if (step === 2) {
@@ -381,13 +385,6 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
       setLoading(true);
 
-      const token = await getStoredToken();
-
-      if (!token) {
-        Alert.alert("Error", "User token not found. Please login again.");
-        return;
-      }
-
       const [
         uploadedProfilePic,
         uploadedCoverPic,
@@ -430,13 +427,10 @@ const SellerRegistration = ({ navigation, route }: any) => {
       const endpoint = mode === "edit" ? "/seller/update" : "/seller/register";
       const method = mode === "edit" ? API.put : API.post;
 
-      const res = await method(endpoint, payload, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
+      const res = await method(endpoint, payload);
 
       if (res?.data?.success) {
+        setErrorMessage("");
         Alert.alert(
           "Success",
           mode === "edit"
@@ -445,17 +439,24 @@ const SellerRegistration = ({ navigation, route }: any) => {
         );
         navigation.replace("SellerDashboardScreen");
       } else {
+        const fallbackMessage = mode === "edit" ? "Profile update failed" : "Registration failed";
+        setErrorMessage(res?.data?.message || fallbackMessage);
         Alert.alert(
           "Error",
-          res?.data?.message || (mode === "edit" ? "Profile update failed" : "Registration failed")
+          res?.data?.message || fallbackMessage
         );
       }
     } catch (error: any) {
       console.log("seller register error:", error?.response?.data || error.message);
+      const nextMessage = getReadableApiErrorMessage(
+        error,
+        mode === "edit" ? "Seller update failed" : "Seller registration failed"
+      );
+      setErrorMessage(nextMessage);
 
       Alert.alert(
         "Error",
-        error?.response?.data?.message || (mode === "edit" ? "Seller update failed" : "Seller registration failed")
+        nextMessage
       );
     } finally {
       setLoading(false);
@@ -464,26 +465,27 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
   if (initializing) {
     return (
-      <View style={styles.loaderContainer}>
+      <SafeAreaView style={[styles.loaderContainer, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color="#7B4DFF" />
-        <Text style={styles.loaderText}>
+        <Text style={[styles.loaderText, { color: colors.mutedText }]}>
           Loading seller profile...
         </Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
+      <KeyboardAvoidingView style={styles.screen} behavior="padding">
+      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backBtn}
         >
-          <Icon name="arrow-back" size={22} color="#000" />
+          <Icon name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
           {mode === "edit" ? "Update Seller Profile" : "Seller Registration"}
         </Text>
 
@@ -491,9 +493,16 @@ const SellerRegistration = ({ navigation, route }: any) => {
       </View>
 
       <ScrollView
-        style={styles.container}
+        style={[styles.container, { backgroundColor: colors.background }]}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        {errorMessage ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerTitle}>Seller profile issue</Text>
+            <Text style={styles.errorBannerText}>{errorMessage}</Text>
+          </View>
+        ) : null}
         <View style={styles.coverContainer}>
           <Image
             source={{ uri: cover || DEFAULT_COVER }}
@@ -718,7 +727,8 @@ const SellerRegistration = ({ navigation, route }: any) => {
           </View>
         </View>
       </ScrollView>
-    </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
@@ -741,6 +751,25 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#F6F7FB"
+  },
+  errorBanner: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  errorBannerTitle: {
+    color: "#991B1B",
+    fontWeight: "800",
+    marginBottom: 4
+  },
+  errorBannerText: {
+    color: "#B91C1C",
+    lineHeight: 19
   },
   header: {
     height: 90,
