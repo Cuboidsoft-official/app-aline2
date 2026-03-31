@@ -4,6 +4,7 @@ import {
   Alert,
   FlatList,
   Image,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +16,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 
@@ -32,18 +34,25 @@ function CloseFriendsScreen({ navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
   const [query, setQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [following, setFollowing] = useState<UserRow[]>([]);
   const [closeFriendIds, setCloseFriendIds] = useState<string[]>([]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (showRefreshing = false) => {
     try {
-      setLoading(true);
+      if (showRefreshing) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       const profileRes = await API.get("/auth/profile");
       const currentUserId = profileRes.data?.user?._id;
 
       if (!currentUserId) {
         setFollowing([]);
         setCloseFriendIds([]);
+        setErrorMessage("Please log in again to manage close friends.");
         return;
       }
 
@@ -57,11 +66,15 @@ function CloseFriendsScreen({ navigation }: any) {
 
       setFollowing(followingUsers);
       setCloseFriendIds(currentCloseFriends.map((item: UserRow) => item._id));
+      setErrorMessage("");
     } catch (error) {
       console.log("close friends load error:", error);
-      Alert.alert("Unable to load close friends", "Please try again.");
+      setErrorMessage(getReadableApiErrorMessage(error, "Unable to load close friends."));
+      setFollowing([]);
+      setCloseFriendIds([]);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -100,13 +113,18 @@ function CloseFriendsScreen({ navigation }: any) {
         await API.post("/user/close-friends/add", { friendId: userId });
         setCloseFriendIds((prev) => [...prev, userId]);
       }
+      setErrorMessage("");
     } catch (error) {
       console.log("close friend toggle error:", error);
-      Alert.alert("Unable to update close friends", "Please try again.");
+      Alert.alert("Unable to update close friends", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setBusyId("");
     }
   };
+
+  const onRefresh = useCallback(async () => {
+    await loadData(true);
+  }, [loadData]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -142,13 +160,21 @@ function CloseFriendsScreen({ navigation }: any) {
           data={filteredFollowing}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.listContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Icon name="people-outline" size={40} color={colors.primary} />
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>No followed accounts yet</Text>
-              <Text style={[styles.emptyCopy, { color: colors.mutedText }]}>
-                Follow people first, then you can add them to your close friends list.
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                {errorMessage ? "Close friends unavailable" : "No followed accounts yet"}
               </Text>
+              <Text style={[styles.emptyCopy, { color: colors.mutedText }]}>
+                {errorMessage || "Follow people first, then you can add them to your close friends list."}
+              </Text>
+              {errorMessage ? (
+                <TouchableOpacity style={[styles.retryButton, { backgroundColor: colors.primary }]} onPress={() => loadData()}>
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           }
           renderItem={({ item }) => {
@@ -260,4 +286,14 @@ const styles = StyleSheet.create({
   emptyState: { paddingTop: 80, alignItems: "center" },
   emptyTitle: { marginTop: 12, fontSize: 18, fontWeight: "700" },
   emptyCopy: { marginTop: 8, fontSize: 14, lineHeight: 20, textAlign: "center" },
+  retryButton: {
+    marginTop: 16,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  retryText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
 });

@@ -55,6 +55,7 @@ function StoryActivitySheet({
   const [activeTab, setActiveTab] = useState<ActivityTab>(initialTab);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
   const [savingSettings, setSavingSettings] = useState(false);
@@ -85,6 +86,7 @@ function StoryActivitySheet({
     setViewers(nextViewers);
     setLikers(nextLikers);
     setComments(nextComments);
+    setErrorMessage("");
     onStoryUpdate?.(nextStory);
   }, [onStoryUpdate, storyId]);
 
@@ -102,6 +104,7 @@ function StoryActivitySheet({
       setRefreshing(false);
       setSubmitting(false);
       setBusyIds({});
+      setErrorMessage("");
       return;
     }
 
@@ -112,8 +115,7 @@ function StoryActivitySheet({
         await load();
       } catch (error) {
         if (active) {
-          Alert.alert("Could not load story activity", toUserSafeMessage(error));
-          onClose();
+          setErrorMessage(toUserSafeMessage(error));
         }
       } finally {
         if (active) {
@@ -135,7 +137,7 @@ function StoryActivitySheet({
     try {
       await load();
     } catch (error) {
-      Alert.alert("Refresh failed", toUserSafeMessage(error));
+      setErrorMessage(toUserSafeMessage(error));
     } finally {
       setRefreshing(false);
     }
@@ -414,6 +416,14 @@ function StoryActivitySheet({
             <View style={styles.loader}>
               <ActivityIndicator size="small" color="#3345d1" />
             </View>
+          ) : errorMessage ? (
+            <View style={styles.errorState}>
+              <Text style={styles.errorTitle}>Story activity unavailable</Text>
+              <Text style={styles.errorText}>{errorMessage}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => load().catch((error) => setErrorMessage(toUserSafeMessage(error)))}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
           ) : activeTab === "replies" ? (
             <>
               <FlatList
@@ -575,6 +585,33 @@ const styles = StyleSheet.create({
   },
   settingChipLabel: { color: "#374151", fontWeight: "700", fontSize: 12.5 },
   loader: { paddingVertical: 24, alignItems: "center" },
+  errorState: {
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+    alignItems: "center",
+  },
+  errorTitle: {
+    color: "#111827",
+    fontWeight: "800",
+    fontSize: 16,
+  },
+  errorText: {
+    marginTop: 8,
+    color: "#6b7280",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: "#3345d1",
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  retryButtonText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
   listContent: { paddingBottom: 100 },
   metricRow: {
     flexDirection: "row",
