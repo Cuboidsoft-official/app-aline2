@@ -1,336 +1,229 @@
-import React, { useState } from "react";
+import React from "react";
 import {
  View,
  Text,
  StyleSheet,
- TextInput,
  TouchableOpacity,
- ScrollView
+ ScrollView,
+ StatusBar,
+ Linking,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 import { monetizationDisabledMessage, productFlags } from "../config/productFlags";
+import { useAppTheme } from "../theme/AppThemeContext";
 
-type ComboOption = "Stories" | "Post" | "Reel" | "Video";
-type ChargesMap = Record<ComboOption, number>;
+const supportEmail = "support@aline2.app";
 
-const comboOptions: ComboOption[] = ["Stories", "Post", "Reel", "Video"];
+const moneyPoints = [
+ "Complete your seller profile so buyers can trust your services.",
+ "Keep your service catalog, pricing, and availability accurate.",
+ "Track paid bookings and settlement review from the earnings screen.",
+];
 
-function HowToEarnScreen({ navigation }:any) {
- const [selectedCombo, setSelectedCombo] = useState<ComboOption[]>([]);
+function HowToEarnScreen({ navigation }: any) {
+ const { colors, isDarkMode } = useAppTheme();
 
- const [charges, setCharges] = useState<ChargesMap>({
-  Stories: 500,
-  Post: 1000,
-  Reel: 1500,
-  Video: 2500
- });
+ const openSupport = async () => {
+  const mailtoUrl = `mailto:${supportEmail}?subject=Aline2%20seller%20business%20tools`;
 
- // 👉 TOTAL CALCULATION
- const total = selectedCombo.reduce((sum, item) => {
-  return sum + (charges[item] || 0);
- }, 0);
-
- const toggleCombo = (item: ComboOption) => {
-  if (selectedCombo.includes(item)) {
-   setSelectedCombo(selectedCombo.filter(i => i !== item));
-  } else {
-   setSelectedCombo([...selectedCombo, item]);
+  try {
+   await Linking.openURL(mailtoUrl);
+  } catch (error) {
+   console.log("open support mail failed:", error);
   }
  };
 
- const updateCharge = (key: ComboOption, value: string) => {
-  setCharges({ ...charges, [key]: Number(value) });
- };
-
- if (!productFlags.sellerMonetizationInConsumerApp) {
-  return (
-   <View style={styles.disabledContainer}>
-    <View style={styles.header}>
-     <TouchableOpacity onPress={() => navigation.goBack()}>
-      <Icon name="arrow-back" size={24} color="#fff" />
-     </TouchableOpacity>
-     <Text style={styles.headerTitle}>Business Tools</Text>
-    </View>
-
-    <View style={styles.disabledCard}>
-     <Icon name="briefcase-outline" size={28} color="#ab2aeb" />
-     <Text style={styles.disabledTitle}>Creator monetization is out of scope here</Text>
-     <Text style={styles.disabledText}>{monetizationDisabledMessage}</Text>
-    </View>
+ const renderDisabledState = () => (
+  <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+   <View style={[styles.iconWrap, { backgroundColor: isDarkMode ? "#221B3A" : "#F2EDFF" }]}>
+    <Icon name="briefcase-outline" size={28} color={colors.primary} />
    </View>
-  );
- }
-
- const InputField = ({ icon, placeholder }: { icon: string; placeholder: string }) => (
-  <View style={styles.inputBox}>
-   <Icon name={icon} size={18} color="#ab2aeb" />
-   <TextInput
-    placeholder={placeholder}
-    placeholderTextColor="#999"
-    style={styles.input}
-   />
+   <Text style={[styles.title, { color: colors.text }]}>Business tools are limited in this build</Text>
+   <Text style={[styles.description, { color: colors.mutedText }]}>{monetizationDisabledMessage}</Text>
+   <TouchableOpacity
+    style={[styles.secondaryButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+    onPress={() => navigation.goBack()}
+   >
+    <Text style={[styles.secondaryButtonText, { color: colors.text }]}>Go back</Text>
+   </TouchableOpacity>
   </View>
  );
 
- return (
-  <View style={{ flex: 1 }}>
-   <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-
-    {/* HEADER */}
-    <View style={styles.header}>
-     <TouchableOpacity onPress={() => navigation.goBack()}>
-      <Icon name="arrow-back" size={24} color="#fff" />
-     </TouchableOpacity>
-     <Text style={styles.headerTitle}>How to Earn</Text>
-    </View>
-
-    {/* GUIDE */}
-    <View style={styles.guideBox}>
-     <Text style={styles.guideTitle}>Start Earning Easily</Text>
-
-     {[
-      "Create your profile",
-      "Set pricing",
-      "Get paid collaborations"
-     ].map((step, i) => (
-      <View key={i} style={styles.stepRow}>
-       <View style={styles.stepDot} />
-       <Text style={styles.guideText}>{step}</Text>
-      </View>
-     ))}
-    </View>
-
-    {/* FORM */}
-    <View style={styles.card}>
-
-     <InputField icon="person-outline" placeholder="Profile Name" />
-     <InputField icon="people-outline" placeholder="Followers Count" />
-     <InputField icon="location-outline" placeholder="Address" />
-
-     {/* CHARGES */}
-     <Text style={styles.section}>Set Your Charges</Text>
-
-     {comboOptions.map((item, i) => (
-      <View key={i} style={styles.chargeRow}>
-       <Text style={styles.chargeLabel}>{item}</Text>
-
-       <TextInput
-        style={styles.chargeInput}
-        keyboardType="numeric"
-        value={charges[item].toString()}
-        onChangeText={(text) => updateCharge(item, text)}
-       />
-      </View>
-     ))}
-
-     {/* DROPDOWN */}
-     <Text style={styles.section}>Select Services</Text>
-
-     {comboOptions.map((item, i) => (
-      <TouchableOpacity
-       key={i}
-       style={styles.optionRow}
-       onPress={() => toggleCombo(item)}
-      >
-       <Text>{item}</Text>
-
-       <Icon
-        name={selectedCombo.includes(item) ? "checkbox" : "square-outline"}
-        size={22}
-        color="#ab2aeb"
-       />
-      </TouchableOpacity>
-     ))}
-
-     {/* BANK */}
-     <InputField icon="card-outline" placeholder="Bank Details" />
-
-     <View style={{ height: 80 }} /> {/* space for bottom bar */}
-
-    </View>
-
-   </ScrollView>
-
-   {/* 🔥 STICKY TOTAL BAR */}
-   <View style={styles.bottomBar}>
-    <View>
-     <Text style={styles.totalLabel}>Total Earnings</Text>
-     <Text style={styles.total}>₹ {total}</Text>
-    </View>
-
-    <TouchableOpacity style={styles.submitBtn}>
-     <Text style={styles.submitText}>Submit</Text>
-    </TouchableOpacity>
+ const renderEnabledState = () => (
+  <>
+   <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <Text style={[styles.title, { color: colors.text }]}>Seller business tools</Text>
+    <Text style={[styles.description, { color: colors.mutedText }]}>
+     Use this app to manage your seller profile, publish services, and follow paid booking activity. Seller payouts remain manually reviewed for this launch, so the live earnings screen is the source of truth.
+    </Text>
    </View>
 
-  </View>
+   <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <Text style={[styles.sectionTitle, { color: colors.text }]}>What to focus on</Text>
+    {moneyPoints.map((point) => (
+     <View key={point} style={styles.pointRow}>
+      <Icon name="checkmark-circle-outline" size={18} color={colors.primary} />
+      <Text style={[styles.pointText, { color: colors.mutedText }]}>{point}</Text>
+     </View>
+    ))}
+   </View>
+
+   <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <Text style={[styles.sectionTitle, { color: colors.text }]}>Open a real tool</Text>
+
+    <TouchableOpacity
+     style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+     onPress={() => navigation.navigate("SellerDashboardScreen")}
+    >
+     <Text style={styles.primaryButtonText}>Manage services</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+     style={[styles.secondaryButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+     onPress={() => navigation.navigate("WalletScreen")}
+    >
+     <Text style={[styles.secondaryButtonText, { color: colors.text }]}>View seller earnings</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+     style={[styles.secondaryButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+     onPress={() => navigation.navigate("SellerRegistration")}
+    >
+     <Text style={[styles.secondaryButtonText, { color: colors.text }]}>Edit seller profile</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+     style={[styles.tertiaryButton, { borderColor: colors.border }]}
+     onPress={openSupport}
+    >
+     <Text style={[styles.tertiaryButtonText, { color: colors.primary }]}>Contact support</Text>
+    </TouchableOpacity>
+   </View>
+  </>
+ );
+
+ return (
+  <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+   <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={colors.background} />
+
+   <View style={[styles.header, { borderBottomColor: colors.border }]}>
+    <TouchableOpacity onPress={() => navigation.goBack()}>
+     <Icon name="arrow-back" size={24} color={colors.text} />
+    </TouchableOpacity>
+    <Text style={[styles.headerTitle, { color: colors.text }]}>Business Tools</Text>
+    <View style={styles.headerSpacer} />
+   </View>
+
+   <ScrollView
+    style={styles.scroll}
+    contentContainerStyle={styles.content}
+    showsVerticalScrollIndicator={false}
+   >
+    {productFlags.sellerMonetizationInConsumerApp ? renderEnabledState() : renderDisabledState()}
+   </ScrollView>
+  </SafeAreaView>
  );
 }
 
 export default HowToEarnScreen;
 
 const styles = StyleSheet.create({
- disabledContainer: {
-  flex: 1,
-  backgroundColor: "#f8f5ff",
- },
-
  container: {
   flex: 1,
-  backgroundColor: "#f8f5ff",
  },
- disabledCard: {
-  margin: 16,
-  padding: 20,
-  borderRadius: 18,
-  backgroundColor: "#fff",
-  borderWidth: 1,
-  borderColor: "#E9D5FF",
+ scroll: {
+  flex: 1,
  },
- disabledTitle: {
-  marginTop: 12,
-  color: "#111827",
+ header: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  paddingHorizontal: 18,
+  paddingVertical: 14,
+  borderBottomWidth: 1,
+ },
+ headerTitle: {
   fontSize: 18,
-  fontWeight: "bold",
+  fontWeight: "700",
  },
- disabledText: {
-  marginTop: 8,
-  color: "#4B5563",
+ headerSpacer: {
+  width: 24,
+ },
+ content: {
+  padding: 18,
+  gap: 16,
+ },
+ card: {
+  borderWidth: 1,
+  borderRadius: 18,
+  padding: 18,
+ },
+ iconWrap: {
+  width: 56,
+  height: 56,
+  borderRadius: 28,
+  alignItems: "center",
+  justifyContent: "center",
+  marginBottom: 16,
+ },
+ title: {
+  fontSize: 21,
+  fontWeight: "800",
+ },
+ description: {
+  marginTop: 10,
+  fontSize: 14,
   lineHeight: 21,
  },
-
- header: {
-  backgroundColor: "#ab2aeb",
-  paddingTop: 70,
-  paddingBottom: 20,
-  paddingHorizontal: 20,
+ sectionTitle: {
+  fontSize: 16,
+  fontWeight: "700",
+  marginBottom: 12,
+ },
+ pointRow: {
   flexDirection: "row",
-  alignItems: "center",
+  alignItems: "flex-start",
+  gap: 10,
+  marginBottom: 12,
  },
-
- headerTitle: {
-  color: "#fff",
-  fontSize: 20,
-  fontWeight: "bold",
-  marginLeft: 15,
- },
-
- guideBox: {
-  backgroundColor: "#fff",
-  margin: 15,
-  padding: 15,
-  borderRadius: 15,
- },
-
- guideTitle: {
-  fontWeight: "bold",
-  color: "#ab2aeb",
- },
-
- stepRow: {
-  flexDirection: "row",
-  marginTop: 5,
- },
-
- stepDot: {
-  width: 6,
-  height: 6,
-  backgroundColor: "#ab2aeb",
-  borderRadius: 10,
-  marginRight: 8,
-  marginTop: 6,
- },
-
- guideText: {
-  color: "#555",
- },
-
- card: {
-  backgroundColor: "#fff",
-  marginHorizontal: 15,
-  borderRadius: 20,
-  padding: 20,
- },
-
- inputBox: {
-  flexDirection: "row",
-  alignItems: "center",
-  backgroundColor: "#f4f4f4",
-  borderRadius: 12,
-  paddingHorizontal: 12,
-  marginTop: 12,
- },
-
- input: {
+ pointText: {
   flex: 1,
-  padding: 12,
+  fontSize: 14,
+  lineHeight: 21,
  },
-
- section: {
-  marginTop: 20,
-  fontWeight: "bold",
-  color: "#ab2aeb",
+ primaryButton: {
+  borderRadius: 14,
+  paddingVertical: 14,
+  alignItems: "center",
+  marginBottom: 12,
  },
-
- chargeRow: {
-  flexDirection: "row",
-  justifyContent: "space-between",
-  marginTop: 10,
+ primaryButtonText: {
+  color: "#fff",
+  fontSize: 15,
+  fontWeight: "700",
  },
-
- chargeLabel: {
-  fontWeight: "500",
- },
-
- chargeInput: {
-  backgroundColor: "#f4f4f4",
-  borderRadius: 8,
-  paddingHorizontal: 10,
-  minWidth: 80,
-  textAlign: "center",
- },
-
- optionRow: {
-  flexDirection: "row",
-  justifyContent: "space-between",
+ secondaryButton: {
+  borderWidth: 1,
+  borderRadius: 14,
+  paddingVertical: 14,
+  alignItems: "center",
   marginTop: 12,
  },
-
- /* 🔥 BOTTOM BAR */
- bottomBar: {
-  position: "absolute",
-  bottom: 0,
-  width: "100%",
-  backgroundColor: "#fff",
-  padding: 15,
-  flexDirection: "row",
-  justifyContent: "space-between",
+ secondaryButtonText: {
+  fontSize: 15,
+  fontWeight: "600",
+ },
+ tertiaryButton: {
+  marginTop: 12,
+  borderWidth: 1,
+  borderRadius: 14,
+  paddingVertical: 14,
   alignItems: "center",
-  borderTopWidth: 0.5,
-  borderColor: "#ddd",
+  borderStyle: "dashed",
  },
-
- totalLabel: {
-  fontSize: 12,
-  color: "#888",
+ tertiaryButtonText: {
+  fontSize: 15,
+  fontWeight: "700",
  },
-
- total: {
-  fontSize: 20,
-  fontWeight: "bold",
-  color: "#ab2aeb",
- },
-
- submitBtn: {
-  backgroundColor: "#ab2aeb",
-  paddingVertical: 10,
-  paddingHorizontal: 20,
-  borderRadius: 10,
- },
-
- submitText: {
-  color: "#fff",
-  fontWeight: "bold",
- },
-
 });

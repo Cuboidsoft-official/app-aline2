@@ -1,18 +1,31 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {View,Text,TouchableOpacity,Alert,StyleSheet,TextInput,ActivityIndicator} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { clearStoredSession } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
 
 const DeleteAccountScreen = ({ navigation }: any) => {
- const { colors } = useAppTheme();
+ const { colors, isDarkMode } = useAppTheme();
  const [password, setPassword] = useState("");
  const [confirmationText, setConfirmationText] = useState("");
  const [loading, setLoading] = useState(false);
+ const [errorMessage, setErrorMessage] = useState("");
+
+ const trimmedConfirmationText = confirmationText.trim().toUpperCase();
+ const canSubmit = useMemo(
+  () => trimmedConfirmationText === "DELETE" && !loading,
+  [loading, trimmedConfirmationText]
+ );
 
  const deleteAccount = ()=>{
+  if (trimmedConfirmationText !== "DELETE") {
+   setErrorMessage('Type "DELETE" exactly to confirm account deletion.');
+   return;
+  }
+
   Alert.alert(
    "Delete account",
    "This permanently removes your account data, conversations, posts, services, and related records. This action cannot be undone.",
@@ -23,6 +36,7 @@ const DeleteAccountScreen = ({ navigation }: any) => {
      style:"destructive",
      onPress: async () => {
       try {
+       setErrorMessage("");
        setLoading(true);
        const res = await API.post("/user/account/delete", {
         password,
@@ -40,10 +54,7 @@ const DeleteAccountScreen = ({ navigation }: any) => {
         routes: [{ name: "Login" }]
        });
       } catch (error: any) {
-       Alert.alert(
-        "Unable to delete account",
-        error?.response?.data?.message || "Please try again."
-       );
+       setErrorMessage(getReadableApiErrorMessage(error, "Please try again."));
       } finally {
        setLoading(false);
       }
@@ -64,33 +75,59 @@ const DeleteAccountScreen = ({ navigation }: any) => {
    </View>
 
    <View style={styles.content}>
-    <Text style={[styles.warningTitle, { color: colors.text }]}>Permanent account deletion</Text>
+   <Text style={[styles.warningTitle, { color: colors.text }]}>Permanent account deletion</Text>
     <Text style={[styles.warningCopy, { color: colors.mutedText }]}>
-     To prevent accidental deletion, enter your current password and type DELETE below. Your account data and related records will be removed.
+     To prevent accidental deletion, type DELETE below. If your account uses a password, enter it too. Your account data and related records will be removed.
     </Text>
 
-    <TextInput
+   <TextInput
      secureTextEntry
      value={password}
-     onChangeText={setPassword}
-     placeholder="Current password"
+     onChangeText={(value) => {
+      setPassword(value);
+      if (errorMessage) {
+       setErrorMessage("");
+      }
+     }}
+     placeholder="Current password if set"
      placeholderTextColor={colors.placeholder}
      style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
     />
 
     <TextInput
      value={confirmationText}
-     onChangeText={setConfirmationText}
+     onChangeText={(value) => {
+      setConfirmationText(value);
+      if (errorMessage) {
+       setErrorMessage("");
+      }
+     }}
      placeholder='Type DELETE'
      autoCapitalize="characters"
      placeholderTextColor={colors.placeholder}
      style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
     />
 
+    <View style={[styles.requirementsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+     <Text style={[styles.requirementsTitle, { color: colors.text }]}>Before we delete your account</Text>
+     <Text style={[styles.requirementText, { color: password.trim() ? colors.text : colors.mutedText }]}>
+      {password.trim() ? "Password entered for password-based account" : "Password is optional for Google-only accounts"}
+     </Text>
+     <Text style={[styles.requirementText, { color: trimmedConfirmationText === "DELETE" ? colors.text : colors.mutedText }]}>
+      {trimmedConfirmationText === "DELETE" ? 'Confirmation phrase ready' : 'Type "DELETE" exactly'}
+     </Text>
+    </View>
+
+    {errorMessage ? (
+     <View style={[styles.errorBanner, { backgroundColor: isDarkMode ? "#3b1f24" : "#FEE2E2", borderColor: isDarkMode ? "#7f1d1d" : "#FCA5A5" }]}>
+      <Text style={[styles.errorText, { color: isDarkMode ? "#FECACA" : "#991B1B" }]}>{errorMessage}</Text>
+     </View>
+    ) : null}
+
     <TouchableOpacity
-     style={[styles.deleteButton, { backgroundColor: loading ? "#d37f7f" : "#d62828" }]}
+     style={[styles.deleteButton, { backgroundColor: canSubmit ? "#d62828" : "#d37f7f" }]}
      onPress={deleteAccount}
-     disabled={loading}
+     disabled={!canSubmit}
     >
      {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.deleteButtonText}>Delete my account</Text>}
     </TouchableOpacity>
@@ -110,6 +147,11 @@ const styles = StyleSheet.create({
  warningTitle:{fontSize:22,fontWeight:"800"},
  warningCopy:{marginTop:10,fontSize:14,lineHeight:21},
  input:{borderWidth:1,borderRadius:14,paddingHorizontal:16,paddingVertical:14,fontSize:15,marginTop:18},
+ requirementsCard:{marginTop:18,borderWidth:1,borderRadius:14,padding:16,gap:8},
+ requirementsTitle:{fontSize:15,fontWeight:"700"},
+ requirementText:{fontSize:14,lineHeight:20},
+ errorBanner:{marginTop:18,borderWidth:1,borderRadius:14,paddingHorizontal:14,paddingVertical:12},
+ errorText:{fontSize:14,lineHeight:20,fontWeight:"600"},
  deleteButton:{marginTop:28,borderRadius:14,paddingVertical:16,alignItems:"center"},
  deleteButtonText:{color:"#fff",fontWeight:"700",fontSize:15}
 });
