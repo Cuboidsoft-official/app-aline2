@@ -8,17 +8,18 @@ import {
  TouchableOpacity,
  FlatList,
  Alert,
- ActivityIndicator
+ ActivityIndicator,
+ RefreshControl
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { appConfig } from "../config/env";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { shareContentLink } from "../utils/shareLinks";
-import { getStoredToken } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
 
 interface ProfilePost {
@@ -67,48 +68,54 @@ const ProfileScreen = ({navigation}: any) => {
  const [allPosts, setAllPosts] = useState<ProfilePost[]>([]);
  const [taggedPosts, setTaggedPosts] = useState<ProfilePost[]>([]);
  const [loading, setLoading] = useState(true);
+ const [refreshing, setRefreshing] = useState(false);
  const [privateLoading, setPrivateLoading] = useState(false);
+ const [errorMessage, setErrorMessage] = useState("");
  const [activeTab, setActiveTab] = useState<ProfileTab>("posts");
  const [isPrivate, setIsPrivate] = useState(false);
 
- const fetchProfile = useCallback(async () => {
+ const fetchProfile = useCallback(async (showRefreshing = false) => {
 
  try {
-   const token = await getStoredToken();
-   const profileRes = await API.get("/auth/profile", {
-    headers: {
-     Authorization: `Bearer ${token}`
-    }
-   });
+   if (showRefreshing) {
+    setRefreshing(true);
+   } else {
+    setLoading(true);
+   }
+   const profileRes = await API.get("/auth/profile");
 
    const profileUser = (profileRes.data.user || null) as ProfileUser | null;
    setUser(profileUser);
    setIsPrivate(!!profileUser?.isPrivate);
 
    if (profileUser?._id) {
-   const postsRes = await API.get(`/posts/user/${profileUser._id}`, {
-     headers: {
-      Authorization: `Bearer ${token}`
-     }
-    });
+    const [postsRes, taggedRes] = await Promise.allSettled([
+      API.get(`/posts/user/${profileUser._id}`),
+      API.get(`/posts/tagged/${profileUser._id}`),
+    ]);
 
-    const taggedRes = await API.get(`/posts/tagged/${profileUser._id}`, {
-     headers: {
-      Authorization: `Bearer ${token}`
-     }
-    });
-
-    setAllPosts((postsRes.data.posts || []) as ProfilePost[]);
-    setTaggedPosts((taggedRes.data.posts || []) as ProfilePost[]);
+    setAllPosts(
+      postsRes.status === "fulfilled" ? ((postsRes.value.data.posts || []) as ProfilePost[]) : [],
+    );
+    setTaggedPosts(
+      taggedRes.status === "fulfilled" ? ((taggedRes.value.data.posts || []) as ProfilePost[]) : [],
+    );
    } else {
     setAllPosts([]);
     setTaggedPosts([]);
    }
 
+   setErrorMessage("");
+
   } catch (error) {
    console.log("Profile Error:", getErrorMessage(error));
+   setUser(null);
+   setAllPosts([]);
+   setTaggedPosts([]);
+   setErrorMessage(getReadableApiErrorMessage(error, "Could not load your profile right now."));
   } finally {
    setLoading(false);
+   setRefreshing(false);
   }
 
  }, []);
@@ -122,6 +129,10 @@ const ProfileScreen = ({navigation}: any) => {
    fetchProfile().catch(() => {});
   }, [fetchProfile]),
  );
+
+ const onRefresh = useCallback(async () => {
+  await fetchProfile(true);
+ }, [fetchProfile]);
 
  const posts = useMemo(() => {
   if (activeTab === "swipes") {
@@ -153,13 +164,7 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
 
  try {
    setPrivateLoading(true);
-   const token = await getStoredToken();
-
-   const res = await API.post(
-    "/auth/toggle-private",
-    {},
-    { headers: { Authorization: `Bearer ${token}` } }
-   );
+   const res = await API.post("/auth/toggle-private");
 
    const nextValue = !!res?.data?.isPrivate;
    setIsPrivate(nextValue);
@@ -168,8 +173,8 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
     "Profile Updated",
     nextValue ? "Your profile is now Private" : "Your profile is now Public"
    );
-  } catch (error) {
-   Alert.alert("Error", "Unable to change profile privacy");
+ } catch (error) {
+   Alert.alert("Error", getReadableApiErrorMessage(error, "Unable to change profile privacy."));
    console.log("Private Toggle Error:", getErrorMessage(error));
   } finally {
    setPrivateLoading(false);
@@ -359,6 +364,24 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
     <Text style={[styles.requestsBtnText, { color: colors.text }]}>My Requests</Text>
    </TouchableOpacity>
 
+   <View style={styles.archiveRow}>
+    <TouchableOpacity
+     style={[styles.archiveButton, { borderColor: colors.border, backgroundColor: colors.card }]}
+     onPress={() => navigation.navigate("PostArchive")}
+    >
+     <Icon name="archive-outline" size={18} color={colors.text} />
+     <Text style={[styles.archiveButtonText, { color: colors.text }]}>Post Archive</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+     style={[styles.archiveButton, { borderColor: colors.border, backgroundColor: colors.card }]}
+     onPress={() => navigation.navigate("StoryArchive")}
+    >
+     <Icon name="time-outline" size={18} color={colors.text} />
+     <Text style={[styles.archiveButtonText, { color: colors.text }]}>Story Archive</Text>
+    </TouchableOpacity>
+   </View>
+
    <View style={styles.tabs}>
 
     <TouchableOpacity
@@ -400,6 +423,18 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
   );
  }
 
+ if (!user && errorMessage) {
+  return (
+   <View style={[styles.center, { backgroundColor: colors.background, paddingHorizontal: 24 }]}>
+    <Text style={[styles.emptyTitle, { color: colors.text }]}>Profile unavailable</Text>
+    <Text style={[styles.emptyText, { color: colors.mutedText }]}>{errorMessage}</Text>
+    <TouchableOpacity style={styles.retryButton} onPress={() => fetchProfile()}>
+     <Text style={styles.retryButtonText}>Retry</Text>
+    </TouchableOpacity>
+   </View>
+  );
+ }
+
  return (
   <FlatList
    data={posts}
@@ -416,15 +451,23 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
       {activeTab === "tagged" ? "No tagged posts yet" : activeTab === "swipes" ? "No swipes yet" : "No posts yet"}
      </Text>
      <Text style={[styles.emptyText, { color: colors.mutedText }]}>
-      {activeTab === "tagged"
+      {errorMessage
+       ? errorMessage
+       : activeTab === "tagged"
        ? "Posts where you are tagged will show up here."
        : activeTab === "swipes"
         ? "Your short video posts will appear here."
         : "Share photos and videos to build your profile."}
      </Text>
+     {errorMessage ? (
+      <TouchableOpacity style={styles.retryButton} onPress={() => fetchProfile()}>
+       <Text style={styles.retryButtonText}>Retry</Text>
+      </TouchableOpacity>
+     ) : null}
     </View>
    }
    showsVerticalScrollIndicator={false}
+   refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
   />
  );
 };
@@ -605,6 +648,25 @@ bioSection: {
   color:"#333",
   fontWeight:"600"
  },
+ archiveRow:{
+  flexDirection:"row",
+  paddingHorizontal:20,
+  gap:10,
+  marginBottom:14
+ },
+ archiveButton:{
+  flex:1,
+  borderWidth:1,
+  borderRadius:12,
+  paddingVertical:12,
+  alignItems:"center",
+  justifyContent:"center",
+  flexDirection:"row"
+ },
+ archiveButtonText:{
+  marginLeft:8,
+  fontWeight:"600"
+ },
 
  tabs:{
   flexDirection:"row",
@@ -649,6 +711,17 @@ bioSection: {
   marginTop:8,
   textAlign:"center",
   lineHeight:20
+ },
+ retryButton:{
+  marginTop:16,
+  backgroundColor:"#7B4DFF",
+  borderRadius:999,
+  paddingHorizontal:16,
+  paddingVertical:10
+ },
+ retryButtonText:{
+  color:"#fff",
+  fontWeight:"700"
  },
 
  center:{

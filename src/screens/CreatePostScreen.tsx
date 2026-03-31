@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
   PanResponder,
   ScrollView,
   StyleSheet,
@@ -12,9 +13,11 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import {
   captureComposerAssets,
   ComposerAsset,
@@ -45,6 +48,7 @@ import {
   getUserOriginalSounds,
 } from "../utils/musicApi";
 import { getStoredUserId } from "../utils/authSession";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 type ComposerTab = "post" | "story" | "swipe";
 
@@ -196,6 +200,7 @@ const buildMusicLabel = (music: SelectedMusicClip | null | undefined): string =>
   [music?.title, music?.artist].filter(Boolean).join(" • ");
 
 function CreatePostScreen({ navigation, route }: any) {
+  const { colors } = useAppTheme();
   const initialTab = (route?.params?.initialTab as ComposerTab | undefined) || "post";
   const initialMedia = route?.params?.initialMedia as string | undefined;
   const initialMediaType = (route?.params?.initialMediaType as "image" | "video" | undefined) || "image";
@@ -203,6 +208,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [activeTab, setActiveTab] = useState<ComposerTab>(initialTab);
   const [publishing, setPublishing] = useState(false);
   const [pickingMedia, setPickingMedia] = useState(false);
+  const [publishError, setPublishError] = useState("");
 
   const [postType, setPostType] = useState<PostType>("photo");
   const [storyType, setStoryType] = useState<StoryType>("media");
@@ -458,6 +464,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const onSelectTab = (tab: ComposerTab) => {
     setActiveTab(tab);
     resetAssetsForTab(tab);
+    setPublishError("");
   };
 
   const setMusicForTab = (tab: ComposerTab, selection: SelectedMusicClip | null) => {
@@ -798,10 +805,13 @@ function CreatePostScreen({ navigation, route }: any) {
       }
 
       const publishedType = activeTab === "swipe" ? "swipe" : activeTab;
+      setPublishError("");
       Alert.alert("Published", `Your ${publishedType} is now live.`);
       navigation.navigate(activeTab === "swipe" ? "Swipes" : "Feed");
     } catch (error) {
-      Alert.alert("Publish failed", toUserSafeMessage(error));
+      const nextMessage = getReadableApiErrorMessage(error, toUserSafeMessage(error));
+      setPublishError(nextMessage);
+      Alert.alert("Publish failed", nextMessage);
     } finally {
       setPublishing(false);
     }
@@ -1472,18 +1482,37 @@ function CreatePostScreen({ navigation, route }: any) {
   );
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}><Text style={styles.headerTitle}>Advanced Create</Text></View>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <KeyboardAvoidingView style={styles.container} behavior="padding">
+      <View style={[styles.header, { borderColor: colors.border, backgroundColor: colors.background }]}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Advanced Create</Text>
+      </View>
 
       <View style={styles.tabsRow}>
         {tabs.map((tab) => (
-          <TouchableOpacity key={tab} style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]} onPress={() => onSelectTab(tab)}>
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab.toUpperCase()}</Text>
+          <TouchableOpacity
+            key={tab}
+            style={[
+              styles.tabButton,
+              { borderColor: colors.border, backgroundColor: colors.card },
+              activeTab === tab && styles.tabButtonActive,
+            ]}
+            onPress={() => onSelectTab(tab)}
+          >
+            <Text style={[styles.tabText, { color: activeTab === tab ? "#fff" : colors.mutedText }, activeTab === tab && styles.tabTextActive]}>
+              {tab.toUpperCase()}
+            </Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {publishError ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerTitle}>Publish issue</Text>
+            <Text style={styles.errorBannerText}>{publishError}</Text>
+          </View>
+        ) : null}
         {renderMediaPreview()}
 
         {!(activeTab === "story" && storyType === "text") ? (
@@ -1521,7 +1550,8 @@ function CreatePostScreen({ navigation, route }: any) {
           </Text>
         </TouchableOpacity>
       </ScrollView>
-    </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -1576,6 +1606,24 @@ const styles = StyleSheet.create({
   tabText: { fontWeight: "700", color: "#595959", fontSize: 12 },
   tabTextActive: { color: "#fff" },
   content: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 32 },
+  errorBanner: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 14,
+  },
+  errorBannerTitle: {
+    color: "#991B1B",
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  errorBannerText: {
+    color: "#B91C1C",
+    lineHeight: 19,
+  },
   preview: {
     width: "100%",
     height: 250,

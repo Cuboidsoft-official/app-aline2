@@ -1,5 +1,6 @@
 import React from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
 import { ContentKind } from "../../features/social/types";
@@ -12,7 +13,7 @@ function ContentActionsScreen({ route, navigation }: any) {
   const title = route?.params?.title as string | undefined;
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: "transparent" }]}>
       <ContentActionSheet
         visible
         contentType={contentType}
@@ -22,7 +23,7 @@ function ContentActionsScreen({ route, navigation }: any) {
         title={title}
         onClose={() => navigation.goBack()}
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
