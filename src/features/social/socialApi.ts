@@ -840,6 +840,10 @@ class RemoteSocialApi implements SocialApi {
     return this.getSwipes();
   }
 
+  async getReel(reelId: string): Promise<Reel> {
+    return this.getSwipe(reelId);
+  }
+
   async getSwipes(): Promise<Reel[]> {
     await loadModerationPrefs();
     const [reelsRes, savedIds] = await Promise.all([
@@ -860,6 +864,31 @@ class RemoteSocialApi implements SocialApi {
     );
 
     return applyContentVisibilityFilters(reels, "swipe");
+  }
+
+  async getSwipe(swipeId: string): Promise<Reel> {
+    await loadModerationPrefs();
+    const [res, savedIds, likes] = await Promise.all([
+      API.get(`/posts/${swipeId}`),
+      this.getSavedPostIds(),
+      this.getLikeStatusMap([swipeId], "postId"),
+    ]);
+
+    const reel = this.mapReel(res?.data?.post, {
+      liked: !!likes.get(swipeId),
+      saved: savedIds.has(swipeId),
+    });
+
+    if (
+      blockedUserIds.has(reel.user.id) ||
+      mutedUserIds.has(reel.user.id) ||
+      hiddenContentKeys.has(buildContentKey("swipe", reel.id))
+    ) {
+      throw new Error("Swipe not available.");
+    }
+
+    this.reelCache.set(reel.id, reel);
+    return reel;
   }
 
   async getStorySequence(storyId: string, options?: GetStorySequenceOptions): Promise<StorySequenceResponse> {

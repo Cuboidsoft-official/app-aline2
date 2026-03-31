@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import ContentActionSheet from "../features/social/components/ContentActionSheet";
@@ -25,6 +26,7 @@ import { FeedResponse, Post, Story } from "../features/social/types";
 import { toUserSafeMessage } from "../features/social/validation";
 import { getStoredUser } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 
 const initialFeed: FeedResponse = {
   stories: [],
@@ -76,6 +78,7 @@ function FeedScreen({ navigation }: any) {
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [activeSheet, setActiveSheet] = useState<null | "comments" | "share" | "actions">(null);
   const [currentUser, setCurrentUser] = useState<{ id: string; avatarUrl: string } | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const loadFeed = useCallback(async () => {
     const [data, storedUser] = await Promise.all([socialApi.getFeed(), getStoredUser()]);
@@ -88,6 +91,7 @@ function FeedScreen({ navigation }: any) {
           }
         : null,
     );
+    setErrorMessage("");
   }, []);
 
   useFocusEffect(
@@ -108,6 +112,12 @@ function FeedScreen({ navigation }: any) {
                   }
                 : null,
             );
+            setErrorMessage("");
+          }
+        } catch (error) {
+          if (active) {
+            setFeed(initialFeed);
+            setErrorMessage(getReadableApiErrorMessage(error, "Failed to load your feed."));
           }
         } finally {
           if (active) {
@@ -460,14 +470,14 @@ function FeedScreen({ navigation }: any) {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
+      <SafeAreaView style={styles.centered}>
         <ActivityIndicator size="large" color="#7b3fe4" />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <FlatList
         data={feed.posts}
         keyExtractor={(item) => item.id}
@@ -475,6 +485,12 @@ function FeedScreen({ navigation }: any) {
         ListHeaderComponent={renderHeader}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>{errorMessage ? "Feed unavailable" : "No posts yet"}</Text>
+            <Text style={styles.emptyText}>{errorMessage || "Posts from people you follow will appear here."}</Text>
+          </View>
+        }
       />
 
       <PostCommentsSheet
@@ -535,13 +551,16 @@ function FeedScreen({ navigation }: any) {
           }}
         />
       ) : null}
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
+  emptyState: { paddingHorizontal: 24, paddingTop: 72, alignItems: "center" },
+  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111" },
+  emptyText: { marginTop: 8, color: "#666", textAlign: "center", lineHeight: 20 },
   topBar: {
     flexDirection: "row",
     justifyContent: "space-between",

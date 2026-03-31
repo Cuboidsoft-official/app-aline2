@@ -11,9 +11,12 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 type HashtagPost = {
   _id: string;
@@ -42,10 +45,12 @@ const getPreviewUrl = (post: HashtagPost) =>
   post.media?.[0]?.thumbnailUrl || post.media?.[0]?.url || post.image || DEFAULT_AVATAR;
 
 function HashtagResultsScreen({ route, navigation }: any) {
+  const { colors } = useAppTheme();
   const hashtag = String(route?.params?.hashtag || "").replace(/^#/, "").trim();
   const [posts, setPosts] = useState<HashtagPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const loadPosts = useCallback(async () => {
     if (!hashtag) {
@@ -59,9 +64,11 @@ function HashtagResultsScreen({ route, navigation }: any) {
       const res = await API.get(`/search/hashtag/${encodeURIComponent(hashtag)}`);
 
       setPosts(res.data?.posts || []);
+      setErrorMessage("");
     } catch (error) {
       console.log("hashtag results error:", error);
       setPosts([]);
+      setErrorMessage(getReadableApiErrorMessage(error, "Could not load hashtag posts right now."));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -133,20 +140,20 @@ function HashtagResultsScreen({ route, navigation }: any) {
 
   if (loading) {
     return (
-      <View style={styles.center}>
+      <SafeAreaView style={[styles.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color="#7B4DFF" />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color="#111" />
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>#{hashtag || "hashtag"}</Text>
-        <View style={{ width: 24 }} />
+        <Text style={[styles.headerTitle, { color: colors.text }]}>#{hashtag || "hashtag"}</Text>
+        <View style={styles.headerSpacer} />
       </View>
 
       <FlatList
@@ -157,12 +164,21 @@ function HashtagResultsScreen({ route, navigation }: any) {
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No posts found</Text>
-            <Text style={styles.emptyText}>There are no posts tagged with #{hashtag} yet.</Text>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>
+              {errorMessage ? "Hashtag unavailable" : "No posts found"}
+            </Text>
+            <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+              {errorMessage || `There are no posts tagged with #${hashtag} yet.`}
+            </Text>
+            {errorMessage ? (
+              <TouchableOpacity style={styles.retryButton} onPress={loadPosts}>
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         }
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -174,7 +190,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#F7F8FC"
   },
   header: {
-    paddingTop: 54,
     paddingBottom: 16,
     paddingHorizontal: 18,
     flexDirection: "row",
@@ -183,6 +198,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderBottomWidth: 1,
     borderBottomColor: "#eee"
+  },
+  headerSpacer: {
+    width: 24
   },
   headerTitle: {
     fontSize: 18,
@@ -260,6 +278,17 @@ const styles = StyleSheet.create({
     color: "#666",
     textAlign: "center",
     lineHeight: 20
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: "#7B4DFF",
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10
+  },
+  retryText: {
+    color: "#fff",
+    fontWeight: "700"
   },
   center: {
     flex: 1,

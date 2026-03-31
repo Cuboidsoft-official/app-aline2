@@ -7,14 +7,19 @@ import {
   FlatList,
   Image,
   TouchableOpacity,
-  ActivityIndicator
+  ActivityIndicator,
+  RefreshControl
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import Icon from "react-native-vector-icons/Ionicons";
 import { getStoredUserId } from "../utils/authSession";
 import { formatPrimaryServicePrice } from "../utils/servicePricing";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 type UserItem = {
   _id: string;
@@ -69,6 +74,7 @@ const TAB_LABELS = {
 } as const;
 
 const SearchScreen = ({ navigation }: any) => {
+  const { colors } = useAppTheme();
   const [allUsers, setAllUsers] = useState<UserItem[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [suggestedUsers, setSuggestedUsers] = useState<UserItem[]>([]);
@@ -80,6 +86,8 @@ const SearchScreen = ({ navigation }: any) => {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<keyof typeof TAB_LABELS>("users");
 
@@ -99,9 +107,13 @@ const SearchScreen = ({ navigation }: any) => {
     setServices(items);
   }, []);
 
-  const init = useCallback(async () => {
+  const init = useCallback(async (showRefreshing = false) => {
     try {
-      setLoading(true);
+      if (showRefreshing) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       const id = await getStoredUserId();
       setCurrentUserId(id);
 
@@ -118,22 +130,36 @@ const SearchScreen = ({ navigation }: any) => {
       applyServiceResults(Array.isArray(servicesRes.data?.services) ? servicesRes.data.services : []);
       setSuggestedUsers((suggestedRes.data?.users || []).filter((item: UserItem) => item?._id !== id));
       setTrendingHashtags(hashtagsRes.data?.hashtags || []);
+      setErrorMessage("");
     } catch (error) {
       console.log("search init error:", error);
+      setErrorMessage(getReadableApiErrorMessage(error, "Could not load search right now."));
+      setAllUsers([]);
+      setUsers([]);
+      setSuggestedUsers([]);
+      setAllSellers([]);
+      setSellers([]);
+      setDiscoverServices([]);
+      setServices([]);
+      setTrendingHashtags([]);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [applySellerResults, applyServiceResults, applyUserResults]);
 
-  useEffect(() => {
-    init();
-  }, [init]);
+  useFocusEffect(
+    useCallback(() => {
+      init();
+    }, [init])
+  );
 
   useEffect(() => {
     if (!search.trim()) {
       setUsers(allUsers);
       setSellers(allSellers);
       setServices(discoverServices);
+      setSearching(false);
       return;
     }
 
@@ -147,6 +173,7 @@ const SearchScreen = ({ navigation }: any) => {
           });
 
           setUsers((res.data?.users || []).filter((item: UserItem) => item?._id !== currentUserId));
+          setErrorMessage("");
           return;
         }
 
@@ -165,6 +192,7 @@ const SearchScreen = ({ navigation }: any) => {
               );
             })
           );
+          setErrorMessage("");
           return;
         }
 
@@ -173,8 +201,10 @@ const SearchScreen = ({ navigation }: any) => {
         });
 
         setServices(res.data?.services || []);
+        setErrorMessage("");
       } catch (error) {
         console.log("searchData error:", error);
+        setErrorMessage(getReadableApiErrorMessage(error, "Could not update search results."));
       } finally {
         setSearching(false);
       }
@@ -183,9 +213,13 @@ const SearchScreen = ({ navigation }: any) => {
     handleSearch();
   }, [activeTab, allSellers, allUsers, currentUserId, discoverServices, search]);
 
-  const searchData = async (text: string) => {
+  const searchData = (text: string) => {
     setSearch(text);
   };
+
+  const onRefresh = useCallback(async () => {
+    await init(true);
+  }, [init]);
 
   const openHashtagResults = (tag: string) => {
     const normalizedTag = String(tag || "").replace(/^#/, "").trim();
@@ -237,7 +271,7 @@ const SearchScreen = ({ navigation }: any) => {
             </View>
           ) : null}
         </View>
-        <Text style={styles.name}>{item.name || "Aline2 user"}</Text>
+        <Text style={styles.name}>{item.name || item.username || "Aline2 user"}</Text>
         {!!item.interests?.length && (
           <Text style={styles.metaLine} numberOfLines={1}>
             {item.interests.join(" • ")}
@@ -284,7 +318,8 @@ const SearchScreen = ({ navigation }: any) => {
 
   const renderService = ({ item }: { item: ServiceItem }) => (
     <TouchableOpacity
-      style={styles.serviceCard}
+      style={[styles.serviceCard, !item?.seller?._id && styles.disabledCard]}
+      disabled={!item?.seller?._id}
       onPress={() =>
         navigation.navigate("SellerPreviewScreen", {
           sellerId: item?.seller?._id
@@ -334,7 +369,7 @@ const SearchScreen = ({ navigation }: any) => {
             <Image source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }} style={styles.suggestionAvatar} />
             <View style={styles.cardContent}>
               <Text style={styles.username}>{item.username || "user"}</Text>
-              <Text style={styles.name}>{item.name || "Aline2 user"}</Text>
+              <Text style={styles.name}>{item.name || item.username || "Aline2 user"}</Text>
             </View>
           </TouchableOpacity>
         ))}
@@ -371,32 +406,33 @@ const SearchScreen = ({ navigation }: any) => {
 
   if (loading) {
     return (
-      <View style={styles.center}>
+      <SafeAreaView style={[styles.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
 
       {/* HEADER */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} />
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>Search</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Search</Text>
 
-        <View style={{ width: 24 }} />
+        <View style={styles.headerSpacer} />
       </View>
 
       {/* SEARCH */}
-      <View style={styles.searchBar}>
-        <Icon name="search-outline" size={20} color="#777" />
+      <View style={[styles.searchBar, { backgroundColor: colors.input, borderColor: colors.border }]}>
+        <Icon name="search-outline" size={20} color={colors.mutedText} />
         <TextInput
           placeholder={`Search ${activeTab}...`}
-          style={styles.searchInput}
+          placeholderTextColor={colors.placeholder}
+          style={[styles.searchInput, { color: colors.text }]}
           value={search}
           onChangeText={searchData}
         />
@@ -408,7 +444,7 @@ const SearchScreen = ({ navigation }: any) => {
           style={[styles.tab, activeTab === "users" && styles.activeTab]}
           onPress={() => setActiveTab("users")}
         >
-          <Text style={activeTab === "users" && styles.activeText}>
+          <Text style={[styles.tabText, { color: activeTab === "users" ? "#7B4DFF" : colors.mutedText }, activeTab === "users" && styles.activeText]}>
             Users
           </Text>
         </TouchableOpacity>
@@ -417,7 +453,7 @@ const SearchScreen = ({ navigation }: any) => {
           style={[styles.tab, activeTab === "sellers" && styles.activeTab]}
           onPress={() => setActiveTab("sellers")}
         >
-          <Text style={activeTab === "sellers" && styles.activeText}>
+          <Text style={[styles.tabText, { color: activeTab === "sellers" ? "#7B4DFF" : colors.mutedText }, activeTab === "sellers" && styles.activeText]}>
             Sellers
           </Text>
         </TouchableOpacity>
@@ -426,7 +462,7 @@ const SearchScreen = ({ navigation }: any) => {
           style={[styles.tab, activeTab === "services" && styles.activeTab]}
           onPress={() => setActiveTab("services")}
         >
-          <Text style={activeTab === "services" && styles.activeText}>
+          <Text style={[styles.tabText, { color: activeTab === "services" ? "#7B4DFF" : colors.mutedText }, activeTab === "services" && styles.activeText]}>
             Services
           </Text>
         </TouchableOpacity>
@@ -435,7 +471,7 @@ const SearchScreen = ({ navigation }: any) => {
       {searching ? (
         <View style={styles.searchingBox}>
           <ActivityIndicator size="small" color="#7B4DFF" />
-          <Text style={styles.searchingText}>Updating results...</Text>
+          <Text style={[styles.searchingText, { color: colors.mutedText }]}>Updating results...</Text>
         </View>
       ) : null}
 
@@ -451,12 +487,25 @@ const SearchScreen = ({ navigation }: any) => {
         }
         ListHeaderComponent={activeTab === "services" ? renderServiceHeader : renderDiscoverHeader}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No {TAB_LABELS[activeTab]} found</Text>
+          <View style={styles.emptyState}>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>
+              {errorMessage ? "Search unavailable" : `No ${TAB_LABELS[activeTab]} found`}
+            </Text>
+            <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+              {errorMessage || "Try another search or check back later."}
+            </Text>
+            {errorMessage ? (
+              <TouchableOpacity style={styles.retryButton} onPress={() => init()}>
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         }
-        contentContainerStyle={styles.listContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7B4DFF" />}
+        contentContainerStyle={[styles.listContent, !currentData.length && styles.listContentEmpty]}
       />
 
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -465,8 +514,7 @@ export default SearchScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#fff",
-    paddingTop: 50
+    backgroundColor: "#fff"
   },
 
   header: {
@@ -474,7 +522,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     marginBottom: 10
+  },
+  headerSpacer: {
+    width: 24
   },
 
   headerTitle: {
@@ -487,6 +540,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#f5f4fb",
     marginHorizontal: 15,
+    borderWidth: 1,
     borderRadius: 14,
     paddingHorizontal: 12,
     height: 48,
@@ -521,6 +575,9 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#7B4DFF"
   },
+  tabText: {
+    fontWeight: "600"
+  },
 
   userCard: {
     flexDirection: "row",
@@ -535,6 +592,9 @@ const styles = StyleSheet.create({
     padding: 15,
     borderBottomWidth: 1,
     borderColor: "#eee"
+  },
+  disabledCard: {
+    opacity: 0.6
   },
 
   avatar: {
@@ -661,10 +721,34 @@ const styles = StyleSheet.create({
   listContent: {
     paddingBottom: 24
   },
+  listContentEmpty: {
+    flexGrow: 1
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: "700"
+  },
   emptyText: {
     textAlign: "center",
-    marginTop: 24,
+    marginTop: 8,
     color: "#666"
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: "#7B4DFF",
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10
+  },
+  retryText: {
+    color: "#fff",
+    fontWeight: "700"
   },
   searchingBox: {
     flexDirection: "row",
