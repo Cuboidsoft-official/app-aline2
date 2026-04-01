@@ -1137,6 +1137,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         mode: "outgoing",
         initialCallSession: data?.callSession,
         initialIceServers: data?.iceServers || [],
+        callRuntime: data?.callRuntime || null,
         title: seller?.sellerName || "Aline2 seller call",
         avatarUrl: seller?.profilePic || DEFAULT_AVATAR_URL,
       });

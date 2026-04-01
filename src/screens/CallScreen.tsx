@@ -100,6 +100,7 @@ const CallScreen = ({ navigation, route }: any) => {
       ? initialIceServers
       : [{ urls: ["stun:stun.l.google.com:19302"] }]
   );
+  const [callRuntime, setCallRuntime] = useState<any>(route.params?.callRuntime || null);
   const [loading, setLoading] = useState(!initialCallSession);
   const [answering, setAnswering] = useState(false);
   const [ending, setEnding] = useState(false);
@@ -159,24 +160,35 @@ const CallScreen = ({ navigation, route }: any) => {
     setRemoteStream(null);
   }, []);
 
-  const fetchCallSessionState = useCallback(async () => {
+  const fetchCallSessionState = useCallback(async (options: { silent?: boolean } = {}) => {
     if (!callSessionId) {
       return;
     }
 
     try {
-      setLoading(true);
+      if (!options.silent) {
+        setLoading(true);
+      }
       const data = await getCallSession(callSessionId);
       setCallSession(data.callSession || null);
       if (Array.isArray(data.iceServers) && data.iceServers.length) {
         setIceServers(data.iceServers);
       }
+      if (data.callRuntime) {
+        setCallRuntime(data.callRuntime);
+      }
       setStatusLabel(buildStatusLabel(data.callSession, mode));
     } catch (error) {
-      Alert.alert("Call unavailable", getReadableApiErrorMessage(error, "This call could not be loaded."));
-      navigation.goBack();
+      if (!options.silent) {
+        Alert.alert("Call unavailable", getReadableApiErrorMessage(error, "This call could not be loaded."));
+        navigation.goBack();
+      } else {
+        console.log("call session poll error", error);
+      }
     } finally {
-      setLoading(false);
+      if (!options.silent) {
+        setLoading(false);
+      }
     }
   }, [callSessionId, mode, navigation]);
 
@@ -340,6 +352,26 @@ const CallScreen = ({ navigation, route }: any) => {
 
     fetchCallSessionState().catch(() => {});
   }, [callSessionId, fetchCallSessionState, navigation]);
+
+  useEffect(() => {
+    if (!callSession || String(callSession.status || "") !== "ringing" || closingRef.current) {
+      return undefined;
+    }
+
+    const pollInterval = setInterval(() => {
+      fetchCallSessionState({ silent: true }).catch(() => {});
+    }, Math.max(3000, Math.min(Number(callRuntime?.ringingTimeoutMs || 5000) / 3, 5000)));
+
+    return () => clearInterval(pollInterval);
+  }, [callRuntime?.ringingTimeoutMs, callSession, fetchCallSessionState]);
+
+  useEffect(() => {
+    if (!callSession || !TERMINAL_STATUSES.has(String(callSession.status || ""))) {
+      return;
+    }
+
+    applyTerminalState(callSession);
+  }, [applyTerminalState, callSession]);
 
   useEffect(() => {
     const syncSocket = async () => {
@@ -511,6 +543,9 @@ const CallScreen = ({ navigation, route }: any) => {
       setCallSession(response.callSession || null);
       if (Array.isArray(response.iceServers) && response.iceServers.length) {
         setIceServers(response.iceServers);
+      }
+      if (response.callRuntime) {
+        setCallRuntime(response.callRuntime);
       }
       setStatusLabel(buildStatusLabel(response.callSession, mode));
     } catch (error) {

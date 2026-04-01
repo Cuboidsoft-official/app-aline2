@@ -117,6 +117,7 @@ function AppNavigator() {
         mode: "incoming",
         initialCallSession: nextCallSession,
         initialIceServers: payload?.iceServers || [],
+        callRuntime: payload?.callRuntime || null,
         title: nextCallSession?.otherParticipant?.name || nextCallSession?.otherParticipant?.username || "Incoming call",
         avatarUrl: nextCallSession?.otherParticipant?.profilePic || "",
       });

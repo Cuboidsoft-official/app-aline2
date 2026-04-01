@@ -299,6 +299,7 @@ const ChatScreen = ({ navigation, route }) => {
         mode: "outgoing",
         initialCallSession: data?.callSession,
         initialIceServers: data?.iceServers || [],
+        callRuntime: data?.callRuntime || null,
         title: user?.name || user?.username || "Aline2 call",
         avatarUrl: user?.profilePic || DEFAULT_AVATAR_URL,
       });
