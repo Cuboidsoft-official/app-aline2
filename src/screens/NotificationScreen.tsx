@@ -62,7 +62,7 @@ interface NotificationScreenProps {
 const FALLBACK_AVATAR = DEFAULT_AVATAR_URL;
 
 const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
-  const { colors } = useAppTheme();
+  const { colors, isDarkMode } = useAppTheme();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -329,17 +329,26 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
   const groupKeys = useMemo(() => Object.keys(grouped), [grouped]);
 
   const renderRightActions = (id: string) => (
-    <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteNotification(id)}>
+    <TouchableOpacity style={[styles.deleteBtn, { backgroundColor: colors.danger }]} onPress={() => deleteNotification(id)}>
       <Icon name="trash" size={22} color="#fff" />
     </TouchableOpacity>
   );
 
   const renderNotification = ({ item }: { item: AppNotification }) => (
     <Swipeable renderRightActions={() => renderRightActions(item._id)}>
-      <TouchableOpacity style={[styles.card, { backgroundColor: colors.card }]} onPress={() => handlePress(item)}>
+      <TouchableOpacity
+        style={[
+          styles.card,
+          {
+            backgroundColor: colors.card,
+            shadowColor: isDarkMode ? "#000" : "#111827",
+          },
+        ]}
+        onPress={() => handlePress(item)}
+      >
         <Image
           source={{ uri: item.sender?.profilePic || FALLBACK_AVATAR }}
-          style={styles.avatar}
+          style={[styles.avatar, { backgroundColor: colors.surface }]}
         />
         <View style={styles.content}>
           <Text style={[styles.title, { color: colors.text }]}>
@@ -355,7 +364,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
           </Text>
         </View>
 
-        {!item.read ? <View style={styles.unreadDot} /> : null}
+        {!item.read ? <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} /> : null}
         <Icon name={getIcon(item.type)} size={22} color={colors.mutedText} />
       </TouchableOpacity>
     </Swipeable>
@@ -418,21 +427,21 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
 export default NotificationScreen;
 
 const styles = StyleSheet.create({
-  container:{flex:1, backgroundColor:"#f7f7f7"},
-  header:{flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:18, paddingBottom:14, borderBottomWidth:1, borderColor:"#eee", backgroundColor:"#fff"},
+  container:{flex:1},
+  header:{flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal:18, paddingBottom:14, borderBottomWidth:1},
   headerCopy:{flex:1, marginLeft:14},
   headerTitle:{fontSize:19, fontWeight:"600", letterSpacing:0.3},
-  headerSubtitle:{marginTop:4, fontSize:12, color:"#777"},
-  headerAction:{paddingHorizontal:12, paddingVertical:8, backgroundColor:"#efe8ff", borderRadius:12},
-  headerActionText:{color:"#6c42e6", fontWeight:"600", fontSize:12},
-  groupTitle:{fontSize:16, fontWeight:"600", marginLeft:20, marginTop:20, marginBottom:5, color:"#555"},
-  card:{flexDirection:"row", alignItems:"center", paddingVertical:14, paddingHorizontal:14, marginHorizontal:14, marginTop:10, borderRadius:16, backgroundColor:"#fff", shadowColor:"#000", shadowOpacity:0.06, shadowRadius:8, shadowOffset:{width:0,height:2}, elevation:3},
-  avatar:{width:52, height:52, borderRadius:26, marginRight:14, backgroundColor:"#ddd"},
+  headerSubtitle:{marginTop:4, fontSize:12},
+  headerAction:{paddingHorizontal:12, paddingVertical:8, borderRadius:12},
+  headerActionText:{fontWeight:"600", fontSize:12},
+  groupTitle:{fontSize:16, fontWeight:"600", marginLeft:20, marginTop:20, marginBottom:5},
+  card:{flexDirection:"row", alignItems:"center", paddingVertical:14, paddingHorizontal:14, marginHorizontal:14, marginTop:10, borderRadius:16, shadowOpacity:0.06, shadowRadius:8, shadowOffset:{width:0,height:2}, elevation:3},
+  avatar:{width:52, height:52, borderRadius:26, marginRight:14},
   content:{flex:1},
-  title:{fontWeight:"600", fontSize:14, color:"#111"},
-  msg:{fontWeight:"400", color:"#555", fontSize:14},
-  time:{fontSize:12, color:"#999", marginTop:4},
-  deleteBtn:{backgroundColor:"#ff3b30", justifyContent:"center", alignItems:"center", width:80, marginTop:10, borderTopRightRadius:0, borderBottomRightRadius:0},
+  title:{fontWeight:"600", fontSize:14},
+  msg:{fontWeight:"400", fontSize:14},
+  time:{fontSize:12, marginTop:4},
+  deleteBtn:{justifyContent:"center", alignItems:"center", width:80, marginTop:10, borderTopRightRadius:0, borderBottomRightRadius:0},
   center:{flex:1, justifyContent:"center", alignItems:"center"},
-  unreadDot:{width:10, height:10, borderRadius:5, backgroundColor:"#0095f6", marginRight:10}
+  unreadDot:{width:10, height:10, borderRadius:5, marginRight:10}
 });

@@ -18,8 +18,6 @@ import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { DEFAULT_AVATAR_URL, DEFAULT_COVER_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 
-const PRIMARY = "#7B4DFF";
-
 const SellerPreviewScreen = ({ route, navigation }: any) => {
  const { colors, isDarkMode } = useAppTheme();
  const { sellerId } = route.params;
@@ -107,17 +105,17 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
  };
 
  const getVerificationBg = () => {
-  if (!seller?.verificationStatus) return "#FEF3C7";
-  if (seller?.verificationStatus === "approved") return "#E7F8EE";
-  if (seller?.verificationStatus === "rejected") return "#FEE2E2";
-  return "#FEF3C7";
+  if (!seller?.verificationStatus) return isDarkMode ? "#5B4300" : "#FEF3C7";
+  if (seller?.verificationStatus === "approved") return isDarkMode ? "#143322" : "#E7F8EE";
+  if (seller?.verificationStatus === "rejected") return isDarkMode ? "#4A1D1D" : "#FEE2E2";
+  return isDarkMode ? "#5B4300" : "#FEF3C7";
  };
 
  const getVerificationColor = () => {
-  if (!seller?.verificationStatus) return "#D97706";
+  if (!seller?.verificationStatus) return isDarkMode ? "#FBBF24" : "#D97706";
   if (seller?.verificationStatus === "approved") return "#16A34A";
   if (seller?.verificationStatus === "rejected") return "#DC2626";
-  return "#D97706";
+  return isDarkMode ? "#FBBF24" : "#D97706";
  };
 
  if (loading) {
@@ -162,12 +160,12 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
 
    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
     <View style={styles.bannerWrap}>
-     <Image source={{ uri: seller?.coverPic || DEFAULT_COVER_URL }} style={styles.banner} />
-     <View style={styles.bannerOverlay} />
+     <Image source={{ uri: seller?.coverPic || DEFAULT_COVER_URL }} style={[styles.banner, { backgroundColor: colors.surface }]} />
+     <View style={[styles.bannerOverlay, { backgroundColor: isDarkMode ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.15)" }]} />
     </View>
 
     <View style={[styles.profileCard, { backgroundColor: colors.card, shadowColor: isDarkMode ? "#000" : "#111827" }]}>
-     <Image source={{ uri: seller?.profilePic || DEFAULT_AVATAR_URL }} style={styles.avatar} />
+     <Image source={{ uri: seller?.profilePic || DEFAULT_AVATAR_URL }} style={[styles.avatar, { borderColor: colors.card, backgroundColor: colors.surface }]} />
 
      <Text style={[styles.name, { color: colors.text }]}>{seller?.sellerName || "Seller"}</Text>
 
@@ -252,7 +250,7 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
 
       <View style={styles.infoRowLast}>
        <Text style={[styles.infoLabel, { color: colors.mutedText }]}>Availability</Text>
-       <Text style={[styles.infoValue, { color: seller?.availabilityStatus ? "#16A34A" : "#DC2626" }]}>
+       <Text style={[styles.infoValue, { color: seller?.availabilityStatus ? "#16A34A" : colors.danger }]}>
         {seller?.availabilityStatus ? "Available" : "Unavailable"}
        </Text>
       </View>
@@ -264,7 +262,7 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
 
      {services.length === 0 ? (
       <View style={[styles.emptyWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-       <Icon name="briefcase-outline" size={38} color="#C4C4C4" />
+       <Icon name="briefcase-outline" size={38} color={colors.mutedText} />
        <Text style={[styles.emptyTitle, { color: colors.text }]}>No services available</Text>
        <Text style={[styles.emptySubTitle, { color: colors.mutedText }]}>
         Seller has not added any service yet.
@@ -280,7 +278,7 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
           <Text style={[styles.serviceName, { color: colors.text }]}>{item.serviceName}</Text>
 
           <View style={[styles.pricePill, { backgroundColor: isDarkMode ? colors.surface : "#F4F0FF" }]}>
-           <Text style={styles.priceText}>{getPriceText(item)}</Text>
+           <Text style={[styles.priceText, { color: colors.primary }]}>{getPriceText(item)}</Text>
           </View>
          </View>
 
@@ -305,7 +303,6 @@ export default SellerPreviewScreen;
 const styles = StyleSheet.create({
  main: {
   flex: 1,
-  backgroundColor: "#F8F8FC",
  },
  scrollContent: {
   paddingBottom: 30,
@@ -367,7 +364,6 @@ const styles = StyleSheet.create({
  banner: {
   width: "100%",
   height: 240,
-  backgroundColor: "#ECECEC",
  },
  bannerOverlay: {
   position: "absolute",
@@ -393,8 +389,6 @@ const styles = StyleSheet.create({
   height: 108,
   borderRadius: 54,
   borderWidth: 4,
-  borderColor: "#fff",
-  backgroundColor: "#F3F3F3",
   marginTop: -6,
  },
  name: {
@@ -550,7 +544,6 @@ const styles = StyleSheet.create({
  serviceImage: {
   width: "100%",
   height: 170,
-  backgroundColor: "#EFEFEF",
  },
  serviceContent: {
   padding: 14,
@@ -573,7 +566,6 @@ const styles = StyleSheet.create({
  },
  priceText: {
   fontSize: 12,
-  color: PRIMARY,
   fontWeight: "700",
  },
  serviceDesc: {

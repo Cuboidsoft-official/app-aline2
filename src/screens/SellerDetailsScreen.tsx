@@ -243,7 +243,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
         {/* PROFILE */}
         <View style={styles.profileSection}>
 
-          <View style={styles.avatarRing}>
+          <View style={[styles.avatarRing, { backgroundColor: colors.surface }]}>
             <Image
               source={{
                 uri:
@@ -254,11 +254,11 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
             />
           </View>
 
-          <Text style={styles.username}>
+          <Text style={[styles.username, { color: colors.text }]}>
             {seller?.sellerName || "Loading..."}
           </Text>
 
-          <Text style={styles.bio}>
+          <Text style={[styles.bio, { color: colors.mutedText }]}>
             {seller?.bio || "No description available"}
           </Text>
 
@@ -272,41 +272,50 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
             title="Request"
             onPress={() => openSellerChat()}
             disabled={!sellerUserId}
+            colors={colors}
           />
           <Action
             icon="chatbubble-outline"
             title="Chat"
             onPress={() => openSellerChat()}
             disabled={!sellerUserId}
+            colors={colors}
           />
           <Action
             icon="share-social-outline"
             title="Share"
             onPress={shareSellerProfile}
+            colors={colors}
           />
           <Action
             icon="close-circle-outline"
             title="Block"
             onPress={blockSeller}
             disabled={!sellerUserId}
+            colors={colors}
           />
 
         </View>
         {!sellerUserId ? (
-          <Text style={styles.inlineNotice}>This seller profile is missing its linked account, so chat and block actions are temporarily unavailable.</Text>
+          <Text style={[styles.inlineNotice, { color: colors.mutedText }]}>This seller profile is missing its linked account, so chat and block actions are temporarily unavailable.</Text>
         ) : null}
 
         {/* SERVICES */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Services</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Services</Text>
 
           {services.length > 0 ? (
 
             services.map((item, index) => (
-              <TouchableOpacity key={index} style={styles.serviceCard} activeOpacity={0.92} onPress={() => openSellerChat(item)}>
+              <TouchableOpacity
+                key={index}
+                style={[styles.serviceCard, { backgroundColor: colors.card, shadowColor: colors.border }]}
+                activeOpacity={0.92}
+                onPress={() => openSellerChat(item)}
+              >
 
                 <View>
-                  <Text style={styles.serviceName}>
+                  <Text style={[styles.serviceName, { color: colors.text }]}>
                     {item.serviceName}
                   </Text>
 
@@ -315,7 +324,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
                   </Text>
 
                   {!!getServicePricingOptions(item).slice(1, 3).length && (
-                    <Text style={styles.serviceMeta}>
+                    <Text style={[styles.serviceMeta, { color: colors.mutedText }]}>
                       {getServicePricingOptions(item)
                         .slice(1, 3)
                         .map((option: { label?: string }) => option.label)
@@ -339,7 +348,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
 
         {/* MEDIA */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Media</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Media</Text>
 
           {media.length > 0 ? (
             <View style={styles.mediaRow}>
@@ -358,19 +367,19 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
         </View>
 
         {/* SETTINGS */}
-        <View style={styles.optionBox}>
-          <Option icon="notifications-outline" title="Notifications" onPress={() => navigation.navigate("NotificationSettingsScreen")} />
-          <Option icon="calendar-outline" title="Open booking chat" onPress={() => openSellerChat()} />
-          <Option icon="share-social-outline" title="Share seller profile" onPress={shareSellerProfile} />
+        <View style={[styles.optionBox, { backgroundColor: colors.card }]}>
+          <Option icon="notifications-outline" title="Notifications" onPress={() => navigation.navigate("NotificationSettingsScreen")} colors={colors} />
+          <Option icon="calendar-outline" title="Open booking chat" onPress={() => openSellerChat()} colors={colors} />
+          <Option icon="share-social-outline" title="Share seller profile" onPress={shareSellerProfile} colors={colors} />
         </View>
 
         {/* BLOCK */}
         <TouchableOpacity
-          style={styles.blockButton}
+          style={[styles.blockButton, { borderColor: colors.danger }]}
           onPress={blockSeller}
         >
-          <Icon name="close-circle-outline" size={20} color="#ef4444" />
-          <Text style={styles.blockText}>
+          <Icon name="close-circle-outline" size={20} color={colors.danger} />
+          <Text style={[styles.blockText, { color: colors.danger }]}>
             Block {seller?.sellerName || "Seller"}
           </Text>
         </TouchableOpacity>
@@ -393,17 +402,19 @@ const Action = ({
   title,
   onPress,
   disabled = false,
+  colors,
 }: {
   icon: string;
   title: string;
   onPress?: () => void;
   disabled?: boolean;
+  colors: Record<string, string>;
 }) => (
   <TouchableOpacity style={[styles.actionItem, disabled ? styles.actionItemDisabled : null]} onPress={onPress} disabled={disabled}>
-    <View style={styles.actionIcon}>
+    <View style={[styles.actionIcon, { backgroundColor: colors.card }]}>
       <Icon name={icon} size={24} color={PRIMARY} />
     </View>
-    <Text style={styles.actionText}>{title}</Text>
+    <Text style={[styles.actionText, { color: colors.text }]}>{title}</Text>
   </TouchableOpacity>
 );
 
@@ -411,15 +422,17 @@ const Option = ({
   icon,
   title,
   onPress,
+  colors,
 }: {
   icon: string;
   title: string;
   onPress?: () => void;
+  colors: Record<string, string>;
 }) => (
-  <TouchableOpacity style={styles.optionRow} onPress={onPress}>
-    <Icon name={icon} size={22} style={{ marginRight: 15 }} />
-    <Text style={{ flex: 1 }}>{title}</Text>
-    <Icon name="chevron-forward" />
+  <TouchableOpacity style={[styles.optionRow, { borderColor: colors.border }]} onPress={onPress}>
+    <Icon name={icon} size={22} color={colors.mutedText} style={{ marginRight: 15 }} />
+    <Text style={{ flex: 1, color: colors.text }}>{title}</Text>
+    <Icon name="chevron-forward" color={colors.mutedText} />
   </TouchableOpacity>
 );
 
@@ -433,7 +446,6 @@ const styles = StyleSheet.create({
 
   container: {
     flex: 1,
-    backgroundColor: "#F6F7FB"
   },
   loaderWrap: {
     flex: 1,
@@ -452,7 +464,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingTop: 55,
+    paddingTop: 18,
     paddingBottom: 15,
     backgroundColor: PRIMARY
   },
@@ -471,7 +483,6 @@ const styles = StyleSheet.create({
   avatarRing: {
     padding: 4,
     borderRadius: 70,
-    backgroundColor: "#E9E0FF"
   },
 
   avatar: {
@@ -487,7 +498,6 @@ const styles = StyleSheet.create({
   },
 
   bio: {
-    color: "#777",
     marginTop: 6,
     textAlign: "center",
     paddingHorizontal: 30
@@ -507,7 +517,6 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: "#fff",
     justifyContent: "center",
     alignItems: "center",
     elevation: 3
@@ -535,11 +544,14 @@ const styles = StyleSheet.create({
   serviceCard: {
     flexDirection: "row",
     justifyContent: "space-between",
-    backgroundColor: "#fff",
     padding: 14,
     borderRadius: 14,
     marginBottom: 10,
-    alignItems: "center"
+    alignItems: "center",
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
 
   serviceName: {
@@ -552,7 +564,6 @@ const styles = StyleSheet.create({
   },
 
   serviceMeta: {
-    color: "#666",
     marginTop: 4,
     fontSize: 12
   },
@@ -579,7 +590,6 @@ const styles = StyleSheet.create({
 
   optionBox: {
     marginTop: 30,
-    backgroundColor: "#fff",
     marginHorizontal: 18,
     borderRadius: 14
   },
@@ -589,7 +599,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 16,
     borderBottomWidth: 1,
-    borderColor: "#f0f0f0"
   },
 
   blockButton: {
@@ -604,14 +613,12 @@ const styles = StyleSheet.create({
   },
 
   blockText: {
-    color: "#ef4444",
     marginLeft: 8,
     fontWeight: "600"
   },
   inlineNotice: {
     marginHorizontal: 20,
     marginTop: 8,
-    color: "#6B7280",
     lineHeight: 18,
     fontSize: 12
   },
