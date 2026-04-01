@@ -101,7 +101,8 @@ const getDocumentPickerMessage = (error) => {
 const ChatScreen = ({ navigation, route }) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { userId, conversationId, conversationType = "direct", serviceId } = route.params || {};
+  const { userId, conversationId, conversationType = "direct", serviceId, groupName, groupAvatar, memberCount } = route.params || {};
+  const isGroupConversation = conversationType === "group";
   const [user, setUser] = useState(null);
   const [text, setText] = useState("");
   const [showTools, setShowTools] = useState(false);
@@ -121,6 +122,11 @@ const ChatScreen = ({ navigation, route }) => {
   const typingTimeoutRef = useRef(null);
 
   const fetchUser = useCallback(async () => {
+    if (!userId) {
+      setUser(null);
+      return;
+    }
+
     try {
       const res = await API.get(`/auth/user/${userId}`);
       setUser(res.data.user);
@@ -839,30 +845,58 @@ const ChatScreen = ({ navigation, route }) => {
           <Icon name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.userInfo}
-          activeOpacity={0.7}
-          onPress={() => navigation.navigate("ChatDetailsScreen", { userId, conversationId: currentConversationId })}
-        >
-          <Image
-            source={{
-              uri: user?.profilePic || DEFAULT_AVATAR_URL
-            }}
-            style={styles.avatar}
-          />
+        {isGroupConversation ? (
+          <View style={styles.userInfo}>
+            {groupAvatar ? (
+              <Image
+                source={{
+                  uri: groupAvatar
+                }}
+                style={styles.avatar}
+              />
+            ) : (
+              <View style={styles.groupAvatar}>
+                <Icon name="people-outline" size={20} color="#fff" />
+              </View>
+            )}
 
-          <View>
-            <Text style={styles.username}>
-              {user?.username || user?.name || "Loading..."}
-            </Text>
-            <Text style={styles.status}>{typingUserId ? "Typing..." : "Conversation"}</Text>
+            <View>
+              <Text style={styles.username}>
+                {groupName || "Group chat"}
+              </Text>
+              <Text style={styles.status}>
+                {typingUserId ? "Typing..." : `${memberCount || 0} members`}
+              </Text>
+            </View>
           </View>
-        </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.userInfo}
+            activeOpacity={0.7}
+            onPress={() => navigation.navigate("ChatDetailsScreen", { userId, conversationId: currentConversationId })}
+          >
+            <Image
+              source={{
+                uri: user?.profilePic || DEFAULT_AVATAR_URL
+              }}
+              style={styles.avatar}
+            />
+
+            <View>
+              <Text style={styles.username}>
+                {user?.username || user?.name || "Loading..."}
+              </Text>
+              <Text style={styles.status}>{typingUserId ? "Typing..." : "Conversation"}</Text>
+            </View>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.headerIcons}>
-          <TouchableOpacity onPress={() => navigation.navigate("ChatDetailsScreen", { userId, conversationId: currentConversationId })}>
-            <Icon name="ellipsis-vertical" size={20} color="#fff" />
-          </TouchableOpacity>
+          {!isGroupConversation ? (
+            <TouchableOpacity onPress={() => navigation.navigate("ChatDetailsScreen", { userId, conversationId: currentConversationId })}>
+              <Icon name="ellipsis-vertical" size={20} color="#fff" />
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
@@ -1056,6 +1090,15 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     marginRight: 10
+  },
+  groupAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#6d28d9"
   },
   username: {
     color: "#fff",

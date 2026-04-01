@@ -28,6 +28,23 @@ export const createChatConversation = async ({ receiverId, conversationType = "d
   return response.data;
 };
 
+/**
+ * @param {{ groupName?: string; memberIds?: string[] }} [params]
+ */
+export const createGroupChatConversation = async ({ groupName, memberIds = [] } = {}) => {
+  const headers = await buildAuthHeaders();
+  const response = await API.post(
+    "/chat/group",
+    {
+      groupName,
+      memberIds,
+    },
+    { headers }
+  );
+
+  return response.data;
+};
+
 export const fetchChatConversations = async (params = {}) => {
   const headers = await buildAuthHeaders();
   const response = await API.get("/chat/my-conversations", {

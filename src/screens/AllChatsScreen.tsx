@@ -8,6 +8,8 @@ Image,
 TouchableOpacity,
 ActivityIndicator,
 RefreshControl,
+Modal,
+TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -16,7 +18,7 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import Icon from "react-native-vector-icons/Ionicons";
 import { getStoredUserId } from "../utils/authSession";
-import { fetchChatConversations } from "../utils/chatApi";
+import { createGroupChatConversation, fetchChatConversations } from "../utils/chatApi";
 import { getConversationPreview } from "../utils/chatPresentation";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
@@ -27,6 +29,7 @@ interface ChatUser {
   name?: string;
   profilePic?: string;
   sellerProfile?: string;
+  category?: string;
 }
 
 interface SellerServiceSummary {
@@ -41,9 +44,14 @@ interface SellerServiceSummary {
 
 interface Conversation {
   _id: string;
+  conversationType?: "direct" | "seller" | "group";
   otherUser?: ChatUser | null;
   sellerUser?: ChatUser | null;
   service?: SellerServiceSummary | null;
+  members?: ChatUser[];
+  groupName?: string | null;
+  groupAvatar?: string | null;
+  memberCount?: number;
   updatedAt?: string;
   lastMessageTime?: string;
   lastMessageText?: string;
@@ -51,328 +59,544 @@ interface Conversation {
   unreadCount?: number;
 }
 
+type ChatTab = "regular" | "seller" | "group";
+
 const AllChatsScreen = ({ navigation }: any) => {
   const { colors, isDarkMode } = useAppTheme();
 
-  const [users,setUsers] = useState<ChatUser[]>([]);
-const [conversations,setConversations] = useState<Conversation[]>([]);
-const [loading,setLoading] = useState(true);
-const [refreshing,setRefreshing] = useState(false);
-const [errorMessage,setErrorMessage] = useState("");
-const [activeTab,setActiveTab] = useState("regular"); // regular / seller
+  const [users, setUsers] = useState<ChatUser[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [activeTab, setActiveTab] = useState<ChatTab>("regular");
+  const [groupModalVisible, setGroupModalVisible] = useState(false);
+  const [groupName, setGroupName] = useState("");
+  const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
+  const [creatingGroup, setCreatingGroup] = useState(false);
 
-const fetchChatData = useCallback(async (isRefresh = false)=>{
+  const fetchChatData = useCallback(async (isRefresh = false) => {
+    try {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
 
- try{
-  if (isRefresh) {
-   setRefreshing(true);
-  } else {
-   setLoading(true);
-  }
+      const currentUserId = await getStoredUserId();
+      const conversationType = activeTab === "seller"
+        ? "seller"
+        : activeTab === "group"
+          ? "group"
+          : "direct";
+      const userQuery = activeTab === "seller"
+        ? { category: "Seller" }
+        : activeTab === "group"
+          ? {}
+          : { excludeCategory: "Seller" };
 
-  const currentUserId = await getStoredUserId();
-  const conversationType = activeTab === "seller" ? "seller" : "direct";
+      const [usersRes, conversationsRes] = await Promise.all([
+        API.get("/auth/users", { params: userQuery }),
+        fetchChatConversations({ conversationType }),
+      ]);
 
-  const [usersRes, conversationsRes] = await Promise.all([
-   API.get("/auth/users",{
-    params: activeTab === "seller"
-     ? { category:"Seller" }
-     : { excludeCategory:"Seller" }
-   }),
-   fetchChatConversations({ conversationType })
-  ]);
+      const fetchedUsers = ((usersRes?.data?.users || []) as ChatUser[]).filter(
+        (user: ChatUser) => user?._id !== currentUserId
+      );
 
-  const fetchedUsers = ((usersRes?.data?.users || []) as ChatUser[]).filter(
-   (user: ChatUser) => user?._id !== currentUserId
+      setUsers(fetchedUsers);
+      setConversations((conversationsRes?.conversations || []) as Conversation[]);
+      setErrorMessage("");
+    } catch (error) {
+      console.log("Chats Error:", error);
+      setUsers([]);
+      setConversations([]);
+      setErrorMessage(getReadableApiErrorMessage(error, "Failed to load chats."));
+    } finally {
+      if (isRefresh) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
+    }
+  }, [activeTab]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchChatData();
+    }, [fetchChatData])
   );
 
-  setUsers(fetchedUsers);
-  setConversations((conversationsRes?.conversations || []) as Conversation[]);
-  setErrorMessage("");
+  const conversationMap = useMemo(() => {
+    return new Map(
+      conversations
+        .filter((conversation): conversation is Conversation & { otherUser: ChatUser } => Boolean(conversation?.otherUser?._id))
+        .map((conversation) => [conversation.otherUser._id, conversation] as const)
+    );
+  }, [conversations]);
 
- }catch(err){
+  const orderedUsers = useMemo(() => {
+    return [...users].sort((a, b) => {
+      const conversationA = conversationMap.get(a._id);
+      const conversationB = conversationMap.get(b._id);
+      const timeA = conversationA ? new Date(conversationA.updatedAt || conversationA.lastMessageTime || 0).getTime() : 0;
+      const timeB = conversationB ? new Date(conversationB.updatedAt || conversationB.lastMessageTime || 0).getTime() : 0;
 
-  console.log("Chats Error:",err);
-  setUsers([]);
-  setConversations([]);
-  setErrorMessage(getReadableApiErrorMessage(err, "Failed to load chats."));
+      if (timeA !== timeB) {
+        return timeB - timeA;
+      }
 
- }finally{
+      return String(a?.username || a?.name || "").localeCompare(
+        String(b?.username || b?.name || "")
+      );
+    });
+  }, [conversationMap, users]);
 
-  if (isRefresh) {
-   setRefreshing(false);
-  } else {
-   setLoading(false);
-  }
+  const orderedSellerConversations = useMemo(() => {
+    return [...conversations]
+      .filter((conversation) => conversation?.service || conversation?.sellerUser || conversation?.otherUser?.sellerProfile)
+      .sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.lastMessageTime || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.lastMessageTime || 0).getTime();
+        return timeB - timeA;
+      });
+  }, [conversations]);
 
- }
+  const orderedGroupConversations = useMemo(() => {
+    return [...conversations]
+      .filter((conversation) => conversation?.conversationType === "group")
+      .sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.lastMessageTime || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.lastMessageTime || 0).getTime();
+        return timeB - timeA;
+      });
+  }, [conversations]);
 
-},[activeTab]);
+  const closeGroupModal = useCallback(() => {
+    setGroupModalVisible(false);
+    setGroupName("");
+    setSelectedGroupMembers([]);
+  }, []);
 
-useFocusEffect(
- useCallback(() => {
-  fetchChatData();
- }, [fetchChatData])
-);
+  const toggleGroupMember = useCallback((memberId: string) => {
+    setSelectedGroupMembers((prev) =>
+      prev.includes(memberId)
+        ? prev.filter((entry) => entry !== memberId)
+        : [...prev, memberId]
+    );
+  }, []);
 
-const conversationMap = useMemo(() => {
- return new Map(
-  conversations
-   .filter((conversation): conversation is Conversation & { otherUser: ChatUser } => Boolean(conversation?.otherUser?._id))
-   .map((conversation) => [conversation.otherUser._id, conversation] as const)
- );
-}, [conversations]);
+  const createGroup = useCallback(async () => {
+    if (!groupName.trim()) {
+      setErrorMessage("Enter a group name to continue.");
+      return;
+    }
 
-const orderedUsers = useMemo(() => {
- return [...users].sort((a,b)=>{
-  const conversationA = conversationMap.get(a._id);
-  const conversationB = conversationMap.get(b._id);
-  const timeA = conversationA ? new Date(conversationA.updatedAt || conversationA.lastMessageTime || 0).getTime() : 0;
-  const timeB = conversationB ? new Date(conversationB.updatedAt || conversationB.lastMessageTime || 0).getTime() : 0;
+    if (selectedGroupMembers.length < 2) {
+      setErrorMessage("Choose at least two other people for a group chat.");
+      return;
+    }
 
-  if (timeA !== timeB) {
-   return timeB - timeA;
-  }
+    try {
+      setCreatingGroup(true);
+      const response = await createGroupChatConversation({
+        groupName: groupName.trim(),
+        memberIds: selectedGroupMembers,
+      });
 
-  return String(a?.username || a?.name || "").localeCompare(
-   String(b?.username || b?.name || "")
-  );
- });
-}, [conversationMap, users]);
+      const conversation = response?.conversation;
+      closeGroupModal();
+      await fetchChatData(true);
 
-const orderedSellerConversations = useMemo(() => {
- return [...conversations]
-  .filter((conversation) => conversation?.service || conversation?.sellerUser || conversation?.otherUser?.sellerProfile)
-  .sort((a, b) => {
-   const timeA = new Date(a.updatedAt || a.lastMessageTime || 0).getTime();
-   const timeB = new Date(b.updatedAt || b.lastMessageTime || 0).getTime();
-   return timeB - timeA;
-  });
-}, [conversations]);
+      if (conversation?._id) {
+        navigation.navigate("ChatScreen", {
+          conversationId: conversation._id,
+          conversationType: "group",
+          groupName: conversation.groupName,
+          groupAvatar: conversation.groupAvatar,
+          memberCount: conversation.memberCount || conversation.members?.length || 0,
+        });
+      }
+    } catch (error) {
+      setErrorMessage(getReadableApiErrorMessage(error, "Failed to create group chat."));
+    } finally {
+      setCreatingGroup(false);
+    }
+  }, [closeGroupModal, fetchChatData, groupName, navigation, selectedGroupMembers]);
 
-	const renderChat = ({item}: { item: ChatUser })=>{
- const conversation = conversationMap.get(item._id);
- const subtitle = getConversationPreview(conversation)
-  || (activeTab === "seller" ? "Tap to start seller conversation" : "Tap to start conversation");
+  const renderChat = ({ item }: { item: ChatUser }) => {
+    const conversation = conversationMap.get(item._id);
+    const subtitle = getConversationPreview(conversation)
+      || (activeTab === "seller" ? "Tap to start seller conversation" : "Tap to start conversation");
 
- return(
+    return (
+      <TouchableOpacity
+        style={[styles.chatCard, { borderColor: colors.border, backgroundColor: colors.card }]}
+        onPress={() => navigation.navigate("ChatScreen", {
+          userId: item._id,
+          conversationId: conversation?._id,
+          conversationType: activeTab === "seller" ? "seller" : "direct"
+        })}
+      >
+        <View style={styles.avatarContainer}>
+          <Image
+            source={{
+              uri: item.profilePic || DEFAULT_AVATAR_URL
+            }}
+            style={styles.avatar}
+          />
 
- <TouchableOpacity
- style={[styles.chatCard, { borderColor: colors.border, backgroundColor: colors.card }]}
- onPress={()=>navigation.navigate("ChatScreen",{
-  userId:item._id,
-  conversationId:conversation?._id,
-  conversationType: activeTab === "seller" ? "seller" : "direct"
- })}
- >
+          <View style={styles.onlineDot}/>
+        </View>
 
- <View style={styles.avatarContainer}>
+        <View style={styles.chatInfo}>
+          <Text style={[styles.username, { color: colors.text }]}>
+            {item.username || item.name || "User"}
+          </Text>
 
- <Image
- source={{
- uri:item.profilePic || DEFAULT_AVATAR_URL
- }}
- style={styles.avatar}
- />
+          <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        </View>
 
- <View style={styles.onlineDot}/>
+        <View style={styles.chatMeta}>
+          {!!conversation?.unreadCount && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadText}>
+                {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
+              </Text>
+            </View>
+          )}
 
- </View>
-
- <View style={styles.chatInfo}>
-
- <Text style={[styles.username, { color: colors.text }]}>
- {item.username || item.name || "User"}
- </Text>
-
- <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={1}>
- {subtitle}
- </Text>
-
- </View>
-
- <View style={styles.chatMeta}>
-  {!!conversation?.unreadCount && (
-   <View style={styles.unreadBadge}>
-    <Text style={styles.unreadText}>
-     {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
-    </Text>
-   </View>
-  )}
-
-  <Icon name="chevron-forward-outline" size={20} color={colors.mutedText}/>
- </View>
-
- </TouchableOpacity>
-
- );
-
-};
-
- const renderSellerConversation = ({ item }: { item: Conversation }) => {
-  const sellerUserId = item?.sellerUser?._id || item?.otherUser?._id || "";
-  const sellerId = item?.service?.seller?._id || item?.otherUser?.sellerProfile || "";
- const sellerName = item?.service?.seller?.sellerName || item?.otherUser?.username || item?.otherUser?.name || "Seller";
-  const profilePic = item?.otherUser?.profilePic || item?.sellerUser?.profilePic || DEFAULT_AVATAR_URL;
-  const hasSellerLink = Boolean(sellerUserId && sellerId);
-  const subtitleParts = [
-   item?.service?.serviceName ? `Service: ${item.service.serviceName}` : "",
-   getConversationPreview(item),
-  ].filter(Boolean);
-
-  const handlePress = () => {
-   if (!hasSellerLink) {
-    return;
-   }
-
-   navigation.navigate("SellerChatScreen", {
-    sellerId,
-    sellerUserId,
-    conversationId: item._id,
-    serviceId: item?.service?._id,
-    serviceName: item?.service?.serviceName,
-   });
+          <Icon name="chevron-forward-outline" size={20} color={colors.mutedText}/>
+        </View>
+      </TouchableOpacity>
+    );
   };
 
-  return (
-   <TouchableOpacity
-    style={[
-     styles.chatCard,
-     { borderColor: colors.border, backgroundColor: colors.card },
-     !hasSellerLink ? styles.chatCardDisabled : null,
-    ]}
-    onPress={handlePress}
-    disabled={!hasSellerLink}
-    activeOpacity={hasSellerLink ? 0.85 : 1}
-   >
-    <View style={styles.avatarContainer}>
-     <Image
-      source={{
-       uri: profilePic
-      }}
-      style={styles.avatar}
-     />
+  const renderSellerConversation = ({ item }: { item: Conversation }) => {
+    const sellerUserId = item?.sellerUser?._id || item?.otherUser?._id || "";
+    const sellerId = item?.service?.seller?._id || item?.otherUser?.sellerProfile || "";
+    const sellerName = item?.service?.seller?.sellerName || item?.otherUser?.username || item?.otherUser?.name || "Seller";
+    const profilePic = item?.otherUser?.profilePic || item?.sellerUser?.profilePic || DEFAULT_AVATAR_URL;
+    const hasSellerLink = Boolean(sellerUserId && sellerId);
+    const subtitleParts = [
+      item?.service?.serviceName ? `Service: ${item.service.serviceName}` : "",
+      getConversationPreview(item),
+    ].filter(Boolean);
 
-     <View style={styles.onlineDot}/>
-    </View>
+    const handlePress = () => {
+      if (!hasSellerLink) {
+        return;
+      }
 
-    <View style={styles.chatInfo}>
-     <Text style={[styles.username, { color: colors.text }]}>
-      {sellerName}
-     </Text>
+      navigation.navigate("SellerChatScreen", {
+        sellerId,
+        sellerUserId,
+        conversationId: item._id,
+        serviceId: item?.service?._id,
+        serviceName: item?.service?.serviceName,
+      });
+    };
 
-     <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={2}>
-      {hasSellerLink
-       ? subtitleParts.join(" • ") || "Tap to open seller conversation"
-       : "This seller conversation is temporarily unavailable while profile details finish syncing."}
-     </Text>
-    </View>
+    return (
+      <TouchableOpacity
+        style={[
+          styles.chatCard,
+          { borderColor: colors.border, backgroundColor: colors.card },
+          !hasSellerLink ? styles.chatCardDisabled : null,
+        ]}
+        onPress={handlePress}
+        disabled={!hasSellerLink}
+        activeOpacity={hasSellerLink ? 0.85 : 1}
+      >
+        <View style={styles.avatarContainer}>
+          <Image
+            source={{
+              uri: profilePic
+            }}
+            style={styles.avatar}
+          />
 
-    <View style={styles.chatMeta}>
-     {!!item?.unreadCount && (
-      <View style={styles.unreadBadge}>
-       <Text style={styles.unreadText}>
-        {item.unreadCount > 99 ? "99+" : item.unreadCount}
-       </Text>
+          <View style={styles.onlineDot}/>
+        </View>
+
+        <View style={styles.chatInfo}>
+          <Text style={[styles.username, { color: colors.text }]}>
+            {sellerName}
+          </Text>
+
+          <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={2}>
+            {hasSellerLink
+              ? subtitleParts.join(" • ") || "Tap to open seller conversation"
+              : "This seller conversation is temporarily unavailable while profile details finish syncing."}
+          </Text>
+        </View>
+
+        <View style={styles.chatMeta}>
+          {!!item?.unreadCount && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadText}>
+                {item.unreadCount > 99 ? "99+" : item.unreadCount}
+              </Text>
+            </View>
+          )}
+
+          <Icon
+            name={hasSellerLink ? "chevron-forward-outline" : "alert-circle-outline"}
+            size={20}
+            color={hasSellerLink ? colors.mutedText : colors.placeholder}
+          />
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderGroupConversation = ({ item }: { item: Conversation }) => {
+    const title = item?.groupName || "Group chat";
+    const subtitle = getConversationPreview(item)
+      || `${item?.memberCount || item?.members?.length || 0} members`;
+
+    return (
+      <TouchableOpacity
+        style={[styles.chatCard, { borderColor: colors.border, backgroundColor: colors.card }]}
+        onPress={() => navigation.navigate("ChatScreen", {
+          conversationId: item._id,
+          conversationType: "group",
+          groupName: item?.groupName,
+          groupAvatar: item?.groupAvatar,
+          memberCount: item?.memberCount || item?.members?.length || 0,
+        })}
+      >
+        <View style={[styles.groupAvatarCard, { backgroundColor: isDarkMode ? colors.surface : "#ede9fe" }]}>
+          <Icon name="people-outline" size={22} color={colors.primary} />
+        </View>
+
+        <View style={styles.chatInfo}>
+          <Text style={[styles.username, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={2}>
+            {subtitle}
+          </Text>
+        </View>
+
+        <View style={styles.chatMeta}>
+          {!!item?.unreadCount && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadText}>
+                {item.unreadCount > 99 ? "99+" : item.unreadCount}
+              </Text>
+            </View>
+          )}
+
+          <Icon name="chevron-forward-outline" size={20} color={colors.mutedText}/>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const listData = activeTab === "seller"
+    ? orderedSellerConversations
+    : activeTab === "group"
+      ? orderedGroupConversations
+      : orderedUsers;
+  const renderListItem = activeTab === "seller"
+    ? renderSellerConversation
+    : activeTab === "group"
+      ? renderGroupConversation
+      : renderChat;
+  const keyExtractor = (item: ChatUser | Conversation) => item._id;
+
+  if (loading) {
+    return (
+      <View style={[styles.center, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
-     )}
+    );
+  }
 
-     <Icon
-      name={hasSellerLink ? "chevron-forward-outline" : "alert-circle-outline"}
-      size={20}
-      color={hasSellerLink ? colors.mutedText : colors.placeholder}
-     />
-    </View>
-   </TouchableOpacity>
-  );
- };
-
- const listData = activeTab === "seller" ? orderedSellerConversations : orderedUsers;
- const renderListItem = activeTab === "seller" ? renderSellerConversation : renderChat;
- const keyExtractor = (item: ChatUser | Conversation) => item._id;
-
- if (loading) {
   return (
-   <View style={[styles.center, { backgroundColor: colors.background }]}>
-    <ActivityIndicator size="large" color={colors.primary} />
-   </View>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+      <View style={styles.header}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Chats</Text>
+
+        <View style={styles.headerActions}>
+          <TouchableOpacity onPress={() => navigation.navigate("Search")}>
+            <Icon name="search-outline" size={24} color={colors.text} />
+          </TouchableOpacity>
+          {activeTab === "group" ? (
+            <TouchableOpacity
+              style={styles.headerActionButton}
+              onPress={() => {
+                setErrorMessage("");
+                setGroupModalVisible(true);
+              }}
+            >
+              <Icon name="add-circle-outline" size={24} color={colors.text} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={[styles.tabs, { backgroundColor: isDarkMode ? colors.surface : "#f2f2f2" }]}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === "regular" && styles.activeTab]}
+          onPress={() => setActiveTab("regular")}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              activeTab === "regular" && styles.activeTabText,
+              { color: activeTab === "regular" ? "#fff" : colors.mutedText },
+            ]}
+          >
+            Regular Chats
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tab, activeTab === "seller" && styles.activeTab]}
+          onPress={() => setActiveTab("seller")}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              activeTab === "seller" && styles.activeTabText,
+              { color: activeTab === "seller" ? "#fff" : colors.mutedText },
+            ]}
+          >
+            Seller Chats
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tab, activeTab === "group" && styles.activeTab]}
+          onPress={() => setActiveTab("group")}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              activeTab === "group" && styles.activeTabText,
+              { color: activeTab === "group" ? "#fff" : colors.mutedText },
+            ]}
+          >
+            Group Chats
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <FlatList
+        data={listData}
+        keyExtractor={keyExtractor}
+        renderItem={renderListItem}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>
+              {errorMessage
+                ? activeTab === "seller"
+                  ? "Seller chats unavailable"
+                  : activeTab === "group"
+                    ? "Group chats unavailable"
+                    : "Chats unavailable"
+                : activeTab === "seller"
+                  ? "No seller chats yet"
+                  : activeTab === "group"
+                    ? "No group chats yet"
+                    : "No chats yet"}
+            </Text>
+            <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+              {errorMessage || (activeTab === "seller"
+                ? "Start a seller conversation from a seller profile to see it here."
+                : activeTab === "group"
+                  ? "Create a group chat to talk with multiple people in one place."
+                  : "Start a direct conversation from a user profile or this tab.")}
+            </Text>
+          </View>
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => fetchChatData(true).catch(() => {})}
+            tintColor={colors.primary}
+          />
+        }
+      />
+
+      <Modal
+        visible={groupModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeGroupModal}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Create Group Chat</Text>
+              <TouchableOpacity onPress={closeGroupModal}>
+                <Icon name="close-outline" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              value={groupName}
+              onChangeText={setGroupName}
+              placeholder="Group name"
+              placeholderTextColor={colors.placeholder}
+              style={[styles.groupNameInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.background }]}
+            />
+
+            <Text style={[styles.modalHelper, { color: colors.mutedText }]}>
+              Choose at least two other members.
+            </Text>
+
+            <FlatList
+              data={users}
+              keyExtractor={(item) => item._id}
+              style={styles.groupPickerList}
+              renderItem={({ item }) => {
+                const isSelected = selectedGroupMembers.includes(item._id);
+
+                return (
+                  <TouchableOpacity
+                    style={[styles.memberRow, { borderColor: colors.border }]}
+                    onPress={() => toggleGroupMember(item._id)}
+                  >
+                    <Image
+                      source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }}
+                      style={styles.memberAvatar}
+                    />
+
+                    <View style={styles.memberMeta}>
+                      <Text style={[styles.memberName, { color: colors.text }]}>
+                        {item.username || item.name || "User"}
+                      </Text>
+                      <Text style={[styles.memberSubtitle, { color: colors.mutedText }]}>
+                        {item.name || item.category || "Aline2 member"}
+                      </Text>
+                    </View>
+
+                    <Icon
+                      name={isSelected ? "checkbox" : "square-outline"}
+                      size={22}
+                      color={isSelected ? colors.primary : colors.mutedText}
+                    />
+                  </TouchableOpacity>
+                );
+              }}
+            />
+
+            <TouchableOpacity
+              style={[styles.createGroupButton, { backgroundColor: creatingGroup ? "#a78bfa" : colors.primary }]}
+              onPress={createGroup}
+              disabled={creatingGroup}
+            >
+              {creatingGroup ? <ActivityIndicator color="#fff" /> : <Text style={styles.createGroupButtonText}>Create group</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
- }
-
- return (
-  <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
-   <View style={styles.header}>
-    <Text style={[styles.headerTitle, { color: colors.text }]}>Chats</Text>
-
-    <View style={styles.headerActions}>
-     <TouchableOpacity onPress={() => navigation.navigate("Search")}>
-      <Icon name="search-outline" size={24} color={colors.text} />
-     </TouchableOpacity>
-    </View>
-   </View>
-
-   <View style={[styles.tabs, { backgroundColor: isDarkMode ? colors.surface : "#f2f2f2" }]}>
-    <TouchableOpacity
-     style={[styles.tab, activeTab === "regular" && styles.activeTab]}
-     onPress={() => setActiveTab("regular")}
-    >
-     <Text
-      style={[
-       styles.tabText,
-       activeTab === "regular" && styles.activeTabText,
-       { color: activeTab === "regular" ? "#fff" : colors.mutedText },
-      ]}
-     >
-      Regular Chats
-     </Text>
-    </TouchableOpacity>
-
-    <TouchableOpacity
-     style={[styles.tab, activeTab === "seller" && styles.activeTab]}
-     onPress={() => setActiveTab("seller")}
-    >
-     <Text
-      style={[
-       styles.tabText,
-       activeTab === "seller" && styles.activeTabText,
-       { color: activeTab === "seller" ? "#fff" : colors.mutedText },
-      ]}
-     >
-      Seller Chats
-     </Text>
-    </TouchableOpacity>
-   </View>
-
-   <FlatList
-    data={listData}
-    keyExtractor={keyExtractor}
-    renderItem={renderListItem}
-    showsVerticalScrollIndicator={false}
-   ListEmptyComponent={
-     <View style={styles.emptyState}>
-      <Text style={[styles.emptyTitle, { color: colors.text }]}>
-       {errorMessage
-        ? activeTab === "seller" ? "Seller chats unavailable" : "Chats unavailable"
-        : activeTab === "seller" ? "No seller chats yet" : "No chats yet"}
-      </Text>
-      <Text style={[styles.emptyText, { color: colors.mutedText }]}>
-       {errorMessage || (activeTab === "seller"
-        ? "Start a seller conversation from a seller profile to see it here."
-        : "Start a direct conversation from a user profile or this tab.")}
-      </Text>
-     </View>
-    }
-    refreshControl={
-     <RefreshControl
-      refreshing={refreshing}
-      onRefresh={() => fetchChatData(true).catch(() => {})}
-      tintColor={colors.primary}
-     />
-    }
-   />
-  </SafeAreaView>
- );
-
 };
 
 export default AllChatsScreen;
@@ -390,7 +614,7 @@ header:{
  alignItems:"center",
  paddingHorizontal:18,
  marginBottom:10,
- paddingBottom: 20,
+ paddingBottom:20,
 },
 
 headerTitle:{
@@ -399,11 +623,12 @@ headerTitle:{
 },
 
 headerActions:{
- flexDirection:"row"
+ flexDirection:"row",
+ alignItems:"center"
 },
 
 headerActionButton:{
- marginRight:15
+ marginLeft:16
 },
 
 tabs:{
@@ -458,6 +683,15 @@ avatar:{
  borderRadius:28
 },
 
+groupAvatarCard:{
+ width:55,
+ height:55,
+ borderRadius:28,
+ justifyContent:"center",
+ alignItems:"center",
+ marginRight:15
+},
+
 onlineDot:{
  width:12,
  height:12,
@@ -471,7 +705,7 @@ onlineDot:{
 },
 
 chatInfo:{
-flex:1
+ flex:1
 },
 
 chatMeta:{
@@ -526,23 +760,97 @@ unreadText:{
  fontWeight:"700"
 },
 
-groupButton:{
- position:"absolute",
- bottom:25,
- right:25,
- backgroundColor:"#7b3fe4",
- width:55,
- height:55,
- borderRadius:28,
- justifyContent:"center",
- alignItems:"center",
- elevation:4
-},
-
 center:{
  flex:1,
  justifyContent:"center",
  alignItems:"center"
+},
+
+modalBackdrop:{
+ flex:1,
+ backgroundColor:"rgba(17,24,39,0.55)",
+ justifyContent:"flex-end"
+},
+
+modalCard:{
+ borderTopLeftRadius:24,
+ borderTopRightRadius:24,
+ borderWidth:1,
+ paddingHorizontal:18,
+ paddingTop:18,
+ paddingBottom:24,
+ maxHeight:"85%"
+},
+
+modalHeader:{
+ flexDirection:"row",
+ justifyContent:"space-between",
+ alignItems:"center"
+},
+
+modalTitle:{
+ fontSize:18,
+ fontWeight:"700"
+},
+
+groupNameInput:{
+ marginTop:16,
+ borderWidth:1,
+ borderRadius:14,
+ paddingHorizontal:14,
+ paddingVertical:14,
+ fontSize:15
+},
+
+modalHelper:{
+ marginTop:10,
+ fontSize:13,
+ lineHeight:19
+},
+
+groupPickerList:{
+ marginTop:16
+},
+
+memberRow:{
+ flexDirection:"row",
+ alignItems:"center",
+ paddingVertical:12,
+ borderBottomWidth:1
+},
+
+memberAvatar:{
+ width:42,
+ height:42,
+ borderRadius:21,
+ marginRight:12
+},
+
+memberMeta:{
+ flex:1
+},
+
+memberName:{
+ fontSize:15,
+ fontWeight:"600"
+},
+
+memberSubtitle:{
+ marginTop:3,
+ fontSize:12
+},
+
+createGroupButton:{
+ marginTop:16,
+ borderRadius:14,
+ paddingVertical:15,
+ alignItems:"center"
+},
+
+createGroupButtonText:{
+ color:"#fff",
+ fontWeight:"700",
+ fontSize:15
 }
 
 });
