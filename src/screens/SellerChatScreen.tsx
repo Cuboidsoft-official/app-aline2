@@ -51,7 +51,6 @@ import {
   fetchConversationMessages,
   sendChatMessage,
 } from "../utils/chatApi";
-import { startCallSession } from "../utils/callApi";
 import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import {
   getLastIncomingUnseenMessage,
@@ -60,6 +59,7 @@ import {
 } from "../utils/chatRealtime";
 import { getStoredUser } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import { callingDisabledMessage, productFlags } from "../config/productFlags";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 
@@ -247,7 +247,6 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [typingUserId, setTypingUserId] = useState("");
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
-  const [startingCallType, setStartingCallType] = useState("");
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const quickOptions = useMemo(
@@ -1118,35 +1117,12 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     setSelectedAppointmentStart("");
   }, [appointmentSlots, showPaymentModal]);
 
-  const startCallFlow = useCallback(async (callType: "audio" | "video") => {
-    try {
-      setStartingCallType(callType);
-      const resolvedConversationId = await ensureConversation();
-
-      if (!resolvedConversationId) {
-        throw new Error("Conversation not ready");
-      }
-
-      const data = await startCallSession({
-        conversationId: resolvedConversationId,
-        callType,
-      });
-
-      navigation.navigate("CallScreen", {
-        callSessionId: data?.callSession?._id,
-        mode: "outgoing",
-        initialCallSession: data?.callSession,
-        initialIceServers: data?.iceServers || [],
-        callRuntime: data?.callRuntime || null,
-        title: seller?.sellerName || "Aline2 seller call",
-        avatarUrl: seller?.profilePic || DEFAULT_AVATAR_URL,
-      });
-    } catch (error) {
-      Alert.alert("Could not start call", getReadableApiErrorMessage(error, "Please try again."));
-    } finally {
-      setStartingCallType("");
+  const startCallFlow = useCallback(async () => {
+    if (!productFlags.callingInConsumerApp) {
+      Alert.alert("Coming soon", callingDisabledMessage);
+      return;
     }
-  }, [ensureConversation, navigation, seller]);
+  }, []);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
@@ -1182,25 +1158,17 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         <View style={styles.rightIcons}>
           <TouchableOpacity
             style={styles.headerIconButton}
-            onPress={() => startCallFlow("audio")}
-            disabled={startingCallType === "audio" || startingCallType === "video" || !seller?.user}
+            onPress={startCallFlow}
+            disabled={!seller?.user}
           >
-            {startingCallType === "audio" ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Icon name="call-outline" size={20} color="#fff" />
-            )}
+            <Icon name="call-outline" size={20} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerIconButton}
-            onPress={() => startCallFlow("video")}
-            disabled={startingCallType === "audio" || startingCallType === "video" || !seller?.user}
+            onPress={startCallFlow}
+            disabled={!seller?.user}
           >
-            {startingCallType === "video" ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Icon name="videocam-outline" size={22} color="#fff" />
-            )}
+            <Icon name="videocam-outline" size={22} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() =>

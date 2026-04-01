@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { Alert } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -55,6 +56,7 @@ import GroupDetailsScreen from './src/screens/GroupDetailsScreen';
 import CallScreen from './src/screens/CallScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
+import { callingDisabledMessage, productFlags } from './src/config/productFlags';
 import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
 import { connectSocket, disconnectSocket, socket } from './src/socket';
 import { setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
@@ -100,6 +102,11 @@ function AppNavigator() {
 
   useEffect(() => {
     const handleIncomingCall = (payload: any) => {
+      if (!productFlags.callingInConsumerApp) {
+        Alert.alert("Coming soon", callingDisabledMessage);
+        return;
+      }
+
       const nextCallSession = payload?.callSession;
       const nextCallSessionId = String(nextCallSession?._id || "");
 
