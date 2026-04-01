@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
+  Image,
   PermissionsAndroid,
   Platform,
   StatusBar,
@@ -9,7 +11,6 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Image,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
@@ -32,6 +33,7 @@ import {
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+
 const TERMINAL_STATUSES = new Set(["rejected", "ended", "cancelled", "missed", "failed"]);
 
 const requestCallPermissions = async (callType: "audio" | "video") => {
@@ -51,9 +53,13 @@ const requestCallPermissions = async (callType: "audio" | "video") => {
   );
 };
 
-const buildStatusLabel = (callSession: any, mode: "incoming" | "outgoing") => {
+const buildStatusLabel = (callSession: any, mode: "incoming" | "outgoing", isGroupCall: boolean) => {
   if (!callSession) {
     return "Preparing call...";
+  }
+
+  if (isGroupCall && callSession?.currentParticipantState?.status === "invited" && callSession?.status === "ongoing") {
+    return mode === "incoming" ? "Incoming group call..." : "Connecting group call...";
   }
 
   switch (callSession.status) {
@@ -104,33 +110,112 @@ const CallScreen = ({ navigation, route }: any) => {
   const [loading, setLoading] = useState(!initialCallSession);
   const [answering, setAnswering] = useState(false);
   const [ending, setEnding] = useState(false);
-  const [statusLabel, setStatusLabel] = useState(
-    buildStatusLabel(initialCallSession, mode)
-  );
   const [localStream, setLocalStream] = useState<any>(null);
-  const [remoteStream, setRemoteStream] = useState<any>(null);
+  const [directRemoteStream, setDirectRemoteStream] = useState<any>(null);
+  const [groupRemoteStreams, setGroupRemoteStreams] = useState<Record<string, any>>({});
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(
     String(initialCallSession?.callType || route.params?.callType || "audio") === "video"
   );
   const [durationSeconds, setDurationSeconds] = useState(0);
-  const peerConnectionRef = useRef<any>(null);
+  const [statusLabel, setStatusLabel] = useState("");
+
+  const directPeerConnectionRef = useRef<any>(null);
+  const groupPeerConnectionsRef = useRef<Record<string, any>>({});
   const localStreamRef = useRef<any>(null);
-  const remoteStreamRef = useRef<any>(null);
-  const offerStartedRef = useRef(false);
+  const directRemoteStreamRef = useRef<any>(null);
+  const groupRemoteStreamsRef = useRef<Record<string, any>>({});
+  const directOfferStartedRef = useRef(false);
+  const joinSentRef = useRef(false);
   const closingRef = useRef(false);
   const answeredRef = useRef(false);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const effectiveCallType = String(callSession?.callType || route.params?.callType || "audio") === "video" ? "video" : "audio";
-  const otherParticipant = useMemo(
-    () => callSession?.otherParticipant || null,
-    [callSession]
+  const effectiveCallType =
+    String(callSession?.callType || route.params?.callType || "audio") === "video" ? "video" : "audio";
+  const isGroupCall = String(callSession?.conversation?.conversationType || "") === "group";
+  const participantStates = useMemo(
+    () => (Array.isArray(callSession?.participantStates) ? callSession.participantStates : []),
+    [callSession?.participantStates]
+  );
+  const currentParticipantState = callSession?.currentParticipantState || null;
+  const currentUserId = String(currentParticipantState?.user?._id || currentParticipantState?.user || "");
+  const conversationMeta = callSession?.conversation || {};
+  const otherParticipant = useMemo(() => callSession?.otherParticipant || null, [callSession]);
+
+  const joinedParticipantIds = useMemo(
+    () =>
+      participantStates
+        .filter((entry: any) => String(entry?.status || "") === "joined")
+        .map((entry: any) => String(entry?.user?._id || entry?.user || "")),
+    [participantStates]
   );
 
-  const displayName = otherParticipant?.name || otherParticipant?.username || title || "Aline2 call";
-  const displayAvatar = otherParticipant?.profilePic || avatarUrl || DEFAULT_AVATAR_URL;
+  const groupMembers = useMemo(() => {
+    const directParticipants = Array.isArray(callSession?.participants) ? callSession.participants : [];
+    const stateUsers = participantStates
+      .map((entry: any) => entry?.user)
+      .filter(Boolean);
+    const merged = [...directParticipants, ...stateUsers];
+    const seen = new Set<string>();
+
+    return merged.filter((participant: any) => {
+      const participantId = String(participant?._id || participant || "");
+      if (!participantId || seen.has(participantId)) {
+        return false;
+      }
+      seen.add(participantId);
+      return true;
+    });
+  }, [callSession, participantStates]);
+
+  const remoteParticipants = useMemo(
+    () =>
+      groupMembers
+        .filter((participant: any) => {
+          const participantId = String(participant?._id || participant || "");
+          return participantId && participantId !== currentUserId && joinedParticipantIds.includes(participantId);
+        })
+        .map((participant: any) => {
+          const participantId = String(participant?._id || participant || "");
+          const stream = groupRemoteStreams[participantId] || null;
+          return {
+            id: participantId,
+            participant,
+            stream,
+            streamUrl: stream?.toURL?.() || null,
+          };
+        }),
+    [currentUserId, groupMembers, groupRemoteStreams, joinedParticipantIds]
+  );
+
+  const displayName = isGroupCall
+    ? conversationMeta?.groupName || title || "Group call"
+    : otherParticipant?.name || otherParticipant?.username || title || "Aline2 call";
+  const displayAvatar = isGroupCall
+    ? conversationMeta?.groupAvatar || avatarUrl || DEFAULT_AVATAR_URL
+    : otherParticipant?.profilePic || avatarUrl || DEFAULT_AVATAR_URL;
   const hasActiveCall = callSession && !TERMINAL_STATUSES.has(String(callSession.status || ""));
+
+  const closeGroupPeerConnection = useCallback((remoteUserId: string) => {
+    const peerConnection = groupPeerConnectionsRef.current[remoteUserId];
+
+    if (peerConnection) {
+      peerConnection.close();
+      delete groupPeerConnectionsRef.current[remoteUserId];
+    }
+
+    const remoteStream = groupRemoteStreamsRef.current[remoteUserId];
+    if (remoteStream) {
+      remoteStream.getTracks?.().forEach((track: any) => track.stop?.());
+      delete groupRemoteStreamsRef.current[remoteUserId];
+      setGroupRemoteStreams((prev) => {
+        const next = { ...prev };
+        delete next[remoteUserId];
+        return next;
+      });
+    }
+  }, []);
 
   const cleanupMedia = useCallback(() => {
     if (durationTimerRef.current) {
@@ -138,122 +223,69 @@ const CallScreen = ({ navigation, route }: any) => {
       durationTimerRef.current = null;
     }
 
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.onicecandidate = null;
-      peerConnectionRef.current.ontrack = null;
-      peerConnectionRef.current.onconnectionstatechange = null;
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
+    if (directPeerConnectionRef.current) {
+      directPeerConnectionRef.current.close();
+      directPeerConnectionRef.current = null;
     }
+
+    Object.keys(groupPeerConnectionsRef.current).forEach((userId) => {
+      groupPeerConnectionsRef.current[userId]?.close();
+      delete groupPeerConnectionsRef.current[userId];
+    });
 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track: any) => track.stop());
       localStreamRef.current = null;
     }
 
-    if (remoteStreamRef.current) {
-      remoteStreamRef.current.getTracks().forEach((track: any) => track.stop?.());
-      remoteStreamRef.current = null;
+    if (directRemoteStreamRef.current) {
+      directRemoteStreamRef.current.getTracks().forEach((track: any) => track.stop?.());
+      directRemoteStreamRef.current = null;
     }
+
+    Object.values(groupRemoteStreamsRef.current).forEach((stream: any) => {
+      stream?.getTracks?.().forEach((track: any) => track.stop?.());
+    });
+    groupRemoteStreamsRef.current = {};
 
     setLocalStream(null);
-    setRemoteStream(null);
+    setDirectRemoteStream(null);
+    setGroupRemoteStreams({});
   }, []);
 
-  const fetchCallSessionState = useCallback(async (options: { silent?: boolean } = {}) => {
-    if (!callSessionId) {
-      return;
-    }
-
-    try {
-      if (!options.silent) {
-        setLoading(true);
-      }
-      const data = await getCallSession(callSessionId);
-      setCallSession(data.callSession || null);
-      if (Array.isArray(data.iceServers) && data.iceServers.length) {
-        setIceServers(data.iceServers);
-      }
-      if (data.callRuntime) {
-        setCallRuntime(data.callRuntime);
-      }
-      setStatusLabel(buildStatusLabel(data.callSession, mode));
-    } catch (error) {
-      if (!options.silent) {
-        Alert.alert("Call unavailable", getReadableApiErrorMessage(error, "This call could not be loaded."));
-        navigation.goBack();
-      } else {
-        console.log("call session poll error", error);
-      }
-    } finally {
-      if (!options.silent) {
-        setLoading(false);
-      }
-    }
-  }, [callSessionId, mode, navigation]);
-
-  const ensurePeerConnection = useCallback(async () => {
-    if (peerConnectionRef.current) {
-      return peerConnectionRef.current;
-    }
-
-    const peerConnection: any = new RTCPeerConnection({ iceServers });
-
-    const handleIceCandidate = (event: any) => {
-      if (!event?.candidate) {
+  const fetchCallSessionState = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      if (!callSessionId) {
         return;
       }
 
-      socket.emit("call:ice-candidate", {
-        callSessionId,
-        candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate,
-      });
-    };
-
-    const handleTrack = (event: any) => {
-      const nextStream = event?.streams?.[0];
-
-      if (nextStream) {
-        remoteStreamRef.current = nextStream;
-        setRemoteStream(nextStream);
-        return;
+      try {
+        if (!options.silent) {
+          setLoading(true);
+        }
+        const data = await getCallSession(callSessionId);
+        setCallSession(data.callSession || null);
+        if (Array.isArray(data.iceServers) && data.iceServers.length) {
+          setIceServers(data.iceServers);
+        }
+        if (data.callRuntime) {
+          setCallRuntime(data.callRuntime);
+        }
+      } catch (error) {
+        if (!options.silent) {
+          Alert.alert("Call unavailable", getReadableApiErrorMessage(error, "This call could not be loaded."));
+          navigation.goBack();
+        } else {
+          console.log("call session poll error", error);
+        }
+      } finally {
+        if (!options.silent) {
+          setLoading(false);
+        }
       }
-
-      if (!remoteStreamRef.current) {
-        remoteStreamRef.current = new MediaStream();
-      }
-
-      if (event?.track) {
-        remoteStreamRef.current.addTrack(event.track);
-        setRemoteStream(remoteStreamRef.current);
-      }
-    };
-
-    const handleConnectionStateChange = () => {
-      const connectionState = String(peerConnection.connectionState || "");
-
-      if (connectionState === "connected") {
-        setStatusLabel("Connected");
-      } else if (connectionState === "failed") {
-        setStatusLabel("Connection failed");
-      } else if (connectionState === "disconnected") {
-        setStatusLabel("Reconnecting...");
-      }
-    };
-
-    peerConnection.addEventListener("icecandidate", handleIceCandidate as any);
-    peerConnection.addEventListener("track", handleTrack as any);
-    peerConnection.addEventListener("connectionstatechange", handleConnectionStateChange as any);
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track: any) => {
-        peerConnection.addTrack(track, localStreamRef.current);
-      });
-    }
-
-    peerConnectionRef.current = peerConnection;
-    return peerConnection;
-  }, [callSessionId, iceServers]);
+    },
+    [callSessionId, navigation]
+  );
 
   const ensureLocalStream = useCallback(async () => {
     if (localStreamRef.current) {
@@ -290,25 +322,143 @@ const CallScreen = ({ navigation, route }: any) => {
         : false
     );
 
-    if (peerConnectionRef.current) {
+    if (directPeerConnectionRef.current) {
       stream.getTracks().forEach((track: any) => {
-        peerConnectionRef.current.addTrack(track, stream);
+        directPeerConnectionRef.current.addTrack(track, stream);
       });
     }
+
+    Object.values(groupPeerConnectionsRef.current).forEach((peerConnection: any) => {
+      stream.getTracks().forEach((track: any) => {
+        peerConnection.addTrack(track, stream);
+      });
+    });
 
     return stream;
   }, [effectiveCallType]);
 
-  const startOffer = useCallback(async () => {
-    if (offerStartedRef.current) {
+  const ensureDirectPeerConnection = useCallback(async () => {
+    if (directPeerConnectionRef.current) {
+      return directPeerConnectionRef.current;
+    }
+
+    const peerConnection: any = new RTCPeerConnection({ iceServers });
+
+    peerConnection.addEventListener("icecandidate", (event: any) => {
+      if (!event?.candidate) {
+        return;
+      }
+
+      socket.emit("call:ice-candidate", {
+        callSessionId,
+        candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate,
+      });
+    });
+
+    peerConnection.addEventListener("track", (event: any) => {
+      const nextStream = event?.streams?.[0];
+
+      if (nextStream) {
+        directRemoteStreamRef.current = nextStream;
+        setDirectRemoteStream(nextStream);
+        return;
+      }
+
+      if (!directRemoteStreamRef.current) {
+        directRemoteStreamRef.current = new MediaStream();
+      }
+
+      if (event?.track) {
+        directRemoteStreamRef.current.addTrack(event.track);
+        setDirectRemoteStream(directRemoteStreamRef.current);
+      }
+    });
+
+    peerConnection.addEventListener("connectionstatechange", () => {
+      const connectionState = String(peerConnection.connectionState || "");
+
+      if (connectionState === "connected") {
+        setStatusLabel("Connected");
+      } else if (connectionState === "failed") {
+        setStatusLabel("Connection failed");
+      } else if (connectionState === "disconnected") {
+        setStatusLabel("Reconnecting...");
+      }
+    });
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track: any) => {
+        peerConnection.addTrack(track, localStreamRef.current);
+      });
+    }
+
+    directPeerConnectionRef.current = peerConnection;
+    return peerConnection;
+  }, [callSessionId, iceServers]);
+
+  const ensureGroupPeerConnection = useCallback(
+    async (remoteUserId: string) => {
+      if (groupPeerConnectionsRef.current[remoteUserId]) {
+        return groupPeerConnectionsRef.current[remoteUserId];
+      }
+
+      const peerConnection: any = new RTCPeerConnection({ iceServers });
+
+      peerConnection.addEventListener("icecandidate", (event: any) => {
+        if (!event?.candidate) {
+          return;
+        }
+
+        socket.emit("call:ice-candidate", {
+          callSessionId,
+          targetUserId: remoteUserId,
+          candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate,
+        });
+      });
+
+      peerConnection.addEventListener("track", (event: any) => {
+        const nextStream = event?.streams?.[0];
+        if (!nextStream) {
+          return;
+        }
+
+        groupRemoteStreamsRef.current[remoteUserId] = nextStream;
+        setGroupRemoteStreams((prev) => ({
+          ...prev,
+          [remoteUserId]: nextStream,
+        }));
+      });
+
+      peerConnection.addEventListener("connectionstatechange", () => {
+        const connectionState = String(peerConnection.connectionState || "");
+
+        if (connectionState === "failed" || connectionState === "closed") {
+          closeGroupPeerConnection(remoteUserId);
+        }
+      });
+
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track: any) => {
+          peerConnection.addTrack(track, localStreamRef.current);
+        });
+      }
+
+      groupPeerConnectionsRef.current[remoteUserId] = peerConnection;
+      return peerConnection;
+    },
+    [callSessionId, closeGroupPeerConnection, iceServers]
+  );
+
+  const startDirectOffer = useCallback(async () => {
+    if (directOfferStartedRef.current) {
       return;
     }
 
-    offerStartedRef.current = true;
+    directOfferStartedRef.current = true;
 
     try {
       await ensureLocalStream();
-      const peerConnection = await ensurePeerConnection();
+      const peerConnection = await ensureDirectPeerConnection();
       const offer = await peerConnection.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: effectiveCallType === "video",
@@ -320,15 +470,42 @@ const CallScreen = ({ navigation, route }: any) => {
         description: offer.toJSON ? offer.toJSON() : offer,
       });
     } catch (error) {
-      offerStartedRef.current = false;
+      directOfferStartedRef.current = false;
       Alert.alert("Could not start call", getReadableApiErrorMessage(error, "Unable to initialize the call."));
     }
-  }, [callSessionId, effectiveCallType, ensureLocalStream, ensurePeerConnection]);
+  }, [callSessionId, effectiveCallType, ensureDirectPeerConnection, ensureLocalStream]);
+
+  const startGroupOffer = useCallback(
+    async (remoteUserId: string) => {
+      if (!remoteUserId || remoteUserId === currentUserId) {
+        return;
+      }
+
+      try {
+        await ensureLocalStream();
+        const peerConnection = await ensureGroupPeerConnection(remoteUserId);
+        const offer = await peerConnection.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: effectiveCallType === "video",
+        });
+        await peerConnection.setLocalDescription(offer);
+
+        socket.emit("call:offer", {
+          callSessionId,
+          targetUserId: remoteUserId,
+          description: offer.toJSON ? offer.toJSON() : offer,
+        });
+      } catch (error) {
+        console.log("group call offer error", error);
+      }
+    },
+    [callSessionId, currentUserId, effectiveCallType, ensureGroupPeerConnection, ensureLocalStream]
+  );
 
   const applyTerminalState = useCallback(
     (nextCallSession: any) => {
       setCallSession(nextCallSession);
-      setStatusLabel(buildStatusLabel(nextCallSession, mode));
+      setStatusLabel(buildStatusLabel(nextCallSession, mode, isGroupCall));
       cleanupMedia();
 
       if (closingRef.current) {
@@ -340,7 +517,7 @@ const CallScreen = ({ navigation, route }: any) => {
         navigation.goBack();
       }, 900);
     },
-    [cleanupMedia, mode, navigation]
+    [cleanupMedia, isGroupCall, mode, navigation]
   );
 
   useEffect(() => {
@@ -354,7 +531,18 @@ const CallScreen = ({ navigation, route }: any) => {
   }, [callSessionId, fetchCallSessionState, navigation]);
 
   useEffect(() => {
-    if (!callSession || String(callSession.status || "") !== "ringing" || closingRef.current) {
+    setStatusLabel(buildStatusLabel(callSession, mode, isGroupCall));
+  }, [callSession, isGroupCall, mode]);
+
+  useEffect(() => {
+    const shouldPoll =
+      !closingRef.current &&
+      (
+        String(callSession?.status || "") === "ringing" ||
+        (isGroupCall && String(callSession?.currentParticipantState?.status || "") === "invited")
+      );
+
+    if (!shouldPoll) {
       return undefined;
     }
 
@@ -363,7 +551,7 @@ const CallScreen = ({ navigation, route }: any) => {
     }, Math.max(3000, Math.min(Number(callRuntime?.ringingTimeoutMs || 5000) / 3, 5000)));
 
     return () => clearInterval(pollInterval);
-  }, [callRuntime?.ringingTimeoutMs, callSession, fetchCallSessionState]);
+  }, [callRuntime?.ringingTimeoutMs, callSession, fetchCallSessionState, isGroupCall]);
 
   useEffect(() => {
     if (!callSession || !TERMINAL_STATUSES.has(String(callSession.status || ""))) {
@@ -374,32 +562,84 @@ const CallScreen = ({ navigation, route }: any) => {
   }, [applyTerminalState, callSession]);
 
   useEffect(() => {
-    const syncSocket = async () => {
-      await connectSocket();
-      socket.emit("call:join", { callSessionId });
-    };
+    const shouldJoinRoom =
+      Boolean(callSessionId) &&
+      (
+        mode === "outgoing" ||
+        (
+          String(callSession?.status || "") === "ongoing" &&
+          (!isGroupCall || String(callSession?.currentParticipantState?.status || "") === "joined")
+        )
+      );
 
-    syncSocket().catch((error) => {
-      console.log("call socket connect error", error);
-    });
+    if (!shouldJoinRoom || joinSentRef.current) {
+      return;
+    }
 
+    connectSocket()
+      .then(() => {
+        socket.emit("call:join", { callSessionId });
+        joinSentRef.current = true;
+      })
+      .catch((error) => {
+        console.log("call socket connect error", error);
+      });
+  }, [callSession?.currentParticipantState?.status, callSession?.status, callSessionId, isGroupCall, mode]);
+
+  useEffect(() => {
     const handleCallStatus = (payload: any) => {
       const nextCallSession = payload?.callSession;
       if (!nextCallSession || String(nextCallSession._id || "") !== String(callSessionId || "")) {
         return;
       }
 
+      if (Array.isArray(payload?.iceServers) && payload.iceServers.length) {
+        setIceServers(payload.iceServers);
+      }
+      if (payload?.callRuntime) {
+        setCallRuntime(payload.callRuntime);
+      }
+
       setCallSession(nextCallSession);
-      setStatusLabel(buildStatusLabel(nextCallSession, mode));
 
       if (TERMINAL_STATUSES.has(String(nextCallSession.status || ""))) {
         applyTerminalState(nextCallSession);
         return;
       }
 
-      if (String(nextCallSession.status) === "ongoing" && mode === "outgoing") {
-        startOffer().catch(() => {});
+      if (!isGroupCall && String(nextCallSession.status) === "ongoing" && mode === "outgoing") {
+        startDirectOffer().catch(() => {});
       }
+
+      if (isGroupCall) {
+        const joinedRemoteIds = (Array.isArray(nextCallSession?.participantStates) ? nextCallSession.participantStates : [])
+          .filter((entry: any) => String(entry?.status || "") === "joined")
+          .map((entry: any) => String(entry?.user?._id || entry?.user || ""))
+          .filter((userId: string) => userId && userId !== currentUserId);
+
+        Object.keys(groupPeerConnectionsRef.current).forEach((userId) => {
+          if (!joinedRemoteIds.includes(userId)) {
+            closeGroupPeerConnection(userId);
+          }
+        });
+      }
+    };
+
+    const handleParticipantJoined = (payload: any) => {
+      if (!isGroupCall || String(payload?.callSessionId || "") !== String(callSessionId || "")) {
+        return;
+      }
+
+      const remoteUserId = String(payload?.userId || "");
+      if (!remoteUserId || remoteUserId === currentUserId) {
+        return;
+      }
+
+      if (String(callSession?.currentParticipantState?.status || "") !== "joined") {
+        return;
+      }
+
+      startGroupOffer(remoteUserId).catch(() => {});
     };
 
     const handleOffer = async (payload: any) => {
@@ -409,7 +649,23 @@ const CallScreen = ({ navigation, route }: any) => {
 
       try {
         await ensureLocalStream();
-        const peerConnection = await ensurePeerConnection();
+
+        if (isGroupCall && payload?.fromUserId) {
+          const remoteUserId = String(payload.fromUserId);
+          const peerConnection = await ensureGroupPeerConnection(remoteUserId);
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.description));
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+
+          socket.emit("call:answer", {
+            callSessionId,
+            targetUserId: remoteUserId,
+            description: answer.toJSON ? answer.toJSON() : answer,
+          });
+          return;
+        }
+
+        const peerConnection = await ensureDirectPeerConnection();
         await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.description));
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
@@ -429,7 +685,13 @@ const CallScreen = ({ navigation, route }: any) => {
       }
 
       try {
-        const peerConnection = await ensurePeerConnection();
+        if (isGroupCall && payload?.fromUserId) {
+          const peerConnection = await ensureGroupPeerConnection(String(payload.fromUserId));
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.description));
+          return;
+        }
+
+        const peerConnection = await ensureDirectPeerConnection();
         await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.description));
       } catch (error) {
         console.log("call answer handling error", error);
@@ -442,7 +704,13 @@ const CallScreen = ({ navigation, route }: any) => {
       }
 
       try {
-        const peerConnection = await ensurePeerConnection();
+        if (isGroupCall && payload?.fromUserId) {
+          const peerConnection = await ensureGroupPeerConnection(String(payload.fromUserId));
+          await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          return;
+        }
+
+        const peerConnection = await ensureDirectPeerConnection();
         await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
       } catch (error) {
         console.log("call ice candidate error", error);
@@ -450,12 +718,14 @@ const CallScreen = ({ navigation, route }: any) => {
     };
 
     socket.on("call:status", handleCallStatus);
+    socket.on("call:participant-joined", handleParticipantJoined);
     socket.on("call:offer", handleOffer);
     socket.on("call:answer", handleAnswer);
     socket.on("call:ice-candidate", handleIceCandidate);
 
     return () => {
       socket.off("call:status", handleCallStatus);
+      socket.off("call:participant-joined", handleParticipantJoined);
       socket.off("call:offer", handleOffer);
       socket.off("call:answer", handleAnswer);
       socket.off("call:ice-candidate", handleIceCandidate);
@@ -463,16 +733,22 @@ const CallScreen = ({ navigation, route }: any) => {
     };
   }, [
     applyTerminalState,
+    callSession,
     callSessionId,
     cleanupMedia,
+    closeGroupPeerConnection,
+    currentUserId,
+    ensureDirectPeerConnection,
+    ensureGroupPeerConnection,
     ensureLocalStream,
-    ensurePeerConnection,
+    isGroupCall,
     mode,
-    startOffer,
+    startDirectOffer,
+    startGroupOffer,
   ]);
 
   useEffect(() => {
-    if (callSession?.status !== "ongoing") {
+    if (String(callSession?.status || "") !== "ongoing") {
       if (durationTimerRef.current) {
         clearInterval(durationTimerRef.current);
         durationTimerRef.current = null;
@@ -507,7 +783,7 @@ const CallScreen = ({ navigation, route }: any) => {
 
       event.preventDefault();
 
-      const reason = mode === "incoming" && callSession?.status === "ringing" ? "declined" : "hangup";
+      const reason = mode === "incoming" && String(callSession?.status || "") === "ringing" ? "declined" : "hangup";
 
       endCallSession(callSessionId, reason)
         .catch(() => {})
@@ -521,14 +797,18 @@ const CallScreen = ({ navigation, route }: any) => {
   }, [callSession?.status, callSessionId, hasActiveCall, mode, navigation]);
 
   useEffect(() => {
-    if (mode !== "outgoing" || !callSession || TERMINAL_STATUSES.has(String(callSession.status || ""))) {
+    const shouldWarmMedia =
+      mode === "outgoing" ||
+      (isGroupCall && String(callSession?.currentParticipantState?.status || "") === "joined");
+
+    if (!shouldWarmMedia || !callSession || TERMINAL_STATUSES.has(String(callSession.status || ""))) {
       return;
     }
 
     ensureLocalStream().catch((error) => {
       Alert.alert("Could not access call media", getReadableApiErrorMessage(error, "Please check your device permissions."));
     });
-  }, [callSession, ensureLocalStream, mode]);
+  }, [callSession, ensureLocalStream, isGroupCall, mode]);
 
   const handleAnswer = async () => {
     if (answering || answeredRef.current) {
@@ -547,7 +827,6 @@ const CallScreen = ({ navigation, route }: any) => {
       if (response.callRuntime) {
         setCallRuntime(response.callRuntime);
       }
-      setStatusLabel(buildStatusLabel(response.callSession, mode));
     } catch (error) {
       Alert.alert("Could not answer call", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
@@ -611,10 +890,14 @@ const CallScreen = ({ navigation, route }: any) => {
     );
   }
 
-  const showIncomingActions = mode === "incoming" && callSession?.status === "ringing";
-  const showCallControls = callSession?.status === "ongoing" || (mode === "outgoing" && callSession?.status === "ringing");
+  const showIncomingActions = isGroupCall
+    ? mode === "incoming" && String(currentParticipantState?.status || "") === "invited" && String(callSession?.status || "") === "ongoing"
+    : mode === "incoming" && String(callSession?.status || "") === "ringing";
+  const showCallControls = isGroupCall
+    ? String(currentParticipantState?.status || "") === "joined" && !TERMINAL_STATUSES.has(String(callSession?.status || ""))
+    : String(callSession?.status || "") === "ongoing" || (mode === "outgoing" && String(callSession?.status || "") === "ringing");
   const localStreamUrl = localStream?.toURL?.() || null;
-  const remoteStreamUrl = remoteStream?.toURL?.() || null;
+  const directRemoteStreamUrl = directRemoteStream?.toURL?.() || null;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? "#050816" : "#0f172a" }]}>
@@ -626,13 +909,66 @@ const CallScreen = ({ navigation, route }: any) => {
         </TouchableOpacity>
       </View>
 
-      {effectiveCallType === "video" && remoteStreamUrl ? (
-        <RTCView streamURL={remoteStreamUrl} style={styles.remoteVideo} objectFit="cover" />
+      {effectiveCallType === "video" ? (
+        isGroupCall ? (
+          remoteParticipants.length ? (
+            <FlatList
+              data={remoteParticipants}
+              keyExtractor={(item) => item.id}
+              numColumns={2}
+              contentContainerStyle={styles.groupVideoGrid}
+              renderItem={({ item }) => (
+                <View style={styles.groupVideoTile}>
+                  {item.streamUrl ? (
+                    <RTCView streamURL={item.streamUrl} style={styles.groupVideo} objectFit="cover" />
+                  ) : (
+                    <View style={styles.groupVideoFallback}>
+                      <Image
+                        source={{ uri: item.participant?.profilePic || DEFAULT_AVATAR_URL }}
+                        style={styles.groupVideoAvatar}
+                      />
+                    </View>
+                  )}
+                  <View style={styles.groupVideoLabel}>
+                    <Text style={styles.groupVideoLabelText} numberOfLines={1}>
+                      {item.participant?.name || item.participant?.username || "Participant"}
+                    </Text>
+                  </View>
+                </View>
+              )}
+            />
+          ) : (
+            <View style={styles.avatarStage}>
+              <View style={[styles.avatarRing, { borderColor: colors.primary }]}>
+                <Image source={{ uri: displayAvatar }} style={styles.avatar} />
+              </View>
+            </View>
+          )
+        ) : directRemoteStreamUrl ? (
+          <RTCView streamURL={directRemoteStreamUrl} style={styles.remoteVideo} objectFit="cover" />
+        ) : (
+          <View style={styles.avatarStage}>
+            <View style={[styles.avatarRing, { borderColor: colors.primary }]}>
+              <Image source={{ uri: displayAvatar }} style={styles.avatar} />
+            </View>
+          </View>
+        )
       ) : (
         <View style={styles.avatarStage}>
           <View style={[styles.avatarRing, { borderColor: colors.primary }]}>
             <Image source={{ uri: displayAvatar }} style={styles.avatar} />
           </View>
+          {isGroupCall && remoteParticipants.length ? (
+            <View style={styles.groupJoinedWrap}>
+              {remoteParticipants.map((item) => (
+                <View key={item.id} style={styles.groupJoinedChip}>
+                  <Text style={styles.groupJoinedChipText}>
+                    {item.participant?.username || item.participant?.name || "Joined"}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </View>
       )}
 
@@ -643,8 +979,15 @@ const CallScreen = ({ navigation, route }: any) => {
       <View style={styles.overlay}>
         <Text style={styles.name}>{displayName}</Text>
         <Text style={styles.statusLabel}>
-          {callSession?.status === "ongoing" ? formatDuration(durationSeconds) : statusLabel}
+          {String(callSession?.status || "") === "ongoing" && (!isGroupCall || String(currentParticipantState?.status || "") === "joined")
+            ? formatDuration(durationSeconds)
+            : statusLabel}
         </Text>
+        {isGroupCall ? (
+          <Text style={styles.participantCount}>
+            {joinedParticipantIds.length}/{Array.isArray(callSession?.participants) ? callSession.participants.length : 0} joined
+          </Text>
+        ) : null}
 
         {showIncomingActions ? (
           <View style={styles.actionRow}>
@@ -660,7 +1003,7 @@ const CallScreen = ({ navigation, route }: any) => {
               onPress={handleAnswer}
               disabled={answering}
             >
-              {answering ? <ActivityIndicator color="#fff" /> : <Icon name="call" size={24} color="#fff" />}
+              {answering ? <ActivityIndicator color="#fff" /> : <Icon name={isGroupCall ? "people" : "call"} size={24} color="#fff" />}
             </TouchableOpacity>
           </View>
         ) : showCallControls ? (
@@ -741,6 +1084,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: 24,
   },
   avatarRing: {
     width: 170,
@@ -758,22 +1102,23 @@ const styles = StyleSheet.create({
   },
   localPreview: {
     position: "absolute",
+    top: 110,
     right: 18,
-    top: 96,
-    width: 110,
-    height: 160,
-    borderRadius: 18,
+    width: 112,
+    height: 164,
+    borderRadius: 20,
     overflow: "hidden",
+    zIndex: 4,
     backgroundColor: "#111827",
-    zIndex: 3,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "flex-end",
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     paddingHorizontal: 24,
-    paddingBottom: 42,
-    backgroundColor: "rgba(0,0,0,0.18)",
+    paddingBottom: 28,
+    alignItems: "center",
   },
   name: {
     color: "#fff",
@@ -782,33 +1127,27 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   statusLabel: {
+    color: "rgba(255,255,255,0.86)",
     marginTop: 10,
-    color: "#d1d5db",
     fontSize: 15,
-    textAlign: "center",
+    fontWeight: "500",
   },
-  controlSection: {
-    marginTop: 28,
-    width: "100%",
-    alignItems: "center",
+  participantCount: {
+    marginTop: 8,
+    color: "rgba(255,255,255,0.74)",
+    fontSize: 13,
+    fontWeight: "500",
   },
   actionRow: {
+    marginTop: 36,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 18,
-    marginTop: 28,
   },
-  controlButton: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: "rgba(255,255,255,0.18)",
+  controlSection: {
+    width: "100%",
     alignItems: "center",
-    justifyContent: "center",
-  },
-  controlButtonActive: {
-    backgroundColor: "rgba(239,68,68,0.42)",
   },
   callButton: {
     width: 68,
@@ -817,16 +1156,87 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  acceptButton: {
-    backgroundColor: "#16a34a",
-  },
   rejectButton: {
-    backgroundColor: "#dc2626",
+    backgroundColor: "#ef4444",
+  },
+  acceptButton: {
+    backgroundColor: "#22c55e",
   },
   endButton: {
     backgroundColor: "#ef4444",
   },
   endIcon: {
     transform: [{ rotate: "135deg" }],
+  },
+  controlButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  controlButtonActive: {
+    backgroundColor: "rgba(255,255,255,0.28)",
+  },
+  groupVideoGrid: {
+    paddingTop: 110,
+    paddingHorizontal: 12,
+    paddingBottom: 220,
+  },
+  groupVideoTile: {
+    flex: 1,
+    minWidth: 0,
+    height: 220,
+    margin: 6,
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "#111827",
+  },
+  groupVideo: {
+    flex: 1,
+  },
+  groupVideoFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111827",
+  },
+  groupVideoAvatar: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+  },
+  groupVideoLabel: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 10,
+    backgroundColor: "rgba(15,23,42,0.6)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  groupVideoLabelText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+  groupJoinedWrap: {
+    marginTop: 22,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
+  groupJoinedChip: {
+    margin: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  groupJoinedChipText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 12,
   },
 });

@@ -276,11 +276,6 @@ const ChatScreen = ({ navigation, route }) => {
   }, [ensureConversation, fetchGroupMeta, fetchMessages, fetchUser, userId]);
 
   const startCallFlow = useCallback(async (callType) => {
-    if (isGroupConversation) {
-      Alert.alert("Group calling not available", "Calls currently support one-to-one chats only.");
-      return;
-    }
-
     try {
       setStartingCallType(callType);
       const resolvedConversationId = await ensureConversation();
@@ -300,15 +295,19 @@ const ChatScreen = ({ navigation, route }) => {
         initialCallSession: data?.callSession,
         initialIceServers: data?.iceServers || [],
         callRuntime: data?.callRuntime || null,
-        title: user?.name || user?.username || "Aline2 call",
-        avatarUrl: user?.profilePic || DEFAULT_AVATAR_URL,
+        title: isGroupConversation
+          ? groupMeta.groupName || "Group call"
+          : user?.name || user?.username || "Aline2 call",
+        avatarUrl: isGroupConversation
+          ? groupMeta.groupAvatar || DEFAULT_AVATAR_URL
+          : user?.profilePic || DEFAULT_AVATAR_URL,
       });
     } catch (error) {
       Alert.alert("Could not start call", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setStartingCallType("");
     }
-  }, [ensureConversation, isGroupConversation, navigation, user]);
+  }, [ensureConversation, groupMeta.groupAvatar, groupMeta.groupName, isGroupConversation, navigation, user]);
 
   useEffect(() => {
     setCurrentConversationId(conversationId || null);
@@ -981,9 +980,33 @@ const ChatScreen = ({ navigation, route }) => {
 
         <View style={styles.headerIcons}>
           {isGroupConversation ? (
-            <TouchableOpacity onPress={() => navigation.navigate("GroupDetailsScreen", { conversationId: currentConversationId })}>
-              <Icon name="ellipsis-vertical" size={20} color="#fff" />
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                style={styles.headerIconButton}
+                onPress={() => startCallFlow("audio")}
+                disabled={startingCallType === "audio" || startingCallType === "video"}
+              >
+                {startingCallType === "audio" ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Icon name="call-outline" size={20} color="#fff" />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerIconButton}
+                onPress={() => startCallFlow("video")}
+                disabled={startingCallType === "audio" || startingCallType === "video"}
+              >
+                {startingCallType === "video" ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Icon name="videocam-outline" size={22} color="#fff" />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => navigation.navigate("GroupDetailsScreen", { conversationId: currentConversationId })}>
+                <Icon name="ellipsis-vertical" size={20} color="#fff" />
+              </TouchableOpacity>
+            </>
           ) : (
             <>
               <TouchableOpacity

@@ -118,8 +118,14 @@ function AppNavigator() {
         initialCallSession: nextCallSession,
         initialIceServers: payload?.iceServers || [],
         callRuntime: payload?.callRuntime || null,
-        title: nextCallSession?.otherParticipant?.name || nextCallSession?.otherParticipant?.username || "Incoming call",
-        avatarUrl: nextCallSession?.otherParticipant?.profilePic || "",
+        title:
+          nextCallSession?.conversation?.conversationType === "group"
+            ? nextCallSession?.conversation?.groupName || "Incoming group call"
+            : nextCallSession?.otherParticipant?.name || nextCallSession?.otherParticipant?.username || "Incoming call",
+        avatarUrl:
+          nextCallSession?.conversation?.conversationType === "group"
+            ? nextCallSession?.conversation?.groupAvatar || ""
+            : nextCallSession?.otherParticipant?.profilePic || "",
       });
     };
 
