@@ -368,9 +368,13 @@ const AllChatsScreen = ({ navigation }: any) => {
           memberCount: item?.memberCount || item?.members?.length || 0,
         })}
       >
-        <View style={[styles.groupAvatarCard, { backgroundColor: isDarkMode ? colors.surface : "#ede9fe" }]}>
-          <Icon name="people-outline" size={22} color={colors.primary} />
-        </View>
+        {item?.groupAvatar ? (
+          <Image source={{ uri: item.groupAvatar }} style={styles.avatar} />
+        ) : (
+          <View style={[styles.groupAvatarCard, { backgroundColor: isDarkMode ? colors.surface : "#ede9fe" }]}>
+            <Icon name="people-outline" size={22} color={colors.primary} />
+          </View>
+        )}
 
         <View style={styles.chatInfo}>
           <Text style={[styles.username, { color: colors.text }]}>{title}</Text>

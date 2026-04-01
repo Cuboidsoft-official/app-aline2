@@ -41,6 +41,7 @@ import {
 } from "../utils/chatPresentation";
 import {
   createChatConversation,
+  fetchChatConversationDetails,
   fetchConversationMessages,
   sendChatMessage,
 } from "../utils/chatApi";
@@ -119,6 +120,11 @@ const ChatScreen = ({ navigation, route }) => {
   const [typingUserId, setTypingUserId] = useState("");
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
+  const [groupMeta, setGroupMeta] = useState({
+    groupName: groupName || "Group chat",
+    groupAvatar: groupAvatar || "",
+    memberCount: Number(memberCount || 0),
+  });
   const typingTimeoutRef = useRef(null);
 
   const fetchUser = useCallback(async () => {
@@ -176,6 +182,31 @@ const ChatScreen = ({ navigation, route }) => {
     }
   }, [currentConversationId]);
 
+  const fetchGroupMeta = useCallback(async (targetConversationId = currentConversationId) => {
+    if (!isGroupConversation || !targetConversationId) {
+      return;
+    }
+
+    try {
+      const data = await fetchChatConversationDetails(targetConversationId);
+      const nextConversation = data?.conversation;
+      const nextGroupMeta = {
+        groupName: nextConversation?.groupName || "Group chat",
+        groupAvatar: nextConversation?.groupAvatar || "",
+        memberCount: Number(nextConversation?.memberCount || nextConversation?.members?.length || 0),
+      };
+
+      setGroupMeta(nextGroupMeta);
+      navigation.setParams({
+        groupName: nextGroupMeta.groupName,
+        groupAvatar: nextGroupMeta.groupAvatar,
+        memberCount: nextGroupMeta.memberCount,
+      });
+    } catch (error) {
+      console.log("Fetch group details error:", error?.response?.data || error);
+    }
+  }, [currentConversationId, isGroupConversation, navigation]);
+
   const ensureConversation = useCallback(async () => {
     if (currentConversationId) {
       return currentConversationId;
@@ -222,7 +253,10 @@ const ChatScreen = ({ navigation, route }) => {
       const resolvedConversationId = await ensureConversation();
 
       if (resolvedConversationId) {
-        await fetchMessages(resolvedConversationId);
+        await Promise.all([
+          fetchMessages(resolvedConversationId),
+          fetchGroupMeta(resolvedConversationId),
+        ]);
         await connectSocket();
         socket.emit("joinConversation", resolvedConversationId);
       }
@@ -237,11 +271,19 @@ const ChatScreen = ({ navigation, route }) => {
         setLoading(false);
       }
     }
-  }, [ensureConversation, fetchMessages, fetchUser, userId]);
+  }, [ensureConversation, fetchGroupMeta, fetchMessages, fetchUser, userId]);
 
   useEffect(() => {
     setCurrentConversationId(conversationId || null);
   }, [conversationId]);
+
+  useEffect(() => {
+    setGroupMeta({
+      groupName: groupName || "Group chat",
+      groupAvatar: groupAvatar || "",
+      memberCount: Number(memberCount || 0),
+    });
+  }, [groupAvatar, groupName, memberCount]);
 
   useEffect(() => {
     let mounted = true;
@@ -272,13 +314,18 @@ const ChatScreen = ({ navigation, route }) => {
   useFocusEffect(
     useCallback(() => {
       if (currentConversationId) {
-        fetchMessages(currentConversationId);
+        Promise.all([
+          fetchMessages(currentConversationId),
+          fetchGroupMeta(currentConversationId),
+        ]).catch((error) => {
+          console.log("Chat focus refresh error:", error);
+        });
       } else {
         initializeChat({ refresh: true }).catch((error) => {
           console.log("Chat focus refresh error:", error);
         });
       }
-    }, [currentConversationId, fetchMessages, initializeChat])
+    }, [currentConversationId, fetchGroupMeta, fetchMessages, initializeChat])
   );
 
   useEffect(() => {
@@ -851,10 +898,10 @@ const ChatScreen = ({ navigation, route }) => {
             activeOpacity={0.8}
             onPress={() => navigation.navigate("GroupDetailsScreen", { conversationId: currentConversationId })}
           >
-            {groupAvatar ? (
+            {groupMeta.groupAvatar ? (
               <Image
                 source={{
-                  uri: groupAvatar
+                  uri: groupMeta.groupAvatar
                 }}
                 style={styles.avatar}
               />
@@ -866,10 +913,10 @@ const ChatScreen = ({ navigation, route }) => {
 
             <View>
               <Text style={styles.username}>
-                {groupName || "Group chat"}
+                {groupMeta.groupName || "Group chat"}
               </Text>
               <Text style={styles.status}>
-                {typingUserId ? "Typing..." : `${memberCount || 0} members`}
+                {typingUserId ? "Typing..." : `${groupMeta.memberCount || 0} members`}
               </Text>
             </View>
           </TouchableOpacity>
