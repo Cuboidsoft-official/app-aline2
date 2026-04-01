@@ -199,6 +199,21 @@ const formatDuration = (seconds: number | undefined): string => {
 const buildMusicLabel = (music: SelectedMusicClip | null | undefined): string =>
   [music?.title, music?.artist].filter(Boolean).join(" • ");
 
+const isValidHttpUrl = (value: string): boolean => {
+  const normalized = String(value || "").trim();
+
+  if (!normalized) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 function CreatePostScreen({ navigation, route }: any) {
   const { colors } = useAppTheme();
   const initialTab = (route?.params?.initialTab as ComposerTab | undefined) || "post";
@@ -723,6 +738,24 @@ function CreatePostScreen({ navigation, route }: any) {
       throw new Error("Write something before publishing a text story.");
     }
 
+    if (storyLinkUrl.trim() && !isValidHttpUrl(storyLinkUrl)) {
+      throw new Error("Story links must start with http:// or https://");
+    }
+
+    if (storyType === "poll") {
+      if (!pollQuestion.trim()) {
+        throw new Error("Add a poll question before publishing.");
+      }
+
+      if (!pollOptionA.trim() || !pollOptionB.trim()) {
+        throw new Error("Poll stories need two answer options.");
+      }
+    }
+
+    if (storyType === "question" && !questionPrompt.trim()) {
+      throw new Error("Add a question prompt before publishing.");
+    }
+
     const base: CreateStoryInput = {
       type: storyType,
       media: background,
@@ -755,14 +788,14 @@ function CreatePostScreen({ navigation, route }: any) {
 
     if (storyType === "poll") {
       base.poll = {
-        question: pollQuestion,
-        options: [pollOptionA, pollOptionB],
+        question: pollQuestion.trim(),
+        options: [pollOptionA.trim(), pollOptionB.trim()],
       };
     }
 
     if (storyType === "question") {
       base.question = {
-        prompt: questionPrompt,
+        prompt: questionPrompt.trim(),
       };
     }
 
