@@ -215,7 +215,7 @@ const isValidHttpUrl = (value: string): boolean => {
 };
 
 function CreatePostScreen({ navigation, route }: any) {
-  const { colors } = useAppTheme();
+  const { colors, isDarkMode } = useAppTheme();
   const initialTab = (route?.params?.initialTab as ComposerTab | undefined) || "post";
   const initialMedia = route?.params?.initialMedia as string | undefined;
   const initialMediaType = (route?.params?.initialMediaType as "image" | "video" | undefined) || "image";
@@ -287,6 +287,14 @@ function CreatePostScreen({ navigation, route }: any) {
   const [musicImportingId, setMusicImportingId] = useState("");
   const [musicError, setMusicError] = useState("");
   const [musicBrowseMode, setMusicBrowseMode] = useState<MusicBrowseMode>("trending");
+
+  const surfaceColor = isDarkMode ? colors.surface : colors.card;
+  const elevatedSurfaceColor = isDarkMode ? colors.card : "#f8fafc";
+  const subtleSurfaceColor = isDarkMode ? colors.surface : "#f3f4f6";
+  const inputStyle = { borderColor: colors.border, backgroundColor: surfaceColor, color: colors.text };
+  const helperTextStyle = { color: colors.mutedText };
+  const controlBorderStyle = { borderColor: colors.border };
+  const activePillStyle = { backgroundColor: colors.primary, borderColor: colors.primary };
   const textStickerDragStartRef = useRef(storyStickerPresetPositions.bottom_left);
   const emojiStickerDragStartRef = useRef(storyStickerPresetPositions.top_right);
 
@@ -999,93 +1007,94 @@ function CreatePostScreen({ navigation, route }: any) {
 
     return (
       <>
-        <Text style={styles.sectionLabel}>Music</Text>
+        <Text style={[styles.sectionLabel, { color: colors.text }]}>Music</Text>
         <View style={styles.modeRow}>
           <TouchableOpacity
-            style={[styles.pill, musicBrowseMode === "trending" && styles.pillActive]}
+            style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, musicBrowseMode === "trending" && [styles.pillActive, activePillStyle]]}
             onPress={loadTrendingMusic}
           >
-            <Text style={[styles.pillText, musicBrowseMode === "trending" && styles.pillTextActive]}>Trending</Text>
+            <Text style={[styles.pillText, { color: musicBrowseMode === "trending" ? "#fff" : colors.text }, musicBrowseMode === "trending" && styles.pillTextActive]}>Trending</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.pill, musicBrowseMode === "original" && styles.pillActive]}
+            style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, musicBrowseMode === "original" && [styles.pillActive, activePillStyle]]}
             onPress={loadOriginalSounds}
           >
-            <Text style={[styles.pillText, musicBrowseMode === "original" && styles.pillTextActive]}>My Audio</Text>
+            <Text style={[styles.pillText, { color: musicBrowseMode === "original" ? "#fff" : colors.text }, musicBrowseMode === "original" && styles.pillTextActive]}>My Audio</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.musicSearchRow}>
           <TextInput
-            style={styles.musicSearchInput}
+            style={[styles.musicSearchInput, inputStyle]}
             value={musicQuery}
             onChangeText={setMusicQuery}
             placeholder="Search tracks or original sounds"
+            placeholderTextColor={colors.mutedText}
             maxLength={limits.music}
           />
-          <TouchableOpacity style={styles.musicActionButton} onPress={runMusicSearch} disabled={musicLoading}>
+          <TouchableOpacity style={[styles.musicActionButton, { backgroundColor: colors.primary }]} onPress={runMusicSearch} disabled={musicLoading}>
             {musicLoading ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="search-outline" size={16} color="#fff" />}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.musicSecondaryButton} onPress={loadTrendingMusic} disabled={musicLoading}>
-            <Icon name="flame-outline" size={16} color="#111827" />
+          <TouchableOpacity style={[styles.musicSecondaryButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={loadTrendingMusic} disabled={musicLoading}>
+            <Icon name="flame-outline" size={16} color={colors.text} />
           </TouchableOpacity>
         </View>
 
         {current ? (
-          <View style={styles.musicCard}>
+          <View style={[styles.musicCard, { backgroundColor: elevatedSurfaceColor, borderColor: colors.border }]}>
             <View style={styles.musicCardHeader}>
               <View style={styles.musicTitleBlock}>
-                <Text style={styles.musicTitle}>{buildMusicLabel(current)}</Text>
-                <Text style={styles.musicMeta}>
+                <Text style={[styles.musicTitle, { color: colors.text }]}>{buildMusicLabel(current)}</Text>
+                <Text style={[styles.musicMeta, helperTextStyle]}>
                   {[current.source || "catalog", current.isOriginal ? "original" : null, `${formatDuration(current.duration)} track`]
                     .filter(Boolean)
                     .join(" • ")}
                 </Text>
               </View>
-              <TouchableOpacity style={styles.musicClearButton} onPress={() => setMusicForTab(tab, null)}>
-                <Text style={styles.musicClearText}>Remove</Text>
+              <TouchableOpacity style={[styles.musicClearButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setMusicForTab(tab, null)}>
+                <Text style={[styles.musicClearText, { color: colors.text }]}>Remove</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.sectionLabel}>Clip length</Text>
+            <Text style={[styles.sectionLabel, { color: colors.text }]}>Clip length</Text>
             <View style={styles.modeRow}>
               {clipPresets
                 .filter((preset) => preset <= current.duration)
                 .map((preset) => (
                   <TouchableOpacity
                     key={preset}
-                    style={[styles.pill, (current.clipDuration || 0) === preset && styles.pillActive]}
+                    style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, (current.clipDuration || 0) === preset && [styles.pillActive, activePillStyle]]}
                     onPress={() => setSelectedMusicClipDuration(preset)}
                   >
-                    <Text style={[styles.pillText, (current.clipDuration || 0) === preset && styles.pillTextActive]}>
+                    <Text style={[styles.pillText, { color: (current.clipDuration || 0) === preset ? "#fff" : colors.text }, (current.clipDuration || 0) === preset && styles.pillTextActive]}>
                       {preset}s
                     </Text>
                   </TouchableOpacity>
                 ))}
             </View>
 
-            <Text style={styles.sectionLabel}>Clip start</Text>
+            <Text style={[styles.sectionLabel, { color: colors.text }]}>Clip start</Text>
             <View style={styles.clipAdjustRow}>
-              <TouchableOpacity style={styles.clipAdjustButton} onPress={() => nudgeSelectedMusicStart(-5)}>
+              <TouchableOpacity style={[styles.clipAdjustButton, { backgroundColor: colors.primary }]} onPress={() => nudgeSelectedMusicStart(-5)}>
                 <Text style={styles.clipAdjustText}>-5s</Text>
               </TouchableOpacity>
-              <Text style={styles.clipAdjustValue}>
+              <Text style={[styles.clipAdjustValue, { color: colors.text }]}>
                 Starts at {formatDuration(current.clipStartTime)} for {formatDuration(current.clipDuration)}
               </Text>
-              <TouchableOpacity style={styles.clipAdjustButton} onPress={() => nudgeSelectedMusicStart(5)}>
+              <TouchableOpacity style={[styles.clipAdjustButton, { backgroundColor: colors.primary }]} onPress={() => nudgeSelectedMusicStart(5)}>
                 <Text style={styles.clipAdjustText}>+5s</Text>
               </TouchableOpacity>
             </View>
           </View>
         ) : (
-          <Text style={styles.helperText}>
+          <Text style={[styles.helperText, helperTextStyle]}>
             Attach a real track so this {tab === "story" ? "story" : tab} uses a saved music record instead of placeholder text.
           </Text>
         )}
 
-        {musicError ? <Text style={styles.musicError}>{musicError}</Text> : null}
+        {musicError ? <Text style={[styles.musicError, { color: isDarkMode ? "#FCA5A5" : "#b91c1c" }]}>{musicError}</Text> : null}
 
         {!musicLoading && !musicResults.length ? (
-          <Text style={styles.helperText}>
+          <Text style={[styles.helperText, helperTextStyle]}>
             {musicBrowseMode === "original"
               ? "You do not have any original sounds yet. Publish a video first, then turn it into audio."
               : musicBrowseMode === "search"
@@ -1106,13 +1115,17 @@ function CreatePostScreen({ navigation, route }: any) {
             return (
               <TouchableOpacity
                 key={`${item.id}:${item.title}`}
-                style={[styles.musicResultCard, isCurrent && styles.musicResultCardActive]}
+                style={[
+                  styles.musicResultCard,
+                  { backgroundColor: surfaceColor, borderColor: colors.border },
+                  isCurrent && [styles.musicResultCardActive, { backgroundColor: elevatedSurfaceColor, borderColor: colors.primary }],
+                ]}
                 onPress={() => attachMusic(item)}
                 disabled={isImporting}
               >
                 <View style={styles.musicResultBody}>
-                  <Text style={styles.musicResultTitle}>{buildMusicLabel(item)}</Text>
-                  <Text style={styles.musicResultMeta}>
+                  <Text style={[styles.musicResultTitle, { color: colors.text }]}>{buildMusicLabel(item)}</Text>
+                  <Text style={[styles.musicResultMeta, helperTextStyle]}>
                     {[item.source || "catalog", item.isOriginal ? "original" : null, formatDuration(item.duration)]
                       .filter(Boolean)
                       .join(" • ")}
@@ -1133,54 +1146,55 @@ function CreatePostScreen({ navigation, route }: any) {
 
   const renderPostControls = () => (
     <>
-      <Text style={styles.sectionLabel}>Post Type</Text>
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Post Type</Text>
       <View style={styles.modeRow}>
         {postModes.map((mode) => (
           <TouchableOpacity
             key={mode}
-            style={[styles.pill, postType === mode && styles.pillActive]}
+            style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, postType === mode && [styles.pillActive, activePillStyle]]}
             onPress={() => {
               setPostType(mode);
               setSelectedAssets([]);
             }}
           >
-            <Text style={[styles.pillText, postType === mode && styles.pillTextActive]}>{mode}</Text>
+            <Text style={[styles.pillText, { color: postType === mode ? "#fff" : colors.text }, postType === mode && styles.pillTextActive]}>{mode}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <Text style={styles.sectionLabel}>Caption</Text>
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Caption</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, inputStyle]}
         value={caption}
         onChangeText={setCaption}
         placeholder="Write caption"
+        placeholderTextColor={colors.mutedText}
         multiline
         maxLength={limits.caption}
       />
-      <Text style={styles.counter}>{caption.length}/{limits.caption}</Text>
+      <Text style={[styles.counter, helperTextStyle]}>{caption.length}/{limits.caption}</Text>
 
-      <Text style={styles.sectionLabel}>Location</Text>
-      <TextInput style={styles.inputSingle} value={location} onChangeText={setLocation} placeholder="Add location" maxLength={limits.location} />
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Location</Text>
+      <TextInput style={[styles.inputSingle, inputStyle]} value={location} onChangeText={setLocation} placeholder="Add location" placeholderTextColor={colors.mutedText} maxLength={limits.location} />
       {renderMusicPicker("post")}
 
-      <Text style={styles.sectionLabel}>Hashtags (comma separated)</Text>
-      <TextInput style={styles.inputSingle} value={hashtagsRaw} onChangeText={setHashtagsRaw} placeholder="fashion, travel" />
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Hashtags (comma separated)</Text>
+      <TextInput style={[styles.inputSingle, inputStyle]} value={hashtagsRaw} onChangeText={setHashtagsRaw} placeholder="fashion, travel" placeholderTextColor={colors.mutedText} />
 
-      <Text style={styles.sectionLabel}>Mentions (comma separated)</Text>
-      <TextInput style={styles.inputSingle} value={mentionsRaw} onChangeText={setMentionsRaw} placeholder="alice, bob" />
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Mentions (comma separated)</Text>
+      <TextInput style={[styles.inputSingle, inputStyle]} value={mentionsRaw} onChangeText={setMentionsRaw} placeholder="alice, bob" placeholderTextColor={colors.mutedText} />
 
-      <View style={styles.switchRow}><Text style={styles.switchLabel}>Disable comments</Text><Switch value={disableComments} onValueChange={setDisableComments} /></View>
-      <View style={styles.switchRow}><Text style={styles.switchLabel}>Hide like count</Text><Switch value={hideLikeCount} onValueChange={setHideLikeCount} /></View>
+      <View style={styles.switchRow}><Text style={[styles.switchLabel, { color: colors.text }]}>Disable comments</Text><Switch value={disableComments} onValueChange={setDisableComments} /></View>
+      <View style={styles.switchRow}><Text style={[styles.switchLabel, { color: colors.text }]}>Hide like count</Text><Switch value={hideLikeCount} onValueChange={setHideLikeCount} /></View>
 
-      <Text style={styles.helperText}>
+      <Text style={[styles.helperText, helperTextStyle]}>
         {postType === "carousel"
           ? "Select up to 10 images for a carousel post."
           : postType === "video"
             ? "Choose a single video. It will upload through the backend media pipeline."
             : "Choose a single image for this post."}
       </Text>
-      <Text style={styles.helperText}>
+      <Text style={[styles.helperText, helperTextStyle]}>
         Basic posting is production-focused here: caption, media, location, music, hashtags, mentions, comment control, and like-count privacy are supported. Collaboration/remix controls are hidden until they are fully product-ready.
       </Text>
     </>
@@ -1188,15 +1202,15 @@ function CreatePostScreen({ navigation, route }: any) {
 
   const renderStoryControls = () => (
     <>
-      <Text style={styles.sectionLabel}>Story Type</Text>
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Story Type</Text>
       <View style={styles.modeRow}>
         {storyModes.map((mode) => (
           <TouchableOpacity
             key={mode}
-            style={[styles.pill, storyType === mode && styles.pillActive]}
+            style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyType === mode && [styles.pillActive, activePillStyle]]}
             onPress={() => setStoryType(mode)}
           >
-            <Text style={[styles.pillText, storyType === mode && styles.pillTextActive]}>{mode}</Text>
+            <Text style={[styles.pillText, { color: storyType === mode ? "#fff" : colors.text }, storyType === mode && styles.pillTextActive]}>{mode}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -1219,17 +1233,17 @@ function CreatePostScreen({ navigation, route }: any) {
         </>
       ) : null}
 
-      <Text style={styles.sectionLabel}>{storyType === "text" ? "Text story" : "Caption"}</Text>
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>{storyType === "text" ? "Text story" : "Caption"}</Text>
       <TextInput
-        style={[styles.input, storyType === "text" && styles.textStoryInput]}
+        style={[styles.input, inputStyle, storyType === "text" && styles.textStoryInput]}
         value={storyCaption}
         onChangeText={setStoryCaption}
         placeholder={storyType === "text" ? "Share a thought" : "Add story caption"}
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor={colors.mutedText}
         maxLength={limits.caption}
         multiline
       />
-      <Text style={styles.counter}>{storyCaption.length}/{limits.caption}</Text>
+      <Text style={[styles.counter, helperTextStyle]}>{storyCaption.length}/{limits.caption}</Text>
 
       {storyType === "text" ? (
         <>
@@ -1251,15 +1265,15 @@ function CreatePostScreen({ navigation, route }: any) {
 
       {storyType !== "text" ? (
         <>
-          <Text style={styles.sectionLabel}>Filter</Text>
+          <Text style={[styles.sectionLabel, { color: colors.text }]}>Filter</Text>
           <View style={styles.modeRow}>
             {storyFilterPresets.map((preset) => (
               <TouchableOpacity
                 key={`story-filter-${preset}`}
-                style={[styles.pill, storyFilterPreset === preset && styles.pillActive]}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyFilterPreset === preset && [styles.pillActive, activePillStyle]]}
                 onPress={() => setStoryFilterPreset(preset)}
               >
-                <Text style={[styles.pillText, storyFilterPreset === preset && styles.pillTextActive]}>
+                <Text style={[styles.pillText, { color: storyFilterPreset === preset ? "#fff" : colors.text }, storyFilterPreset === preset && styles.pillTextActive]}>
                   {storyFilterPresetLabels[preset]}
                 </Text>
               </TouchableOpacity>
@@ -1268,14 +1282,14 @@ function CreatePostScreen({ navigation, route }: any) {
           {storyFilterPreset !== "none" ? (
             <View style={styles.stickerScaleRow}>
               <TouchableOpacity
-                style={styles.scaleButton}
+                style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]}
                 onPress={() => setStoryFilterIntensity((value) => Math.max(0.2, Math.round((value - 0.1) * 10) / 10))}
               >
                 <Text style={styles.scaleButtonText}>-</Text>
               </TouchableOpacity>
-              <Text style={styles.scaleValueText}>Filter strength {storyFilterIntensity.toFixed(1)}x</Text>
+              <Text style={[styles.scaleValueText, { color: colors.text }]}>Filter strength {storyFilterIntensity.toFixed(1)}x</Text>
               <TouchableOpacity
-                style={styles.scaleButton}
+                style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]}
                 onPress={() => setStoryFilterIntensity((value) => Math.min(1, Math.round((value + 0.1) * 10) / 10))}
               >
                 <Text style={styles.scaleButtonText}>+</Text>
@@ -1285,15 +1299,15 @@ function CreatePostScreen({ navigation, route }: any) {
         </>
       ) : null}
 
-      <Text style={styles.sectionLabel}>Audience</Text>
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Audience</Text>
       <View style={styles.modeRow}>
         {(["public", "friends", "close_friends", "custom"] as Visibility[]).map((mode) => (
           <TouchableOpacity
             key={mode}
-            style={[styles.pill, storyVisibility === mode && styles.pillActive]}
+            style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyVisibility === mode && [styles.pillActive, activePillStyle]]}
             onPress={() => setStoryVisibility(mode)}
           >
-            <Text style={[styles.pillText, storyVisibility === mode && styles.pillTextActive]}>{mode}</Text>
+            <Text style={[styles.pillText, { color: storyVisibility === mode ? "#fff" : colors.text }, storyVisibility === mode && styles.pillTextActive]}>{mode}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -1495,22 +1509,22 @@ function CreatePostScreen({ navigation, route }: any) {
 
   const renderSwipeControls = () => (
     <>
-      <Text style={styles.sectionLabel}>Caption</Text>
-      <TextInput style={styles.input} value={caption} onChangeText={setCaption} placeholder="Write swipe caption" maxLength={limits.caption} multiline />
-      <Text style={styles.counter}>{caption.length}/{limits.caption}</Text>
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Caption</Text>
+      <TextInput style={[styles.input, inputStyle]} value={caption} onChangeText={setCaption} placeholder="Write swipe caption" placeholderTextColor={colors.mutedText} maxLength={limits.caption} multiline />
+      <Text style={[styles.counter, helperTextStyle]}>{caption.length}/{limits.caption}</Text>
 
       {renderMusicPicker("swipe")}
 
-      <Text style={styles.sectionLabel}>Location</Text>
-      <TextInput style={styles.inputSingle} value={location} onChangeText={setLocation} placeholder="Add location" maxLength={limits.location} />
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Location</Text>
+      <TextInput style={[styles.inputSingle, inputStyle]} value={location} onChangeText={setLocation} placeholder="Add location" placeholderTextColor={colors.mutedText} maxLength={limits.location} />
 
-      <Text style={styles.sectionLabel}>Hashtags</Text>
-      <TextInput style={styles.inputSingle} value={hashtagsRaw} onChangeText={setHashtagsRaw} placeholder="fitlife, travel" />
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Hashtags</Text>
+      <TextInput style={[styles.inputSingle, inputStyle]} value={hashtagsRaw} onChangeText={setHashtagsRaw} placeholder="fitlife, travel" placeholderTextColor={colors.mutedText} />
 
-      <Text style={styles.sectionLabel}>Mentions</Text>
-      <TextInput style={styles.inputSingle} value={mentionsRaw} onChangeText={setMentionsRaw} placeholder="alice, bob" />
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Mentions</Text>
+      <TextInput style={[styles.inputSingle, inputStyle]} value={mentionsRaw} onChangeText={setMentionsRaw} placeholder="alice, bob" placeholderTextColor={colors.mutedText} />
 
-      <Text style={styles.helperText}>Swipes require a single short-form video. The backend will create a thumbnail automatically.</Text>
+      <Text style={[styles.helperText, helperTextStyle]}>Swipes require a single short-form video. The backend will create a thumbnail automatically.</Text>
     </>
   );
 
@@ -1527,8 +1541,8 @@ function CreatePostScreen({ navigation, route }: any) {
             key={tab}
             style={[
               styles.tabButton,
-              { borderColor: colors.border, backgroundColor: colors.card },
-              activeTab === tab && styles.tabButtonActive,
+              { borderColor: colors.border, backgroundColor: surfaceColor },
+              activeTab === tab && [styles.tabButtonActive, activePillStyle],
             ]}
             onPress={() => onSelectTab(tab)}
           >
@@ -1541,9 +1555,17 @@ function CreatePostScreen({ navigation, route }: any) {
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {publishError ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerTitle}>Publish issue</Text>
-            <Text style={styles.errorBannerText}>{publishError}</Text>
+          <View
+            style={[
+              styles.errorBanner,
+              {
+                backgroundColor: isDarkMode ? "#3b1f24" : "#FEF2F2",
+                borderColor: isDarkMode ? "#7f1d1d" : "#FECACA",
+              },
+            ]}
+          >
+            <Text style={[styles.errorBannerTitle, { color: isDarkMode ? "#FECACA" : "#991B1B" }]}>Publish issue</Text>
+            <Text style={[styles.errorBannerText, { color: isDarkMode ? "#FCA5A5" : "#B91C1C" }]}>{publishError}</Text>
           </View>
         ) : null}
         {renderMediaPreview()}
@@ -1551,13 +1573,17 @@ function CreatePostScreen({ navigation, route }: any) {
         {!(activeTab === "story" && storyType === "text") ? (
           <>
             <View style={styles.mediaSectionHeader}>
-              <Text style={styles.sectionLabel}>Media</Text>
+              <Text style={[styles.sectionLabel, { color: colors.text }]}>Media</Text>
               <View style={styles.mediaActionsRow}>
-                <TouchableOpacity style={styles.secondaryPickButton} disabled={pickingMedia} onPress={onCaptureMedia}>
-                  <Icon name="camera-outline" size={18} color="#111827" />
-                  <Text style={styles.secondaryPickButtonText}>Camera</Text>
+                <TouchableOpacity
+                  style={[styles.secondaryPickButton, { backgroundColor: subtleSurfaceColor, borderColor: colors.border }]}
+                  disabled={pickingMedia}
+                  onPress={onCaptureMedia}
+                >
+                  <Icon name="camera-outline" size={18} color={colors.text} />
+                  <Text style={[styles.secondaryPickButtonText, { color: colors.text }]}>Camera</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.pickButton} disabled={pickingMedia} onPress={onPickMedia}>
+                <TouchableOpacity style={[styles.pickButton, { backgroundColor: colors.primary }]} disabled={pickingMedia} onPress={onPickMedia}>
                   {pickingMedia ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="images-outline" size={18} color="#fff" />}
                   <Text style={styles.pickButtonText}>{selectedAssets.length ? "Replace" : "Choose"}</Text>
                 </TouchableOpacity>
@@ -1573,7 +1599,7 @@ function CreatePostScreen({ navigation, route }: any) {
         {activeTab === "swipe" ? renderSwipeControls() : null}
 
         <TouchableOpacity
-          style={[styles.publishButton, publishing && styles.publishButtonDisabled]}
+          style={[styles.publishButton, { backgroundColor: colors.primary }, publishing && styles.publishButtonDisabled]}
           onPress={publish}
           disabled={publishing}
         >

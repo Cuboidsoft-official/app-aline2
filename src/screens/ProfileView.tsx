@@ -261,7 +261,7 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
      ) : null}
 
      {user?.isVerified ? (
-      <View style={styles.verifiedBadge}>
+      <View style={[styles.verifiedBadge, { backgroundColor: colors.primary }]}>
        <Icon name="checkmark-circle" size={16} color="#fff"/>
        <Text style={styles.verifiedText}>
         Verified account
@@ -322,8 +322,17 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
     {!!user?.interests?.length && (
      <View style={styles.interestsRow}>
       {user.interests.map((interest) => (
-       <View key={interest} style={[styles.interestChip, { backgroundColor: isDarkMode ? colors.surface : "#F1ECFF" }]}>
-        <Text style={[styles.interestText, { color: colors.text }]}>{interest}</Text>
+       <View
+        key={interest}
+        style={[
+         styles.interestChip,
+         {
+          backgroundColor: isDarkMode ? colors.surface : colors.card,
+          borderColor: colors.border,
+         },
+        ]}
+       >
+        <Text style={[styles.interestText, { color: colors.primary }]}>{interest}</Text>
        </View>
       ))}
      </View>
@@ -334,18 +343,25 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
    <View style={styles.buttons}>
 
     <TouchableOpacity
-     style={[styles.editBtn, { backgroundColor: isDarkMode ? colors.surface : "#EFEFEF" }]}
+     style={[styles.editBtn, { backgroundColor: isDarkMode ? colors.surface : colors.card, borderColor: colors.border }]}
      onPress={()=> navigation.navigate("Profile")}
     >
      <Text style={[styles.btnText, { color: colors.text }]}>Edit Profile</Text>
     </TouchableOpacity>
 
-    <TouchableOpacity style={[styles.shareBtn, { backgroundColor: isDarkMode ? colors.surface : "#EFEFEF" }]} onPress={handleShareProfile}>
+    <TouchableOpacity
+     style={[styles.shareBtn, { backgroundColor: isDarkMode ? colors.surface : colors.card, borderColor: colors.border }]}
+     onPress={handleShareProfile}
+    >
      <Text style={[styles.btnText, { color: colors.text }]}>Share Profile</Text>
     </TouchableOpacity>
 
     <TouchableOpacity
-     style={[styles.shareBtn, { backgroundColor: isDarkMode ? colors.surface : "#EFEFEF" }, isPrivate ? styles.privateOnBtn : null]}
+     style={[
+      styles.shareBtn,
+      { backgroundColor: isDarkMode ? colors.surface : colors.card, borderColor: colors.border },
+      isPrivate ? [styles.privateOnBtn, { borderColor: colors.primary, backgroundColor: colors.primary }] : null,
+     ]}
      onPress={togglePrivateProfile}
      disabled={privateLoading}
     >

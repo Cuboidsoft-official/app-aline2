@@ -27,6 +27,7 @@ import { toUserSafeMessage } from "../features/social/validation";
 import { getStoredUser } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { useAppTheme } from "../theme/AppThemeContext";
 
 const initialFeed: FeedResponse = {
   stories: [],
@@ -70,6 +71,7 @@ const getPostTypeTag = (post: Post): string => {
 
 function FeedScreen({ navigation }: any) {
   const { width } = useWindowDimensions();
+  const { colors } = useAppTheme();
   const [feed, setFeed] = useState<FeedResponse>(initialFeed);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -250,7 +252,7 @@ function FeedScreen({ navigation }: any) {
         <View style={[styles.storyRing, ringStyle, closeFriends && styles.storyRingCloseFriends]}>
           <Image source={{ uri: item.user.avatarUrl }} style={styles.storyAvatar} />
         </View>
-        <Text style={styles.storyName} numberOfLines={1}>
+        <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
           {item.user.name}
         </Text>
       </TouchableOpacity>
@@ -318,20 +320,20 @@ function FeedScreen({ navigation }: any) {
     const metaLine = tokens.join(" • ");
 
     return (
-      <View style={styles.postCard}>
+      <View style={[styles.postCard, { backgroundColor: colors.background }]}>
         <View style={styles.postHeader}>
           <Image source={{ uri: item.user.avatarUrl }} style={styles.postAvatar} />
           <View style={styles.userMeta}>
             <View style={styles.row}>
-              <Text style={styles.username}>{item.user.username}</Text>
+              <Text style={[styles.username, { color: colors.text }]}>{item.user.username}</Text>
               {item.user.isVerified ? (
                 <Icon style={styles.verifiedIcon} name="checkmark-circle" color="#4ba8ff" size={14} />
               ) : null}
             </View>
-            <Text style={styles.postTime}>{formatAgo(item.createdAt)}</Text>
+            <Text style={[styles.postTime, { color: colors.mutedText }]}>{formatAgo(item.createdAt)}</Text>
           </View>
           <TouchableOpacity style={styles.moreButton} onPress={() => openContentActions(item)}>
-            <Icon name="ellipsis-horizontal" size={20} color="#141414" />
+            <Icon name="ellipsis-horizontal" size={20} color={colors.text} />
           </TouchableOpacity>
         </View>
 
@@ -341,64 +343,64 @@ function FeedScreen({ navigation }: any) {
 
         <View style={styles.actionsRow}>
           <TouchableOpacity style={styles.iconButton} onPress={() => handleLike(item.id)}>
-            <Icon name={item.liked ? "heart" : "heart-outline"} size={24} color={item.liked ? "#f3425f" : "#111"} />
+            <Icon name={item.liked ? "heart" : "heart-outline"} size={24} color={item.liked ? "#f3425f" : colors.text} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.iconButton} onPress={() => openPostCommentsSheet(item)}>
-            <Icon name="chatbubble-outline" size={22} color="#111" />
+            <Icon name="chatbubble-outline" size={22} color={colors.text} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.iconButton} onPress={() => openPostShareSheet(item)}>
-            <Icon name="paper-plane-outline" size={22} color="#111" />
+            <Icon name="paper-plane-outline" size={22} color={colors.text} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.bookmarkButton} onPress={() => handleSave(item.id)}>
-            <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={22} color="#111" />
+            <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={22} color={colors.text} />
           </TouchableOpacity>
         </View>
 
         {!item.settings.hideLikeCount ? (
-          <Text style={styles.likesText}>{formatCount(item.likesCount)} likes</Text>
+          <Text style={[styles.likesText, { color: colors.text }]}>{formatCount(item.likesCount)} likes</Text>
         ) : null}
 
-        <Text style={styles.caption}>
-          <Text style={styles.captionUser}>{item.user.username} </Text>
+        <Text style={[styles.caption, { color: colors.text }]}>
+          <Text style={[styles.captionUser, { color: colors.text }]}>{item.user.username} </Text>
           {item.caption}
         </Text>
 
         {item.hashtags.length ? (
-          <Text style={styles.tagLine}>{item.hashtags.map((tag) => `#${tag}`).join(" ")}</Text>
+          <Text style={[styles.tagLine, { color: colors.primary }]}>{item.hashtags.map((tag) => `#${tag}`).join(" ")}</Text>
         ) : null}
 
         {item.mentions.length ? (
-          <Text style={styles.tagLineMuted}>{item.mentions.map((mention) => `@${mention}`).join(" ")}</Text>
+          <Text style={[styles.tagLineMuted, { color: colors.mutedText }]}>{item.mentions.map((mention) => `@${mention}`).join(" ")}</Text>
         ) : null}
 
-        <Text style={styles.metaLine}>{metaLine}</Text>
+        <Text style={[styles.metaLine, { color: colors.mutedText }]}>{metaLine}</Text>
 
         {item.collaboratorIds.length ? (
-          <Text style={styles.collabLine}>Collab post • {item.collaboratorIds.length} collaborators</Text>
+          <Text style={[styles.collabLine, { color: colors.text }]}>Collab post • {item.collaboratorIds.length} collaborators</Text>
         ) : null}
 
         <TouchableOpacity onPress={() => openPostCommentsSheet(item)}>
-          <Text style={styles.commentCount}>View all {item.commentsCount} comments</Text>
+          <Text style={[styles.commentCount, { color: colors.mutedText }]}>View all {item.commentsCount} comments</Text>
         </TouchableOpacity>
 
         {!item.settings.disableComments ? (
-          <View style={styles.commentComposer}>
+          <View style={[styles.commentComposer, { borderColor: colors.border }]}>
             <TextInput
               value={commentDrafts[item.id] || ""}
               onChangeText={(text) => setCommentDrafts((prev) => ({ ...prev, [item.id]: text }))}
-              style={styles.commentInput}
+              style={[styles.commentInput, { color: colors.text }]}
               placeholder="Add a comment..."
-              placeholderTextColor="#777"
+              placeholderTextColor={colors.mutedText}
             />
             <TouchableOpacity onPress={() => handleCommentSubmit(item.id)}>
-              <Text style={styles.postButton}>Post</Text>
+              <Text style={[styles.postButton, { color: colors.primary }]}>Post</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          <Text style={styles.commentsDisabled}>Comments limited for this post</Text>
+          <Text style={[styles.commentsDisabled, { color: colors.mutedText }]}>Comments limited for this post</Text>
         )}
       </View>
     );
@@ -411,26 +413,26 @@ function FeedScreen({ navigation }: any) {
 
     return (
       <>
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { borderColor: colors.border, backgroundColor: colors.background }]}>
         <View style={styles.topLeft}>
           <Image source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }} style={styles.logo} />
-          <Text style={styles.brand}>Aline2</Text>
+          <Text style={[styles.brand, { color: colors.primary }]}>Aline2</Text>
         </View>
 
         <View style={styles.topRight}>
           <TouchableOpacity onPress={() => navigation.navigate("Search")}>
-            <Icon name="search-outline" size={23} color="#111" />
+            <Icon name="search-outline" size={23} color={colors.text} />
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.headerIconGap}
             onPress={() => navigation.navigate("NotificationScreen")}
           >
-            <Icon name="notifications-outline" size={23} color="#111" />
+            <Icon name="notifications-outline" size={23} color={colors.text} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.headerIconGap} onPress={() => navigation.navigate("Swipes")}>
-            <Icon name="play-circle-outline" size={23} color="#111" />
+            <Icon name="play-circle-outline" size={23} color={colors.text} />
           </TouchableOpacity>
         </View>
       </View>
@@ -452,11 +454,11 @@ function FeedScreen({ navigation }: any) {
               source={{ uri: ownStoryAvatar }}
               style={styles.storyAvatar}
             />
-            <View style={styles.storyAddBadge}>
+            <View style={[styles.storyAddBadge, { borderColor: colors.background }]}>
               <Icon name="add" size={13} color="#fff" />
             </View>
           </View>
-        <Text style={styles.storyName} numberOfLines={1}>
+        <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
           Your story
         </Text>
       </TouchableOpacity>
@@ -470,14 +472,14 @@ function FeedScreen({ navigation }: any) {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.centered}>
-        <ActivityIndicator size="large" color="#7b3fe4" />
+      <SafeAreaView style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <FlatList
         data={feed.posts}
         keyExtractor={(item) => item.id}
@@ -487,8 +489,8 @@ function FeedScreen({ navigation }: any) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>{errorMessage ? "Feed unavailable" : "No posts yet"}</Text>
-            <Text style={styles.emptyText}>{errorMessage || "Posts from people you follow will appear here."}</Text>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>{errorMessage ? "Feed unavailable" : "No posts yet"}</Text>
+            <Text style={[styles.emptyText, { color: colors.mutedText }]}>{errorMessage || "Posts from people you follow will appear here."}</Text>
           </View>
         }
       />
