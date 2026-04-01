@@ -409,6 +409,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
       <FlatList<string>
         data={groupKeys}
         keyExtractor={(item) => item}
+        contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -449,14 +450,15 @@ const styles = StyleSheet.create({
   headerSubtitle:{marginTop:4, fontSize:12},
   headerAction:{paddingHorizontal:12, paddingVertical:8, borderRadius:12},
   headerActionText:{fontWeight:"600", fontSize:12},
-  groupTitle:{fontSize:16, fontWeight:"600", marginLeft:20, marginTop:20, marginBottom:5},
-  card:{flexDirection:"row", alignItems:"center", paddingVertical:14, paddingHorizontal:14, marginHorizontal:14, marginTop:10, borderRadius:16, shadowOpacity:0.06, shadowRadius:8, shadowOffset:{width:0,height:2}, elevation:3},
+  listContent:{paddingBottom:28},
+  groupTitle:{fontSize:16, fontWeight:"600", marginLeft:20, marginTop:24, marginBottom:8},
+  card:{flexDirection:"row", alignItems:"center", paddingVertical:16, paddingHorizontal:16, marginHorizontal:16, marginTop:12, borderRadius:18, shadowOpacity:0.12, shadowRadius:12, shadowOffset:{width:0,height:4}, elevation:5},
   avatar:{width:52, height:52, borderRadius:26, marginRight:14},
   content:{flex:1},
   title:{fontWeight:"600", fontSize:14},
   msg:{fontWeight:"400", fontSize:14},
   time:{fontSize:12, marginTop:4},
-  deleteBtn:{justifyContent:"center", alignItems:"center", width:80, marginTop:10, borderTopRightRadius:0, borderBottomRightRadius:0},
+  deleteBtn:{justifyContent:"center", alignItems:"center", width:84, marginTop:12, marginBottom:2, borderTopRightRadius:0, borderBottomRightRadius:0},
   center:{flex:1, justifyContent:"center", alignItems:"center"},
   unreadDot:{width:10, height:10, borderRadius:5, marginRight:10},
   emptyTitle:{fontSize:17},

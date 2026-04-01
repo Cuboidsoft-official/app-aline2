@@ -62,6 +62,8 @@ import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { callingDisabledMessage, productFlags } from "../config/productFlags";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { ensureCameraPermission } from "../utils/permissions";
+import { normalizeMediaUrl } from "../utils/mediaUrls";
 
 const PRIMARY = "#7B4DFF";
 const LOCATION_MESSAGE_LABEL = "Shared location:";
@@ -517,6 +519,12 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   }, [submitMessage, text]);
 
   const sendCameraAttachment = useCallback(async () => {
+    const hasPermission = await ensureCameraPermission();
+    if (!hasPermission) {
+      Alert.alert("Camera permission needed", "Allow camera access to capture and send a photo or video.");
+      return;
+    }
+
     launchCamera(
       {
         mediaType: "mixed",
@@ -993,13 +1001,13 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           ]}
         >
           {isImageMessage(item) && attachment?.url ? (
-            <Image source={{ uri: attachment.url }} style={styles.messageImage} />
+            <Image source={{ uri: normalizeMediaUrl(attachment.url) }} style={styles.messageImage} />
           ) : null}
 
           {isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url) ? (
             <View style={styles.attachmentRow}>
               <Image
-                source={{ uri: attachment.thumbnailUrl || attachment.url }}
+                source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl || attachment.url) }}
                 style={styles.messageImage}
               />
               <Text
@@ -1125,7 +1133,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   }, []);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
       <StatusBar barStyle="light-content" backgroundColor={PRIMARY} />
 
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
@@ -1284,7 +1292,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
       <View style={{ flex: 1 }}>
@@ -1297,7 +1305,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             data={messages}
             renderItem={renderMessage}
             keyExtractor={(item, index) => item._id || index.toString()}
-            contentContainerStyle={{ padding: 12, paddingBottom: 20 + insets.bottom }}
+            contentContainerStyle={{ padding: 12, paddingBottom: Math.max(20, 12 + insets.bottom) }}
             keyboardShouldPersistTaps="handled"
             refreshControl={
               <RefreshControl
@@ -1357,7 +1365,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         </View>
       </View>
 
-      <View style={[styles.inputWrap, { backgroundColor: colors.card, paddingBottom: 10 + insets.bottom, borderTopColor: colors.border }]}>
+      <View style={[styles.inputWrap, { backgroundColor: colors.card, paddingBottom: Math.max(6, insets.bottom), borderTopColor: colors.border }]}>
         <TouchableOpacity style={styles.attachButton} onPress={sendCameraAttachment} disabled={uploading || loading}>
           <Icon name="camera-outline" size={22} color={colors.primary} />
         </TouchableOpacity>
@@ -1700,7 +1708,9 @@ const styles = StyleSheet.create({
   msgBubble: {
     padding: 12,
     borderRadius: 16,
-    maxWidth: "80%"
+    maxWidth: "80%",
+    alignSelf: "flex-start",
+    flexShrink: 1,
   },
   myMsg: { backgroundColor: PRIMARY },
   otherMsg: { backgroundColor: "#fff" },

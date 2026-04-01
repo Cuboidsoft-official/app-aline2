@@ -21,6 +21,7 @@ import { appConfig } from "../config/env";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { shareContentLink } from "../utils/shareLinks";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { normalizeMediaUrl } from "../utils/mediaUrls";
 
 interface ProfilePost {
  _id: string;
@@ -152,10 +153,12 @@ const ProfileScreen = ({navigation}: any) => {
  );
 
 const getPostPreviewUrl = (post: ProfilePost): string =>
-  post.media?.[0]?.thumbnailUrl ||
-  post.media?.[0]?.url ||
-  post.image ||
-  DEFAULT_AVATAR_URL;
+  normalizeMediaUrl(
+    post.media?.[0]?.thumbnailUrl ||
+      post.media?.[0]?.url ||
+      post.image ||
+      "",
+  );
 
  const togglePrivateProfile = async () => {
   if (privateLoading) {
@@ -207,12 +210,18 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
    style={styles.postCard}
    onPress={() => navigation.navigate("PostDetail", { postId: item._id })}
   >
-   <Image
-    source={{
-     uri: getPostPreviewUrl(item)
-    }}
-    style={styles.postImage}
-   />
+   {getPostPreviewUrl(item) ? (
+    <Image
+     source={{
+      uri: getPostPreviewUrl(item)
+     }}
+     style={styles.postImage}
+    />
+   ) : (
+    <View style={[styles.postImage, styles.postFallback]}>
+      <Icon name="image-outline" size={22} color={colors.mutedText} />
+    </View>
+   )}
   </TouchableOpacity>
  );
 
@@ -713,6 +722,11 @@ bioSection: {
  postCard:{
   width:"33.3333%",
   padding:1
+ },
+ postFallback:{
+  alignItems:"center",
+  justifyContent:"center",
+  backgroundColor:"#F3F4F6"
  },
  emptyState:{
   paddingHorizontal:24,

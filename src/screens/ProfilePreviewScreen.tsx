@@ -19,6 +19,7 @@ import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { getStoredUserId } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { normalizeMediaUrl } from "../utils/mediaUrls";
 
 type ProfilePreviewPost = {
  _id: string;
@@ -172,10 +173,12 @@ const totalPostCount = useMemo(
 );
 
 const getPostPreviewUrl = (post: ProfilePreviewPost): string =>
- post.media?.[0]?.thumbnailUrl ||
- post.media?.[0]?.url ||
- post.image ||
- DEFAULT_AVATAR_URL;
+ normalizeMediaUrl(
+  post.media?.[0]?.thumbnailUrl ||
+   post.media?.[0]?.url ||
+   post.image ||
+   "",
+ );
 
 
 const renderSuggestion = ({ item }: { item: any }) => (

@@ -124,14 +124,14 @@ export default NotificationSettingsScreen;
 
 const styles = StyleSheet.create({
  container:{flex:1},
- content:{paddingHorizontal:20,paddingTop:18,paddingBottom:32},
+ content:{paddingHorizontal:20,paddingTop:18,paddingBottom:40},
  header:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",paddingHorizontal:20,paddingTop:12,paddingBottom:16,borderBottomWidth:1},
  headerTitle:{fontSize:18,fontWeight:"700"},
  headerSpacer:{width:24},
  helperCard:{borderWidth:1,borderRadius:18,paddingHorizontal:16,paddingVertical:14},
  helper:{fontSize:14,lineHeight:20},
  listCard:{marginTop:14,borderWidth:1,borderRadius:20,overflow:"hidden"},
- item:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingVertical:18,borderBottomWidth:1},
+ item:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingHorizontal:18,paddingVertical:18,borderBottomWidth:1},
  itemText:{fontSize:15,fontWeight:"500"},
  switchWrap:{flexDirection:"row",alignItems:"center"},
  spinner:{marginRight:10},

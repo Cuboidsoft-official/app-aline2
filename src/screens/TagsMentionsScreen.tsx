@@ -205,6 +205,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 16,
+    paddingHorizontal: 18,
     paddingVertical: 16,
     borderBottomWidth: 1,
   },

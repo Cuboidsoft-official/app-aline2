@@ -1030,6 +1030,8 @@ function CreatePostScreen({ navigation, route }: any) {
             placeholder="Search tracks or original sounds"
             placeholderTextColor={colors.mutedText}
             maxLength={limits.music}
+            returnKeyType="search"
+            onSubmitEditing={runMusicSearch}
           />
           <TouchableOpacity style={[styles.musicActionButton, { backgroundColor: colors.primary }]} onPress={runMusicSearch} disabled={musicLoading}>
             {musicLoading ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="search-outline" size={16} color="#fff" />}

@@ -11,7 +11,7 @@ import {
   TextInput,
   Linking,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
@@ -97,6 +97,7 @@ const SearchResult = ({ item }) => {
 
 const ChatDetailsScreen = ({ route, navigation }) => {
   const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { userId, conversationId } = route.params || {};
   const [user, setUser] = useState(null);
   const [media, setMedia] = useState([]);
@@ -264,8 +265,8 @@ const ChatDetailsScreen = ({ route, navigation }) => {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
-      <View style={[styles.header, { backgroundColor: PRIMARY }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
+      <View style={[styles.header, { backgroundColor: PRIMARY, paddingTop: Math.max(insets.top, 16) }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -277,7 +278,7 @@ const ChatDetailsScreen = ({ route, navigation }) => {
         </TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 20, 34) }}>
         <View style={styles.profileSection}>
           <View style={[styles.avatarRing, { backgroundColor: colors.surface }]}>
             <Image
@@ -382,7 +383,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingTop: 55,
     paddingBottom: 15,
     backgroundColor: "#7b3fe4"
   },
@@ -581,6 +581,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     margin: 20,
+    marginTop: 24,
     padding: 15,
     borderRadius: 14,
     borderWidth: 1,

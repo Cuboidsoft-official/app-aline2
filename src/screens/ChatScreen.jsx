@@ -55,6 +55,8 @@ import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { callingDisabledMessage, productFlags } from "../config/productFlags";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { ensureCameraPermission } from "../utils/permissions";
+import { normalizeMediaUrl } from "../utils/mediaUrls";
 
 const PRIMARY = "#7b3fe4";
 const LOCATION_MESSAGE_LABEL = "Shared location:";
@@ -483,6 +485,12 @@ const ChatScreen = ({ navigation, route }) => {
   }, [submitMessage, text]);
 
   const sendCameraAttachment = useCallback(async () => {
+    const hasPermission = await ensureCameraPermission();
+    if (!hasPermission) {
+      Alert.alert("Camera permission needed", "Allow camera access to capture and send a photo or video.");
+      return;
+    }
+
     launchCamera(
       {
         mediaType: "mixed",
@@ -491,7 +499,7 @@ const ChatScreen = ({ navigation, route }) => {
       },
       async (response) => {
         if (response?.didCancel) return;
-        if (response?.errorCode) {
+          if (response?.errorCode) {
           Alert.alert("Error", response.errorMessage || "Camera capture failed");
           return;
         }
@@ -806,13 +814,13 @@ const ChatScreen = ({ navigation, route }) => {
           ]}
         >
           {isImageMessage(item) && attachment?.url ? (
-            <Image source={{ uri: attachment.url }} style={styles.messageImage} />
+            <Image source={{ uri: normalizeMediaUrl(attachment.url) }} style={styles.messageImage} />
           ) : null}
 
           {isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url) ? (
             <View style={styles.documentCard}>
               <Image
-                source={{ uri: attachment.thumbnailUrl || attachment.url }}
+                source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl || attachment.url) }}
                 style={styles.messageImage}
               />
               <Text style={[styles.documentName, isMine && styles.myDocumentName]} numberOfLines={1}>
@@ -892,7 +900,7 @@ const ChatScreen = ({ navigation, route }) => {
   };
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top"]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
       <StatusBar backgroundColor={PRIMARY} barStyle="light-content" />
 
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }]}>
@@ -993,7 +1001,7 @@ const ChatScreen = ({ navigation, route }) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
         <View style={[styles.chatBackground, { backgroundColor: colors.surface }]}>
@@ -1002,7 +1010,7 @@ const ChatScreen = ({ navigation, route }) => {
             extraData={messages}
             keyExtractor={(item, index) => item._id || item.id || index.toString()}
             renderItem={renderMessage}
-            contentContainerStyle={[styles.listContent, { paddingBottom: 16 + insets.bottom }]}
+            contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(20, 12 + insets.bottom) }]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             refreshControl={
@@ -1114,7 +1122,7 @@ const ChatScreen = ({ navigation, route }) => {
         </View>
       </Modal>
 
-        <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: 10 + insets.bottom }]}>
+        <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: Math.max(6, insets.bottom) }]}>
           <TouchableOpacity onPress={() => setShowTools(true)} disabled={uploading}>
             <Icon name="add" size={28} color={colors.primary} />
           </TouchableOpacity>
@@ -1248,7 +1256,9 @@ const styles = StyleSheet.create({
   messageBubble: {
     padding: 12,
     borderRadius: 16,
-    maxWidth: "78%"
+    maxWidth: "78%",
+    alignSelf: "flex-start",
+    flexShrink: 1,
   },
   messageText: {
     fontSize: 15,
