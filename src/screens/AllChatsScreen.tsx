@@ -63,6 +63,10 @@ type ChatTab = "regular" | "seller" | "group";
 
 const AllChatsScreen = ({ navigation }: any) => {
   const { colors, isDarkMode } = useAppTheme();
+  const tabsBackgroundColor = isDarkMode ? colors.surface : colors.card;
+  const groupAvatarBackgroundColor = isDarkMode ? colors.surface : colors.card;
+  const modalInputBackgroundColor = isDarkMode ? colors.surface : colors.background;
+  const disabledCreateGroupColor = isDarkMode ? colors.surface : colors.border;
 
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -246,7 +250,7 @@ const AllChatsScreen = ({ navigation }: any) => {
             style={styles.avatar}
           />
 
-          <View style={styles.onlineDot}/>
+          <View style={[styles.onlineDot, { borderColor: colors.card }]}/>
         </View>
 
         <View style={styles.chatInfo}>
@@ -318,7 +322,7 @@ const AllChatsScreen = ({ navigation }: any) => {
             style={styles.avatar}
           />
 
-          <View style={styles.onlineDot}/>
+          <View style={[styles.onlineDot, { borderColor: colors.card }]}/>
         </View>
 
         <View style={styles.chatInfo}>
@@ -371,7 +375,7 @@ const AllChatsScreen = ({ navigation }: any) => {
         {item?.groupAvatar ? (
           <Image source={{ uri: item.groupAvatar }} style={styles.avatar} />
         ) : (
-          <View style={[styles.groupAvatarCard, { backgroundColor: isDarkMode ? colors.surface : "#ede9fe" }]}>
+          <View style={[styles.groupAvatarCard, { backgroundColor: groupAvatarBackgroundColor }]}>
             <Icon name="people-outline" size={22} color={colors.primary} />
           </View>
         )}
@@ -420,7 +424,7 @@ const AllChatsScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Chats</Text>
 
         <View style={styles.headerActions}>
@@ -441,9 +445,9 @@ const AllChatsScreen = ({ navigation }: any) => {
         </View>
       </View>
 
-      <View style={[styles.tabs, { backgroundColor: isDarkMode ? colors.surface : "#f2f2f2" }]}>
+      <View style={[styles.tabs, { backgroundColor: tabsBackgroundColor, borderColor: colors.border }]}>
         <TouchableOpacity
-          style={[styles.tab, activeTab === "regular" && styles.activeTab]}
+          style={[styles.tab, activeTab === "regular" ? { backgroundColor: colors.primary } : null]}
           onPress={() => setActiveTab("regular")}
         >
           <Text
@@ -458,7 +462,7 @@ const AllChatsScreen = ({ navigation }: any) => {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.tab, activeTab === "seller" && styles.activeTab]}
+          style={[styles.tab, activeTab === "seller" ? { backgroundColor: colors.primary } : null]}
           onPress={() => setActiveTab("seller")}
         >
           <Text
@@ -473,7 +477,7 @@ const AllChatsScreen = ({ navigation }: any) => {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.tab, activeTab === "group" && styles.activeTab]}
+          style={[styles.tab, activeTab === "group" ? { backgroundColor: colors.primary } : null]}
           onPress={() => setActiveTab("group")}
         >
           <Text
@@ -546,7 +550,7 @@ const AllChatsScreen = ({ navigation }: any) => {
               onChangeText={setGroupName}
               placeholder="Group name"
               placeholderTextColor={colors.placeholder}
-              style={[styles.groupNameInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.background }]}
+              style={[styles.groupNameInput, { borderColor: colors.border, color: colors.text, backgroundColor: modalInputBackgroundColor }]}
             />
 
             <Text style={[styles.modalHelper, { color: colors.mutedText }]}>
@@ -590,7 +594,7 @@ const AllChatsScreen = ({ navigation }: any) => {
             />
 
             <TouchableOpacity
-              style={[styles.createGroupButton, { backgroundColor: creatingGroup ? "#a78bfa" : colors.primary }]}
+              style={[styles.createGroupButton, { backgroundColor: creatingGroup ? disabledCreateGroupColor : colors.primary }]}
               onPress={createGroup}
               disabled={creatingGroup}
             >
@@ -609,7 +613,6 @@ const styles = StyleSheet.create({
 
 container:{
  flex:1,
- backgroundColor:"#fff"
 },
 
 header:{
@@ -619,6 +622,7 @@ header:{
  paddingHorizontal:18,
  marginBottom:10,
  paddingBottom:20,
+ borderBottomWidth:1,
 },
 
 headerTitle:{
@@ -639,28 +643,23 @@ tabs:{
  flexDirection:"row",
  marginHorizontal:15,
  marginBottom:10,
- backgroundColor:"#f2f2f2",
- borderRadius:10
+ borderRadius:10,
+ borderWidth:1,
+ padding:4,
 },
 
 tab:{
  flex:1,
  paddingVertical:10,
  alignItems:"center",
- borderRadius:10
-},
-
-activeTab:{
- backgroundColor:"#7b3fe4"
+ borderRadius:8
 },
 
 tabText:{
  fontSize:14,
- color:"#555"
 },
 
 activeTabText:{
- color:"#fff",
  fontWeight:"600"
 },
 
@@ -669,7 +668,6 @@ chatCard:{
  alignItems:"center",
  padding:15,
  borderBottomWidth:1,
- borderColor:"#eee"
 },
 
 chatCardDisabled:{
@@ -725,14 +723,12 @@ emptyState:{
 emptyTitle:{
  fontSize:16,
  fontWeight:"600",
- color:"#111"
 },
 
 emptyText:{
  marginTop:8,
  fontSize:13,
  lineHeight:18,
- color:"#666",
  textAlign:"center"
 },
 
@@ -742,7 +738,6 @@ username:{
 },
 
 lastMessage:{
- color:"#777",
  marginTop:3,
  fontSize:13
 },

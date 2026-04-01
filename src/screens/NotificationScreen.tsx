@@ -63,6 +63,7 @@ const FALLBACK_AVATAR = DEFAULT_AVATAR_URL;
 
 const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
   const { colors, isDarkMode } = useAppTheme();
+  const notificationCardShadowColor = isDarkMode ? "#000" : "#111827";
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -141,6 +142,10 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
   };
 
   const markAllRead = async () => {
+    if (unreadCount <= 0) {
+      return;
+    }
+
     try {
       await API.put("/notifications/read-all");
       setUnreadCount(0);
@@ -341,7 +346,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
           styles.card,
           {
             backgroundColor: colors.card,
-            shadowColor: isDarkMode ? "#000" : "#111827",
+            shadowColor: notificationCardShadowColor,
           },
         ]}
         onPress={() => handlePress(item)}
@@ -386,7 +391,17 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
             {errorMessage || (unreadCount > 0 ? `${unreadCount} unread` : "All caught up")}
           </Text>
         </View>
-        <TouchableOpacity style={[styles.headerAction, { backgroundColor: colors.surface }]} onPress={markAllRead}>
+        <TouchableOpacity
+          style={[
+            styles.headerAction,
+            {
+              backgroundColor: colors.surface,
+              opacity: unreadCount > 0 ? 1 : 0.6,
+            },
+          ]}
+          onPress={markAllRead}
+          disabled={unreadCount <= 0}
+        >
           <Text style={[styles.headerActionText, { color: colors.primary }]}>Read all</Text>
         </TouchableOpacity>
       </View>
@@ -403,10 +418,10 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
         }
         ListEmptyComponent={
           <View style={styles.center}>
-            <Text style={[styles.headerTitle, { color: colors.text, fontSize: 17 }]}>
+            <Text style={[styles.headerTitle, styles.emptyTitle, { color: colors.text }]}>
               {errorMessage ? "Notifications unavailable" : "No notifications yet"}
             </Text>
-            <Text style={[styles.headerSubtitle, { color: colors.mutedText, textAlign: "center", marginTop: 8 }]}>
+            <Text style={[styles.headerSubtitle, styles.emptySubtitle, { color: colors.mutedText }]}>
               {errorMessage || "Your latest follows, likes, comments, and requests will appear here."}
             </Text>
           </View>
@@ -443,5 +458,7 @@ const styles = StyleSheet.create({
   time:{fontSize:12, marginTop:4},
   deleteBtn:{justifyContent:"center", alignItems:"center", width:80, marginTop:10, borderTopRightRadius:0, borderBottomRightRadius:0},
   center:{flex:1, justifyContent:"center", alignItems:"center"},
-  unreadDot:{width:10, height:10, borderRadius:5, marginRight:10}
+  unreadDot:{width:10, height:10, borderRadius:5, marginRight:10},
+  emptyTitle:{fontSize:17},
+  emptySubtitle:{textAlign:"center", marginTop:8}
 });
