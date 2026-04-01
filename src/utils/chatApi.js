@@ -54,6 +54,31 @@ export const fetchChatConversations = async (params = {}) => {
   return response.data;
 };
 
+export const fetchChatConversationDetails = async (conversationId) => {
+  const headers = await buildAuthHeaders();
+  const response = await API.get(`/chat/${conversationId}`, { headers });
+  return response.data;
+};
+
+/**
+ * @param {{ conversationId?: string; memberIds?: string[] }} [params]
+ */
+export const addGroupChatMembers = async ({ conversationId, memberIds = [] } = {}) => {
+  const headers = await buildAuthHeaders();
+  const response = await API.post(
+    `/chat/${conversationId}/members`,
+    { memberIds },
+    { headers }
+  );
+  return response.data;
+};
+
+export const removeGroupChatMember = async ({ conversationId, memberId } = {}) => {
+  const headers = await buildAuthHeaders();
+  const response = await API.delete(`/chat/${conversationId}/members/${memberId}`, { headers });
+  return response.data;
+};
+
 export const fetchConversationMessages = async (conversationId, params = {}) => {
   const headers = await buildAuthHeaders();
   const response = await API.get(`/message/${conversationId}`, {

@@ -846,7 +846,11 @@ const ChatScreen = ({ navigation, route }) => {
         </TouchableOpacity>
 
         {isGroupConversation ? (
-          <View style={styles.userInfo}>
+          <TouchableOpacity
+            style={styles.userInfo}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate("GroupDetailsScreen", { conversationId: currentConversationId })}
+          >
             {groupAvatar ? (
               <Image
                 source={{
@@ -868,7 +872,7 @@ const ChatScreen = ({ navigation, route }) => {
                 {typingUserId ? "Typing..." : `${memberCount || 0} members`}
               </Text>
             </View>
-          </View>
+          </TouchableOpacity>
         ) : (
           <TouchableOpacity
             style={styles.userInfo}
@@ -892,11 +896,15 @@ const ChatScreen = ({ navigation, route }) => {
         )}
 
         <View style={styles.headerIcons}>
-          {!isGroupConversation ? (
+          {isGroupConversation ? (
+            <TouchableOpacity onPress={() => navigation.navigate("GroupDetailsScreen", { conversationId: currentConversationId })}>
+              <Icon name="ellipsis-vertical" size={20} color="#fff" />
+            </TouchableOpacity>
+          ) : (
             <TouchableOpacity onPress={() => navigation.navigate("ChatDetailsScreen", { userId, conversationId: currentConversationId })}>
               <Icon name="ellipsis-vertical" size={20} color="#fff" />
             </TouchableOpacity>
-          ) : null}
+          )}
         </View>
       </View>
 

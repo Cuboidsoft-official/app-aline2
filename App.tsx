@@ -51,6 +51,7 @@ import CommentThreadScreen from './src/screens/social/CommentThreadScreen';
 import SearchScreen from './src/screens/SearchScreen';
 import HashtagResultsScreen from './src/screens/HashtagResultsScreen';
 import CloseFriendsScreen from './src/screens/CloseFriendsScreen';
+import GroupDetailsScreen from './src/screens/GroupDetailsScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
 import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
@@ -110,6 +111,7 @@ function AppNavigator() {
         <Stack.Screen name="ChatScreen" component={ChatScreen} />
         <Stack.Screen name="ChatDetailsScreen" component={ChatDetailsScreen} />
         <Stack.Screen name="AllChatsScreen" component={AllChatsScreen} />
+        <Stack.Screen name="GroupDetailsScreen" component={GroupDetailsScreen} />
         <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
         <Stack.Screen name="AccountCenterScreen" component={AccountCenterScreen} />
         <Stack.Screen name="BlockedUsersScreen" component={BlockedUsersScreen} />
