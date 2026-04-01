@@ -6,6 +6,7 @@ const LEGACY_TOKEN_KEY = "token";
 const USER_KEY = "user";
 const USER_ID_KEY = "userId";
 let sessionInvalidationHandler = null;
+const sessionChangeListeners = new Set();
 
 const extractUserId = (user) => {
   if (!user || typeof user !== "object") {
@@ -42,6 +43,16 @@ const setSecureSession = async (session) =>
     service: SESSION_SERVICE,
     accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
+
+const notifySessionChanged = () => {
+  sessionChangeListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch (error) {
+      console.log("session change listener error", error);
+    }
+  });
+};
 
 export const getStoredToken = async () => {
   const secureSession = await getSecureSession();
@@ -103,6 +114,7 @@ export const setStoredSession = async (payload = {}) => {
   }
 
   await Promise.all(writes);
+  notifySessionChanged();
 };
 
 export const clearStoredSession = async () => {
@@ -110,6 +122,19 @@ export const clearStoredSession = async () => {
     Keychain.resetGenericPassword({ service: SESSION_SERVICE }),
     AsyncStorage.multiRemove([LEGACY_TOKEN_KEY, USER_KEY, USER_ID_KEY]),
   ]);
+  notifySessionChanged();
+};
+
+export const subscribeSessionChanges = (handler) => {
+  if (typeof handler !== "function") {
+    return () => {};
+  }
+
+  sessionChangeListeners.add(handler);
+
+  return () => {
+    sessionChangeListeners.delete(handler);
+  };
 };
 
 export const setSessionInvalidationHandler = (handler) => {

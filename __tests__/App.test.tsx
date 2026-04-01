@@ -19,6 +19,7 @@ jest.mock('../src/screens/CreatePostScreen', () => () => null);
 jest.mock('../src/screens/ChatScreen', () => () => null);
 jest.mock('../src/screens/ChatDetailsScreen', () => () => null);
 jest.mock('../src/screens/AllChatsScreen', () => () => null);
+jest.mock('../src/screens/CallScreen', () => () => null);
 jest.mock('../src/screens/SettingsScreen', () => () => null);
 jest.mock('../src/screens/BlockedUsersScreen', () => () => null);
 jest.mock('../src/screens/NotificationSettingsScreen', () => () => null);

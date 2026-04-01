@@ -51,6 +51,7 @@ import {
   fetchConversationMessages,
   sendChatMessage,
 } from "../utils/chatApi";
+import { startCallSession } from "../utils/callApi";
 import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import {
   getLastIncomingUnseenMessage,
@@ -246,6 +247,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [typingUserId, setTypingUserId] = useState("");
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
+  const [startingCallType, setStartingCallType] = useState("");
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const quickOptions = useMemo(
@@ -1116,6 +1118,35 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     setSelectedAppointmentStart("");
   }, [appointmentSlots, showPaymentModal]);
 
+  const startCallFlow = useCallback(async (callType: "audio" | "video") => {
+    try {
+      setStartingCallType(callType);
+      const resolvedConversationId = await ensureConversation();
+
+      if (!resolvedConversationId) {
+        throw new Error("Conversation not ready");
+      }
+
+      const data = await startCallSession({
+        conversationId: resolvedConversationId,
+        callType,
+      });
+
+      navigation.navigate("CallScreen", {
+        callSessionId: data?.callSession?._id,
+        mode: "outgoing",
+        initialCallSession: data?.callSession,
+        initialIceServers: data?.iceServers || [],
+        title: seller?.sellerName || "Aline2 seller call",
+        avatarUrl: seller?.profilePic || DEFAULT_AVATAR_URL,
+      });
+    } catch (error) {
+      Alert.alert("Could not start call", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setStartingCallType("");
+    }
+  }, [ensureConversation, navigation, seller]);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
       <StatusBar barStyle="light-content" backgroundColor={PRIMARY} />
@@ -1148,6 +1179,28 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         </TouchableOpacity>
 
         <View style={styles.rightIcons}>
+          <TouchableOpacity
+            style={styles.headerIconButton}
+            onPress={() => startCallFlow("audio")}
+            disabled={startingCallType === "audio" || startingCallType === "video" || !seller?.user}
+          >
+            {startingCallType === "audio" ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Icon name="call-outline" size={20} color="#fff" />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.headerIconButton}
+            onPress={() => startCallFlow("video")}
+            disabled={startingCallType === "audio" || startingCallType === "video" || !seller?.user}
+          >
+            {startingCallType === "video" ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Icon name="videocam-outline" size={22} color="#fff" />
+            )}
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={() =>
               navigation.navigate("SellerDetailsScreen", { sellerId })
@@ -1544,6 +1597,9 @@ const styles = StyleSheet.create({
   rightIcons: {
     flexDirection: "row",
     alignItems: "center"
+  },
+  headerIconButton: {
+    marginRight: 14,
   },
   premiumServiceWrap: {
     backgroundColor: "#fff",

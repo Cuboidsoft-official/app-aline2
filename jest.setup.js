@@ -8,6 +8,14 @@ jest.mock(
   "@react-native-async-storage/async-storage",
   () => require("@react-native-async-storage/async-storage/jest/async-storage-mock"),
 );
+jest.mock("react-native-keychain", () => ({
+  ACCESSIBLE: {
+    WHEN_UNLOCKED_THIS_DEVICE_ONLY: "WHEN_UNLOCKED_THIS_DEVICE_ONLY",
+  },
+  getGenericPassword: jest.fn(async () => null),
+  setGenericPassword: jest.fn(async () => true),
+  resetGenericPassword: jest.fn(async () => true),
+}));
 jest.mock("react-native-image-picker", () => ({
   launchImageLibrary: jest.fn(async () => ({ assets: [] })),
   launchCamera: jest.fn(async () => ({ assets: [] })),
@@ -39,3 +47,62 @@ jest.mock("socket.io-client", () => ({
     disconnect: jest.fn(),
   })),
 }));
+jest.mock("react-native-webrtc", () => {
+  class MockMediaStream {
+    constructor() {
+      this._tracks = [];
+    }
+
+    getTracks() {
+      return this._tracks;
+    }
+
+    getAudioTracks() {
+      return this._tracks.filter((track) => track.kind === "audio");
+    }
+
+    getVideoTracks() {
+      return this._tracks.filter((track) => track.kind === "video");
+    }
+
+    addTrack(track) {
+      this._tracks.push(track);
+    }
+
+    toURL() {
+      return "mock-stream-url";
+    }
+  }
+
+  class MockRTCPeerConnection {
+    constructor() {
+      this.connectionState = "new";
+      this.localDescription = null;
+      this.remoteDescription = null;
+    }
+
+    addTrack = jest.fn();
+    addIceCandidate = jest.fn(async () => {});
+    createOffer = jest.fn(async () => ({ type: "offer", sdp: "mock-offer" }));
+    createAnswer = jest.fn(async () => ({ type: "answer", sdp: "mock-answer" }));
+    setLocalDescription = jest.fn(async (value) => {
+      this.localDescription = value;
+    });
+    setRemoteDescription = jest.fn(async (value) => {
+      this.remoteDescription = value;
+    });
+    addEventListener = jest.fn();
+    close = jest.fn();
+  }
+
+  return {
+    MediaStream: MockMediaStream,
+    RTCIceCandidate: jest.fn((value) => value),
+    RTCPeerConnection: MockRTCPeerConnection,
+    RTCSessionDescription: jest.fn((value) => value),
+    RTCView: "RTCView",
+    mediaDevices: {
+      getUserMedia: jest.fn(async () => new MockMediaStream()),
+    },
+  };
+});

@@ -52,10 +52,12 @@ import SearchScreen from './src/screens/SearchScreen';
 import HashtagResultsScreen from './src/screens/HashtagResultsScreen';
 import CloseFriendsScreen from './src/screens/CloseFriendsScreen';
 import GroupDetailsScreen from './src/screens/GroupDetailsScreen';
+import CallScreen from './src/screens/CallScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
 import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
-import { setSessionInvalidationHandler } from './src/utils/authSession';
+import { connectSocket, disconnectSocket, socket } from './src/socket';
+import { setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
 
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef();
@@ -78,6 +80,53 @@ function AppNavigator() {
         });
       }
     });
+  }, []);
+
+  useEffect(() => {
+    const syncSocketConnection = () => {
+      connectSocket().catch((error) => {
+        console.log("global socket connect error", error);
+      });
+    };
+
+    syncSocketConnection();
+    const unsubscribe = subscribeSessionChanges(syncSocketConnection);
+
+    return () => {
+      unsubscribe();
+      disconnectSocket();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleIncomingCall = (payload: any) => {
+      const nextCallSession = payload?.callSession;
+      const nextCallSessionId = String(nextCallSession?._id || "");
+
+      if (!nextCallSessionId || !navigationRef.isReady()) {
+        return;
+      }
+
+      const currentRoute: any = navigationRef.getCurrentRoute();
+      if (currentRoute?.name === "CallScreen" && currentRoute?.params?.callSessionId === nextCallSessionId) {
+        return;
+      }
+
+      (navigationRef as any).navigate("CallScreen", {
+        callSessionId: nextCallSessionId,
+        mode: "incoming",
+        initialCallSession: nextCallSession,
+        initialIceServers: payload?.iceServers || [],
+        title: nextCallSession?.otherParticipant?.name || nextCallSession?.otherParticipant?.username || "Incoming call",
+        avatarUrl: nextCallSession?.otherParticipant?.profilePic || "",
+      });
+    };
+
+    socket.on("call:incoming", handleIncomingCall);
+
+    return () => {
+      socket.off("call:incoming", handleIncomingCall);
+    };
   }, []);
 
   return (
@@ -112,6 +161,7 @@ function AppNavigator() {
         <Stack.Screen name="ChatDetailsScreen" component={ChatDetailsScreen} />
         <Stack.Screen name="AllChatsScreen" component={AllChatsScreen} />
         <Stack.Screen name="GroupDetailsScreen" component={GroupDetailsScreen} />
+        <Stack.Screen name="CallScreen" component={CallScreen} />
         <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
         <Stack.Screen name="AccountCenterScreen" component={AccountCenterScreen} />
         <Stack.Screen name="BlockedUsersScreen" component={BlockedUsersScreen} />
