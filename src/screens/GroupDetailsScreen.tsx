@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
@@ -17,8 +18,11 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import {
   addGroupChatMembers,
+  demoteGroupChatAdmin,
   fetchChatConversationDetails,
+  promoteGroupChatAdmin,
   removeGroupChatMember,
+  updateGroupChatConversation,
 } from "../utils/chatApi";
 import { getStoredUserId } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
@@ -41,6 +45,7 @@ type GroupConversation = {
   isGroupOwner?: boolean;
   isGroupAdmin?: boolean;
   groupOwner?: string | null;
+  groupAdmins?: string[];
 };
 
 const GroupDetailsScreen = ({ navigation, route }: any) => {
@@ -55,6 +60,9 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
   const [candidateUsers, setCandidateUsers] = useState<ChatUser[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [savingMembers, setSavingMembers] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [groupNameDraft, setGroupNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
 
   const loadConversation = useCallback(async () => {
     try {
@@ -65,7 +73,9 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
       ]);
 
       setCurrentUserId(storedUserId || "");
-      setConversation((conversationRes?.conversation || null) as GroupConversation | null);
+      const nextConversation = (conversationRes?.conversation || null) as GroupConversation | null;
+      setConversation(nextConversation);
+      setGroupNameDraft(nextConversation?.groupName || "");
       setErrorMessage("");
     } catch (error) {
       console.log("group details load error:", error);
@@ -83,7 +93,13 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
   );
 
   const canManageMembers = Boolean(conversation?.isGroupOwner || conversation?.isGroupAdmin);
+  const canEditGroup = canManageMembers;
+  const isOwner = Boolean(conversation?.isGroupOwner);
   const members = useMemo(() => Array.isArray(conversation?.members) ? conversation.members : [], [conversation]);
+  const groupAdminIds = useMemo(
+    () => new Set(Array.isArray(conversation?.groupAdmins) ? conversation.groupAdmins.map((entry) => String(entry)) : []),
+    [conversation]
+  );
 
   const openAddMembers = useCallback(async () => {
     try {
@@ -130,6 +146,27 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
       setSavingMembers(false);
     }
   }, [conversationId, selectedUsers]);
+
+  const submitGroupName = useCallback(async () => {
+    if (!groupNameDraft.trim()) {
+      Alert.alert("Group name", "Enter a group name.");
+      return;
+    }
+
+    try {
+      setSavingName(true);
+      const res = await updateGroupChatConversation({
+        conversationId,
+        groupName: groupNameDraft.trim(),
+      });
+      setConversation((res?.conversation || null) as GroupConversation | null);
+      setEditingName(false);
+    } catch (error) {
+      Alert.alert("Unable to update group", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setSavingName(false);
+    }
+  }, [conversationId, groupNameDraft]);
 
   const handleRemoveMember = useCallback((member: ChatUser) => {
     Alert.alert(
@@ -184,6 +221,32 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
     );
   }, [conversationId, currentUserId, navigation]);
 
+  const handleAdminToggle = useCallback((member: ChatUser) => {
+    const isAdmin = groupAdminIds.has(member._id);
+    const actionLabel = isAdmin ? "Remove admin role" : "Make admin";
+
+    Alert.alert(
+      actionLabel,
+      `${actionLabel} for ${member?.username || member?.name || "this member"}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: actionLabel,
+          onPress: async () => {
+            try {
+              const res = isAdmin
+                ? await demoteGroupChatAdmin({ conversationId, memberId: member._id })
+                : await promoteGroupChatAdmin({ conversationId, memberId: member._id });
+              setConversation((res?.conversation || null) as GroupConversation | null);
+            } catch (error) {
+              Alert.alert("Unable to update admin role", getReadableApiErrorMessage(error, "Please try again."));
+            }
+          },
+        },
+      ]
+    );
+  }, [conversationId, groupAdminIds]);
+
   if (loading) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
@@ -217,9 +280,52 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
           </View>
         )}
 
-        <Text style={[styles.groupName, { color: colors.text }]}>
-          {conversation?.groupName || "Group chat"}
-        </Text>
+        {editingName ? (
+          <View style={styles.editNameWrap}>
+            <View style={[styles.nameInputCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+              <TextInput
+                value={groupNameDraft}
+                onChangeText={setGroupNameDraft}
+                placeholder="Group name"
+                placeholderTextColor={colors.placeholder}
+                style={[styles.nameInput, { color: colors.text }]}
+              />
+            </View>
+            <View style={styles.editNameActions}>
+              <TouchableOpacity
+                style={[styles.nameSecondaryButton, { borderColor: colors.border, backgroundColor: colors.card }]}
+                onPress={() => {
+                  setEditingName(false);
+                  setGroupNameDraft(conversation?.groupName || "");
+                }}
+                disabled={savingName}
+              >
+                <Text style={[styles.nameSecondaryText, { color: colors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.namePrimaryButton, { backgroundColor: savingName ? "#a78bfa" : colors.primary }]}
+                onPress={submitGroupName}
+                disabled={savingName}
+              >
+                {savingName ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.namePrimaryText}>Save</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.groupNameRow}>
+            <Text style={[styles.groupName, { color: colors.text }]}>
+              {conversation?.groupName || "Group chat"}
+            </Text>
+            {canEditGroup ? (
+              <TouchableOpacity
+                style={[styles.editNameButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => setEditingName(true)}
+              >
+                <Icon name="create-outline" size={16} color={colors.primary} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
         <Text style={[styles.memberCount, { color: colors.mutedText }]}>
           {conversation?.memberCount || members.length} members
         </Text>
@@ -265,15 +371,31 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
                   {item.username || item.name || "User"}
                 </Text>
                 <Text style={[styles.memberMeta, { color: colors.mutedText }]}>
-                  {isSelf ? "You" : item.name || item.category || "Aline2 member"}
+                  {isSelf
+                    ? groupAdminIds.has(item._id) ? "You • admin" : "You"
+                    : groupAdminIds.has(item._id)
+                      ? "Group admin"
+                      : item.name || item.category || "Aline2 member"}
                 </Text>
               </View>
 
-              {canRemove ? (
-                <TouchableOpacity onPress={() => handleRemoveMember(item)}>
-                  <Icon name="person-remove-outline" size={22} color="#dc2626" />
-                </TouchableOpacity>
-              ) : null}
+              <View style={styles.memberActions}>
+                {isOwner && !isSelf ? (
+                  <TouchableOpacity style={styles.memberActionButton} onPress={() => handleAdminToggle(item)}>
+                    <Icon
+                      name={groupAdminIds.has(item._id) ? "shield-checkmark-outline" : "shield-outline"}
+                      size={21}
+                      color={groupAdminIds.has(item._id) ? colors.primary : colors.mutedText}
+                    />
+                  </TouchableOpacity>
+                ) : null}
+
+                {canRemove ? (
+                  <TouchableOpacity style={styles.memberActionButton} onPress={() => handleRemoveMember(item)}>
+                    <Icon name="person-remove-outline" size={22} color="#dc2626" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             </View>
           );
         }}
@@ -398,6 +520,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 24,
   },
+  groupNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 14,
+    gap: 10,
+  },
   heroAvatar: {
     width: 84,
     height: 84,
@@ -411,10 +539,58 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   groupName: {
-    marginTop: 14,
     fontSize: 22,
     fontWeight: "800",
     textAlign: "center",
+  },
+  editNameButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editNameWrap: {
+    width: "100%",
+    marginTop: 14,
+  },
+  nameInputCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+  },
+  nameInput: {
+    fontSize: 16,
+    paddingVertical: 14,
+    textAlign: "center",
+    fontWeight: "700",
+  },
+  editNameActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+  },
+  nameSecondaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 12,
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  nameSecondaryText: {
+    fontWeight: "600",
+  },
+  namePrimaryButton: {
+    flex: 1,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+  },
+  namePrimaryText: {
+    color: "#fff",
+    fontWeight: "700",
   },
   memberCount: {
     marginTop: 6,
@@ -474,6 +650,14 @@ const styles = StyleSheet.create({
   },
   memberInfo: {
     flex: 1,
+  },
+  memberActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  memberActionButton: {
+    padding: 4,
   },
   memberName: {
     fontSize: 15,

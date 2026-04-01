@@ -60,6 +60,16 @@ export const fetchChatConversationDetails = async (conversationId) => {
   return response.data;
 };
 
+export const updateGroupChatConversation = async ({ conversationId, groupName } = {}) => {
+  const headers = await buildAuthHeaders();
+  const response = await API.patch(
+    `/chat/${conversationId}/group`,
+    { groupName },
+    { headers }
+  );
+  return response.data;
+};
+
 /**
  * @param {{ conversationId?: string; memberIds?: string[] }} [params]
  */
@@ -76,6 +86,18 @@ export const addGroupChatMembers = async ({ conversationId, memberIds = [] } = {
 export const removeGroupChatMember = async ({ conversationId, memberId } = {}) => {
   const headers = await buildAuthHeaders();
   const response = await API.delete(`/chat/${conversationId}/members/${memberId}`, { headers });
+  return response.data;
+};
+
+export const promoteGroupChatAdmin = async ({ conversationId, memberId } = {}) => {
+  const headers = await buildAuthHeaders();
+  const response = await API.post(`/chat/${conversationId}/admins/${memberId}`, {}, { headers });
+  return response.data;
+};
+
+export const demoteGroupChatAdmin = async ({ conversationId, memberId } = {}) => {
+  const headers = await buildAuthHeaders();
+  const response = await API.delete(`/chat/${conversationId}/admins/${memberId}`, { headers });
   return response.data;
 };
 
