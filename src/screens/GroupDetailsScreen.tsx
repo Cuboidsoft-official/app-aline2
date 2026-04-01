@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
+import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
@@ -22,11 +23,13 @@ import {
   fetchChatConversationDetails,
   promoteGroupChatAdmin,
   removeGroupChatMember,
+  transferGroupChatOwnership,
   updateGroupChatConversation,
 } from "../utils/chatApi";
 import { getStoredUserId } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { uploadImageAsset } from "../utils/uploadMedia";
 
 type ChatUser = {
   _id: string;
@@ -63,6 +66,8 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
   const [editingName, setEditingName] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
+  const [savingAvatar, setSavingAvatar] = useState(false);
+  const [transferringOwnerId, setTransferringOwnerId] = useState("");
 
   const loadConversation = useCallback(async () => {
     try {
@@ -168,6 +173,43 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
     }
   }, [conversationId, groupNameDraft]);
 
+  const handleChangeAvatar = useCallback(async () => {
+    try {
+      const result = await launchImageLibrary({
+        mediaType: "photo",
+        quality: 0.7,
+        selectionLimit: 1,
+      });
+
+      if (result.didCancel) {
+        return;
+      }
+
+      const asset = result.assets?.[0];
+      if (!asset?.uri) {
+        Alert.alert("Group photo", "Please choose a usable image.");
+        return;
+      }
+
+      setSavingAvatar(true);
+      const groupAvatar = await uploadImageAsset({
+        uri: asset.uri,
+        fileName: asset.fileName,
+        name: asset.fileName,
+        type: asset.type,
+      });
+      const res = await updateGroupChatConversation({
+        conversationId,
+        groupAvatar,
+      });
+      setConversation((res?.conversation || null) as GroupConversation | null);
+    } catch (error) {
+      Alert.alert("Unable to update photo", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setSavingAvatar(false);
+    }
+  }, [conversationId]);
+
   const handleRemoveMember = useCallback((member: ChatUser) => {
     Alert.alert(
       "Remove member",
@@ -247,6 +289,33 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
     );
   }, [conversationId, groupAdminIds]);
 
+  const handleTransferOwnership = useCallback((member: ChatUser) => {
+    Alert.alert(
+      "Transfer ownership",
+      `Make ${member?.username || member?.name || "this member"} the new group owner?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Transfer",
+          onPress: async () => {
+            try {
+              setTransferringOwnerId(member._id);
+              const res = await transferGroupChatOwnership({
+                conversationId,
+                memberId: member._id,
+              });
+              setConversation((res?.conversation || null) as GroupConversation | null);
+            } catch (error) {
+              Alert.alert("Unable to transfer ownership", getReadableApiErrorMessage(error, "Please try again."));
+            } finally {
+              setTransferringOwnerId("");
+            }
+          },
+        },
+      ]
+    );
+  }, [conversationId]);
+
   if (loading) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
@@ -273,10 +342,40 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
 
       <View style={styles.hero}>
         {conversation?.groupAvatar ? (
-          <Image source={{ uri: conversation.groupAvatar }} style={styles.heroAvatar} />
+          <View style={styles.avatarWrap}>
+            <Image source={{ uri: conversation.groupAvatar }} style={styles.heroAvatar} />
+            {canEditGroup ? (
+              <TouchableOpacity
+                style={[styles.avatarEditButton, { backgroundColor: colors.primary }]}
+                onPress={handleChangeAvatar}
+                disabled={savingAvatar}
+              >
+                {savingAvatar ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Icon name="camera-outline" size={16} color="#fff" />
+                )}
+              </TouchableOpacity>
+            ) : null}
+          </View>
         ) : (
-          <View style={[styles.heroFallback, { backgroundColor: isDarkMode ? colors.surface : "#ede9fe" }]}>
-            <Icon name="people-outline" size={30} color={colors.primary} />
+          <View style={styles.avatarWrap}>
+            <View style={[styles.heroFallback, { backgroundColor: isDarkMode ? colors.surface : "#ede9fe" }]}>
+              <Icon name="people-outline" size={30} color={colors.primary} />
+            </View>
+            {canEditGroup ? (
+              <TouchableOpacity
+                style={[styles.avatarEditButton, { backgroundColor: colors.primary }]}
+                onPress={handleChangeAvatar}
+                disabled={savingAvatar}
+              >
+                {savingAvatar ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Icon name="camera-outline" size={16} color="#fff" />
+                )}
+              </TouchableOpacity>
+            ) : null}
           </View>
         )}
 
@@ -372,14 +471,28 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
                 </Text>
                 <Text style={[styles.memberMeta, { color: colors.mutedText }]}>
                   {isSelf
-                    ? groupAdminIds.has(item._id) ? "You • admin" : "You"
+                    ? conversation?.groupOwner === item._id
+                      ? "You • owner"
+                      : groupAdminIds.has(item._id) ? "You • admin" : "You"
                     : groupAdminIds.has(item._id)
-                      ? "Group admin"
+                      ? conversation?.groupOwner === item._id
+                        ? "Group owner"
+                        : "Group admin"
                       : item.name || item.category || "Aline2 member"}
                 </Text>
               </View>
 
               <View style={styles.memberActions}>
+                {isOwner && !isSelf && conversation?.groupOwner !== item._id ? (
+                  <TouchableOpacity style={styles.memberActionButton} onPress={() => handleTransferOwnership(item)}>
+                    {transferringOwnerId === item._id ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <Icon name="swap-horizontal-outline" size={20} color={colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                ) : null}
+
                 {isOwner && !isSelf ? (
                   <TouchableOpacity style={styles.memberActionButton} onPress={() => handleAdminToggle(item)}>
                     <Icon
@@ -520,6 +633,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 24,
   },
+  avatarWrap: {
+    position: "relative",
+  },
   groupNameRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -535,6 +651,16 @@ const styles = StyleSheet.create({
     width: 84,
     height: 84,
     borderRadius: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarEditButton: {
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
   },

@@ -60,11 +60,21 @@ export const fetchChatConversationDetails = async (conversationId) => {
   return response.data;
 };
 
-export const updateGroupChatConversation = async ({ conversationId, groupName } = {}) => {
+export const updateGroupChatConversation = async ({ conversationId, groupName, groupAvatar } = {}) => {
   const headers = await buildAuthHeaders();
+  const payload = {};
+
+  if (typeof groupName !== "undefined") {
+    payload.groupName = groupName;
+  }
+
+  if (typeof groupAvatar !== "undefined") {
+    payload.groupAvatar = groupAvatar;
+  }
+
   const response = await API.patch(
     `/chat/${conversationId}/group`,
-    { groupName },
+    payload,
     { headers }
   );
   return response.data;
@@ -98,6 +108,12 @@ export const promoteGroupChatAdmin = async ({ conversationId, memberId } = {}) =
 export const demoteGroupChatAdmin = async ({ conversationId, memberId } = {}) => {
   const headers = await buildAuthHeaders();
   const response = await API.delete(`/chat/${conversationId}/admins/${memberId}`, { headers });
+  return response.data;
+};
+
+export const transferGroupChatOwnership = async ({ conversationId, memberId } = {}) => {
+  const headers = await buildAuthHeaders();
+  const response = await API.post(`/chat/${conversationId}/owner/${memberId}`, {}, { headers });
   return response.data;
 };
 
