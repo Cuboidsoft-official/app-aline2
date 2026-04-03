@@ -6,12 +6,12 @@ on:
       envfile:
         description: Env file to use for the Android bundle
         required: false
-        default: .env
+        default: .env.staging
         type: choice
         options:
-          - .env
           - .env.staging
           - .env.production
+          - .env
       artifact_name:
         description: Optional artifact name override
         required: false
@@ -43,7 +43,7 @@ jobs:
       - name: Resolve workflow inputs
         id: resolve_inputs
         run: |
-          envfile="${{ github.event_name == 'workflow_dispatch' && inputs.envfile || '.env' }}"
+          envfile="${{ github.event_name == 'workflow_dispatch' && inputs.envfile || '.env.staging' }}"
           artifact_name="${{ github.event_name == 'workflow_dispatch' && inputs.artifact_name || '' }}"
           publish_release="${{ github.event_name == 'workflow_dispatch' && inputs.publish_release || 'false' }}"
 
@@ -82,6 +82,45 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare CI env file
+        id: prepare_env
+        env:
+          SELECTED_ENVFILE: ${{ steps.resolve_inputs.outputs.envfile }}
+          BACKEND_ORIGIN_VALUE: ${{ vars.BACKEND_ORIGIN != '' && vars.BACKEND_ORIGIN || secrets.BACKEND_ORIGIN }}
+          API_BASE_URL_VALUE: ${{ vars.API_BASE_URL != '' && vars.API_BASE_URL || secrets.API_BASE_URL }}
+          SOCKET_URL_VALUE: ${{ vars.SOCKET_URL != '' && vars.SOCKET_URL || secrets.SOCKET_URL }}
+          SHARE_BASE_URL_VALUE: ${{ vars.SHARE_BASE_URL != '' && vars.SHARE_BASE_URL || secrets.SHARE_BASE_URL }}
+          GOOGLE_WEB_CLIENT_ID_VALUE: ${{ vars.GOOGLE_WEB_CLIENT_ID != '' && vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
+          GOOGLE_IOS_CLIENT_ID_VALUE: ${{ vars.GOOGLE_IOS_CLIENT_ID != '' && vars.GOOGLE_IOS_CLIENT_ID || secrets.GOOGLE_IOS_CLIENT_ID }}
+        run: |
+          if [ -f "$SELECTED_ENVFILE" ]; then
+            cp "$SELECTED_ENVFILE" .env.ci
+          else
+            cp .env.staging .env.ci
+          fi
+
+          upsert_env() {
+            key="$1"
+            value="$2"
+
+            if [ -z "$value" ]; then
+              return
+            fi
+
+            grep -v "^${key}=" .env.ci > .env.ci.tmp || true
+            printf "%s=%s\n" "$key" "$value" >> .env.ci.tmp
+            mv .env.ci.tmp .env.ci
+          }
+
+          upsert_env "BACKEND_ORIGIN" "$BACKEND_ORIGIN_VALUE"
+          upsert_env "API_BASE_URL" "$API_BASE_URL_VALUE"
+          upsert_env "SOCKET_URL" "$SOCKET_URL_VALUE"
+          upsert_env "SHARE_BASE_URL" "$SHARE_BASE_URL_VALUE"
+          upsert_env "GOOGLE_WEB_CLIENT_ID" "$GOOGLE_WEB_CLIENT_ID_VALUE"
+          upsert_env "GOOGLE_IOS_CLIENT_ID" "$GOOGLE_IOS_CLIENT_ID_VALUE"
+
+          echo "envfile=.env.ci" >> "$GITHUB_OUTPUT"
+
       - name: Patch React Native Gradle toolchain resolver for CI
         run: |
           plugin_file="node_modules/@react-native/gradle-plugin/settings.gradle.kts"
@@ -96,7 +135,7 @@ jobs:
 
       - name: Build release APK
         env:
-          ENVFILE_VALUE: ${{ steps.resolve_inputs.outputs.envfile }}
+          ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
         run: |
           echo "Building Android release APK with ${ENVFILE_VALUE}"
           cd android
@@ -137,7 +176,7 @@ jobs:
       - name: Add build summary
         if: success()
         env:
-          ENVFILE_VALUE: ${{ steps.resolve_inputs.outputs.envfile }}
+          ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
           ARTIFACT_NAME: ${{ steps.resolve_inputs.outputs.artifact_name }}
           ARTIFACT_URL: ${{ steps.upload_apk.outputs.artifact-url }}
           RELEASE_URL: ${{ steps.publish_release.outputs.release_url }}

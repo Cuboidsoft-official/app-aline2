@@ -80,6 +80,9 @@ yarn-error.log*
 .expo/
 .expo-shared/
 .turbo/
+.codex
+.codex/
+.gradle-home/
 
 # testing
 /coverage
