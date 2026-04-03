@@ -18,6 +18,7 @@ const isPrivateHostname = (hostname = "") =>
 const isLoopbackHostname = (hostname = "") =>
   /^(localhost|0\.0\.0\.0|127(?:\.\d{1,3}){0,3})$/i.test(String(hostname || "").trim());
 const ANDROID_EMULATOR_HOSTS = ["10.0.2.2", "10.0.3.2"];
+const DEFAULT_PUBLIC_BACKEND_ORIGIN = "https://studious-rotary-phone-q77j4jjqxw7x39599-5000.app.github.dev";
 const replaceUrlHostname = (rawUrl, nextHostname) => {
   try {
     const parsed = new URL(rawUrl);
@@ -49,9 +50,12 @@ const buildCandidateUrls = (rawUrl, fallbackUrl) => {
   }
 };
 
-const fallbackApiBaseUrl =
-  Platform.OS === "android" ? "http://10.0.2.2:5000/api" : "http://localhost:5000/api";
 const normalizedBackendOrigin = trimTrailingSlash(BACKEND_ORIGIN || "");
+const localDevFallbackApiBaseUrl =
+  Platform.OS === "android" ? "http://10.0.2.2:5000/api" : "http://localhost:5000/api";
+const fallbackApiBaseUrl = __DEV__
+  ? localDevFallbackApiBaseUrl
+  : appendApiPath(DEFAULT_PUBLIC_BACKEND_ORIGIN) || localDevFallbackApiBaseUrl;
 const derivedApiBaseUrl = appendApiPath(normalizedBackendOrigin);
 const derivedSocketBaseUrl = normalizedBackendOrigin;
 const apiBaseUrlCandidates = buildCandidateUrls(API_BASE_URL || derivedApiBaseUrl, fallbackApiBaseUrl);
