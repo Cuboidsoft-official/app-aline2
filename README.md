@@ -184,6 +184,32 @@ npm start
 npm run android
 ```
 
+## Shareable Android APK via GitHub Actions
+
+This repo includes a GitHub Actions workflow at [`.github/workflows/android-apk.yml`](/workspaces/app-aline2/.github/workflows/android-apk.yml) that builds a release APK and uploads it for download.
+
+Use it like this:
+
+1. Push the latest code to GitHub.
+2. Open the repository `Actions` tab.
+3. Run `Build Android APK`.
+4. Choose the env file:
+   `.env` uses the current Codespaces backend.
+   `.env.staging` uses the staging-style config.
+5. Leave `publish_release` enabled if you want a GitHub Release download page.
+6. Wait for the workflow to finish.
+7. Open the workflow run summary and use either:
+   the uploaded artifact link, or
+   the `Download APK via GitHub Release` link.
+
+Notes:
+
+- The local path `android/app/build/outputs/apk/release/app-release.apk` only exists after a successful Android release build.
+- If you have not built locally or in CI yet, that folder/file will not be present.
+- GitHub Actions builds the APK on the runner, then uploads it as a downloadable artifact or release asset.
+- If the repository is private, teammates will need repo access to download Actions artifacts or release assets.
+- The APK is built against the selected env file, so backend switching should happen through `.env`, `.env.staging`, or `.env.production` rather than code edits.
+
 ## Backend
 
 ```

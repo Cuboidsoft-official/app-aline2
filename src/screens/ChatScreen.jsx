@@ -56,7 +56,7 @@ import { callingDisabledMessage, productFlags } from "../config/productFlags";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { ensureCameraPermission } from "../utils/permissions";
-import { normalizeMediaUrl } from "../utils/mediaUrls";
+import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 
 const PRIMARY = "#7b3fe4";
 const LOCATION_MESSAGE_LABEL = "Shared location:";
@@ -102,6 +102,65 @@ const getDocumentPickerMessage = (error) => {
   }
 };
 
+const messageRenderKeyCache = new WeakMap();
+let nextSyntheticMessageKey = 0;
+
+const getMessageIdentity = (message) => {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+
+  const identity =
+    message?._id
+    || message?.id
+    || message?.clientMessageId
+    || message?.clientId
+    || message?.localId
+    || message?.tempId
+    || message?.optimisticId
+    || message?.messageId;
+
+  return identity ? String(identity) : "";
+};
+
+const getMessageRenderKey = (message) => {
+  const identity = getMessageIdentity(message);
+  if (identity) {
+    return identity;
+  }
+
+  if (!message || typeof message !== "object") {
+    return "message:missing";
+  }
+
+  const cachedKey = messageRenderKeyCache.get(message);
+  if (cachedKey) {
+    return cachedKey;
+  }
+
+  const nextKey = `message:synthetic:${nextSyntheticMessageKey++}`;
+  messageRenderKeyCache.set(message, nextKey);
+  return nextKey;
+};
+
+const dedupeMessages = (items) => {
+  const seen = new Set();
+
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const identity = getMessageIdentity(item);
+    if (!identity) {
+      return true;
+    }
+
+    if (seen.has(identity)) {
+      return false;
+    }
+
+    seen.add(identity);
+    return true;
+  });
+};
+
 const ChatScreen = ({ navigation, route }) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -145,12 +204,17 @@ const ChatScreen = ({ navigation, route }) => {
   }, [userId]);
 
   const mergeMessage = useCallback((nextMessage) => {
+    const normalizedMessage = normalizeMediaFieldsDeep(nextMessage);
+
     setMessages((prev) => {
-      const exists = prev.find((item) => item._id === nextMessage?._id);
+      const nextIdentity = getMessageIdentity(normalizedMessage);
+      const exists = nextIdentity
+        ? prev.some((item) => getMessageIdentity(item) === nextIdentity)
+        : false;
       if (exists) {
         return prev;
       }
-      return [...prev, nextMessage];
+      return [...prev, normalizedMessage];
     });
   }, []);
 
@@ -172,9 +236,9 @@ const ChatScreen = ({ navigation, route }) => {
         cursor: options.cursor,
         limit: options.limit || 30,
       });
-      const nextMessages = data?.messages || [];
+      const nextMessages = dedupeMessages(normalizeMediaFieldsDeep(data?.messages || []));
       setPagination(data?.pagination || { nextCursor: null, hasMore: false, limit: 30 });
-      setMessages((prev) => (options.append ? [...nextMessages, ...prev] : nextMessages));
+      setMessages((prev) => (options.append ? dedupeMessages([...nextMessages, ...prev]) : nextMessages));
       setErrorMessage("");
     } catch (err) {
       console.log("Fetch messages error:", err?.response?.data || err);
@@ -1008,7 +1072,7 @@ const ChatScreen = ({ navigation, route }) => {
           <FlatList
             data={messages}
             extraData={messages}
-            keyExtractor={(item, index) => item._id || item.id || index.toString()}
+            keyExtractor={(item) => getMessageRenderKey(item)}
             renderItem={renderMessage}
             contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(20, 12 + insets.bottom) }]}
             showsVerticalScrollIndicator={false}

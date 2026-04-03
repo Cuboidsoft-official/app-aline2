@@ -1,6 +1,7 @@
 import axios from "axios";
 import { Platform } from "react-native";
 import { appConfig } from "../config/env";
+import { normalizeMediaFieldsDeep } from "../utils/mediaUrls";
 import {
   clearStoredSession,
   getStoredRefreshToken,
@@ -27,6 +28,14 @@ export const ROOT_API = axios.create({
 });
 
 let refreshPromise = null;
+
+const normalizeResponsePayload = (response) => {
+  if (typeof response?.data !== "undefined") {
+    response.data = normalizeMediaFieldsDeep(response.data);
+  }
+
+  return response;
+};
 
 const applyConnectionCandidate = (index) => {
   const nextIndex = Math.max(0, Math.min(index, connectionCandidates.length - 1));
@@ -101,7 +110,7 @@ const refreshAccessToken = async () => {
 
 const attachConnectionFailover = (client, kind) => {
   client.interceptors.response.use(
-    (response) => response,
+    (response) => normalizeResponsePayload(response),
     async (error) => {
       const originalConfig = error?.config;
 

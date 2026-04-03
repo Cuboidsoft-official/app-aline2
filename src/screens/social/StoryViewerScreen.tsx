@@ -21,12 +21,15 @@ import StoryActivitySheet from "../../features/social/components/StoryActivitySh
 import { socialApi } from "../../features/social/socialApi";
 import { Story, StoryFilterPreset } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
+import { DEFAULT_AVATAR_URL } from "../../constants/defaultAssets";
 
 const DEFAULT_STORY_MS = 5000;
 const TEXT_STORY_MS = 7000;
 const QUICK_REACTIONS = ["❤️", "🔥", "😍", "👏", "😮"];
 
 const formatAgo = (timestamp: number): string => {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "now";
+
   const mins = Math.max(1, Math.floor((Date.now() - timestamp) / (1000 * 60)));
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
@@ -373,6 +376,10 @@ function StoryViewerScreen({ route, navigation }: any) {
     }
 
     if (currentStory.media?.mediaType === "video") {
+      if (!currentStory.media?.url) {
+        return <View style={[styles.storyImage, styles.storyFallback]} />;
+      }
+
       return (
         <SocialVideo
           uri={currentStory.media?.url}
@@ -384,11 +391,14 @@ function StoryViewerScreen({ route, navigation }: any) {
       );
     }
 
-    return (
+    const imageUri = currentStory.media?.thumbnailUrl || currentStory.media?.url;
+    return imageUri ? (
       <Image
-        source={{ uri: currentStory.media?.thumbnailUrl || currentStory.media?.url }}
+        source={{ uri: imageUri }}
         style={styles.storyImage}
       />
+    ) : (
+      <View style={[styles.storyImage, styles.storyFallback]} />
     );
   };
 
@@ -555,7 +565,7 @@ function StoryViewerScreen({ route, navigation }: any) {
       </View>
 
       <View style={styles.header}>
-        <Image source={{ uri: currentStory.user.avatarUrl }} style={styles.avatar} />
+        <Image source={{ uri: currentStory.user.avatarUrl || DEFAULT_AVATAR_URL }} style={styles.avatar} />
         <View style={styles.headerMeta}>
           <View style={styles.headerUserRow}>
             <Text style={styles.username}>@{currentStory.user.username}</Text>
@@ -793,6 +803,7 @@ const styles = StyleSheet.create({
   },
   unavailableButtonText: { color: "#fff", fontWeight: "700" },
   storyImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
+  storyFallback: { backgroundColor: "#111827" },
   topFade: { ...StyleSheet.absoluteFillObject, height: 180 },
   bottomFade: { ...StyleSheet.absoluteFillObject, top: undefined, height: 300, bottom: 0 },
   textStoryWrap: {

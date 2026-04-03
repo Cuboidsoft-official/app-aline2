@@ -63,7 +63,7 @@ import { callingDisabledMessage, productFlags } from "../config/productFlags";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { ensureCameraPermission } from "../utils/permissions";
-import { normalizeMediaUrl } from "../utils/mediaUrls";
+import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 
 const PRIMARY = "#7B4DFF";
 const LOCATION_MESSAGE_LABEL = "Shared location:";
@@ -106,7 +106,14 @@ type AttachmentShape = {
 };
 
 type ChatMessage = {
-  _id: string;
+  _id?: string;
+  id?: string;
+  clientMessageId?: string;
+  clientId?: string;
+  localId?: string;
+  tempId?: string;
+  optimisticId?: string;
+  messageId?: string;
   text?: string;
   messageType?: string;
   attachment?: AttachmentShape;
@@ -214,6 +221,65 @@ const getDocumentPickerMessage = (error: unknown): string => {
   }
 };
 
+const messageRenderKeyCache = new WeakMap<object, string>();
+let nextSyntheticMessageKey = 0;
+
+const getMessageIdentity = (message: ChatMessage | null | undefined): string => {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+
+  const identity =
+    message?._id
+    || message?.id
+    || message?.clientMessageId
+    || message?.clientId
+    || message?.localId
+    || message?.tempId
+    || message?.optimisticId
+    || message?.messageId;
+
+  return identity ? String(identity) : "";
+};
+
+const getMessageRenderKey = (message: ChatMessage | null | undefined): string => {
+  const identity = getMessageIdentity(message);
+  if (identity) {
+    return identity;
+  }
+
+  if (!message || typeof message !== "object") {
+    return "message:missing";
+  }
+
+  const cachedKey = messageRenderKeyCache.get(message);
+  if (cachedKey) {
+    return cachedKey;
+  }
+
+  const nextKey = `message:synthetic:${nextSyntheticMessageKey++}`;
+  messageRenderKeyCache.set(message, nextKey);
+  return nextKey;
+};
+
+const dedupeMessages = (items: ChatMessage[]): ChatMessage[] => {
+  const seen = new Set<string>();
+
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const identity = getMessageIdentity(item);
+    if (!identity) {
+      return true;
+    }
+
+    if (seen.has(identity)) {
+      return false;
+    }
+
+    seen.add(identity);
+    return true;
+  });
+};
+
 const SellerChatScreen = ({ route, navigation }: any) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -319,9 +385,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       cursor: options.cursor,
       limit: options.limit || 30,
     });
-    const nextMessages = data?.messages || [];
+    const nextMessages = dedupeMessages(normalizeMediaFieldsDeep(data?.messages || []) as ChatMessage[]);
     setPagination(data?.pagination || { nextCursor: null, hasMore: false, limit: 30 });
-    setMessages((prev) => (options.append ? [...nextMessages, ...prev] : nextMessages));
+    setMessages((prev) => (options.append ? dedupeMessages([...nextMessages, ...prev]) : nextMessages));
     setErrorMessage("");
   }, []);
 
@@ -361,9 +427,14 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   }, [conversationServiceId, resolveConversation, selectedService?._id, serviceId]);
 
   const appendMessage = useCallback((nextMessage: ChatMessage) => {
+    const normalizedMessage = normalizeMediaFieldsDeep(nextMessage) as ChatMessage;
+
     setMessages((prev) => {
-      const exists = prev.some((item) => item._id === nextMessage._id);
-      return exists ? prev : [...prev, nextMessage];
+      const nextIdentity = getMessageIdentity(normalizedMessage);
+      const exists = nextIdentity
+        ? prev.some((item) => getMessageIdentity(item) === nextIdentity)
+        : false;
+      return exists ? prev : [...prev, normalizedMessage];
     });
   }, []);
 
@@ -1301,11 +1372,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             <ActivityIndicator size="large" color={PRIMARY} />
           </View>
         ) : (
-          <FlatList
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item, index) => item._id || index.toString()}
-            contentContainerStyle={{ padding: 12, paddingBottom: Math.max(20, 12 + insets.bottom) }}
+        <FlatList
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => getMessageRenderKey(item)}
+          contentContainerStyle={{ padding: 12, paddingBottom: Math.max(20, 12 + insets.bottom) }}
             keyboardShouldPersistTaps="handled"
             refreshControl={
               <RefreshControl

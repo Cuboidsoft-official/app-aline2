@@ -47,6 +47,10 @@ const formatCount = (value: number): string => {
 };
 
 const formatAgo = (timestamp: number): string => {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return "now";
+  }
+
   const mins = Math.max(1, Math.floor((Date.now() - timestamp) / (1000 * 60)));
 
   if (mins < 60) {
@@ -243,6 +247,7 @@ function FeedScreen({ navigation }: any) {
   const renderStory = ({ item }: { item: Story }) => {
     const ringStyle = item.viewed ? styles.storyRingSeen : styles.storyRingUnseen;
     const closeFriends = item.visibility === "close_friends";
+    const storyAvatar = item.user.avatarUrl || DEFAULT_AVATAR_URL;
 
     return (
       <TouchableOpacity
@@ -250,7 +255,7 @@ function FeedScreen({ navigation }: any) {
         onPress={() => navigation.navigate("StoryViewer", { storyId: item.id })}
       >
         <View style={[styles.storyRing, ringStyle, closeFriends && styles.storyRingCloseFriends]}>
-          <Image source={{ uri: item.user.avatarUrl }} style={styles.storyAvatar} />
+          <Image source={{ uri: storyAvatar }} style={styles.storyAvatar} />
         </View>
         <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
           {item.user.name}
@@ -262,6 +267,10 @@ function FeedScreen({ navigation }: any) {
   const renderPostMedia = (post: Post) => {
     if (post.type !== "carousel") {
       const primaryMedia = post.media[0];
+      if (!primaryMedia?.url) {
+        return <View style={[styles.postImage, styles.mediaFallback, { width }]} />;
+      }
+
       if (primaryMedia?.mediaType === "video") {
         return (
           <SocialVideo
@@ -322,7 +331,7 @@ function FeedScreen({ navigation }: any) {
     return (
       <View style={[styles.postCard, { backgroundColor: colors.background }]}>
         <View style={styles.postHeader}>
-          <Image source={{ uri: item.user.avatarUrl }} style={styles.postAvatar} />
+          <Image source={{ uri: item.user.avatarUrl || DEFAULT_AVATAR_URL }} style={styles.postAvatar} />
           <View style={styles.userMeta}>
             <View style={styles.row}>
               <Text style={[styles.username, { color: colors.text }]}>{item.user.username}</Text>
@@ -616,6 +625,7 @@ const styles = StyleSheet.create({
   postTime: { fontSize: 12, color: "#666", marginTop: 1 },
   moreButton: { marginLeft: "auto", padding: 2 },
   carouselWrap: { width: "100%" },
+  mediaFallback: { backgroundColor: "#f3f3f3" },
   postImage: { height: 350, backgroundColor: "#f3f3f3" },
   actionsRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 9 },
   iconButton: { marginRight: 12 },

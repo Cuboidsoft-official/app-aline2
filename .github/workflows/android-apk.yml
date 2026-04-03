@@ -1,0 +1,155 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      envfile:
+        description: Env file to use for the Android bundle
+        required: false
+        default: .env
+        type: choice
+        options:
+          - .env
+          - .env.staging
+          - .env.production
+      artifact_name:
+        description: Optional artifact name override
+        required: false
+        default: ""
+        type: string
+      publish_release:
+        description: Also publish the APK to a GitHub Release
+        required: false
+        default: true
+        type: boolean
+  push:
+    branches:
+      - main
+      - master
+      - develop
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve workflow inputs
+        id: resolve_inputs
+        run: |
+          envfile="${{ github.event_name == 'workflow_dispatch' && inputs.envfile || '.env' }}"
+          artifact_name="${{ github.event_name == 'workflow_dispatch' && inputs.artifact_name || '' }}"
+          publish_release="${{ github.event_name == 'workflow_dispatch' && inputs.publish_release || 'false' }}"
+
+          if [ -z "$artifact_name" ]; then
+            artifact_name="aline2-android-apk-${{ github.run_number }}"
+          fi
+
+          release_tag="apk-build-${{ github.run_id }}-${{ github.run_attempt }}"
+          release_name="Android APK Build ${{ github.run_number }}.${{ github.run_attempt }}"
+
+          echo "envfile=$envfile" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+          echo "publish_release=$publish_release" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Patch React Native Gradle toolchain resolver for CI
+        run: |
+          plugin_file="node_modules/@react-native/gradle-plugin/settings.gradle.kts"
+          if [ -f "$plugin_file" ]; then
+            sed -i '/org.gradle.toolchains.foojay-resolver-convention/s/^/\/\/ /' "$plugin_file"
+          fi
+
+      - name: Configure Android SDK path
+        run: |
+          printf "sdk.dir=%s\n" "$ANDROID_SDK_ROOT" > android/local.properties
+          chmod +x android/gradlew
+
+      - name: Build release APK
+        env:
+          ENVFILE_VALUE: ${{ steps.resolve_inputs.outputs.envfile }}
+        run: |
+          echo "Building Android release APK with ${ENVFILE_VALUE}"
+          cd android
+          ENVFILE="$ENVFILE_VALUE" ./gradlew assembleRelease --no-daemon
+
+      - name: Show APK outputs
+        run: find android/app/build/outputs/apk -type f -name '*.apk' | sort
+
+      - name: Upload APK artifact
+        id: upload_apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.resolve_inputs.outputs.artifact_name }}
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish APK to GitHub Release
+        if: github.event_name == 'workflow_dispatch' && steps.resolve_inputs.outputs.publish_release == 'true'
+        id: publish_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.resolve_inputs.outputs.release_tag }}
+          RELEASE_NAME: ${{ steps.resolve_inputs.outputs.release_name }}
+          ENVFILE_VALUE: ${{ steps.resolve_inputs.outputs.envfile }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            android/app/build/outputs/apk/release/*.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_NAME" \
+            --notes "Android APK built from workflow run $GITHUB_RUN_NUMBER using ${ENVFILE_VALUE}." \
+            --prerelease
+
+          release_url="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url --jq '.url')"
+          echo "release_url=$release_url" >> "$GITHUB_OUTPUT"
+
+      - name: Add build summary
+        if: success()
+        env:
+          ENVFILE_VALUE: ${{ steps.resolve_inputs.outputs.envfile }}
+          ARTIFACT_NAME: ${{ steps.resolve_inputs.outputs.artifact_name }}
+          ARTIFACT_URL: ${{ steps.upload_apk.outputs.artifact-url }}
+          RELEASE_URL: ${{ steps.publish_release.outputs.release_url }}
+        run: |
+          {
+            echo "## Android APK"
+            echo ""
+            echo "- Env file: \`${ENVFILE_VALUE}\`"
+            echo "- Artifact: [${ARTIFACT_NAME}](${ARTIFACT_URL})"
+            if [ -n "${RELEASE_URL}" ]; then
+              echo "- Release: [Download APK via GitHub Release](${RELEASE_URL})"
+            fi
+            echo "- APK files:"
+            find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | sort | sed 's/^/  - `/; s/$/`/'
+          } >> "$GITHUB_STEP_SUMMARY"

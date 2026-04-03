@@ -1,8 +1,16 @@
 import { Platform } from "react-native";
-import { API_BASE_URL, SHARE_BASE_URL, SOCKET_URL } from "@env";
+import { API_BASE_URL, BACKEND_ORIGIN, SHARE_BASE_URL, SOCKET_URL } from "@env";
 
 const trimTrailingSlash = (value) => value.replace(/\/+$/, "");
 const dedupe = (items) => Array.from(new Set(items.filter(Boolean)));
+const appendApiPath = (value) => {
+  const trimmed = trimTrailingSlash(String(value || "").trim());
+  if (!trimmed) {
+    return "";
+  }
+
+  return trimmed.endsWith("/api") ? trimmed : `${trimmed}/api`;
+};
 const isPrivateHostname = (hostname = "") =>
   /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|.*\.local$)/i.test(
     String(hostname || "").trim()
@@ -43,9 +51,12 @@ const buildCandidateUrls = (rawUrl, fallbackUrl) => {
 
 const fallbackApiBaseUrl =
   Platform.OS === "android" ? "http://10.0.2.2:5000/api" : "http://localhost:5000/api";
-const apiBaseUrlCandidates = buildCandidateUrls(API_BASE_URL, fallbackApiBaseUrl);
+const normalizedBackendOrigin = trimTrailingSlash(BACKEND_ORIGIN || "");
+const derivedApiBaseUrl = appendApiPath(normalizedBackendOrigin);
+const derivedSocketBaseUrl = normalizedBackendOrigin;
+const apiBaseUrlCandidates = buildCandidateUrls(API_BASE_URL || derivedApiBaseUrl, fallbackApiBaseUrl);
 const socketBaseFallback = (apiBaseUrlCandidates[0] || fallbackApiBaseUrl).replace(/\/api$/, "");
-const socketUrlCandidates = buildCandidateUrls(SOCKET_URL, socketBaseFallback);
+const socketUrlCandidates = buildCandidateUrls(SOCKET_URL || derivedSocketBaseUrl, socketBaseFallback);
 const connectionCandidates = dedupe(
   apiBaseUrlCandidates.map((apiBaseUrl, index) =>
     JSON.stringify({
@@ -61,6 +72,14 @@ const resolvePublicShareBaseUrl = () => {
   const explicitShareBaseUrl = trimTrailingSlash(SHARE_BASE_URL || "");
   if (explicitShareBaseUrl) {
     return explicitShareBaseUrl;
+  }
+
+  try {
+    if (derivedSocketBaseUrl && !isPrivateHostname(new URL(derivedSocketBaseUrl).hostname)) {
+      return derivedSocketBaseUrl;
+    }
+  } catch {
+    // Ignore malformed configured backend origins and continue.
   }
 
   try {

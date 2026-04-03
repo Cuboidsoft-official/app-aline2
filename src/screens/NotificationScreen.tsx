@@ -20,6 +20,7 @@ import { Swipeable } from "react-native-gesture-handler";
 import { getStoredUserId } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { normalizeMediaFieldsDeep } from "../utils/mediaUrls";
 
 type NotificationKind =
   | "follow"
@@ -60,6 +61,23 @@ interface NotificationScreenProps {
 }
 
 const FALLBACK_AVATAR = DEFAULT_AVATAR_URL;
+const parseTimestamp = (value?: string): number => {
+  const timestamp = new Date(String(value || "")).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const formatNotificationTime = (value?: string): string => {
+  const timestamp = parseTimestamp(value);
+  if (!timestamp) {
+    return "Recent";
+  }
+
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "numeric",
+    hour12: true
+  });
+};
 
 const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
   const { colors, isDarkMode } = useAppTheme();
@@ -106,12 +124,14 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
     socket.on("connect", () => console.log("Socket connected"));
 
     socket.on("receiveNotification", (data: AppNotification) => {
+      const normalizedNotification = normalizeMediaFieldsDeep(data) as AppNotification;
+
       setNotifications(prev => {
-        if (prev.some((item) => item._id === data._id)) {
+        if (prev.some((item) => item._id === normalizedNotification._id)) {
           return prev;
         }
 
-        return [data, ...prev];
+        return [normalizedNotification, ...prev];
       });
       setUnreadCount(prev => prev + 1);
     });
@@ -306,11 +326,12 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
   };
 
   const getNotificationGroup = (dateString?: string): string => {
-    if (!dateString) {
+    const timestamp = parseTimestamp(dateString);
+    if (!timestamp) {
       return "Earlier";
     }
 
-    const date = new Date(dateString);
+    const date = new Date(timestamp);
     const now = new Date();
     const diffTime = now.getTime() - date.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
@@ -321,15 +342,20 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
     return "Earlier";
   };
 
+  const sortedNotifications = useMemo(
+    () => [...notifications].sort((a, b) => parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt)),
+    [notifications]
+  );
+
   const grouped = useMemo<Record<string, AppNotification[]>>(() => {
     const groups: Record<string, AppNotification[]> = {};
-    notifications.forEach((n) => {
+    sortedNotifications.forEach((n) => {
       const group = getNotificationGroup(n.createdAt);
       if (!groups[group]) groups[group] = [];
       groups[group].push(n);
     });
     return groups;
-  }, [notifications]);
+  }, [sortedNotifications]);
 
   const groupKeys = useMemo(() => Object.keys(grouped), [grouped]);
 
@@ -361,11 +387,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
             <Text style={[styles.msg, { color: colors.mutedText }]}> {getNotificationText(item)}</Text>
           </Text>
           <Text style={[styles.time, { color: colors.mutedText }]}>
-            {new Date(item.createdAt).toLocaleTimeString([], {
-              hour: "numeric",
-              minute: "numeric",
-              hour12: true
-            })}
+            {formatNotificationTime(item.createdAt)}
           </Text>
         </View>
 

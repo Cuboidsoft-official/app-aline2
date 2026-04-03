@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Keychain from "react-native-keychain";
+import { normalizeMediaFieldsDeep } from "./mediaUrls";
 
 const SESSION_SERVICE = "aline2.auth.session";
 const LEGACY_TOKEN_KEY = "token";
@@ -93,6 +94,10 @@ export const setStoredSession = async (payload = {}) => {
   const { token, accessToken, refreshToken, session, user } = payload;
   const nextAccessToken = String(accessToken || token || "").trim();
   const nextRefreshToken = String(refreshToken || "").trim();
+  const normalizedUser =
+    user && typeof user === "object"
+      ? normalizeMediaFieldsDeep(user)
+      : user;
 
   if (nextAccessToken || nextRefreshToken || session) {
     await setSecureSession({
@@ -104,10 +109,10 @@ export const setStoredSession = async (payload = {}) => {
 
   const writes = [AsyncStorage.removeItem(LEGACY_TOKEN_KEY)];
 
-  if (user && typeof user === "object") {
-    writes.push(AsyncStorage.setItem(USER_KEY, JSON.stringify(user)));
+  if (normalizedUser && typeof normalizedUser === "object") {
+    writes.push(AsyncStorage.setItem(USER_KEY, JSON.stringify(normalizedUser)));
 
-    const userId = extractUserId(user);
+    const userId = extractUserId(normalizedUser);
     if (userId) {
       writes.push(AsyncStorage.setItem(USER_ID_KEY, userId));
     }
