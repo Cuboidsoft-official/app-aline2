@@ -93,10 +93,14 @@ jobs:
           GOOGLE_WEB_CLIENT_ID_VALUE: ${{ vars.GOOGLE_WEB_CLIENT_ID != '' && vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
           GOOGLE_IOS_CLIENT_ID_VALUE: ${{ vars.GOOGLE_IOS_CLIENT_ID != '' && vars.GOOGLE_IOS_CLIENT_ID || secrets.GOOGLE_IOS_CLIENT_ID }}
         run: |
+          fallback_example="${SELECTED_ENVFILE}.example"
+
           if [ -f "$SELECTED_ENVFILE" ]; then
             cp "$SELECTED_ENVFILE" .env.ci
+          elif [ -f "$fallback_example" ]; then
+            cp "$fallback_example" .env.ci
           else
-            cp .env.staging .env.ci
+            : > .env.ci
           fi
 
           upsert_env() {
