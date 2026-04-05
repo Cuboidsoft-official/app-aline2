@@ -881,7 +881,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       }
     };
 
-    syncConversationForSelectedService().catch(() => {});
+    syncConversationForSelectedService().catch(() => { });
 
     return () => {
       active = false;
@@ -1065,7 +1065,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       >
         <TouchableOpacity
           activeOpacity={0.92}
-          onLongPress={() => reactToMessage(item._id)}
+          onLongPress={() => reactToMessage(item._id!)}
           style={[
             styles.msgBubble,
             isMine ? styles.myMsg : styles.otherMsg
@@ -1366,122 +1366,122 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
-      <View style={{ flex: 1 }}>
-        {loading ? (
-          <View style={styles.loaderWrap}>
-            <ActivityIndicator size="large" color={PRIMARY} />
-          </View>
-        ) : (
-        <FlatList
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => getMessageRenderKey(item)}
-          contentContainerStyle={{ padding: 12, paddingBottom: Math.max(20, 12 + insets.bottom) }}
-            keyboardShouldPersistTaps="handled"
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={() => {
-                  loadSellerChat({ refresh: true }).catch((error) => {
-                    console.log("seller chat refresh error:", error);
-                  });
-                }}
-                tintColor={colors.primary}
-              />
-            }
-            ListHeaderComponent={
-              pagination?.hasMore ? (
+        <View style={{ flex: 1 }}>
+          {loading ? (
+            <View style={styles.loaderWrap}>
+              <ActivityIndicator size="large" color={PRIMARY} />
+            </View>
+          ) : (
+            <FlatList
+              data={messages}
+              renderItem={renderMessage}
+              keyExtractor={(item) => getMessageRenderKey(item)}
+              contentContainerStyle={{ padding: 12, paddingBottom: Math.max(20, 12 + insets.bottom) }}
+              keyboardShouldPersistTaps="handled"
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => {
+                    loadSellerChat({ refresh: true }).catch((error) => {
+                      console.log("seller chat refresh error:", error);
+                    });
+                  }}
+                  tintColor={colors.primary}
+                />
+              }
+              ListHeaderComponent={
+                pagination?.hasMore ? (
+                  <TouchableOpacity
+                    style={styles.loadEarlierButton}
+                    onPress={loadMoreMessages}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? (
+                      <ActivityIndicator color={PRIMARY} />
+                    ) : (
+                      <Text style={styles.loadEarlierText}>Load earlier messages</Text>
+                    )}
+                  </TouchableOpacity>
+                ) : null
+              }
+              ListEmptyComponent={
+                <View style={styles.emptyWrap}>
+                  <Text style={styles.emptyTitle}>
+                    {errorMessage ? "Conversation unavailable" : "No messages yet"}
+                  </Text>
+                  <Text style={styles.emptyText}>
+                    {errorMessage || "Start the conversation here. Booking requests are handled through chat."}
+                  </Text>
+                </View>
+              }
+            />
+          )}
+
+          <View style={styles.quickContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {quickOptions.map((item, index) => (
                 <TouchableOpacity
-                  style={styles.loadEarlierButton}
-                  onPress={loadMoreMessages}
-                  disabled={loadingMore}
+                  key={index}
+                  style={styles.quickChip}
+                  onPress={() => {
+                    sendMessage(item).catch((error) => {
+                      console.log("seller quick reply error:", error);
+                    });
+                  }}
                 >
-                  {loadingMore ? (
-                    <ActivityIndicator color={PRIMARY} />
-                  ) : (
-                    <Text style={styles.loadEarlierText}>Load earlier messages</Text>
-                  )}
+                  <Text style={styles.quickText}>{item}</Text>
                 </TouchableOpacity>
-              ) : null
-            }
-            ListEmptyComponent={
-              <View style={styles.emptyWrap}>
-                <Text style={styles.emptyTitle}>
-                  {errorMessage ? "Conversation unavailable" : "No messages yet"}
-                </Text>
-                <Text style={styles.emptyText}>
-                  {errorMessage || "Start the conversation here. Booking requests are handled through chat."}
-                </Text>
-              </View>
-            }
-          />
-        )}
-
-        <View style={styles.quickContainer}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {quickOptions.map((item, index) => (
-              <TouchableOpacity
-                key={index}
-                style={styles.quickChip}
-                onPress={() => {
-                  sendMessage(item).catch((error) => {
-                    console.log("seller quick reply error:", error);
-                  });
-                }}
-              >
-                <Text style={styles.quickText}>{item}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+              ))}
+            </ScrollView>
+          </View>
         </View>
-      </View>
 
-      <View style={[styles.inputWrap, { backgroundColor: colors.card, paddingBottom: Math.max(6, insets.bottom), borderTopColor: colors.border }]}>
-        <TouchableOpacity style={styles.attachButton} onPress={sendCameraAttachment} disabled={uploading || loading}>
-          <Icon name="camera-outline" size={22} color={colors.primary} />
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={sendImageAttachment} disabled={uploading || loading}>
-          <Icon name="image-outline" size={22} color={colors.primary} />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.attachButton} onPress={sendDocumentAttachment} disabled={uploading || loading}>
-          <Icon name="document-outline" size={22} color={colors.primary} />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.attachButton} onPress={() => setShowLocationComposer(true)} disabled={uploading || loading}>
-          <Icon name="location-outline" size={22} color={colors.primary} />
-        </TouchableOpacity>
-
-        <TextInput
-          placeholder={uploading ? "Uploading attachment..." : "Message..."}
-          value={text}
-          onChangeText={handleTextChange}
-          style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
-          editable={!loading && !sending && !uploading}
-          placeholderTextColor={colors.placeholder}
-        />
-
-        {uploading ? (
-          <ActivityIndicator color={PRIMARY} />
-        ) : text.trim() ? (
-          <TouchableOpacity
-            style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
-            onPress={() => {
-              sendMessage().catch((error) => {
-                console.log("seller chat send error:", error);
-              });
-            }}
-            disabled={sending || loading}
-          >
-            <Icon name="send" size={18} color="#fff" />
+        <View style={[styles.inputWrap, { backgroundColor: colors.card, paddingBottom: Math.max(6, insets.bottom), borderTopColor: colors.border }]}>
+          <TouchableOpacity style={styles.attachButton} onPress={sendCameraAttachment} disabled={uploading || loading}>
+            <Icon name="camera-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
-        ) : (
-          <TouchableOpacity onPress={sendAudioAttachment} disabled={uploading || loading}>
-            <Icon name="mic-outline" size={24} color={colors.primary} />
+
+          <TouchableOpacity onPress={sendImageAttachment} disabled={uploading || loading}>
+            <Icon name="image-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
-        )}
-      </View>
+
+          <TouchableOpacity style={styles.attachButton} onPress={sendDocumentAttachment} disabled={uploading || loading}>
+            <Icon name="document-outline" size={22} color={colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.attachButton} onPress={() => setShowLocationComposer(true)} disabled={uploading || loading}>
+            <Icon name="location-outline" size={22} color={colors.primary} />
+          </TouchableOpacity>
+
+          <TextInput
+            placeholder={uploading ? "Uploading attachment..." : "Message..."}
+            value={text}
+            onChangeText={handleTextChange}
+            style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
+            editable={!loading && !sending && !uploading}
+            placeholderTextColor={colors.placeholder}
+          />
+
+          {uploading ? (
+            <ActivityIndicator color={PRIMARY} />
+          ) : text.trim() ? (
+            <TouchableOpacity
+              style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
+              onPress={() => {
+                sendMessage().catch((error) => {
+                  console.log("seller chat send error:", error);
+                });
+              }}
+              disabled={sending || loading}
+            >
+              <Icon name="send" size={18} color="#fff" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={sendAudioAttachment} disabled={uploading || loading}>
+              <Icon name="mic-outline" size={24} color={colors.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
       </KeyboardAvoidingView>
 
       <Modal visible={showLocationComposer} transparent animationType="fade">
@@ -1582,10 +1582,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 (loadingAppointmentSlots || !appointmentSlots.length || processingBookingPayment) && styles.payBtnDisabled,
               ]}
               onPress={() => {
-              sendBookingRequest().catch((error) => {
-                console.log("seller booking request error:", error);
-              });
-            }}
+                sendBookingRequest().catch((error) => {
+                  console.log("seller booking request error:", error);
+                });
+              }}
               disabled={loadingAppointmentSlots || !appointmentSlots.length || processingBookingPayment}
             >
               {processingBookingPayment ? (

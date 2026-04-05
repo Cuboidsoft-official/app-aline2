@@ -3,6 +3,7 @@ import { GOOGLE_IOS_CLIENT_ID, GOOGLE_WEB_CLIENT_ID } from "@env";
 
 import { API } from "../api/api";
 import { setStoredSession } from "./authSession";
+import { registerPushToken } from "./pushRegistration";
 
 let isConfigured = false;
 
@@ -67,6 +68,8 @@ export const loginWithGoogle = async () => {
     session: res.data.session,
     user: res.data.user,
   });
+
+  registerPushToken().catch(() => { });
 
   return {
     cancelled: false as const,

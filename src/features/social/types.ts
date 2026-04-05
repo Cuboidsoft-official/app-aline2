@@ -68,6 +68,7 @@ export interface Post {
   collaboratorIds: string[];
   settings: PostSettings;
   createdAt: number;
+  filterPreset?: string;
   editedAt?: number;
   likesCount: number;
   commentsCount: number;
@@ -250,6 +251,7 @@ export interface CreatePostInput {
   mentions?: string[];
   collaboratorIds?: string[];
   settings?: Partial<PostSettings>;
+  filterPreset?: string;
 }
 
 export interface CreateStoryInput {
@@ -323,7 +325,7 @@ export interface DeleteCommentResult {
 }
 
 export interface SocialApi {
-  getFeed(): Promise<FeedResponse>;
+  getFeed(page?: number): Promise<FeedResponse>;
   getReels(): Promise<Reel[]>;
   getReel(reelId: string): Promise<Reel>;
   getSwipes(): Promise<Swipe[]>;

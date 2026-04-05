@@ -28,6 +28,14 @@ import { getStoredUser } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
+
+let ColorMatrix: any;
+try {
+  ColorMatrix = require("react-native-color-matrix-image-filters").ColorMatrix;
+} catch {
+  ColorMatrix = null;
+}
 
 const initialFeed: FeedResponse = {
   stories: [],
@@ -85,16 +93,21 @@ function FeedScreen({ navigation }: any) {
   const [activeSheet, setActiveSheet] = useState<null | "comments" | "share" | "actions">(null);
   const [currentUser, setCurrentUser] = useState<{ id: string; avatarUrl: string } | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [page, setPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
   const loadFeed = useCallback(async () => {
     const [data, storedUser] = await Promise.all([socialApi.getFeed(), getStoredUser()]);
     setFeed(data);
+    setPage(1);
+    setHasMore(data.posts.length >= 20);
     setCurrentUser(
       storedUser
         ? {
-            id: String(storedUser._id || storedUser.id || ""),
-            avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
-          }
+          id: String(storedUser._id || storedUser.id || ""),
+          avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
+        }
         : null,
     );
     setErrorMessage("");
@@ -113,9 +126,9 @@ function FeedScreen({ navigation }: any) {
             setCurrentUser(
               storedUser
                 ? {
-                    id: String(storedUser._id || storedUser.id || ""),
-                    avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
-                  }
+                  id: String(storedUser._id || storedUser.id || ""),
+                  avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
+                }
                 : null,
             );
             setErrorMessage("");
@@ -283,12 +296,21 @@ function FeedScreen({ navigation }: any) {
         );
       }
 
-      return (
+      const rawImage = (
         <Image
           source={{ uri: primaryMedia?.url }}
           style={[styles.postImage, { width }]}
         />
       );
+
+      if (post.filterPreset && ColorMatrix) {
+        const activeFilter = PHOTO_FILTER_LIST.find((f) => f.id === post.filterPreset);
+        if (activeFilter && activeFilter.matrix) {
+          return <ColorMatrix matrix={activeFilter.matrix}>{rawImage}</ColorMatrix>;
+        }
+      }
+
+      return rawImage;
     }
 
     return (
@@ -304,11 +326,28 @@ function FeedScreen({ navigation }: any) {
               repeat
             />
           ) : (
-            <Image
-              key={asset.id}
-              source={{ uri: asset.url }}
-              style={[styles.postImage, { width }]}
-            />
+            (() => {
+              const rawImage = (
+                <Image
+                  key={asset.id}
+                  source={{ uri: asset.url }}
+                  style={[styles.postImage, { width }]}
+                />
+              );
+
+              if (post.filterPreset && ColorMatrix) {
+                const activeFilter = PHOTO_FILTER_LIST.find((f) => f.id === post.filterPreset);
+                if (activeFilter && activeFilter.matrix) {
+                  return (
+                    <View key={asset.id}>
+                      <ColorMatrix matrix={activeFilter.matrix}>{rawImage}</ColorMatrix>
+                    </View>
+                  );
+                }
+              }
+
+              return rawImage;
+            })()
           )
         ))}
       </ScrollView>
@@ -422,60 +461,60 @@ function FeedScreen({ navigation }: any) {
 
     return (
       <>
-      <View style={[styles.topBar, { borderColor: colors.border, backgroundColor: colors.background }]}>
-        <View style={styles.topLeft}>
-          <Image source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }} style={styles.logo} />
-          <Text style={[styles.brand, { color: colors.primary }]}>Aline2</Text>
-        </View>
-
-        <View style={styles.topRight}>
-          <TouchableOpacity onPress={() => navigation.navigate("Search")}>
-            <Icon name="search-outline" size={23} color={colors.text} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.headerIconGap}
-            onPress={() => navigation.navigate("NotificationScreen")}
-          >
-            <Icon name="notifications-outline" size={23} color={colors.text} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.headerIconGap} onPress={() => navigation.navigate("Swipes")}>
-            <Icon name="play-circle-outline" size={23} color={colors.text} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyListContent}>
-        <TouchableOpacity
-          style={styles.storyItem}
-          onPress={() => {
-            if (ownStory) {
-              navigation.navigate("StoryViewer", { storyId: ownStory.id });
-              return;
-            }
-
-            navigation.navigate("Create", { initialTab: "story" });
-          }}
-        >
-          <View style={[styles.storyRing, styles.storyRingSeen]}>
-            <Image
-              source={{ uri: ownStoryAvatar }}
-              style={styles.storyAvatar}
-            />
-            <View style={[styles.storyAddBadge, { borderColor: colors.background }]}>
-              <Icon name="add" size={13} color="#fff" />
-            </View>
+        <View style={[styles.topBar, { borderColor: colors.border, backgroundColor: colors.background }]}>
+          <View style={styles.topLeft}>
+            <Image source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }} style={styles.logo} />
+            <Text style={[styles.brand, { color: colors.primary }]}>Aline2</Text>
           </View>
-        <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
-          Your story
-        </Text>
-      </TouchableOpacity>
-        {feed.stories.filter((story) => story.user.id !== ownStoryOwnerId).map((story) => (
-          <View key={story.id}>{renderStory({ item: story })}</View>
-        ))}
-      </ScrollView>
-    </>
+
+          <View style={styles.topRight}>
+            <TouchableOpacity onPress={() => navigation.navigate("Search")}>
+              <Icon name="search-outline" size={23} color={colors.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.headerIconGap}
+              onPress={() => navigation.navigate("NotificationScreen")}
+            >
+              <Icon name="notifications-outline" size={23} color={colors.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.headerIconGap} onPress={() => navigation.navigate("Swipes")}>
+              <Icon name="play-circle-outline" size={23} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyListContent}>
+          <TouchableOpacity
+            style={styles.storyItem}
+            onPress={() => {
+              if (ownStory) {
+                navigation.navigate("StoryViewer", { storyId: ownStory.id });
+                return;
+              }
+
+              navigation.navigate("Create", { initialTab: "story" });
+            }}
+          >
+            <View style={[styles.storyRing, styles.storyRingSeen]}>
+              <Image
+                source={{ uri: ownStoryAvatar }}
+                style={styles.storyAvatar}
+              />
+              <View style={[styles.storyAddBadge, { borderColor: colors.background }]}>
+                <Icon name="add" size={13} color="#fff" />
+              </View>
+            </View>
+            <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
+              Your story
+            </Text>
+          </TouchableOpacity>
+          {feed.stories.filter((story) => story.user.id !== ownStoryOwnerId).map((story) => (
+            <View key={story.id}>{renderStory({ item: story })}</View>
+          ))}
+        </ScrollView>
+      </>
     );
   };
 
@@ -501,6 +540,25 @@ function FeedScreen({ navigation }: any) {
             <Text style={[styles.emptyTitle, { color: colors.text }]}>{errorMessage ? "Feed unavailable" : "No posts yet"}</Text>
             <Text style={[styles.emptyText, { color: colors.mutedText }]}>{errorMessage || "Posts from people you follow will appear here."}</Text>
           </View>
+        }
+        onEndReachedThreshold={0.5}
+        onEndReached={() => {
+          if (!loadingMore && hasMore) {
+            const nextPage = page + 1;
+            setLoadingMore(true);
+            socialApi.getFeed(nextPage).then((data) => {
+              if (data.posts.length === 0) {
+                setHasMore(false);
+              } else {
+                setFeed((prev) => ({ ...prev, posts: [...prev.posts, ...data.posts] }));
+                setPage(nextPage);
+                if (data.posts.length < 20) setHasMore(false);
+              }
+            }).catch(() => { }).finally(() => setLoadingMore(false));
+          }
+        }}
+        ListFooterComponent={
+          loadingMore ? <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: 20 }} /> : null
         }
       />
 

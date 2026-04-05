@@ -16,6 +16,7 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { clearStoredSession } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { clearPushToken } from "../utils/pushRegistration";
 
 type AccountCenterResponse = {
   account?: {
@@ -82,6 +83,7 @@ const AccountCenterScreen = ({ navigation }: any) => {
   );
 
   const logoutAfterRevoke = async () => {
+    await clearPushToken();
     await clearStoredSession();
     navigation.reset({
       index: 0,

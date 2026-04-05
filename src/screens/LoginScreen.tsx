@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { API } from '../api/api';
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { setStoredSession } from "../utils/authSession";
+import { registerPushToken } from "../utils/pushRegistration";
 import { isGoogleCancelledError, loginWithGoogle } from "../utils/googleAuth";
 
 import {
@@ -46,6 +47,8 @@ const LoginScreen = ({ navigation, route }: any) => {
           session: res.data.session,
           user: res.data.user,
         });
+
+        registerPushToken().catch(() => { });
 
         navigation.replace("MainApp");
 

@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { setStoredSession } from "../utils/authSession";
+import { registerPushToken } from "../utils/pushRegistration";
 import { useAppTheme } from "../theme/AppThemeContext";
 
 const OtpVerifyScreen = ({ route, navigation }: any) => {
@@ -30,6 +31,8 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
+  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
 
   const verifyOtp = async () => {
     if (!email) {
@@ -66,6 +69,7 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
           session: res.data.session,
           user: res.data.user,
         });
+        registerPushToken().catch(() => { });
 
         navigation.reset({
           index: 0,
@@ -107,9 +111,29 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
     try {
       setPasswordLoading(true);
 
+      const cleanName = name.trim();
+      const cleanUsername = username.trim().toLowerCase();
+
+      if (!cleanName || cleanName.length < 2) {
+        Alert.alert("Error", "Please enter your name (at least 2 characters).");
+        return;
+      }
+
+      if (!cleanUsername || cleanUsername.length < 3) {
+        Alert.alert("Error", "Please choose a username (at least 3 characters).");
+        return;
+      }
+
+      if (!/^[a-z0-9_.]+$/.test(cleanUsername)) {
+        Alert.alert("Error", "Username can only contain letters, numbers, dots, and underscores.");
+        return;
+      }
+
       const res = await API.post("/auth/set-password", {
         email,
         password,
+        name: cleanName,
+        username: cleanUsername,
       });
 
       if (!res?.data?.success) {
@@ -131,6 +155,8 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
         session: loginRes.data.session,
         user: loginRes.data.user,
       });
+
+      registerPushToken().catch(() => { });
 
       navigation.reset({
         index: 0,
@@ -215,10 +241,28 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
 
           {showPasswordCard ? (
             <View style={[styles.passwordCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.passwordCardTitle, { color: colors.text }]}>Set your password</Text>
+              <Text style={[styles.passwordCardTitle, { color: colors.text }]}>Complete your profile</Text>
               <Text style={[styles.passwordCardSubtitle, { color: colors.mutedText }]}>
-                Finish signup by saving a password you can use on future logins.
+                Choose a name and username, then set a password to finish signing up.
               </Text>
+
+              <TextInput
+                placeholder="Full name"
+                value={name}
+                onChangeText={setName}
+                style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+                placeholderTextColor={colors.placeholder}
+                autoCapitalize="words"
+              />
+
+              <TextInput
+                placeholder="Username"
+                value={username}
+                onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_.]/g, ''))}
+                style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+                placeholderTextColor={colors.placeholder}
+                autoCapitalize="none"
+              />
 
               <TextInput
                 placeholder="Enter password"

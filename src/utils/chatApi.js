@@ -145,17 +145,17 @@ export const searchConversationMessages = async (conversationId, params = {}) =>
 };
 
 /**
- * @param {{ conversationId?: string; text?: string; file?: { uri?: string; name?: string | null; type?: string | null } }} [params]
+ * @param {{ conversationId?: string; text?: string; file?: { uri?: string; name?: string | null; type?: string | null }; mediaUrl?: string; messageType?: string }} [params]
  */
-export const sendChatMessage = async ({ conversationId, text, file } = {}) => {
+export const sendChatMessage = async ({ conversationId, text, file, mediaUrl, messageType } = {}) => {
   const trimmedText = String(text || "").trim();
 
   if (!conversationId) {
     throw new Error("conversationId is required");
   }
 
-  if (!trimmedText && !file?.uri) {
-    throw new Error("text or file is required");
+  if (!trimmedText && !file?.uri && !mediaUrl) {
+    throw new Error("text, file, or mediaUrl is required");
   }
 
   const headers = await buildAuthHeaders();
@@ -166,6 +166,8 @@ export const sendChatMessage = async ({ conversationId, text, file } = {}) => {
       {
         conversationId,
         text: trimmedText,
+        mediaUrl,
+        messageType,
       },
       { headers }
     );

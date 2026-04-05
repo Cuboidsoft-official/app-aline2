@@ -49,6 +49,10 @@ import {
 } from "../utils/musicApi";
 import { getStoredUserId } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
+import PhotoFilterStrip from "../components/media/PhotoFilterStrip";
+import VideoTrimSheet from "../components/media/VideoTrimSheet";
+import FaceOverlayPicker from "../components/media/FaceOverlayPicker";
+import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
 
 type ComposerTab = "post" | "story" | "swipe";
 
@@ -245,6 +249,11 @@ function CreatePostScreen({ navigation, route }: any) {
   const [storyBackgroundColor, setStoryBackgroundColor] = useState("#1f2937");
   const [storyFilterPreset, setStoryFilterPreset] = useState<StoryFilterPreset>("none");
   const [storyFilterIntensity, setStoryFilterIntensity] = useState(1);
+
+  // Photo filter / video trim / face overlay state
+  const [selectedPhotoFilter, setSelectedPhotoFilter] = useState("none");
+  const [showVideoTrim, setShowVideoTrim] = useState(false);
+  const [showFaceOverlay, setShowFaceOverlay] = useState(false);
   const [storyLinkUrl, setStoryLinkUrl] = useState("");
   const [storyLocation, setStoryLocation] = useState("");
   const [storyHashtagsRaw, setStoryHashtagsRaw] = useState("");
@@ -608,8 +617,8 @@ function CreatePostScreen({ navigation, route }: any) {
       activeTab === "story"
         ? "mixed"
         : activeTab === "swipe" || postType === "video"
-        ? "video"
-        : "photo";
+          ? "video"
+          : "photo";
     const selectionLimit = activeTab === "post" && postType === "carousel" ? MAX_CAROUSEL_ITEMS : 1;
 
     try {
@@ -726,6 +735,7 @@ function CreatePostScreen({ navigation, route }: any) {
         hideLikeCount,
         allowRemix: false,
       },
+      filterPreset: selectedPhotoFilter !== "none" ? selectedPhotoFilter : undefined,
     };
   };
 
@@ -946,33 +956,104 @@ function CreatePostScreen({ navigation, route }: any) {
     }
 
     return activeTab === "story" ? (
-        <View
-          style={styles.storyPreviewFrame}
-          onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
-        >
-          <Image
-            source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }}
-            style={styles.preview}
+      <View
+        style={styles.storyPreviewFrame}
+        onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
+      >
+        <Image
+          source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }}
+          style={styles.preview}
+        />
+        {storyFilterStyle ? (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.storyFilterOverlay,
+              {
+                backgroundColor: storyFilterStyle.backgroundColor,
+                opacity: storyFilterStyle.opacity,
+              },
+            ]}
           />
-          {storyFilterStyle ? (
-            <View
-              pointerEvents="none"
-              style={[
-                styles.storyFilterOverlay,
-                {
-                  backgroundColor: storyFilterStyle.backgroundColor,
-                  opacity: storyFilterStyle.opacity,
-                },
-              ]}
-            />
-          ) : null}
-          {previewStickers}
-        </View>
+        ) : null}
+        {previewStickers}
+      </View>
     ) : (
       <Image
         source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }}
         style={styles.preview}
       />
+    );
+  };
+
+  /** GPU-accelerated photo filter strip for post images */
+  const renderPhotoFilterStrip = () => {
+    if (activeTab !== "post" || postType !== "photo" || !primaryAsset || primaryAsset.mediaType !== "image") {
+      return null;
+    }
+
+    return (
+      <PhotoFilterStrip
+        imageUri={primaryAsset.thumbnailUrl || primaryAsset.uri}
+        selectedFilter={selectedPhotoFilter}
+        onSelectFilter={(filter: any) => setSelectedPhotoFilter(filter.id)}
+      />
+    );
+  };
+
+  /** Video trim button for video posts */
+  const renderVideoTrimButton = () => {
+    if (!primaryAsset || primaryAsset.mediaType !== "video") {
+      return null;
+    }
+
+    return (
+      <>
+        <TouchableOpacity
+          style={[styles.mediaActionButton, { backgroundColor: colors.primary }]}
+          onPress={() => setShowVideoTrim(true)}
+        >
+          <Icon name="cut-outline" size={18} color="#fff" />
+          <Text style={styles.mediaActionText}>Edit Video</Text>
+        </TouchableOpacity>
+        <VideoTrimSheet
+          visible={showVideoTrim}
+          videoUri={primaryAsset.uri}
+          contentType={activeTab === "swipe" ? "swipe" : activeTab === "story" ? "story" : "post"}
+          onClose={() => setShowVideoTrim(false)}
+          onTrimmed={(result: any) => {
+            if (result?.uri) {
+              setSelectedAssets((prev) =>
+                prev.map((a, i) => (i === 0 ? { ...a, uri: result.uri } : a))
+              );
+            }
+          }}
+        />
+      </>
+    );
+  };
+
+  /** Face overlay stickers button */
+  const renderFaceOverlayButton = () => {
+    if (activeTab !== "post" && activeTab !== "story") {
+      return null;
+    }
+
+    return (
+      <>
+        <TouchableOpacity
+          style={[styles.mediaActionButton, { backgroundColor: "#FF6B35", marginLeft: 8 }]}
+          onPress={() => setShowFaceOverlay(true)}
+        >
+          <Icon name="happy-outline" size={18} color="#fff" />
+          <Text style={styles.mediaActionText}>Face Stickers</Text>
+        </TouchableOpacity>
+        <FaceOverlayPicker
+          visible={showFaceOverlay}
+          onClose={() => setShowFaceOverlay(false)}
+          onStickersChanged={() => { }}
+        />
+      </>
     );
   };
 
@@ -1199,6 +1280,15 @@ function CreatePostScreen({ navigation, route }: any) {
       <Text style={[styles.helperText, helperTextStyle]}>
         Basic posting is production-focused here: caption, media, location, music, hashtags, mentions, comment control, and like-count privacy are supported. Collaboration/remix controls are hidden until they are fully product-ready.
       </Text>
+
+      {/* Photo Filters for image posts */}
+      {renderPhotoFilterStrip()}
+
+      {/* Video trim + Face overlay buttons */}
+      <View style={{ flexDirection: "row", marginTop: 8 }}>
+        {renderVideoTrimButton()}
+        {renderFaceOverlayButton()}
+      </View>
     </>
   );
 
@@ -1219,7 +1309,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
       {storyType === "poll" ? (
         <>
-      <Text style={styles.sectionLabel}>Poll Question</Text>
+          <Text style={styles.sectionLabel}>Poll Question</Text>
           <TextInput style={styles.inputSingle} value={pollQuestion} onChangeText={setPollQuestion} placeholder="Ask a poll question" />
           <Text style={styles.sectionLabel}>Option A</Text>
           <TextInput style={styles.inputSingle} value={pollOptionA} onChangeText={setPollOptionA} placeholder="Option A" />
@@ -1230,7 +1320,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
       {storyType === "question" ? (
         <>
-      <Text style={styles.sectionLabel}>Question Prompt</Text>
+          <Text style={styles.sectionLabel}>Question Prompt</Text>
           <TextInput style={styles.inputSingle} value={questionPrompt} onChangeText={setQuestionPrompt} placeholder="Ask followers anything" />
         </>
       ) : null}
@@ -1533,84 +1623,84 @@ function CreatePostScreen({ navigation, route }: any) {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView style={styles.container} behavior="padding">
-      <View style={[styles.header, { borderColor: colors.border, backgroundColor: colors.background }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Advanced Create</Text>
-      </View>
+        <View style={[styles.header, { borderColor: colors.border, backgroundColor: colors.background }]}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Advanced Create</Text>
+        </View>
 
-      <View style={styles.tabsRow}>
-        {tabs.map((tab) => (
+        <View style={styles.tabsRow}>
+          {tabs.map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              style={[
+                styles.tabButton,
+                { borderColor: colors.border, backgroundColor: surfaceColor },
+                activeTab === tab && [styles.tabButtonActive, activePillStyle],
+              ]}
+              onPress={() => onSelectTab(tab)}
+            >
+              <Text style={[styles.tabText, { color: activeTab === tab ? "#fff" : colors.mutedText }, activeTab === tab && styles.tabTextActive]}>
+                {tab.toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          {publishError ? (
+            <View
+              style={[
+                styles.errorBanner,
+                {
+                  backgroundColor: isDarkMode ? "#3b1f24" : "#FEF2F2",
+                  borderColor: isDarkMode ? "#7f1d1d" : "#FECACA",
+                },
+              ]}
+            >
+              <Text style={[styles.errorBannerTitle, { color: isDarkMode ? "#FECACA" : "#991B1B" }]}>Publish issue</Text>
+              <Text style={[styles.errorBannerText, { color: isDarkMode ? "#FCA5A5" : "#B91C1C" }]}>{publishError}</Text>
+            </View>
+          ) : null}
+          {renderMediaPreview()}
+
+          {!(activeTab === "story" && storyType === "text") ? (
+            <>
+              <View style={styles.mediaSectionHeader}>
+                <Text style={[styles.sectionLabel, { color: colors.text }]}>Media</Text>
+                <View style={styles.mediaActionsRow}>
+                  <TouchableOpacity
+                    style={[styles.secondaryPickButton, { backgroundColor: subtleSurfaceColor, borderColor: colors.border }]}
+                    disabled={pickingMedia}
+                    onPress={onCaptureMedia}
+                  >
+                    <Icon name="camera-outline" size={18} color={colors.text} />
+                    <Text style={[styles.secondaryPickButtonText, { color: colors.text }]}>Camera</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.pickButton, { backgroundColor: colors.primary }]} disabled={pickingMedia} onPress={onPickMedia}>
+                    {pickingMedia ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="images-outline" size={18} color="#fff" />}
+                    <Text style={styles.pickButtonText}>{selectedAssets.length ? "Replace" : "Choose"}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {renderSelectedAssets()}
+            </>
+          ) : null}
+
+          {activeTab === "post" ? renderPostControls() : null}
+          {activeTab === "story" ? renderStoryControls() : null}
+          {activeTab === "swipe" ? renderSwipeControls() : null}
+
           <TouchableOpacity
-            key={tab}
-            style={[
-              styles.tabButton,
-              { borderColor: colors.border, backgroundColor: surfaceColor },
-              activeTab === tab && [styles.tabButtonActive, activePillStyle],
-            ]}
-            onPress={() => onSelectTab(tab)}
+            style={[styles.publishButton, { backgroundColor: colors.primary }, publishing && styles.publishButtonDisabled]}
+            onPress={publish}
+            disabled={publishing}
           >
-            <Text style={[styles.tabText, { color: activeTab === tab ? "#fff" : colors.mutedText }, activeTab === tab && styles.tabTextActive]}>
-              {tab.toUpperCase()}
+            <Icon name="cloud-upload-outline" size={18} color="#fff" />
+            <Text style={styles.publishText}>
+              {publishing ? "Publishing..." : `Publish ${activeTab}`}
             </Text>
           </TouchableOpacity>
-        ))}
-      </View>
-
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        {publishError ? (
-          <View
-            style={[
-              styles.errorBanner,
-              {
-                backgroundColor: isDarkMode ? "#3b1f24" : "#FEF2F2",
-                borderColor: isDarkMode ? "#7f1d1d" : "#FECACA",
-              },
-            ]}
-          >
-            <Text style={[styles.errorBannerTitle, { color: isDarkMode ? "#FECACA" : "#991B1B" }]}>Publish issue</Text>
-            <Text style={[styles.errorBannerText, { color: isDarkMode ? "#FCA5A5" : "#B91C1C" }]}>{publishError}</Text>
-          </View>
-        ) : null}
-        {renderMediaPreview()}
-
-        {!(activeTab === "story" && storyType === "text") ? (
-          <>
-            <View style={styles.mediaSectionHeader}>
-              <Text style={[styles.sectionLabel, { color: colors.text }]}>Media</Text>
-              <View style={styles.mediaActionsRow}>
-                <TouchableOpacity
-                  style={[styles.secondaryPickButton, { backgroundColor: subtleSurfaceColor, borderColor: colors.border }]}
-                  disabled={pickingMedia}
-                  onPress={onCaptureMedia}
-                >
-                  <Icon name="camera-outline" size={18} color={colors.text} />
-                  <Text style={[styles.secondaryPickButtonText, { color: colors.text }]}>Camera</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.pickButton, { backgroundColor: colors.primary }]} disabled={pickingMedia} onPress={onPickMedia}>
-                  {pickingMedia ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="images-outline" size={18} color="#fff" />}
-                  <Text style={styles.pickButtonText}>{selectedAssets.length ? "Replace" : "Choose"}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {renderSelectedAssets()}
-          </>
-        ) : null}
-
-        {activeTab === "post" ? renderPostControls() : null}
-        {activeTab === "story" ? renderStoryControls() : null}
-        {activeTab === "swipe" ? renderSwipeControls() : null}
-
-        <TouchableOpacity
-          style={[styles.publishButton, { backgroundColor: colors.primary }, publishing && styles.publishButtonDisabled]}
-          onPress={publish}
-          disabled={publishing}
-        >
-          <Icon name="cloud-upload-outline" size={18} color="#fff" />
-          <Text style={styles.publishText}>
-            {publishing ? "Publishing..." : `Publish ${activeTab}`}
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1986,6 +2076,19 @@ const styles = StyleSheet.create({
   },
   publishButtonDisabled: { opacity: 0.7 },
   publishText: { color: "#fff", fontWeight: "800", fontSize: 15 },
+  mediaActionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    gap: 6,
+  },
+  mediaActionText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
+  },
 });
 
 export default CreatePostScreen;

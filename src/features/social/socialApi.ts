@@ -224,13 +224,13 @@ const mapStoryMusicDetails = (music: any, musicConfig?: any) => {
 const buildMusicRequestPayload = (music: any) =>
   music?.id
     ? {
-        musicId: music.id,
-        musicConfig: {
-          startTime: music.clipStartTime ?? 0,
-          duration: music.clipDuration ?? music.duration,
-          volume: 1,
-        },
-      }
+      musicId: music.id,
+      musicConfig: {
+        startTime: music.clipStartTime ?? 0,
+        duration: music.clipDuration ?? music.duration,
+        volume: 1,
+      },
+    }
     : {};
 
 const buildStoryMusicSticker = (music: any) => {
@@ -396,10 +396,10 @@ class RemoteSocialApi implements SocialApi {
       media: item.media ? { ...item.media } : undefined,
       poll: item.poll
         ? {
-            ...item.poll,
-            options: [...item.poll.options] as [string, string],
-            votes: [...item.poll.votes] as [number, number],
-          }
+          ...item.poll,
+          options: [...item.poll.options] as [string, string],
+          votes: [...item.poll.votes] as [number, number],
+        }
         : undefined,
       question: item.question ? { ...item.question } : undefined,
       music: item.music ? { ...item.music } : undefined,
@@ -553,9 +553,9 @@ class RemoteSocialApi implements SocialApi {
       backgroundColor: typeof story?.backgroundColor === "string" ? story.backgroundColor : undefined,
       filterPreset:
         story?.filterPreset === "warm" ||
-        story?.filterPreset === "cool" ||
-        story?.filterPreset === "noir" ||
-        story?.filterPreset === "dream"
+          story?.filterPreset === "cool" ||
+          story?.filterPreset === "noir" ||
+          story?.filterPreset === "dream"
           ? story.filterPreset
           : "none",
       filterIntensity:
@@ -564,22 +564,22 @@ class RemoteSocialApi implements SocialApi {
           : 1,
       poll: pollSticker
         ? {
-            question: pollSticker?.text || "Poll",
-            options: [
-              pollSticker?.pollOptions?.[0]?.text || "Option 1",
-              pollSticker?.pollOptions?.[1]?.text || "Option 2",
-            ],
-            votes: [
-              pollSticker?.pollOptions?.[0]?.votes || 0,
-              pollSticker?.pollOptions?.[1]?.votes || 0,
-            ],
-          }
+          question: pollSticker?.text || "Poll",
+          options: [
+            pollSticker?.pollOptions?.[0]?.text || "Option 1",
+            pollSticker?.pollOptions?.[1]?.text || "Option 2",
+          ],
+          votes: [
+            pollSticker?.pollOptions?.[0]?.votes || 0,
+            pollSticker?.pollOptions?.[1]?.votes || 0,
+          ],
+        }
         : undefined,
       question: questionSticker
         ? {
-            prompt: questionSticker?.text || "Ask anything",
-            responseCount: 0,
-          }
+          prompt: questionSticker?.text || "Ask anything",
+          responseCount: 0,
+        }
         : undefined,
       linkUrl: typeof story?.linkUrl === "string" ? story.linkUrl : undefined,
       location: locationSticker?.text || undefined,
@@ -599,11 +599,11 @@ class RemoteSocialApi implements SocialApi {
           },
           style: item?.style
             ? {
-                color: typeof item.style.color === "string" ? item.style.color : undefined,
-                backgroundColor: typeof item.style.backgroundColor === "string" ? item.style.backgroundColor : undefined,
-                fontSize: typeof item.style.fontSize === "number" ? item.style.fontSize : undefined,
-                alignment: item.style.alignment,
-              }
+              color: typeof item.style.color === "string" ? item.style.color : undefined,
+              backgroundColor: typeof item.style.backgroundColor === "string" ? item.style.backgroundColor : undefined,
+              fontSize: typeof item.style.fontSize === "number" ? item.style.fontSize : undefined,
+              alignment: item.style.alignment,
+            }
             : undefined,
         })),
       mentions: mentionStickers.map((item: any) => item.text),
@@ -616,8 +616,8 @@ class RemoteSocialApi implements SocialApi {
         .map((item: any) => item.text),
       visibility:
         story?.visibility === "close_friends" ||
-        story?.visibility === "friends" ||
-        story?.visibility === "custom"
+          story?.visibility === "friends" ||
+          story?.visibility === "custom"
           ? story.visibility
           : "public",
       createdAt: this.toTimestamp(story?.createdAt),
@@ -794,11 +794,11 @@ class RemoteSocialApi implements SocialApi {
     return { ...cached };
   }
 
-  async getFeed(): Promise<FeedResponse> {
+  async getFeed(page = 1): Promise<FeedResponse> {
     await loadModerationPrefs();
     const [postsRes, storyGroups, currentUserId] = await Promise.all([
-      API.get("/posts/feed"),
-      this.getStoryFeedGroups(),
+      API.get("/posts/feed", { params: { page } }),
+      page === 1 ? this.getStoryFeedGroups() : Promise.resolve([]),
       this.getCurrentUserId(),
     ]);
 
@@ -1163,9 +1163,9 @@ class RemoteSocialApi implements SocialApi {
         replyCount: (cached.replyCount || 0) + 1,
         question: cached.question
           ? {
-              ...cached.question,
-              responseCount: cached.question.responseCount + 1,
-            }
+            ...cached.question,
+            responseCount: cached.question.responseCount + 1,
+          }
           : undefined,
       });
     }
@@ -1301,10 +1301,10 @@ class RemoteSocialApi implements SocialApi {
       shareType: "story",
       storyData: primaryMedia
         ? {
-            mediaType: primaryMedia.mediaType,
-            mediaUrl: primaryMedia.url,
-            thumbnailUrl: primaryMedia.thumbnailUrl,
-          }
+          mediaType: primaryMedia.mediaType,
+          mediaUrl: primaryMedia.url,
+          thumbnailUrl: primaryMedia.thumbnailUrl,
+        }
         : undefined,
     });
 
@@ -1482,10 +1482,10 @@ class RemoteSocialApi implements SocialApi {
       shareType: "story",
       storyData: cached.media
         ? {
-            mediaType: cached.media.mediaType,
-            mediaUrl: cached.media.url,
-            thumbnailUrl: cached.thumbnailUrl || cached.media.thumbnailUrl,
-          }
+          mediaType: cached.media.mediaType,
+          mediaUrl: cached.media.url,
+          thumbnailUrl: cached.thumbnailUrl || cached.media.thumbnailUrl,
+        }
         : undefined,
     });
     const updated = {
@@ -1634,35 +1634,35 @@ class RemoteSocialApi implements SocialApi {
     const stickers: any[] =
       payload.type === "poll" && payload.poll
         ? [
+          {
+            type: "poll",
+            text: payload.poll.question,
+            pollOptions: payload.poll.options.map((option) => ({
+              text: option,
+            })),
+            position: {
+              x: 0.5,
+              y: 0.55,
+              width: 0.72,
+              height: 0.22,
+              rotation: 0,
+              scale: 1,
+            },
+          },
+        ]
+        : payload.type === "question" && payload.question
+          ? [
             {
-              type: "poll",
-              text: payload.poll.question,
-              pollOptions: payload.poll.options.map((option) => ({
-                text: option,
-              })),
+              type: "question",
+              text: payload.question.prompt,
               position: {
                 x: 0.5,
                 y: 0.55,
                 width: 0.72,
-                height: 0.22,
+                height: 0.18,
                 rotation: 0,
                 scale: 1,
               },
-            },
-          ]
-        : payload.type === "question" && payload.question
-          ? [
-              {
-                type: "question",
-                text: payload.question.prompt,
-                position: {
-                  x: 0.5,
-                  y: 0.55,
-                  width: 0.72,
-                  height: 0.18,
-                  rotation: 0,
-                  scale: 1,
-                },
             },
           ]
           : [];

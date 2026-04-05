@@ -60,6 +60,7 @@ import { callingDisabledMessage, productFlags } from './src/config/productFlags'
 import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
 import { connectSocket, disconnectSocket, socket } from './src/socket';
 import { setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
+import { setupNotificationListeners } from './src/utils/pushRegistration';
 
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef();
@@ -98,6 +99,12 @@ function AppNavigator() {
       unsubscribe();
       disconnectSocket();
     };
+  }, []);
+
+  // Push notification tap handler
+  useEffect(() => {
+    const cleanup = setupNotificationListeners(navigationRef);
+    return cleanup;
   }, []);
 
   useEffect(() => {

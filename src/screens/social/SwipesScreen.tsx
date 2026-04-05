@@ -67,6 +67,7 @@ function SwipesScreen({ navigation }: any) {
   const [selectedReason, setSelectedReason] = useState<ReportReason>("spam");
   const [reportNote, setReportNote] = useState("");
   const [threadComment, setThreadComment] = useState<SwipeComment | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const isBusy = (type: "like" | "save" | "share", swipeId: string): boolean =>
     !!busyActions[`${type}_${swipeId}`];
@@ -440,6 +441,21 @@ function SwipesScreen({ navigation }: any) {
           index,
         })}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />}
+        onEndReachedThreshold={0.5}
+        onEndReached={() => {
+          if (!loadingMore) {
+            setLoadingMore(true);
+            socialApi.getSwipes().then((data) => {
+              if (data.length > 0) {
+                setSwipes((prev) => {
+                  const existingIds = new Set(prev.map((s) => s.id));
+                  const newItems = data.filter((s) => !existingIds.has(s.id));
+                  return [...prev, ...newItems];
+                });
+              }
+            }).catch(() => { }).finally(() => setLoadingMore(false));
+          }
+        }}
       />
 
       <Modal visible={!!activeSheet} transparent animationType="slide" onRequestClose={closeSheet}>
