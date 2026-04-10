@@ -45,7 +45,6 @@ interface MessageContextMenuProps {
     visible: boolean;
     message: ChatMessage | null;
     isMine: boolean;
-    currentUserId: string;
     onClose: () => void;
     onReact?: (messageId: string, emoji: string) => void;
     onMessageEdited?: (data: MessageEditedData) => void;
@@ -56,7 +55,6 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
     visible,
     message,
     isMine,
-    currentUserId,
     onClose,
     onReact,
     onMessageEdited,

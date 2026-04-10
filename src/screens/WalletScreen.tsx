@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from "react";
+import Clipboard from "@react-native-clipboard/clipboard";
 import { TextInput as RNTextInput } from "react-native";
 import {
     View,
@@ -9,7 +10,6 @@ import {
     StatusBar,
     ActivityIndicator,
     Alert,
-    Clipboard,
 } from "react-native";
 
 import Icon from "react-native-vector-icons/Ionicons";

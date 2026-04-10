@@ -5,23 +5,24 @@
  * Release to send the voice message automatically.
  * Slide left to cancel. Shows duration + animated pulsing indicator.
  */
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+    Alert,
     Animated,
     PanResponder,
     Platform,
     PermissionsAndroid,
     StyleSheet,
+    TouchableOpacity,
     Text,
     View,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
-import AudioRecorderPlayer from "react-native-audio-recorder-player";
+import Sound, { AudioEncoderAndroidType, AudioSourceAndroidType } from "react-native-nitro-sound";
 
-const audioRecorder = new (AudioRecorderPlayer as any)();
-audioRecorder.setSubscriptionDuration(0.15); // 150ms updates
+Sound.setSubscriptionDuration(0.15);
 
-const CANCEL_THRESHOLD = -80; // slide left 80px to cancel
+const CANCEL_THRESHOLD = -80;
 
 const formatRecordTime = (ms: number) => {
     const totalSec = Math.floor((ms || 0) / 1000);
@@ -45,12 +46,13 @@ interface VoiceRecorderButtonProps {
 
 const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disabled = false, color = "#7b3fe4" }) => {
     const [recording, setRecording] = useState(false);
+    const [starting, setStarting] = useState(false);
+    const [stopping, setStopping] = useState(false);
     const [duration, setDuration] = useState(0);
     const [cancelled, setCancelled] = useState(false);
     const pulseAnim = useRef(new Animated.Value(1)).current;
     const slideX = useRef(new Animated.Value(0)).current;
     const cancelledRef = useRef(false);
-    const recordingPathRef = useRef("");
     const isRecordingRef = useRef(false);
 
     const startPulse = useCallback(() => {
@@ -58,7 +60,7 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             Animated.sequence([
                 Animated.timing(pulseAnim, { toValue: 1.35, duration: 500, useNativeDriver: true }),
                 Animated.timing(pulseAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
-            ])
+            ]),
         ).start();
     }, [pulseAnim]);
 
@@ -67,11 +69,19 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
         pulseAnim.setValue(1);
     }, [pulseAnim]);
 
+    useEffect(() => () => {
+        try {
+            Sound.removeRecordBackListener();
+        } catch {
+            // Ignore cleanup failures.
+        }
+    }, []);
+
     const requestMicPermission = async () => {
         if (Platform.OS !== "android") return true;
         try {
             const result = await PermissionsAndroid.request(
-                PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+                PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
             );
             return result === PermissionsAndroid.RESULTS.GRANTED;
         } catch {
@@ -80,46 +90,62 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
     };
 
     const startRecording = async () => {
+        if (disabled || starting || stopping || recording) {
+            return;
+        }
+
         const granted = await requestMicPermission();
-        if (!granted) return;
+        if (!granted) {
+            Alert.alert("Microphone Permission Required", "Allow microphone access to record voice notes.");
+            return;
+        }
 
         cancelledRef.current = false;
         setCancelled(false);
         setDuration(0);
-        setRecording(true);
-        isRecordingRef.current = true;
-        startPulse();
+        setStarting(true);
 
         try {
-            const path = await audioRecorder.startRecorder(undefined, {
-                AudioEncoderAndroid: 3, // AAC
-                AudioSourceAndroid: 6, // VOICE_RECOGNITION
-                OutputFormatAndroid: 2, // MPEG_4
-            });
-            recordingPathRef.current = path;
-
-            audioRecorder.addRecordBackListener((e: any) => {
+            Sound.addRecordBackListener((e: any) => {
                 if (isRecordingRef.current) {
                     setDuration(e.currentPosition || 0);
                 }
             });
+
+            await Sound.startRecorder(undefined, {
+                AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
+                AudioSourceAndroid: AudioSourceAndroidType.MIC,
+                AudioSamplingRate: 44100,
+                AudioEncodingBitRate: 128000,
+                AudioChannels: 1,
+            });
+
+            isRecordingRef.current = true;
+            setRecording(true);
+            startPulse();
         } catch (err) {
+            Sound.removeRecordBackListener();
             console.log("voice recorder start error:", err);
-            setRecording(false);
-            isRecordingRef.current = false;
-            stopPulse();
+            Alert.alert("Voice Recording Error", "Could not start voice recording. Please try again.");
+        } finally {
+            setStarting(false);
         }
     };
 
     const stopRecording = async (send = true) => {
+        if (!recording && !starting) {
+            return;
+        }
+
         isRecordingRef.current = false;
+        setStopping(true);
         setRecording(false);
         stopPulse();
         slideX.setValue(0);
 
         try {
-            const result = await audioRecorder.stopRecorder();
-            audioRecorder.removeRecordBackListener();
+            const result = await Sound.stopRecorder();
+            Sound.removeRecordBackListener();
 
             if (send && !cancelledRef.current && result && onSend) {
                 const durationSec = Math.round((duration || 0) / 1000);
@@ -134,7 +160,9 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             }
         } catch (err) {
             console.log("voice recorder stop error:", err);
+            Alert.alert("Voice Recording Error", "Could not finish voice recording. Please try again.");
         } finally {
+            setStopping(false);
             setDuration(0);
             setCancelled(false);
         }
@@ -142,8 +170,8 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
 
     const panResponder = useRef(
         PanResponder.create({
-            onStartShouldSetPanResponder: () => true,
-            onMoveShouldSetPanResponder: () => true,
+            onStartShouldSetPanResponder: () => !disabled && !starting && !stopping,
+            onMoveShouldSetPanResponder: () => !disabled && !starting && !stopping,
             onPanResponderGrant: () => {
                 startRecording();
             },
@@ -165,10 +193,10 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             onPanResponderTerminate: () => {
                 stopRecording(false);
             },
-        })
+        }),
     ).current;
 
-    if (recording) {
+    if (recording || starting || stopping) {
         return (
             <Animated.View
                 style={[styles.recordingContainer, { transform: [{ translateX: slideX }] }]}
@@ -181,10 +209,10 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
                     ]}
                 />
                 <Text style={[styles.recordingTime, cancelled && styles.cancelledText]}>
-                    {cancelled ? "Release to cancel" : formatRecordTime(duration)}
+                    {starting ? "Starting..." : stopping ? "Finishing..." : cancelled ? "Release to cancel" : formatRecordTime(duration)}
                 </Text>
                 <Text style={styles.slideHint}>
-                    {cancelled ? "" : "◁ Slide to cancel"}
+                    {cancelled || starting || stopping ? "" : "◁ Slide to cancel"}
                 </Text>
                 <View style={[styles.recordingMic, { backgroundColor: cancelled ? "#ccc" : color }]}>
                     <Icon name="mic" size={22} color="#fff" />
@@ -194,9 +222,9 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
     }
 
     return (
-        <View {...panResponder.panHandlers} style={styles.micButton}>
+        <TouchableOpacity {...panResponder.panHandlers} disabled={disabled} style={styles.micButton}>
             <Icon name="mic" size={24} color={disabled ? "#ccc" : color} />
-        </View>
+        </TouchableOpacity>
     );
 };
 

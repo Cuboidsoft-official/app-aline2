@@ -278,12 +278,26 @@ const SettingsScreen = ({ navigation }: any) => {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.item}
+          style={[styles.item, isDarkMode ? styles.itemDark : null]}
+          onPress={() => navigation.navigate("PrivacyPolicyScreen")}
+        >
+          <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Privacy Policy</Text>
+          <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.item, styles.deleteItem, isDarkMode ? styles.itemDark : null]}
           onPress={() => navigation.navigate("DeleteAccountScreen")}
         >
-          <Text style={styles.deleteText}>
-            Delete account
-          </Text>
+          <View style={styles.deleteCopy}>
+            <Text style={styles.deleteText}>
+              Delete account
+            </Text>
+            <Text style={[styles.deleteHint, { color: isDarkMode ? "#D1D5DB" : "#6B7280" }]}>
+              Share feedback, confirm deletion, and permanently remove your account.
+            </Text>
+          </View>
+          <Icon name="chevron-forward" size={20} color={isDarkMode ? "#FCA5A5" : "#B91C1C"} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -357,6 +371,10 @@ const styles = StyleSheet.create({
     borderColor: "#1F2937",
     backgroundColor: "#111827"
   },
+  deleteItem: {
+    borderColor: "#F3B4B4",
+    backgroundColor: "#FFF5F5"
+  },
 
   text: {
     fontSize: 16
@@ -374,6 +392,15 @@ const styles = StyleSheet.create({
   deleteText: {
     fontSize: 16,
     color: "red"
+  },
+  deleteCopy: {
+    flex: 1,
+    paddingRight: 16
+  },
+  deleteHint: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18
   },
 
   logout: {

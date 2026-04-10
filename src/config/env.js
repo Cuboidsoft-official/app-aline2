@@ -18,7 +18,7 @@ const isPrivateHostname = (hostname = "") =>
 const isLoopbackHostname = (hostname = "") =>
   /^(localhost|0\.0\.0\.0|127(?:\.\d{1,3}){0,3})$/i.test(String(hostname || "").trim());
 const ANDROID_EMULATOR_HOSTS = ["10.0.2.2", "10.0.3.2"];
-const DEFAULT_PUBLIC_BACKEND_ORIGIN = "https://studious-rotary-phone-q77j4jjqxw7x39599-5000.app.github.dev";
+const DEFAULT_PUBLIC_BACKEND_ORIGIN = "https://api.aline2.com";
 const replaceUrlHostname = (rawUrl, nextHostname) => {
   try {
     const parsed = new URL(rawUrl);

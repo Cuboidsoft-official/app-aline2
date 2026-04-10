@@ -141,12 +141,6 @@ interface SubmitMessageParams {
   messageType?: string;
 }
 
-interface VoiceFile {
-  uri: string;
-  name: string;
-  type: string;
-}
-
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
 const buildLocationMessage = (query: string): string => {
@@ -1385,7 +1379,6 @@ const ChatScreen = ({ navigation, route }: any) => {
           visible={showContextMenu}
           message={contextMessage as any}
           isMine={String(typeof contextMessage?.sender === "object" ? contextMessage?.sender?._id : contextMessage?.sender) === String(currentUserId)}
-          currentUserId={currentUserId}
           onClose={() => { setShowContextMenu(false); setContextMessage(null); }}
           onReact={reactToMessage}
           onMessageEdited={(data: any) => {
@@ -1437,7 +1430,7 @@ const ChatScreen = ({ navigation, route }: any) => {
               <VoiceRecorderButton
                 color={primaryThemeColor}
                 disabled={uploading}
-                onSend={async (voiceFile: VoiceFile) => {
+                onSend={async (voiceFile) => {
                   try {
                     setUploading(true);
                     const formData = new FormData();

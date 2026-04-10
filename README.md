@@ -196,6 +196,7 @@ Use it like this:
 4. Choose the env file:
    `.env` uses the current Codespaces backend.
    `.env.staging` uses the staging-style config.
+   `.env.production` uses the live production domains (`api.aline2.com` and `aline2.com`).
 5. Leave `publish_release` enabled if you want a GitHub Release download page.
 6. Wait for the workflow to finish.
 7. Open the workflow run summary and use either:
@@ -209,6 +210,7 @@ Notes:
 - GitHub Actions builds the APK on the runner, then uploads it as a downloadable artifact or release asset.
 - If the repository is private, teammates will need repo access to download Actions artifacts or release assets.
 - The APK is built against the selected env file, so backend switching should happen through `.env`, `.env.staging`, or `.env.production` rather than code edits.
+- Local production APK build: `npm run android:prod:apk`
 
 ## Backend
 
