@@ -19,6 +19,16 @@ import { setStoredSession } from "../utils/authSession";
 import { registerPushToken } from "../utils/pushRegistration";
 import { useAppTheme } from "../theme/AppThemeContext";
 
+const USERNAME_REGEX = /^(?!.*[.]{2})(?!.*[_]{2})[a-z0-9._]{3,30}$/;
+const OTP_SENDER_HINT = "Verification emails may currently arrive from our delivery inbox while Aline2 branded mail is being finalized.";
+
+const showOtpComingSoon = () => {
+  Alert.alert(
+    "Coming soon",
+    "Email OTP is being upgraded to Aline2-branded delivery and will be available again soon. Please try again later or use another sign-in method.",
+  );
+};
+
 const OtpVerifyScreen = ({ route, navigation }: any) => {
   const { colors } = useAppTheme();
   const email = route?.params?.email || null;
@@ -120,12 +130,12 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
       }
 
       if (!cleanUsername || cleanUsername.length < 3) {
-        Alert.alert("Error", "Please choose a username (at least 3 characters).");
+        Alert.alert("Error", "Please choose a username with at least 3 characters.");
         return;
       }
 
-      if (!/^[a-z0-9_.]+$/.test(cleanUsername)) {
-        Alert.alert("Error", "Username can only contain letters, numbers, dots, and underscores.");
+      if (!USERNAME_REGEX.test(cleanUsername)) {
+        Alert.alert("Error", "Username must be 3 to 30 characters using lowercase letters, numbers, dots, or underscores, without double dots or underscores.");
         return;
       }
 
@@ -188,6 +198,11 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
 
       Alert.alert("Unable to resend OTP", res?.data?.message || "Please try again.");
     } catch (error: any) {
+      if (String(error?.response?.data?.code || "").trim() === "OTP_NOT_CONFIGURED") {
+        showOtpComingSoon();
+        return;
+      }
+
       Alert.alert("Unable to resend OTP", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setResendLoading(false);
@@ -206,6 +221,7 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
           <Text style={[styles.subtitle, { color: colors.mutedText }]}>
             {purpose === "login" ? "Login code sent to " : "OTP sent to "} {email || "your email"}
           </Text>
+          <Text style={[styles.subtitle, { color: colors.mutedText }]}>{OTP_SENDER_HINT}</Text>
 
           <TextInput
             ref={inputRef}
@@ -214,6 +230,7 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
             onChangeText={setOtp}
             style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
             keyboardType="number-pad"
+            textContentType="oneTimeCode"
             maxLength={6}
             autoFocus
             placeholderTextColor={colors.placeholder}
@@ -253,6 +270,7 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
                 style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 placeholderTextColor={colors.placeholder}
                 autoCapitalize="words"
+                textContentType="name"
               />
 
               <TextInput
@@ -262,6 +280,8 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
                 style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 placeholderTextColor={colors.placeholder}
                 autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="username"
               />
 
               <TextInput
@@ -271,6 +291,9 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
                 onChangeText={setPassword}
                 style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 placeholderTextColor={colors.placeholder}
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="newPassword"
               />
 
               <TextInput
@@ -280,6 +303,9 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
                 onChangeText={setConfirmPassword}
                 style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 placeholderTextColor={colors.placeholder}
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="password"
               />
 
               <TouchableOpacity

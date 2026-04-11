@@ -32,6 +32,11 @@ const normalizeAsset = (asset: Asset, index: number): ComposerAsset => {
   const mediaType = asset.type?.startsWith("video/") ? "video" : "image";
   const extension = mediaType === "video" ? "mp4" : "jpg";
 
+  const normalizedDurationMs =
+    typeof asset.duration === "number" && Number.isFinite(asset.duration)
+      ? Math.max(0, Math.round(asset.duration * 1000))
+      : undefined;
+
   return {
     id: asset.fileName || `picker_${Date.now()}_${index}`,
     uri: asset.uri,
@@ -41,7 +46,7 @@ const normalizeAsset = (asset: Asset, index: number): ComposerAsset => {
     mimeType: asset.type || (mediaType === "video" ? "video/mp4" : "image/jpeg"),
     width: typeof asset.width === "number" ? asset.width : undefined,
     height: typeof asset.height === "number" ? asset.height : undefined,
-    durationMs: typeof asset.duration === "number" ? asset.duration : undefined,
+    durationMs: normalizedDurationMs,
   };
 };
 

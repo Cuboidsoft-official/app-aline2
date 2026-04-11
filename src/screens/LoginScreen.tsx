@@ -16,6 +16,16 @@ import {
   Image,
 } from 'react-native';
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const OTP_SENDER_HINT = "Verification emails may currently arrive from our delivery inbox while Aline2 branded mail is being finalized.";
+
+const showOtpComingSoon = () => {
+  Alert.alert(
+    "Coming soon",
+    "Email OTP is being upgraded to Aline2-branded delivery and will be available again soon. Please use password login or Google sign-in for now.",
+  );
+};
+
 const LoginScreen = ({ navigation, route }: any) => {
   const presetEmail = route?.params?.email || '';
 
@@ -30,10 +40,31 @@ const LoginScreen = ({ navigation, route }: any) => {
     }
   }, [presetEmail]);
 
+  const handleMissingPassword = () => {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+
+    Alert.alert(
+      "Password not set",
+      "This account does not have a password yet. Use email OTP once to create or reset it safely.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Use email OTP",
+          onPress: () => navigation.navigate("ForgotPassword", { email: normalizedEmail }),
+        },
+      ],
+    );
+  };
+
   const handleLogin = async () => {
 
     if (!email || !password) {
       Alert.alert("Missing credentials", "Please enter email and password.");
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(String(email || "").trim().toLowerCase())) {
+      Alert.alert("Invalid email", "Please enter a valid email address.");
       return;
     }
 
@@ -65,6 +96,12 @@ const LoginScreen = ({ navigation, route }: any) => {
         status: error?.response?.status,
         responseData: error?.response?.data,
       });
+
+      if (["password_missing", "PASSWORD_NOT_SET"].includes(String(error?.response?.data?.reason || error?.response?.data?.code || "").trim())) {
+        handleMissingPassword();
+        return;
+      }
+
       Alert.alert("Login failed", getReadableApiErrorMessage(error, "Something went wrong"));
     }
   };
@@ -74,6 +111,11 @@ const LoginScreen = ({ navigation, route }: any) => {
 
     if (!cleanEmail) {
       Alert.alert("Missing email", "Enter your email first to receive a login OTP.");
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(cleanEmail)) {
+      Alert.alert("Invalid email", "Please enter a valid email address.");
       return;
     }
 
@@ -94,6 +136,11 @@ const LoginScreen = ({ navigation, route }: any) => {
 
       Alert.alert("Unable to send OTP", res?.data?.message || "Please try again.");
     } catch (error: any) {
+      if (String(error?.response?.data?.code || "").trim() === "OTP_NOT_CONFIGURED") {
+        showOtpComingSoon();
+        return;
+      }
+
       Alert.alert("Unable to send OTP", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setOtpLoading(false);
@@ -146,6 +193,10 @@ const LoginScreen = ({ navigation, route }: any) => {
           value={email}
           onChangeText={setEmail}
           placeholderTextColor="#999"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="emailAddress"
         />
 
         <TextInput
@@ -155,6 +206,9 @@ const LoginScreen = ({ navigation, route }: any) => {
           value={password}
           onChangeText={setPassword}
           placeholderTextColor="#999"
+          autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="password"
         />
 
         <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
@@ -169,7 +223,8 @@ const LoginScreen = ({ navigation, route }: any) => {
           <Text style={styles.forgot}>{otpLoading ? "Sending OTP..." : "Use email OTP instead"}</Text>
         </TouchableOpacity>
 
-        <Text style={styles.supportedHint}>Supported sign in: password or email OTP</Text>
+        <Text style={styles.supportedHint}>Supported sign in: password, Google, or email OTP when available</Text>
+        <Text style={styles.supportedHint}>{OTP_SENDER_HINT}</Text>
 
         <View style={styles.divider} />
 

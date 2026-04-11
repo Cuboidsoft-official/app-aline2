@@ -17,6 +17,16 @@ import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { isGoogleCancelledError, loginWithGoogle } from "../utils/googleAuth";
 import { useAppTheme } from "../theme/AppThemeContext";
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const OTP_SENDER_HINT = "Verification emails may currently arrive from our delivery inbox while Aline2 branded mail is being finalized.";
+
+const showOtpComingSoon = () => {
+  Alert.alert(
+    "Coming soon",
+    "Email OTP is being upgraded to Aline2-branded delivery and will be available again soon. Please use Google sign-in for now.",
+  );
+};
+
 const SignupScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
 
@@ -32,7 +42,7 @@ const SignupScreen = ({ navigation }: any) => {
       Alert.alert("Error", "Please enter email");
       return;
     }
-    if (!/\S+@\S+\.\S+/.test(cleanEmail)) {
+    if (!EMAIL_REGEX.test(cleanEmail)) {
       Alert.alert("Invalid Email", "Please enter a valid email address.");
       return;
     }
@@ -76,6 +86,11 @@ const SignupScreen = ({ navigation }: any) => {
             }
           ]
         );
+        return;
+      }
+
+      if (String(err?.response?.data?.code || "").trim() === "OTP_NOT_CONFIGURED") {
+        showOtpComingSoon();
         return;
       }
 
@@ -139,6 +154,8 @@ const SignupScreen = ({ navigation }: any) => {
           placeholderTextColor={colors.placeholder}
           keyboardType="email-address"
           autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="emailAddress"
         />
 
         <TouchableOpacity
@@ -157,7 +174,8 @@ const SignupScreen = ({ navigation }: any) => {
           )}
         </TouchableOpacity>
 
-        <Text style={[styles.supportedHint, { color: colors.mutedText }]}>Supported sign up: email OTP verification</Text>
+        <Text style={[styles.supportedHint, { color: colors.mutedText }]}>Supported sign up: Google now, email OTP when available</Text>
+        <Text style={[styles.supportedHint, { color: colors.mutedText }]}>{OTP_SENDER_HINT}</Text>
 
         <TouchableOpacity
           style={[styles.googleButton, { borderColor: colors.border, backgroundColor: colors.card }, googleLoading && styles.buttonDisabled]}

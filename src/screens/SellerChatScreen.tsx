@@ -51,6 +51,7 @@ import {
   fetchConversationMessages,
   sendChatMessage,
 } from "../utils/chatApi";
+import { startCallSession } from "../utils/callApi";
 import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import {
   getLastIncomingUnseenMessage,
@@ -1196,12 +1197,50 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     setSelectedAppointmentStart("");
   }, [appointmentSlots, showPaymentModal]);
 
-  const startCallFlow = useCallback(async () => {
+  const startCallFlow = useCallback(async (callType: "audio" | "video") => {
     if (!productFlags.callingInConsumerApp) {
       Alert.alert("Coming soon", callingDisabledMessage);
       return;
     }
-  }, []);
+
+    try {
+      const resolvedConversationId = await ensureConversation();
+
+      if (!resolvedConversationId) {
+        throw new Error("Unable to open this seller conversation for calling.");
+      }
+
+      await connectSocket();
+
+      const response = await startCallSession({
+        conversationId: resolvedConversationId,
+        callType,
+      });
+
+      const nextCallSession = response?.callSession || null;
+      const nextCallSessionId = String(nextCallSession?._id || "");
+
+      if (!nextCallSessionId) {
+        throw new Error("Call session could not be created.");
+      }
+
+      navigation.navigate("CallScreen", {
+        callSessionId: nextCallSessionId,
+        mode: "outgoing",
+        callType,
+        initialCallSession: nextCallSession,
+        initialIceServers: Array.isArray(response?.iceServers) ? response.iceServers : [],
+        callRuntime: response?.callRuntime || null,
+        title: seller?.sellerName || selectedServiceLabel || "Aline2 call",
+        avatarUrl: seller?.profilePic || "",
+      });
+    } catch (error) {
+      Alert.alert(
+        "Could not start call",
+        getReadableApiErrorMessage(error, "Unable to start the call right now."),
+      );
+    }
+  }, [ensureConversation, navigation, selectedServiceLabel, seller?.profilePic, seller?.sellerName]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
@@ -1237,14 +1276,14 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         <View style={styles.rightIcons}>
           <TouchableOpacity
             style={styles.headerIconButton}
-            onPress={startCallFlow}
+            onPress={() => startCallFlow("audio")}
             disabled={!seller?.user}
           >
             <Icon name="call-outline" size={20} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerIconButton}
-            onPress={startCallFlow}
+            onPress={() => startCallFlow("video")}
             disabled={!seller?.user}
           >
             <Icon name="videocam-outline" size={22} color="#fff" />

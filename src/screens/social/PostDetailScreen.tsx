@@ -23,6 +23,7 @@ import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { getStoredUserId } from "../../utils/authSession";
+import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { useAppTheme } from "../../theme/AppThemeContext";
 
 function PostDetailScreen({ route, navigation }: any) {
@@ -204,15 +205,15 @@ function PostDetailScreen({ route, navigation }: any) {
                 asset.mediaType === "video" ? (
                   <SocialVideo
                     key={asset.id}
-                    uri={asset.url}
-                    posterUri={asset.thumbnailUrl}
+                    uri={normalizeMediaUrl(asset.url)}
+                    posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
                     style={styles.image}
                     controls
                   />
                 ) : (
                   <Image
                     key={asset.id}
-                    source={{ uri: asset.url }}
+                    source={{ uri: normalizeMediaUrl(asset.url) }}
                     style={styles.image}
                   />
                 )
@@ -221,14 +222,14 @@ function PostDetailScreen({ route, navigation }: any) {
           ) : (
             post.media[0]?.mediaType === "video" ? (
               <SocialVideo
-                uri={post.media[0]?.url}
-                posterUri={post.media[0]?.thumbnailUrl}
+                uri={normalizeMediaUrl(post.media[0]?.url)}
+                posterUri={normalizeMediaUrl(post.media[0]?.thumbnailUrl || post.media[0]?.url)}
                 style={styles.image}
                 controls
               />
             ) : (
               <Image
-                source={{ uri: post.media[0]?.url }}
+                source={{ uri: normalizeMediaUrl(post.media[0]?.url) }}
                 style={styles.image}
               />
             )

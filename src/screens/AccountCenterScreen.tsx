@@ -174,7 +174,7 @@ const AccountCenterScreen = ({ navigation }: any) => {
             <View style={styles.row}>
               <Text style={[styles.primaryText, { color: colors.text }]}>Password</Text>
               <Text style={[styles.badge, { color: account.linkedAuth?.password ? colors.primary : colors.mutedText }]}>
-                {account.linkedAuth?.password ? "Connected" : "Not set"}
+                {account.linkedAuth?.password ? "Connected" : account.linkedAuth?.google ? "Set password" : "Not set"}
               </Text>
             </View>
             <View style={styles.row}>
@@ -188,7 +188,9 @@ const AccountCenterScreen = ({ navigation }: any) => {
               style={[styles.inlineButton, { borderColor: colors.border }]}
               onPress={() => navigation.navigate("ForgotPassword", { email: account.email || "" })}
             >
-              <Text style={[styles.inlineButtonText, { color: colors.text }]}>Change password</Text>
+              <Text style={[styles.inlineButtonText, { color: colors.text }]}>
+                {account.linkedAuth?.password ? "Change password" : "Set password"}
+              </Text>
             </TouchableOpacity>
           </View>
 

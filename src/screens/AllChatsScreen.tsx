@@ -78,6 +78,7 @@ const AllChatsScreen = ({ navigation }: any) => {
   const [groupName, setGroupName] = useState("");
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const [eligibleGroupMemberIds, setEligibleGroupMemberIds] = useState<string[]>([]);
 
   const fetchChatData = useCallback(async (isRefresh = false) => {
     try {
@@ -104,11 +105,20 @@ const AllChatsScreen = ({ navigation }: any) => {
         fetchChatConversations({ conversationType }),
       ]);
 
+      const profileRes = await API.get("/auth/profile");
+      const me = profileRes?.data?.user || {};
+      const followingIds = new Set((Array.isArray(me?.following) ? me.following : []).map((entry: any) => String(entry || "")));
+      const followerIds = new Set((Array.isArray(me?.followers) ? me.followers : []).map((entry: any) => String(entry || "")));
+
       const fetchedUsers = ((usersRes?.data?.users || []) as ChatUser[]).filter(
         (user: ChatUser) => user?._id !== currentUserId
       );
+      const mutualIds = fetchedUsers
+        .map((user) => String(user?._id || ""))
+        .filter((id) => id && followingIds.has(id) && followerIds.has(id));
 
       setUsers(fetchedUsers);
+      setEligibleGroupMemberIds(mutualIds);
       setConversations((conversationsRes?.conversations || []) as Conversation[]);
       setErrorMessage("");
     } catch (error) {
@@ -124,6 +134,11 @@ const AllChatsScreen = ({ navigation }: any) => {
       }
     }
   }, [activeTab]);
+
+  const eligibleGroupUsers = useMemo(() => {
+    const eligibleSet = new Set(eligibleGroupMemberIds);
+    return users.filter((user) => eligibleSet.has(String(user?._id || "")));
+  }, [eligibleGroupMemberIds, users]);
 
   useFocusEffect(
     useCallback(() => {
@@ -554,11 +569,11 @@ const AllChatsScreen = ({ navigation }: any) => {
             />
 
             <Text style={[styles.modalHelper, { color: colors.mutedText }]}>
-              Choose at least two other members.
+              Choose at least two people who mutually follow you.
             </Text>
 
             <FlatList
-              data={users}
+              data={eligibleGroupUsers}
               keyExtractor={(item) => item._id}
               style={styles.groupPickerList}
               renderItem={({ item }) => {
@@ -592,6 +607,12 @@ const AllChatsScreen = ({ navigation }: any) => {
                 );
               }}
             />
+
+            {!eligibleGroupUsers.length ? (
+              <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
+                Only mutually following users can be added to a group right now.
+              </Text>
+            ) : null}
 
             <TouchableOpacity
               style={[styles.createGroupButton, { backgroundColor: creatingGroup ? disabledCreateGroupColor : colors.primary }]}
@@ -809,6 +830,12 @@ modalHelper:{
 
 groupPickerList:{
  marginTop:16
+},
+
+groupEligibilityHint:{
+ marginTop:10,
+ fontSize:12,
+ lineHeight:18
 },
 
 memberRow:{

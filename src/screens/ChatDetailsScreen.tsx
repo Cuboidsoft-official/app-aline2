@@ -18,17 +18,20 @@ import {
     ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
 import {
     fetchConversationMedia,
+    fetchChatConversationDetails,
     searchConversationMessages,
-    createChatConversation,
 } from "../utils/chatApi";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 import ChatThemePicker from "../components/chat/ChatThemePicker";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { uploadImageAsset } from "../utils/uploadMedia";
 
 const PRIMARY = "#7b3fe4";
 
@@ -116,6 +119,9 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
     const [searching, setSearching] = useState(false);
     const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
     const [showThemePicker, setShowThemePicker] = useState(false);
+    const [currentTheme, setCurrentTheme] = useState("default");
+    const [chatWallpaper, setChatWallpaper] = useState("");
+    const [savingWallpaper, setSavingWallpaper] = useState(false);
 
     const resolvedConversationId = useMemo(() => conversationId || null, [conversationId]);
 
@@ -144,10 +150,26 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
         }
     }, [resolvedConversationId]);
 
+    const loadConversationSettings = useCallback(async () => {
+        if (!resolvedConversationId) {
+            return;
+        }
+
+        try {
+            const data = await fetchChatConversationDetails(resolvedConversationId);
+            const conversation = data?.conversation;
+            setCurrentTheme(String(conversation?.chatTheme || "default"));
+            setChatWallpaper(String(conversation?.chatWallpaper || ""));
+        } catch (err: any) {
+            console.log("ChatDetails settings fetch error:", err?.response?.data || err);
+        }
+    }, [resolvedConversationId]);
+
     useEffect(() => {
         fetchUser();
         loadMedia();
-    }, [fetchUser, loadMedia]);
+        loadConversationSettings();
+    }, [fetchUser, loadConversationSettings, loadMedia]);
 
     // ─── Search ─────────────────────────────────────────────────────────────
 
@@ -187,18 +209,77 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            await API.post(`/auth/block/${user?._id || userId}`);
+                            await API.post(`/user/block/${user?._id || userId}`);
                             Alert.alert("Blocked", "User has been blocked.");
                             navigation.goBack();
                         } catch (err: any) {
                             console.log("Block error:", err?.response?.data || err);
-                            Alert.alert("Error", "Failed to block user.");
+                            Alert.alert("Error", getReadableApiErrorMessage(err, "Failed to block user."));
                         }
                     },
                 },
             ]
         );
     }, [navigation, user, userId]);
+
+    const updateWallpaper = useCallback(async (wallpaperUrl: string | null) => {
+        if (!resolvedConversationId) {
+            return;
+        }
+
+        try {
+            setSavingWallpaper(true);
+            const response = await API.put(`/chat/${resolvedConversationId}/wallpaper`, {
+                wallpaperUrl,
+            });
+            setChatWallpaper(String(response?.data?.wallpaperUrl || ""));
+            Alert.alert(
+                wallpaperUrl ? "Wallpaper updated" : "Wallpaper removed",
+                wallpaperUrl ? "Your custom chat wallpaper is ready." : "The chat is back to its default background."
+            );
+        } catch (error) {
+            Alert.alert("Unable to update wallpaper", getReadableApiErrorMessage(error, "Please try again."));
+        } finally {
+            setSavingWallpaper(false);
+        }
+    }, [resolvedConversationId]);
+
+    const pickWallpaper = useCallback(async () => {
+        try {
+            const result = await launchImageLibrary({
+                mediaType: "photo",
+                quality: 0.8,
+                selectionLimit: 1,
+            });
+
+            if (result.didCancel) {
+                return;
+            }
+
+            const asset = result.assets?.[0];
+            if (!asset?.uri) {
+                Alert.alert("Wallpaper", "Please choose a usable image.");
+                return;
+            }
+
+            setSavingWallpaper(true);
+            const uploadedUrl = await uploadImageAsset({
+                uri: asset.uri,
+                fileName: asset.fileName,
+                name: asset.fileName,
+                type: asset.type,
+            });
+            const response = await API.put(`/chat/${resolvedConversationId}/wallpaper`, {
+                wallpaperUrl: uploadedUrl,
+            });
+            setChatWallpaper(String(response?.data?.wallpaperUrl || uploadedUrl));
+            Alert.alert("Wallpaper updated", "Your custom chat wallpaper is ready.");
+        } catch (error) {
+            Alert.alert("Unable to update wallpaper", getReadableApiErrorMessage(error, "Please try again."));
+        } finally {
+            setSavingWallpaper(false);
+        }
+    }, [resolvedConversationId]);
 
     // ─── Render helpers ─────────────────────────────────────────────────────
 
@@ -258,6 +339,20 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                     <Option icon="images-outline" title="Refresh shared media" onPress={loadMedia} colors={colors} />
                     <Option icon="search-outline" title="Search messages" onPress={toggleSearch} colors={colors} />
                     <Option icon="color-palette-outline" title="Chat Theme" onPress={() => setShowThemePicker(true)} colors={colors} />
+                    <Option
+                        icon={savingWallpaper ? "hourglass-outline" : "image-outline"}
+                        title={chatWallpaper ? "Change wallpaper" : "Add custom wallpaper"}
+                        onPress={pickWallpaper}
+                        colors={colors}
+                    />
+                    {chatWallpaper ? (
+                        <DestructiveOption
+                            icon="close-circle-outline"
+                            title="Remove wallpaper"
+                            onPress={() => updateWallpaper(null)}
+                            colors={colors}
+                        />
+                    ) : null}
                 </View>
 
                 {/* Search bar */}
@@ -324,7 +419,9 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                 <ChatThemePicker
                     visible={showThemePicker}
                     conversationId={resolvedConversationId}
+                    currentTheme={currentTheme}
                     onClose={() => setShowThemePicker(false)}
+                    onThemeChanged={(themeId) => setCurrentTheme(themeId)}
                 />
             )}
         </SafeAreaView>

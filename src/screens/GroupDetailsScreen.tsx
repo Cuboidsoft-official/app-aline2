@@ -68,6 +68,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
   const [savingName, setSavingName] = useState(false);
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [transferringOwnerId, setTransferringOwnerId] = useState("");
+  const [eligibleGroupMemberIds, setEligibleGroupMemberIds] = useState<string[]>([]);
 
   const loadConversation = useCallback(async () => {
     try {
@@ -105,15 +106,29 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
     () => new Set(Array.isArray(conversation?.groupAdmins) ? conversation.groupAdmins.map((entry) => String(entry)) : []),
     [conversation]
   );
+  const eligibleCandidateUsers = useMemo(() => {
+    const eligibleSet = new Set(eligibleGroupMemberIds);
+    return candidateUsers.filter((user) => eligibleSet.has(String(user?._id || "")));
+  }, [candidateUsers, eligibleGroupMemberIds]);
 
   const openAddMembers = useCallback(async () => {
     try {
-      const res = await API.get("/auth/users");
+      const [res, profileRes] = await Promise.all([
+        API.get("/auth/users"),
+        API.get("/auth/profile"),
+      ]);
       const existingIds = new Set(members.map((member) => member._id));
+      const me = profileRes?.data?.user || {};
+      const followingIds = new Set((Array.isArray(me?.following) ? me.following : []).map((entry: any) => String(entry || "")));
+      const followerIds = new Set((Array.isArray(me?.followers) ? me.followers : []).map((entry: any) => String(entry || "")));
       const availableUsers = ((res?.data?.users || []) as ChatUser[]).filter(
         (user) => user?._id && !existingIds.has(user._id)
       );
+      const mutualIds = availableUsers
+        .map((user) => String(user?._id || ""))
+        .filter((id) => id && followingIds.has(id) && followerIds.has(id));
       setCandidateUsers(availableUsers);
+      setEligibleGroupMemberIds(mutualIds);
       setSelectedUsers([]);
       setAddMembersVisible(true);
     } catch (error) {
@@ -535,7 +550,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
             </View>
 
             <FlatList
-              data={candidateUsers}
+              data={eligibleCandidateUsers}
               keyExtractor={(item) => item._id}
               style={styles.modalList}
               renderItem={({ item }) => {
@@ -574,6 +589,12 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
                 </View>
               }
             />
+
+            {!eligibleCandidateUsers.length ? (
+              <Text style={[styles.modalHint, { color: colors.mutedText }]}>
+                Only mutually following users can be added to this group.
+              </Text>
+            ) : null}
 
             <TouchableOpacity
               style={[styles.primaryButton, { backgroundColor: savingMembers ? "#a78bfa" : colors.primary }]}
@@ -827,5 +848,10 @@ const styles = StyleSheet.create({
   modalList: {
     marginTop: 16,
     marginBottom: 16,
+  },
+  modalHint: {
+    marginBottom: 14,
+    fontSize: 12,
+    lineHeight: 18,
   },
 });

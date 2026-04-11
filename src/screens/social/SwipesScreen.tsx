@@ -25,6 +25,7 @@ import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, Swipe, SwipeComment } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
+import { normalizeMediaUrl } from "../../utils/mediaUrls";
 
 const { height } = Dimensions.get("window");
 const reportReasons: ReportReason[] = [
@@ -352,8 +353,8 @@ function SwipesScreen({ navigation }: any) {
   const renderSwipe = ({ item }: { item: Swipe }) => (
     <View style={[styles.swipeItem, { height: viewportHeight }]}>
       <SocialVideo
-        uri={item.media.url}
-        posterUri={item.thumbnailUrl || item.media.thumbnailUrl}
+        uri={normalizeMediaUrl(item.media.url)}
+        posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
         style={styles.swipeMedia}
         repeat
       />

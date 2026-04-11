@@ -18,6 +18,16 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { useAppTheme } from "../theme/AppThemeContext";
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const OTP_SENDER_HINT = "Verification emails may currently arrive from our delivery inbox while Aline2 branded mail is being finalized.";
+
+const showOtpComingSoon = () => {
+  Alert.alert(
+    "Coming soon",
+    "Email OTP is being upgraded to Aline2-branded delivery and will be available again soon. Please use password login or Google sign-in for now.",
+  );
+};
+
 const ForgotPasswordScreen = ({ navigation, route }: any) => {
   const { colors } = useAppTheme();
   const presetEmail = String(route?.params?.email || "").trim().toLowerCase();
@@ -42,6 +52,11 @@ const ForgotPasswordScreen = ({ navigation, route }: any) => {
       return;
     }
 
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      Alert.alert("Invalid email", "Please enter a valid email address.");
+      return;
+    }
+
     try {
       setLoading(true);
       const res = await API.post("/auth/send-otp", {
@@ -57,6 +72,11 @@ const ForgotPasswordScreen = ({ navigation, route }: any) => {
 
       Alert.alert("Unable to send OTP", res?.data?.message || "Please try again.");
     } catch (error: any) {
+      if (String(error?.response?.data?.code || "").trim() === "OTP_NOT_CONFIGURED") {
+        showOtpComingSoon();
+        return;
+      }
+
       Alert.alert("Unable to send OTP", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setLoading(false);
@@ -169,12 +189,17 @@ const ForgotPasswordScreen = ({ navigation, route }: any) => {
                 ? "Enter the 6 digit OTP sent to your email."
                 : "Create a new password for your account."}
           </Text>
+          {step !== "reset" ? (
+            <Text style={[styles.subtitle, { color: colors.mutedText }]}>{OTP_SENDER_HINT}</Text>
+          ) : null}
 
           <TextInput
             placeholder="Email address"
             style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
             autoCapitalize="none"
+            autoCorrect={false}
             keyboardType="email-address"
+            textContentType="emailAddress"
             value={email}
             onChangeText={setEmail}
             editable={!loading && step === "request"}
@@ -186,6 +211,7 @@ const ForgotPasswordScreen = ({ navigation, route }: any) => {
               placeholder="Enter OTP"
               style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
               keyboardType="number-pad"
+              textContentType="oneTimeCode"
               maxLength={6}
               value={otp}
               onChangeText={setOtp}
@@ -200,6 +226,9 @@ const ForgotPasswordScreen = ({ navigation, route }: any) => {
                 placeholder="New password"
                 style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="newPassword"
                 value={password}
                 onChangeText={setPassword}
                 editable={!loading}
@@ -209,6 +238,9 @@ const ForgotPasswordScreen = ({ navigation, route }: any) => {
                 placeholder="Confirm new password"
                 style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="password"
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 editable={!loading}

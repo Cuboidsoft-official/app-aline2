@@ -27,6 +27,7 @@ import { toUserSafeMessage } from "../features/social/validation";
 import { getStoredUser } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
 
@@ -260,7 +261,7 @@ function FeedScreen({ navigation }: any) {
   const renderStory = ({ item }: { item: Story }) => {
     const ringStyle = item.viewed ? styles.storyRingSeen : styles.storyRingUnseen;
     const closeFriends = item.visibility === "close_friends";
-    const storyAvatar = item.user.avatarUrl || DEFAULT_AVATAR_URL;
+    const storyAvatar = normalizeMediaUrl(item.user.avatarUrl || DEFAULT_AVATAR_URL);
 
     return (
       <TouchableOpacity
@@ -287,8 +288,8 @@ function FeedScreen({ navigation }: any) {
       if (primaryMedia?.mediaType === "video") {
         return (
           <SocialVideo
-            uri={primaryMedia.url}
-            posterUri={primaryMedia.thumbnailUrl}
+            uri={normalizeMediaUrl(primaryMedia.url)}
+            posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || primaryMedia.url)}
             style={[styles.postImage, { width }]}
             muted
             repeat
@@ -298,7 +299,7 @@ function FeedScreen({ navigation }: any) {
 
       const rawImage = (
         <Image
-          source={{ uri: primaryMedia?.url }}
+          source={{ uri: normalizeMediaUrl(primaryMedia?.url) }}
           style={[styles.postImage, { width }]}
         />
       );
@@ -319,8 +320,8 @@ function FeedScreen({ navigation }: any) {
           asset.mediaType === "video" ? (
             <SocialVideo
               key={asset.id}
-              uri={asset.url}
-              posterUri={asset.thumbnailUrl}
+              uri={normalizeMediaUrl(asset.url)}
+              posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
               style={[styles.postImage, { width }]}
               muted
               repeat
@@ -330,7 +331,7 @@ function FeedScreen({ navigation }: any) {
               const rawImage = (
                 <Image
                   key={asset.id}
-                  source={{ uri: asset.url }}
+                  source={{ uri: normalizeMediaUrl(asset.url) }}
                   style={[styles.postImage, { width }]}
                 />
               );

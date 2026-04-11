@@ -38,11 +38,8 @@ function PostShareSheet({
   const [busy, setBusy] = useState<string | null>(null);
 
   const buildPostShareUrl = (targetPost: Post) => {
-    if (!appConfig.publicShareBaseUrl) {
-      return "";
-    }
-
-    return `${appConfig.publicShareBaseUrl.replace(/\/+$/, "")}/post/${targetPost.id}`;
+    const shareBase = (appConfig.publicShareBaseUrl || "https://aline2.com").replace(/\/+$/, "");
+    return `${shareBase}/index.php#${targetPost.id}`;
   };
 
   const buildPostShareMessage = async (targetPost: Post) => {

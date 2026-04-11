@@ -13,7 +13,7 @@ const isValidUrl = (value) => {
 };
 
 export const createShortShareUrl = async ({ originalUrl, title, description }) => {
-  if (!isValidUrl(originalUrl) || !appConfig.publicShareBaseUrl) {
+  if (!isValidUrl(originalUrl)) {
     return null;
   }
 
@@ -23,12 +23,14 @@ export const createShortShareUrl = async ({ originalUrl, title, description }) =
     description: description || "",
   });
 
-  const shortCode = response?.data?.data?.shortCode;
-  if (!shortCode) {
-    return null;
+  const shortUrl = String(response?.data?.data?.shortUrl || "").trim();
+  if (shortUrl) {
+    return shortUrl;
   }
 
-  return `${appConfig.publicShareBaseUrl.replace(/\/+$/, "")}/s/${shortCode}`;
+  const shortCode = response?.data?.data?.shortCode;
+  const baseUrl = (appConfig.publicShareBaseUrl || FALLBACK_PUBLIC_URL).replace(/\/+$/, "");
+  return shortCode ? `${baseUrl}/s/${shortCode}` : null;
 };
 
 export const shareContentLink = async ({

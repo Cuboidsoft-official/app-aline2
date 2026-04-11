@@ -22,6 +22,7 @@ import { socialApi } from "../../features/social/socialApi";
 import { Story, StoryFilterPreset } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { DEFAULT_AVATAR_URL } from "../../constants/defaultAssets";
+import { normalizeMediaUrl } from "../../utils/mediaUrls";
 
 const DEFAULT_STORY_MS = 5000;
 const TEXT_STORY_MS = 7000;
@@ -382,8 +383,8 @@ function StoryViewerScreen({ route, navigation }: any) {
 
       return (
         <SocialVideo
-          uri={currentStory.media?.url}
-          posterUri={currentStory.media?.thumbnailUrl}
+          uri={normalizeMediaUrl(currentStory.media?.url)}
+          posterUri={normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url)}
           style={styles.storyImage}
           paused={paused}
           onEnd={next}
@@ -391,7 +392,7 @@ function StoryViewerScreen({ route, navigation }: any) {
       );
     }
 
-    const imageUri = currentStory.media?.thumbnailUrl || currentStory.media?.url;
+    const imageUri = normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url);
     return imageUri ? (
       <Image
         source={{ uri: imageUri }}

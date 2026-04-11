@@ -45,6 +45,7 @@ import {
   fetchConversationMessages,
   sendChatMessage,
 } from "../utils/chatApi";
+import { startCallSession } from "../utils/callApi";
 import { CHAT_THEME_LIST } from "../utils/chatThemes";
 import {
   getLastIncomingUnseenMessage,
@@ -139,6 +140,13 @@ interface SubmitMessageParams {
   file?: { uri: string; name: string; type: string };
   mediaUrl?: string;
   messageType?: string;
+}
+
+interface PendingAttachment {
+  uri: string;
+  name: string;
+  type: string;
+  kind: "image" | "video";
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
@@ -264,6 +272,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagination, setPagination] = useState<PaginationState>({ nextCursor: null, hasMore: false, limit: 30 });
   const [chatTheme, setChatTheme] = useState("default");
+  const [chatWallpaper, setChatWallpaper] = useState("");
   const [typingUserId, setTypingUserId] = useState("");
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
@@ -278,6 +287,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [contextMessage, setContextMessage] = useState<ChatMessage | null>(null);
   const [showContextMenu, setShowContextMenu] = useState(false);
+  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
 
   // ─── Data fetching ──────────────────────────────────────────────────────
 
@@ -356,6 +366,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       if (nextConversation?.chatTheme) {
         setChatTheme(nextConversation.chatTheme);
       }
+      setChatWallpaper(String(nextConversation?.chatWallpaper || ""));
 
       if (isGroupConversation) {
         const nextGroupMeta: GroupMeta = {
@@ -446,12 +457,65 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
   }, [ensureConversation, fetchConversationMeta, fetchMessages, fetchUser, userId]);
 
-  const startCallFlow = useCallback(async () => {
+  const startCallFlow = useCallback(async (callType: "audio" | "video") => {
     if (!productFlags.callingInConsumerApp) {
       Alert.alert("Coming soon", callingDisabledMessage);
       return;
     }
-  }, []);
+
+    try {
+      const resolvedConversationId = await ensureConversation();
+
+      if (!resolvedConversationId) {
+        throw new Error("Unable to open this conversation for calling.");
+      }
+
+      await connectSocket();
+
+      const response = await startCallSession({
+        conversationId: resolvedConversationId,
+        callType,
+      });
+
+      const nextCallSession = response?.callSession || null;
+      const nextCallSessionId = String(nextCallSession?._id || "");
+
+      if (!nextCallSessionId) {
+        throw new Error("Call session could not be created.");
+      }
+
+      navigation.navigate("CallScreen", {
+        callSessionId: nextCallSessionId,
+        mode: "outgoing",
+        callType,
+        initialCallSession: nextCallSession,
+        initialIceServers: Array.isArray(response?.iceServers) ? response.iceServers : [],
+        callRuntime: response?.callRuntime || null,
+        title: isGroupConversation
+          ? groupMeta.groupName || groupName || "Group call"
+          : user?.name || user?.username || "Aline2 call",
+        avatarUrl: isGroupConversation
+          ? groupMeta.groupAvatar || groupAvatar || ""
+          : user?.profilePic || "",
+      });
+    } catch (error) {
+      Alert.alert(
+        "Could not start call",
+        getReadableApiErrorMessage(error, "Unable to start the call right now."),
+      );
+    }
+  }, [
+    ensureConversation,
+    groupAvatar,
+    groupMeta.groupAvatar,
+    groupMeta.groupName,
+    groupName,
+    isGroupConversation,
+    navigation,
+    user?.name,
+    user?.profilePic,
+    user?.username,
+  ]);
 
   // ─── Effects ──────────────────────────────────────────────────────────────
 
@@ -553,6 +617,10 @@ const ChatScreen = ({ navigation, route }: any) => {
       }
     };
 
+    const handleChatWallpaperChanged = (data: any) => {
+      setChatWallpaper(String(data?.wallpaperUrl || ""));
+    };
+
     socket.on("receiveMessage", handleReceiveMessage);
     socket.on("typing", handleTyping);
     socket.on("stopTyping", handleStopTyping);
@@ -560,6 +628,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     socket.on("messageReaction", handleMessageReaction);
     socket.on("messageEdited", handleMessageEdited);
     socket.on("chatThemeChanged", handleChatThemeChanged);
+    socket.on("chatWallpaperChanged", handleChatWallpaperChanged);
 
     return () => {
       socket.off("receiveMessage", handleReceiveMessage);
@@ -569,6 +638,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       socket.off("messageReaction", handleMessageReaction);
       socket.off("messageEdited", handleMessageEdited);
       socket.off("chatThemeChanged", handleChatThemeChanged);
+      socket.off("chatWallpaperChanged", handleChatWallpaperChanged);
     };
   }, [applyMessageReaction, applyMessageSeen, currentUserId, mergeMessage]);
 
@@ -647,45 +717,42 @@ const ChatScreen = ({ navigation, route }: any) => {
     return CHAT_THEME_LIST.find(t => t.id === chatTheme)?.sentBubble[0] || PRIMARY;
   }, [chatTheme]);
 
+  const queueAttachmentPreview = useCallback((asset: any) => {
+    if (!asset?.uri) {
+      return;
+    }
+
+    const mimeType = String(asset.type || "application/octet-stream").trim();
+    const kind = mimeType.startsWith("video/") ? "video" : "image";
+    setPendingAttachment({
+      uri: asset.uri,
+      name: asset.fileName || `${kind}_${Date.now()}`,
+      type: mimeType,
+      kind,
+    });
+    setShowTools(false);
+  }, []);
+
   const sendImageAttachment = useCallback(async () => {
-    launchImageLibrary(
-      {
+    try {
+      const response = await launchImageLibrary({
         mediaType: "mixed",
-        selectionLimit: 1
-      },
-      async (response) => {
-        if (response?.didCancel) return;
-        if (response?.errorCode) {
-          Alert.alert("Error", "Image pick failed");
-          return;
-        }
+        selectionLimit: 1,
+      });
 
-        const asset = response.assets?.[0];
-        if (!asset?.uri) {
-          return;
-        }
-
-        try {
-          setUploading(true);
-          await submitMessage({
-            text: text.trim(),
-            file: {
-              uri: asset.uri,
-              name: asset.fileName || `media_${Date.now()}`,
-              type: asset.type || "application/octet-stream",
-            }
-          });
-          setText("");
-          setShowTools(false);
-        } catch (error: any) {
-          console.log("image message send error:", error);
-          Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send attachment"));
-        } finally {
-          setUploading(false);
-        }
+      if (response?.didCancel) {
+        return;
       }
-    );
-  }, [submitMessage, text]);
+      if (response?.errorCode) {
+        Alert.alert("Error", response.errorMessage || "Image pick failed");
+        return;
+      }
+
+      queueAttachmentPreview(response.assets?.[0]);
+    } catch (error) {
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to select attachment"));
+    }
+  }, [queueAttachmentPreview]);
 
   const sendCameraAttachment = useCallback(async () => {
     const hasPermission = await ensureCameraPermission();
@@ -694,45 +761,51 @@ const ChatScreen = ({ navigation, route }: any) => {
       return;
     }
 
-    launchCamera(
-      {
+    try {
+      const response = await launchCamera({
         mediaType: "mixed",
         saveToPhotos: false,
         videoQuality: "high",
-      },
-      async (response) => {
-        if (response?.didCancel) return;
-        if (response?.errorCode) {
-          Alert.alert("Error", response.errorMessage || "Camera capture failed");
-          return;
-        }
+      });
 
-        const asset = response.assets?.[0];
-        if (!asset?.uri) {
-          return;
-        }
-
-        try {
-          setUploading(true);
-          await submitMessage({
-            text: text.trim(),
-            file: {
-              uri: asset.uri,
-              name: asset.fileName || `camera_${Date.now()}`,
-              type: asset.type || "application/octet-stream",
-            }
-          });
-          setText("");
-          setShowTools(false);
-        } catch (error: any) {
-          console.log("camera message send error:", error);
-          Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send camera capture"));
-        } finally {
-          setUploading(false);
-        }
+      if (response?.didCancel) {
+        return;
       }
-    );
-  }, [submitMessage, text]);
+      if (response?.errorCode) {
+        Alert.alert("Error", response.errorMessage || "Camera capture failed");
+        return;
+      }
+
+      queueAttachmentPreview(response.assets?.[0]);
+    } catch (error) {
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to capture media"));
+    }
+  }, [queueAttachmentPreview]);
+
+  const sendPendingAttachment = useCallback(async () => {
+    if (!pendingAttachment) {
+      return;
+    }
+
+    try {
+      setUploading(true);
+      await submitMessage({
+        text: text.trim(),
+        file: {
+          uri: pendingAttachment.uri,
+          name: pendingAttachment.name,
+          type: pendingAttachment.type,
+        },
+      });
+      setText("");
+      setPendingAttachment(null);
+    } catch (error: any) {
+      console.log("attachment message send error:", error);
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send attachment"));
+    } finally {
+      setUploading(false);
+    }
+  }, [pendingAttachment, submitMessage, text]);
 
   const sendDocumentAttachment = useCallback(async () => {
     try {
@@ -1012,6 +1085,8 @@ const ChatScreen = ({ navigation, route }: any) => {
     const seenCount = Array.isArray(item?.seenBy) ? item.seenBy.length : 0;
     const reactions = Array.isArray(item?.reactions) ? item.reactions : [];
 
+    const bubbleTextColor = isMine ? "#fff" : "#111";
+
     return (
       <View
         style={[
@@ -1113,7 +1188,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   key={`${item?._id || "message"}-${reaction?.emoji || "reaction"}`}
                   style={[styles.reactionChip, isMine && styles.myReactionChip]}
                 >
-                  <Text style={styles.reactionText}>
+                  <Text style={[styles.reactionText, { color: bubbleTextColor }]}>
                     {reaction?.emoji} {Array.isArray(reaction?.users) ? reaction.users.length : 0}
                   </Text>
                 </View>
@@ -1195,13 +1270,13 @@ const ChatScreen = ({ navigation, route }: any) => {
             <>
               <TouchableOpacity
                 style={styles.headerIconButton}
-                onPress={startCallFlow}
+                onPress={() => startCallFlow("audio")}
               >
                 <Icon name="call-outline" size={20} color="#fff" />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.headerIconButton}
-                onPress={startCallFlow}
+                onPress={() => startCallFlow("video")}
               >
                 <Icon name="videocam-outline" size={22} color="#fff" />
               </TouchableOpacity>
@@ -1213,13 +1288,13 @@ const ChatScreen = ({ navigation, route }: any) => {
             <>
               <TouchableOpacity
                 style={styles.headerIconButton}
-                onPress={startCallFlow}
+                onPress={() => startCallFlow("audio")}
               >
                 <Icon name="call-outline" size={20} color="#fff" />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.headerIconButton}
-                onPress={startCallFlow}
+                onPress={() => startCallFlow("video")}
               >
                 <Icon name="videocam-outline" size={22} color="#fff" />
               </TouchableOpacity>
@@ -1237,6 +1312,13 @@ const ChatScreen = ({ navigation, route }: any) => {
         keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
         <View style={[styles.chatBackground, { backgroundColor: colors.surface }]}>
+          {chatWallpaper ? (
+            <Image
+              source={{ uri: normalizeMediaUrl(chatWallpaper) }}
+              style={styles.wallpaperBackground}
+              resizeMode="cover"
+            />
+          ) : null}
           <FlatList
             data={messages}
             extraData={messages}
@@ -1361,9 +1443,16 @@ const ChatScreen = ({ navigation, route }: any) => {
           onSend={async (sticker) => {
             try {
               setUploading(true);
+              if (sticker.emoji && !sticker.imageUrl) {
+                await submitMessage({
+                  text: sticker.emoji,
+                });
+                return;
+              }
+
               await submitMessage({
                 text: sticker.name || "Sticker",
-                mediaUrl: sticker.imageUrl,
+                mediaUrl: normalizeMediaUrl(sticker.imageUrl),
                 messageType: "image"
               });
             } catch (err) {
@@ -1401,8 +1490,36 @@ const ChatScreen = ({ navigation, route }: any) => {
           </TouchableOpacity>
 
           <View style={[styles.inputBox, { backgroundColor: colors.surface }]}>
+            {pendingAttachment ? (
+              <View style={[styles.attachmentPreviewCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+                <View style={styles.attachmentPreviewBody}>
+                  {pendingAttachment.kind === "image" ? (
+                    <Image source={{ uri: pendingAttachment.uri }} style={styles.attachmentPreviewImage} />
+                  ) : (
+                    <View style={[styles.attachmentPreviewVideo, { backgroundColor: primaryThemeColor }]}>
+                      <Icon name="videocam-outline" size={18} color="#fff" />
+                    </View>
+                  )}
+                  <View style={styles.attachmentPreviewMeta}>
+                    <Text style={[styles.attachmentPreviewTitle, { color: colors.text }]} numberOfLines={1}>
+                      {pendingAttachment.kind === "image" ? "Image ready to send" : "Video ready to send"}
+                    </Text>
+                    <Text style={[styles.attachmentPreviewSubtitle, { color: colors.mutedText }]} numberOfLines={1}>
+                      {pendingAttachment.name}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setPendingAttachment(null)}
+                    disabled={uploading}
+                    style={styles.attachmentPreviewClose}
+                  >
+                    <Icon name="close-circle" size={20} color={colors.mutedText} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
             <TextInput
-              placeholder={uploading ? "Uploading attachment..." : "Message"}
+              placeholder={uploading ? "Uploading attachment..." : pendingAttachment ? "Add a caption (optional)" : "Message"}
               placeholderTextColor={colors.placeholder}
               style={[styles.input, { color: colors.text }]}
               value={text}
@@ -1413,8 +1530,12 @@ const ChatScreen = ({ navigation, route }: any) => {
 
           {uploading ? (
             <ActivityIndicator color={colors.primary} />
-          ) : text.length > 0 ? (
-            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: colors.primary }]} onPress={sendTextMessage} disabled={sending}>
+          ) : text.length > 0 || pendingAttachment ? (
+            <TouchableOpacity
+              style={[styles.sendBtn, { backgroundColor: colors.primary }]}
+              onPress={pendingAttachment ? sendPendingAttachment : sendTextMessage}
+              disabled={sending}
+            >
               <Icon name="send" size={20} color="#fff" />
             </TouchableOpacity>
           ) : (
@@ -1528,6 +1649,10 @@ const styles = StyleSheet.create({
   chatBackground: {
     flex: 1
   },
+  wallpaperBackground: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.16,
+  },
   listContent: {
     padding: 12
   },
@@ -1561,13 +1686,13 @@ const styles = StyleSheet.create({
   },
   messageRow: {
     flexDirection: "row",
+    width: "100%",
     marginVertical: 4
   },
   messageBubble: {
     padding: 12,
     borderRadius: 16,
-    maxWidth: "78%",
-    alignSelf: "flex-start",
+    maxWidth: "82%",
     flexShrink: 1,
   },
   messageText: {
@@ -1581,7 +1706,9 @@ const styles = StyleSheet.create({
     backgroundColor: PRIMARY
   },
   otherMessage: {
-    backgroundColor: "#fff"
+    backgroundColor: "#fff",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(15,23,42,0.08)",
   },
   messageImage: {
     width: 220,
@@ -1674,11 +1801,49 @@ const styles = StyleSheet.create({
     backgroundColor: "#f2f2f2",
     borderRadius: 25,
     marginHorizontal: 10,
-    paddingHorizontal: 15
+    paddingHorizontal: 15,
+    paddingVertical: 6,
   },
   input: {
     height: 40,
     paddingVertical: 0,
+  },
+  attachmentPreviewCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 8,
+    marginBottom: 8,
+  },
+  attachmentPreviewBody: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  attachmentPreviewImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+  },
+  attachmentPreviewVideo: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachmentPreviewMeta: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  attachmentPreviewTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  attachmentPreviewSubtitle: {
+    marginTop: 2,
+    fontSize: 11,
+  },
+  attachmentPreviewClose: {
+    marginLeft: 8,
   },
   sendBtn: {
     backgroundColor: PRIMARY,

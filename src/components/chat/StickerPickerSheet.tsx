@@ -22,15 +22,27 @@ import {
     fetchStickersByCategory,
     searchStickers,
 } from "../../utils/chatStickerApi";
+import { normalizeMediaUrl } from "../../utils/mediaUrls";
 
 const COLUMNS = 4;
 const PRIMARY = "#7b3fe4";
 const CATEGORIES = ["all", "general", "love", "funny", "animals", "celebrations"];
+const FALLBACK_EMOJI_STICKERS = [
+    { _id: "emoji_heart", name: "Love", emoji: "❤️", imageUrl: "", category: "love" },
+    { _id: "emoji_fire", name: "Fire", emoji: "🔥", imageUrl: "", category: "general" },
+    { _id: "emoji_laugh", name: "Laugh", emoji: "😂", imageUrl: "", category: "funny" },
+    { _id: "emoji_party", name: "Party", emoji: "🥳", imageUrl: "", category: "celebrations" },
+    { _id: "emoji_star", name: "Star", emoji: "🌟", imageUrl: "", category: "celebrations" },
+    { _id: "emoji_hug", name: "Hug", emoji: "🤗", imageUrl: "", category: "love" },
+    { _id: "emoji_dog", name: "Dog", emoji: "🐶", imageUrl: "", category: "animals" },
+    { _id: "emoji_cat", name: "Cat", emoji: "🐱", imageUrl: "", category: "animals" },
+];
 
 interface Sticker {
     _id?: string;
     name: string;
     imageUrl: string;
+    emoji?: string;
     [key: string]: any;
 }
 
@@ -46,6 +58,22 @@ const StickerPickerSheet: React.FC<StickerPickerSheetProps> = ({ visible, onClos
     const [activeCategory, setActiveCategory] = useState("all");
     const [query, setQuery] = useState("");
 
+    const resolveFallbackStickers = useCallback((category = "all", searchQuery = ""): Sticker[] => {
+        if (searchQuery.trim()) {
+            const normalizedQuery = searchQuery.trim().toLowerCase();
+            return FALLBACK_EMOJI_STICKERS.filter(
+                (item) =>
+                    item.name.toLowerCase().includes(normalizedQuery) || String(item.emoji || "").includes(searchQuery.trim()),
+            );
+        }
+
+        if (category === "all") {
+            return [...FALLBACK_EMOJI_STICKERS];
+        }
+
+        return FALLBACK_EMOJI_STICKERS.filter((item) => item.category === category);
+    }, []);
+
     const loadStickers = useCallback(async (category = "all", searchQuery = "") => {
         setLoading(true);
         try {
@@ -57,13 +85,15 @@ const StickerPickerSheet: React.FC<StickerPickerSheetProps> = ({ visible, onClos
             } else {
                 results = await fetchStickersByCategory(category);
             }
-            setStickers(results || []);
+            const normalizedResults = Array.isArray(results) ? results : [];
+            setStickers(normalizedResults.length ? normalizedResults : resolveFallbackStickers(category, searchQuery));
         } catch (err) {
             console.log("sticker load error:", err);
+            setStickers(resolveFallbackStickers(category, searchQuery));
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [resolveFallbackStickers]);
 
     useEffect(() => {
         if (visible) {
@@ -73,7 +103,7 @@ const StickerPickerSheet: React.FC<StickerPickerSheetProps> = ({ visible, onClos
 
     const handleSend = useCallback(
         (sticker: Sticker) => {
-            if (onSend && sticker?.imageUrl) {
+            if (onSend && (sticker?.imageUrl || sticker?.emoji)) {
                 onSend(sticker);
             }
             onClose();
@@ -83,7 +113,13 @@ const StickerPickerSheet: React.FC<StickerPickerSheetProps> = ({ visible, onClos
 
     const renderSticker = ({ item }: { item: Sticker }) => (
         <TouchableOpacity style={styles.stickerCell} onPress={() => handleSend(item)} activeOpacity={0.7}>
-            <Image source={{ uri: item.imageUrl }} style={styles.stickerImage} resizeMode="contain" />
+            {item.imageUrl ? (
+                <Image source={{ uri: normalizeMediaUrl(item.imageUrl) }} style={styles.stickerImage} resizeMode="contain" />
+            ) : (
+                <View style={styles.emojiSticker}>
+                    <Text style={styles.emojiStickerText}>{item.emoji || "🙂"}</Text>
+                </View>
+            )}
         </TouchableOpacity>
     );
 
@@ -243,6 +279,15 @@ const styles = StyleSheet.create({
     stickerImage: {
         width: "100%",
         height: "100%",
+    },
+    emojiSticker: {
+        width: "100%",
+        height: "100%",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    emojiStickerText: {
+        fontSize: 30,
     },
     loader: {
         marginTop: 40,
