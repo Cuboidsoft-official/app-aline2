@@ -317,7 +317,7 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                     <View style={styles.profileActions}>
                         <TouchableOpacity
                             style={styles.profileActionButton}
-                            onPress={() => navigation.navigate("UserProfileScreen", { userId: user?._id || userId })}
+                            onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: user?._id || userId })}
                         >
                             <Icon name="person-outline" size={20} color={PRIMARY} />
                             <Text style={styles.profileActionLabel}>Profile</Text>

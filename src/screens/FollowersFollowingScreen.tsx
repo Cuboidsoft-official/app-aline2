@@ -17,6 +17,7 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 
 type FollowTab = "followers" | "following";
 
@@ -102,7 +103,7 @@ const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigatio
       {item.username || "unknown"}
      </Text>
 
-     {item.isVerified ? (
+     {shouldShowVerifiedBadge(item) ? (
       <Icon name="checkmark-circle" size={15} color={colors.primary} style={styles.verifiedIcon} />
      ) : null}
     </View>

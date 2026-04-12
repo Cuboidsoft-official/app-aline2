@@ -4,12 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-aab}"
 CREDENTIALS_FILE="${ANDROID_UPLOAD_CREDENTIALS_FILE:-/tmp/aline2-upload-keystore-credentials.txt}"
+DEFAULT_KEYSTORE_PATH="$ROOT_DIR/android/app/aline2-upload.keystore"
 
 if [[ -f "$CREDENTIALS_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "$CREDENTIALS_FILE"
   set +a
+fi
+
+if [[ -z "${ANDROID_UPLOAD_STORE_FILE:-}" && -f "$DEFAULT_KEYSTORE_PATH" ]]; then
+  export ANDROID_UPLOAD_STORE_FILE="$DEFAULT_KEYSTORE_PATH"
 fi
 
 missing=()
@@ -25,6 +30,10 @@ if (( ${#missing[@]} > 0 )); then
   printf 'Set them in the environment or provide %s before building release artifacts.
 ' "$CREDENTIALS_FILE" >&2
   exit 1
+fi
+
+if [[ ! -f "$ANDROID_UPLOAD_STORE_FILE" && -f "$ROOT_DIR/$ANDROID_UPLOAD_STORE_FILE" ]]; then
+  export ANDROID_UPLOAD_STORE_FILE="$ROOT_DIR/$ANDROID_UPLOAD_STORE_FILE"
 fi
 
 if [[ ! -f "$ANDROID_UPLOAD_STORE_FILE" ]]; then
@@ -44,4 +53,21 @@ case "$MODE" in
 esac
 
 cd "$ROOT_DIR/android"
-ENVFILE=.env.production ./gradlew clean "$TASK" --no-daemon --console=plain --max-workers=1 -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+
+# RN 0.84 + Gradle 9 can validate library codegen inputs before the producing task
+# runs when `clean` and release packaging are requested together. Prewarming the
+# affected library in a separate invocation keeps the schema in place and avoids
+# false-negative validation failures from node_modules libraries.
+ENVFILE=.env.production ./gradlew \
+  :react-native-color-matrix-image-filters:generateCodegenSchemaFromJavaScript \
+  :react-native-color-matrix-image-filters:generateCodegenArtifactsFromSchema \
+  --no-daemon \
+  --console=plain \
+  --max-workers=1
+
+ENVFILE=.env.production ./gradlew \
+  "$TASK" \
+  --no-daemon \
+  --console=plain \
+  --max-workers=1 \
+  -PreactNativeArchitectures=armeabi-v7a,arm64-v8a

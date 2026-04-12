@@ -3,6 +3,24 @@ import { SelectedMusicClip } from "../features/social/types";
 
 export type MusicCatalogItem = SelectedMusicClip;
 
+const normalizeExternalUrl = (value: any): string | undefined => {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return undefined;
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  if (raw.startsWith("/")) {
+    return `https://audius.co${raw}`;
+  }
+
+  return raw;
+};
+
 const getId = (value: any): string => {
   if (!value) {
     return "";
@@ -22,7 +40,7 @@ const mapMusicItem = (item: any): MusicCatalogItem => ({
   artist: String(item?.artist || item?.artistName || "").trim() || undefined,
   artworkUrl: item?.thumbnailUrl || item?.artworkUrl || undefined,
   previewUrl: item?.previewUrl || item?.audioUrl || undefined,
-  externalUrl: item?.externalUrl || undefined,
+  externalUrl: normalizeExternalUrl(item?.externalUrl),
   source: item?.source || undefined,
   isOriginal: !!item?.isOriginal,
   duration: Math.max(1, Math.round(Number(item?.duration || 0) || 0)),

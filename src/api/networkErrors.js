@@ -16,7 +16,7 @@ export const getReadableApiErrorMessage = (error, fallbackMessage = "Please try 
   const apiBaseUrl = activeConnection?.apiBaseUrl || "";
 
   if (Platform.OS === "android") {
-    return `Could not reach the server at ${apiBaseUrl}. Make sure the backend is running, then for local Android dev use adb reverse with a localhost API URL or use a reachable LAN or remote host and rebuild the app.`;
+    return `Could not reach the server at ${apiBaseUrl}. Check that the configured API host is reachable. If you intend to use a local backend, explicitly point the app env to localhost and rebuild.`;
   }
 
   return `Could not reach the server at ${apiBaseUrl}. Check that the backend is running and the API base URL is reachable.`;

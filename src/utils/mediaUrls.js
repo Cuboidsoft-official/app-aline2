@@ -28,6 +28,40 @@ const MEDIA_URL_HINT_KEYS = new Set([
   "type",
   "width",
  ]);
+const LEGACY_R2_HOST_PATTERN = /^[a-z0-9-]+\.r2\.dev$/i;
+const LEGACY_R2_KEY_PREFIX = "aline2";
+const LEGACY_R2_MEDIA_PREFIXES = [
+  "audio/",
+  "chat/",
+  "documents/",
+  "images/",
+  "stickers/",
+  "videos/",
+];
+
+const applyLegacyR2PathFix = (rawUrl) => {
+  try {
+    const parsed = new URL(rawUrl);
+    const normalizedPath = parsed.pathname.replace(/^\/+/, "");
+
+    if (!LEGACY_R2_HOST_PATTERN.test(parsed.hostname)) {
+      return rawUrl;
+    }
+
+    if (normalizedPath.startsWith(`${LEGACY_R2_KEY_PREFIX}/`)) {
+      return rawUrl;
+    }
+
+    if (!LEGACY_R2_MEDIA_PREFIXES.some((prefix) => normalizedPath.startsWith(prefix))) {
+      return rawUrl;
+    }
+
+    parsed.pathname = `/${LEGACY_R2_KEY_PREFIX}/${normalizedPath}`;
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+};
 
 const getPublicOrigin = () => {
   const baseCandidates = [
@@ -67,13 +101,14 @@ export const normalizeMediaUrl = (rawUrl) => {
   }
 
   try {
-    const parsed = new URL(value);
+    const fixedValue = applyLegacyR2PathFix(value);
+    const parsed = new URL(fixedValue);
     if (!PRIVATE_HOST_PATTERN.test(parsed.hostname)) {
-      return value;
+      return fixedValue;
     }
 
     if (!publicOrigin) {
-      return value;
+      return fixedValue;
     }
 
     const nextUrl = new URL(publicOrigin);

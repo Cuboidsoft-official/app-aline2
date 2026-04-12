@@ -2,11 +2,18 @@ const fs = require("fs");
 const path = require("path");
 
 const resolveEnvFile = () => {
-  const requested = process.env.ENVFILE || `.env.${process.env.APP_ENV || "development"}`;
-  const requestedPath = path.join(__dirname, requested);
+  const candidates = [
+    process.env.ENVFILE,
+    ".env",
+    process.env.APP_ENV ? `.env.${process.env.APP_ENV}` : null,
+    ".env.production",
+  ].filter(Boolean);
 
-  if (fs.existsSync(requestedPath)) {
-    return requested;
+  for (const candidate of candidates) {
+    const candidatePath = path.join(__dirname, candidate);
+    if (fs.existsSync(candidatePath)) {
+      return candidate;
+    }
   }
 
   return ".env";

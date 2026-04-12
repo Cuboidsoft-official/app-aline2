@@ -144,6 +144,17 @@ export const searchConversationMessages = async (conversationId, params = {}) =>
   return response.data;
 };
 
+export const reactToChatMessage = async (messageId, emoji) => {
+  const headers = await buildAuthHeaders();
+  const response = await API.post(
+    `/message/${messageId}/reactions`,
+    { emoji },
+    { headers }
+  );
+
+  return response.data;
+};
+
 /**
  * @param {{ conversationId?: string; text?: string; file?: { uri?: string; name?: string | null; type?: string | null }; mediaUrl?: string; messageType?: string }} [params]
  */

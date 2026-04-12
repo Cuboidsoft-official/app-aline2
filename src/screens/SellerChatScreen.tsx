@@ -49,6 +49,7 @@ import {
 import {
   createChatConversation,
   fetchConversationMessages,
+  reactToChatMessage,
   sendChatMessage,
 } from "../utils/chatApi";
 import { startCallSession } from "../utils/callApi";
@@ -63,7 +64,7 @@ import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { callingDisabledMessage, productFlags } from "../config/productFlags";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import { ensureCameraPermission } from "../utils/permissions";
+import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 
 const PRIMARY = "#7B4DFF";
@@ -591,15 +592,25 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   }, [submitMessage, text]);
 
   const sendCameraAttachment = useCallback(async () => {
-    const hasPermission = await ensureCameraPermission();
+    const hasPermission = await ensureCameraPermission(
+      "Allow Aline2 to use your camera for seller chat photo and video attachments.",
+    );
     if (!hasPermission) {
       Alert.alert("Camera permission needed", "Allow camera access to capture and send a photo or video.");
       return;
     }
 
+    const mediaType = await resolveCameraCaptureMediaType("mixed", {
+      title: "Send from camera",
+      message: "Choose whether you want to capture a photo or record a video for this seller chat.",
+    });
+    if (!mediaType) {
+      return;
+    }
+
     launchCamera(
       {
-        mediaType: "mixed",
+        mediaType,
         saveToPhotos: false,
         videoQuality: "high",
       },
@@ -1027,27 +1038,23 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   }, [applyMessageSeen, currentConversationId, currentUserId, messages]);
 
   const reactToMessage = useCallback((messageId: string, emoji = "❤️") => {
-    if (!currentConversationId || !messageId) {
+    if (!messageId) {
       return;
     }
 
-    connectSocket()
-      .then(() => {
-        socket.emit("reactMessage", {
-          conversationId: currentConversationId,
-          messageId,
-          emoji,
-        });
+    reactToChatMessage(messageId, emoji)
+      .then((response: any) => {
         applyMessageReaction({
-          messageId,
-          userId: currentUserId,
-          emoji,
+          messageId: response?.data?.messageId || messageId,
+          userId: response?.data?.userId || currentUserId,
+          emoji: response?.data?.emoji || emoji,
         });
       })
       .catch((error) => {
-        console.log("seller message reaction emit error:", error);
+        console.log("seller message reaction save error:", error);
+        Alert.alert("Reaction failed", getReadableApiErrorMessage(error, "Unable to save the reaction right now."));
       });
-  }, [applyMessageReaction, currentConversationId, currentUserId]);
+  }, [applyMessageReaction, currentUserId]);
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isMine = String(getMessageSenderId(item)) === String(currentUserId || "");

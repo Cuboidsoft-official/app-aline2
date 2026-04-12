@@ -26,6 +26,7 @@ import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, Swipe, SwipeComment } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
+import { shouldShowVerifiedBadge } from "../../utils/verificationBadges";
 
 const { height } = Dimensions.get("window");
 const reportReasons: ReportReason[] = [
@@ -370,7 +371,7 @@ function SwipesScreen({ navigation }: any) {
           <View style={styles.bottomTextBlock}>
             <View style={styles.userRow}>
               <Text style={styles.userName}>@{item.user.username}</Text>
-              {item.user.isVerified ? <Icon name="checkmark-circle" color="#6cbcff" size={16} /> : null}
+              {shouldShowVerifiedBadge(item.user) ? <Icon name="checkmark-circle" color="#6cbcff" size={16} /> : null}
             </View>
 
             <Text style={styles.caption}>{item.caption}</Text>

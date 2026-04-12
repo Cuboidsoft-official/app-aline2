@@ -22,6 +22,7 @@ import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { shareContentLink } from "../utils/shareLinks";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
+import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 
 interface ProfilePost {
  _id: string;
@@ -269,7 +270,7 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
       <Text style={[styles.profileHandle, { color: colors.mutedText }]}>@{user.username}</Text>
      ) : null}
 
-     {user?.isVerified ? (
+     {shouldShowVerifiedBadge(user) ? (
       <View style={[styles.verifiedBadge, { backgroundColor: colors.primary }]}>
        <Icon name="checkmark-circle" size={16} color="#fff"/>
        <Text style={styles.verifiedText}>

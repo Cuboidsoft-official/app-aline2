@@ -211,6 +211,8 @@ Notes:
 - If the repository is private, teammates will need repo access to download Actions artifacts or release assets.
 - The APK is built against the selected env file, so backend switching should happen through `.env`, `.env.staging`, or `.env.production` rather than code edits.
 - Local production APK build: `npm run android:prod:apk`
+- Local release signing requires `ANDROID_UPLOAD_STORE_PASSWORD`, `ANDROID_UPLOAD_KEY_ALIAS`, and `ANDROID_UPLOAD_KEY_PASSWORD`.
+- If the checked-in keystore at `android/app/aline2-upload.keystore` is the right one, you only need to provide those secrets. You can export them in your shell or place them in `/tmp/aline2-upload-keystore-credentials.txt`.
 
 ## Backend
 

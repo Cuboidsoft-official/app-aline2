@@ -43,6 +43,7 @@ import {
   createChatConversation,
   fetchChatConversationDetails,
   fetchConversationMessages,
+  reactToChatMessage,
   sendChatMessage,
 } from "../utils/chatApi";
 import { startCallSession } from "../utils/callApi";
@@ -60,7 +61,7 @@ import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
 import MessageContextMenu from "../components/chat/MessageContextMenu";
 import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import { ensureCameraPermission } from "../utils/permissions";
+import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -755,15 +756,25 @@ const ChatScreen = ({ navigation, route }: any) => {
   }, [queueAttachmentPreview]);
 
   const sendCameraAttachment = useCallback(async () => {
-    const hasPermission = await ensureCameraPermission();
+    const hasPermission = await ensureCameraPermission(
+      "Allow Aline2 to use your camera for chat photo and video attachments.",
+    );
     if (!hasPermission) {
       Alert.alert("Camera permission needed", "Allow camera access to capture and send a photo or video.");
       return;
     }
 
     try {
+      const mediaType = await resolveCameraCaptureMediaType("mixed", {
+        title: "Send from camera",
+        message: "Choose whether you want to capture a photo or record a video for this chat.",
+      });
+      if (!mediaType) {
+        return;
+      }
+
       const response = await launchCamera({
-        mediaType: "mixed",
+        mediaType,
         saveToPhotos: false,
         videoQuality: "high",
       });
@@ -1053,27 +1064,23 @@ const ChatScreen = ({ navigation, route }: any) => {
   }, [applyMessageSeen, currentConversationId, currentUserId, messages]);
 
   const reactToMessage = useCallback((messageId: string, emoji = "❤️") => {
-    if (!currentConversationId || !messageId) {
+    if (!messageId) {
       return;
     }
 
-    connectSocket()
-      .then(() => {
-        socket.emit("reactMessage", {
-          conversationId: currentConversationId,
-          messageId,
-          emoji,
-        });
+    reactToChatMessage(messageId, emoji)
+      .then((response: any) => {
         applyMessageReaction({
-          messageId,
-          userId: currentUserId,
-          emoji,
+          messageId: response?.data?.messageId || messageId,
+          userId: response?.data?.userId || currentUserId,
+          emoji: response?.data?.emoji || emoji,
         });
       })
       .catch((error: any) => {
-        console.log("Message reaction emit error:", error);
+        console.log("Message reaction save error:", error);
+        Alert.alert("Reaction failed", getReadableApiErrorMessage(error, "Unable to save the reaction right now."));
       });
-  }, [applyMessageReaction, currentConversationId, currentUserId]);
+  }, [applyMessageReaction, currentUserId]);
 
   // ─── Render message ───────────────────────────────────────────────────────
 

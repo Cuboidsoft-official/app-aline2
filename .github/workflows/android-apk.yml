@@ -140,6 +140,10 @@ jobs:
       - name: Build release APK
         env:
           ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
+          ANDROID_UPLOAD_STORE_FILE: ${{ vars.ANDROID_UPLOAD_STORE_FILE != '' && vars.ANDROID_UPLOAD_STORE_FILE || 'android/app/aline2-upload.keystore' }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ vars.ANDROID_UPLOAD_STORE_PASSWORD != '' && vars.ANDROID_UPLOAD_STORE_PASSWORD || secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ vars.ANDROID_UPLOAD_KEY_PASSWORD != '' && vars.ANDROID_UPLOAD_KEY_PASSWORD || secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           echo "Building Android release APK with ${ENVFILE_VALUE}"
           cd android

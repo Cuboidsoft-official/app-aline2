@@ -2,6 +2,7 @@ import { Asset, CameraOptions, ImageLibraryOptions, launchCamera, launchImageLib
 
 import { API } from "../../api/api";
 import { getReadableApiErrorMessage } from "../../api/networkErrors";
+import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../../utils/permissions";
 import { MediaAsset } from "./types";
 
 export type ComposerAsset = {
@@ -93,7 +94,23 @@ export const pickComposerAssets = async (options: ImageLibraryOptions): Promise<
 };
 
 export const captureComposerAssets = async (options: CameraOptions): Promise<ComposerAsset[]> => {
-  const result = await launchCamera(options);
+  const hasPermission = await ensureCameraPermission("Allow Aline2 to use your camera for posts and stories.");
+  if (!hasPermission) {
+    throw new Error("Camera permission is required to capture media.");
+  }
+
+  const resolvedMediaType = await resolveCameraCaptureMediaType(options.mediaType, {
+    title: "Create with camera",
+    message: "Choose whether you want to capture a photo or record a video.",
+  });
+  if (!resolvedMediaType) {
+    return [];
+  }
+
+  const result = await launchCamera({
+    ...options,
+    mediaType: resolvedMediaType,
+  });
 
   if (result.didCancel) {
     return [];

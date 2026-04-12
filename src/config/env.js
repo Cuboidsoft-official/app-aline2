@@ -51,11 +51,9 @@ const buildCandidateUrls = (rawUrl, fallbackUrl) => {
 };
 
 const normalizedBackendOrigin = trimTrailingSlash(BACKEND_ORIGIN || "");
-const localDevFallbackApiBaseUrl =
-  Platform.OS === "android" ? "http://10.0.2.2:5000/api" : "http://localhost:5000/api";
-const fallbackApiBaseUrl = __DEV__
-  ? localDevFallbackApiBaseUrl
-  : appendApiPath(DEFAULT_PUBLIC_BACKEND_ORIGIN) || localDevFallbackApiBaseUrl;
+const publicFallbackApiBaseUrl = appendApiPath(DEFAULT_PUBLIC_BACKEND_ORIGIN);
+const fallbackApiBaseUrl = publicFallbackApiBaseUrl
+  || (Platform.OS === "android" ? "http://10.0.2.2:5000/api" : "http://localhost:5000/api");
 const derivedApiBaseUrl = appendApiPath(normalizedBackendOrigin);
 const derivedSocketBaseUrl = normalizedBackendOrigin;
 const apiBaseUrlCandidates = buildCandidateUrls(API_BASE_URL || derivedApiBaseUrl, fallbackApiBaseUrl);

@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { createSound } from "react-native-nitro-sound";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import { API } from "../api/api";
@@ -52,7 +53,6 @@ import { useAppTheme } from "../theme/AppThemeContext";
 import PhotoFilterStrip from "../components/media/PhotoFilterStrip";
 import VideoTrimSheet from "../components/media/VideoTrimSheet";
 import FaceOverlayPicker from "../components/media/FaceOverlayPicker";
-import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
 
 type ComposerTab = "post" | "story" | "swipe";
 
@@ -296,6 +296,10 @@ function CreatePostScreen({ navigation, route }: any) {
   const [musicImportingId, setMusicImportingId] = useState("");
   const [musicError, setMusicError] = useState("");
   const [musicBrowseMode, setMusicBrowseMode] = useState<MusicBrowseMode>("trending");
+  const [musicPreviewLoadingId, setMusicPreviewLoadingId] = useState("");
+  const [musicPreviewPlayingId, setMusicPreviewPlayingId] = useState("");
+  const [musicPreviewPositionMs, setMusicPreviewPositionMs] = useState(0);
+  const [musicPreviewDurationMs, setMusicPreviewDurationMs] = useState(0);
 
   const surfaceColor = isDarkMode ? colors.surface : colors.card;
   const elevatedSurfaceColor = isDarkMode ? colors.card : "#f8fafc";
@@ -306,6 +310,94 @@ function CreatePostScreen({ navigation, route }: any) {
   const activePillStyle = { backgroundColor: colors.primary, borderColor: colors.primary };
   const textStickerDragStartRef = useRef(storyStickerPresetPositions.bottom_left);
   const emojiStickerDragStartRef = useRef(storyStickerPresetPositions.top_right);
+  const musicPreviewPlayerRef = useRef(createSound());
+
+  const stopMusicPreview = useCallback(async () => {
+    const player = musicPreviewPlayerRef.current;
+
+    try {
+      player.removePlayBackListener();
+    } catch {
+      // noop
+    }
+
+    try {
+      player.removePlaybackEndListener();
+    } catch {
+      // noop
+    }
+
+    try {
+      await player.stopPlayer();
+    } catch {
+      // noop
+    } finally {
+      setMusicPreviewLoadingId("");
+      setMusicPreviewPlayingId("");
+      setMusicPreviewPositionMs(0);
+      setMusicPreviewDurationMs(0);
+    }
+  }, []);
+
+  const startMusicPreview = useCallback(
+    async (item: MusicCatalogItem) => {
+      const previewUrl = String(item.previewUrl || "").trim();
+
+      if (!previewUrl) {
+        throw new Error("Preview is not available for this track yet.");
+      }
+
+      await stopMusicPreview();
+
+      const player = musicPreviewPlayerRef.current;
+      player.setSubscriptionDuration(0.1);
+      player.addPlayBackListener((event: any) => {
+        setMusicPreviewPositionMs(Math.max(0, Number(event?.currentPosition || 0)));
+        setMusicPreviewDurationMs((currentDuration) => {
+          const reportedDuration = Math.max(0, Number(event?.duration || 0));
+          return reportedDuration || currentDuration;
+        });
+      });
+      player.addPlaybackEndListener(() => {
+        setMusicPreviewLoadingId("");
+        setMusicPreviewPlayingId("");
+        setMusicPreviewPositionMs(0);
+        setMusicPreviewDurationMs(0);
+      });
+
+      setMusicPreviewLoadingId(item.id);
+      setMusicPreviewDurationMs(Math.max(0, Number(item.duration || 0) * 1000));
+
+      try {
+        await player.startPlayer(previewUrl);
+        setMusicPreviewPlayingId(item.id);
+      } finally {
+        setMusicPreviewLoadingId("");
+      }
+    },
+    [stopMusicPreview],
+  );
+
+  const toggleMusicPreview = useCallback(
+    async (item: MusicCatalogItem) => {
+      try {
+        if (musicPreviewPlayingId === item.id) {
+          await stopMusicPreview();
+          return;
+        }
+
+        await startMusicPreview(item);
+      } catch (error) {
+        setMusicError(toUserSafeMessage(error));
+      }
+    },
+    [musicPreviewPlayingId, startMusicPreview, stopMusicPreview],
+  );
+
+  useEffect(() => () => {
+    stopMusicPreview().catch(() => undefined);
+    musicPreviewPlayerRef.current.dispose();
+  }, [stopMusicPreview]);
 
   useEffect(() => {
     const routeTab = route?.params?.initialTab as ComposerTab | undefined;
@@ -1194,32 +1286,68 @@ function CreatePostScreen({ navigation, route }: any) {
               (current.title === item.title && current.artist === item.artist && current.source === item.source)
             );
             const isImporting = musicImportingId === item.id;
+            const isPreviewing = musicPreviewPlayingId === item.id;
+            const isPreviewLoading = musicPreviewLoadingId === item.id;
+            const previewLabel =
+              isPreviewing || isPreviewLoading
+                ? `${formatDuration(Math.round(musicPreviewPositionMs / 1000))} / ${formatDuration(Math.round((musicPreviewDurationMs || item.duration * 1000) / 1000))}`
+                : null;
 
             return (
-              <TouchableOpacity
+              <View
                 key={`${item.id}:${item.title}`}
                 style={[
                   styles.musicResultCard,
                   { backgroundColor: surfaceColor, borderColor: colors.border },
                   isCurrent && [styles.musicResultCardActive, { backgroundColor: elevatedSurfaceColor, borderColor: colors.primary }],
                 ]}
-                onPress={() => attachMusic(item)}
-                disabled={isImporting}
               >
-                <View style={styles.musicResultBody}>
+                <TouchableOpacity
+                  style={styles.musicResultBody}
+                  onPress={() => attachMusic(item)}
+                  disabled={isImporting}
+                >
                   <Text style={[styles.musicResultTitle, { color: colors.text }]}>{buildMusicLabel(item)}</Text>
                   <Text style={[styles.musicResultMeta, helperTextStyle]}>
                     {[item.source || "catalog", item.isOriginal ? "original" : null, formatDuration(item.duration)]
                       .filter(Boolean)
                       .join(" • ")}
                   </Text>
+                  {previewLabel ? <Text style={[styles.musicPreviewMeta, helperTextStyle]}>{previewLabel}</Text> : null}
+                </TouchableOpacity>
+                <View style={styles.musicResultActions}>
+                  <TouchableOpacity
+                    style={[styles.musicResultIconButton, { backgroundColor: elevatedSurfaceColor, borderColor: colors.border }]}
+                    onPress={() => {
+                      toggleMusicPreview(item).catch(() => undefined);
+                    }}
+                    disabled={!item.previewUrl || isImporting || isPreviewLoading}
+                  >
+                    {isPreviewLoading ? (
+                      <ActivityIndicator size="small" color={colors.text} />
+                    ) : (
+                      <Icon
+                        name={isPreviewing ? "pause" : "play"}
+                        size={16}
+                        color={item.previewUrl ? colors.text : colors.mutedText}
+                      />
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.musicResultIconButton, { backgroundColor: elevatedSurfaceColor, borderColor: colors.border }]}
+                    onPress={() => {
+                      attachMusic(item).catch(() => undefined);
+                    }}
+                    disabled={isImporting}
+                  >
+                    {isImporting ? (
+                      <ActivityIndicator size="small" color={colors.text} />
+                    ) : (
+                      <Icon name={isCurrent ? "checkmark-circle" : "add-circle-outline"} size={20} color={colors.text} />
+                    )}
+                  </TouchableOpacity>
                 </View>
-                {isImporting ? (
-                  <ActivityIndicator size="small" color="#111827" />
-                ) : (
-                  <Icon name={isCurrent ? "checkmark-circle" : "add-circle-outline"} size={20} color="#111827" />
-                )}
-              </TouchableOpacity>
+              </View>
             );
           })}
         </View>
@@ -1949,6 +2077,17 @@ const styles = StyleSheet.create({
   musicResultBody: { flex: 1 },
   musicResultTitle: { color: "#111827", fontWeight: "800" },
   musicResultMeta: { marginTop: 4, color: "#6b7280", fontSize: 12 },
+  musicPreviewMeta: { marginTop: 4, color: "#6b7280", fontSize: 12, fontWeight: "600" },
+  musicResultActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  musicResultIconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   pickButton: {
     marginTop: 8,
     flexDirection: "row",

@@ -13,6 +13,7 @@ import { API } from "../../../api/api";
 import { SocialUser } from "../types";
 import { getStoredUserId } from "../../../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../../../constants/defaultAssets";
+import { shouldShowVerifiedBadge } from "../../../utils/verificationBadges";
 
 interface ShareTarget {
   id: string;
@@ -53,7 +54,7 @@ function ShareTargetsList({ onSend }: ShareTargetsListProps) {
             username: String(user?.username || "").trim(),
             name: String(user?.name || user?.username || "User").trim(),
             avatarUrl: String(user?.avatarUrl || user?.profilePic || user?.profileImage || "").trim(),
-            isVerified: !!user?.isVerified,
+            isVerified: shouldShowVerifiedBadge(user),
           }))
           .filter((user: ShareTarget) => user.id && user.username && user.id !== String(currentUserId || ""));
 

@@ -30,6 +30,7 @@ import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
+import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 
 let ColorMatrix: any;
 try {
@@ -375,7 +376,7 @@ function FeedScreen({ navigation }: any) {
           <View style={styles.userMeta}>
             <View style={styles.row}>
               <Text style={[styles.username, { color: colors.text }]}>{item.user.username}</Text>
-              {item.user.isVerified ? (
+              {shouldShowVerifiedBadge(item.user) ? (
                 <Icon style={styles.verifiedIcon} name="checkmark-circle" color="#4ba8ff" size={14} />
               ) : null}
             </View>
