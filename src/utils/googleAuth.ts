@@ -12,7 +12,8 @@ const getGoogleConfig = () => {
   const iosClientId = String(GOOGLE_IOS_CLIENT_ID || "").trim();
 
   if (!webClientId) {
-    throw new Error("Google login is not configured for this app build.");
+    console.warn("Google login is not configured: GOOGLE_WEB_CLIENT_ID is missing.");
+    return null;
   }
 
   return {
@@ -23,25 +24,38 @@ const getGoogleConfig = () => {
 
 export const ensureGoogleConfigured = () => {
   if (isConfigured) {
-    return;
+    return true;
   }
 
   const config = getGoogleConfig();
+  if (!config) {
+    return false;
+  }
 
-  GoogleSignin.configure({
-    webClientId: config.webClientId,
-    iosClientId: config.iosClientId,
-    offlineAccess: false,
-  });
+  try {
+    GoogleSignin.configure({
+      webClientId: config.webClientId,
+      iosClientId: config.iosClientId,
+      offlineAccess: false,
+    });
 
-  isConfigured = true;
+    isConfigured = true;
+    return true;
+  } catch (err) {
+    console.warn("Failed to configure Google Sign-In:", err);
+    return false;
+  }
 };
 
 export const isGoogleCancelledError = (error: any): boolean =>
   error?.code === statusCodes.SIGN_IN_CANCELLED;
 
 export const loginWithGoogle = async () => {
-  ensureGoogleConfigured();
+  const isSetup = ensureGoogleConfigured();
+  if (!isSetup) {
+    throw new Error("Google Login is not currently configured or supported on this device.");
+  }
+
   await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
 
   const response = await GoogleSignin.signIn();

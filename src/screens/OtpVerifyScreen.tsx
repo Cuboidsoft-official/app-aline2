@@ -72,7 +72,9 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
         return;
       }
 
-      if (res?.data?.token && res?.data?.user) {
+      const nextStep = String(res?.data?.nextStep || "").trim();
+
+      if (nextStep === "authenticated" || (res?.data?.token && res?.data?.user)) {
         await setStoredSession({
           accessToken: res.data.accessToken || res.data.token,
           refreshToken: res.data.refreshToken,
@@ -88,12 +90,12 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
         return;
       }
 
-      if (res?.data?.nextStep === "reset_password") {
+      if (nextStep === "reset_password") {
         navigation.replace("ForgotPassword", { email });
         return;
       }
 
-      if (res?.data?.nextStep === "set_password" || purpose === "signup") {
+      if (nextStep === "set_password" || purpose === "signup") {
         setShowPasswordCard(true);
         setOtp("");
         return;

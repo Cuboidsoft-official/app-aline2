@@ -18,7 +18,7 @@ const connectionCandidates =
 let activeConnectionIndex = 0;
 
 const DEFAULT_API_TIMEOUT_MS = 20000;
-const AUTH_API_TIMEOUT_MS = 45000;
+const AUTH_API_TIMEOUT_MS = 90000;
 const AUTH_TIMEOUT_PATH_PATTERN = /^\/auth\/(login|send-otp|verify-otp|set-password|google\/mobile|refresh)(?:$|[/?])/i;
 
 export const API = axios.create({
