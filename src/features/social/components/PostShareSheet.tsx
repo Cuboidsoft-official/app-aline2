@@ -39,7 +39,15 @@ function PostShareSheet({
 
   const buildPostShareUrl = (targetPost: Post) => {
     const shareBase = (appConfig.publicShareBaseUrl || "https://aline2.com").replace(/\/+$/, "");
-    return `${shareBase}/index.php#${targetPost.id}`;
+    const profileSlug =
+      targetPost.user.username || targetPost.user.id || (targetPost.user as any)?._id || "";
+
+    if (!profileSlug) {
+      return shareBase;
+    }
+
+    const query = targetPost.id ? `?post=${encodeURIComponent(String(targetPost.id))}` : "";
+    return `${shareBase}/profile/${encodeURIComponent(String(profileSlug))}${query}`;
   };
 
   const buildPostShareMessage = async (targetPost: Post) => {

@@ -78,6 +78,14 @@ async function ensureAndroidChannel() {
             sound: "default",
         });
 
+        await Notifications.setNotificationChannelAsync("calls", {
+            name: "Calls",
+            importance: Notifications.AndroidImportance?.MAX ?? 4,
+            vibrationPattern: [0, 250, 150, 250, 150, 250],
+            lightColor: "#22c55e",
+            sound: "default",
+        });
+
         await Notifications.setNotificationChannelAsync("social", {
             name: "Social Updates",
             importance: Notifications.AndroidImportance?.DEFAULT ?? 3,
@@ -232,6 +240,20 @@ export function setupNotificationListeners(navigationRef?: any): () => void {
                     case "chat_message":
                         if (data.conversationId) {
                             nav.navigate("ChatScreen", { conversationId: data.conversationId });
+                        } else {
+                            nav.navigate("AllChatsScreen");
+                        }
+                        break;
+
+                    case "incoming_call":
+                        if (data.callSessionId) {
+                            nav.navigate("CallScreen", {
+                                callSessionId: data.callSessionId,
+                                mode: "incoming",
+                                callType: data.callType || "audio",
+                                title: data.title || "Incoming call",
+                                avatarUrl: data.avatarUrl || "",
+                            });
                         } else {
                             nav.navigate("AllChatsScreen");
                         }

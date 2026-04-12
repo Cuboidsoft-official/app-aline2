@@ -17,14 +17,18 @@ const connectionCandidates =
     : [{ apiBaseUrl: appConfig.apiBaseUrl, socketUrl: appConfig.socketUrl }];
 let activeConnectionIndex = 0;
 
+const DEFAULT_API_TIMEOUT_MS = 20000;
+const AUTH_API_TIMEOUT_MS = 45000;
+const AUTH_TIMEOUT_PATH_PATTERN = /^\/auth\/(login|send-otp|verify-otp|set-password|google\/mobile|refresh)(?:$|[/?])/i;
+
 export const API = axios.create({
   baseURL: connectionCandidates[0].apiBaseUrl,
-  timeout: 10000,
+  timeout: DEFAULT_API_TIMEOUT_MS,
 });
 
 export const ROOT_API = axios.create({
   baseURL: connectionCandidates[0].socketUrl,
-  timeout: 10000,
+  timeout: DEFAULT_API_TIMEOUT_MS,
 });
 
 let refreshPromise = null;
@@ -55,6 +59,14 @@ const attachAuthInterceptor = (client) => {
       config.baseURL = getClientBaseUrl("socket");
     } else {
       config.baseURL = getClientBaseUrl("api");
+    }
+
+    if (
+      client === API &&
+      (!config.timeout || config.timeout === DEFAULT_API_TIMEOUT_MS) &&
+      AUTH_TIMEOUT_PATH_PATTERN.test(String(config.url || ""))
+    ) {
+      config.timeout = AUTH_API_TIMEOUT_MS;
     }
 
     config.headers = {
