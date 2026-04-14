@@ -64,6 +64,7 @@ import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { callingDisabledMessage, productFlags } from "../config/productFlags";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 
@@ -105,6 +106,11 @@ type AttachmentShape = {
   fileName?: string;
   mimeType?: string;
   thumbnailUrl?: string;
+};
+
+type MessagePreviewState = {
+  imageUrl: string;
+  title?: string;
 };
 
 type ChatMessage = {
@@ -317,6 +323,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [typingUserId, setTypingUserId] = useState("");
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
+  const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const quickOptions = useMemo(
@@ -391,6 +398,23 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     setPagination(data?.pagination || { nextCursor: null, hasMore: false, limit: 30 });
     setMessages((prev) => (options.append ? dedupeMessages([...nextMessages, ...prev]) : nextMessages));
     setErrorMessage("");
+  }, []);
+
+  const mergeMessage = useCallback((nextMessage: any) => {
+    const normalizedMessage = normalizeMediaFieldsDeep(nextMessage) as ChatMessage;
+
+    setMessages((prev) => {
+      const nextIdentity = getMessageIdentity(normalizedMessage);
+      const exists = nextIdentity
+        ? prev.some((item) => getMessageIdentity(item) === nextIdentity)
+        : false;
+
+      if (exists) {
+        return prev;
+      }
+
+      return [...prev, normalizedMessage];
+    });
   }, []);
 
   const resolveConversation = useCallback(async (targetServiceId?: string | null, options: { force?: boolean } = {}) => {
@@ -1056,6 +1080,57 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       });
   }, [applyMessageReaction, currentUserId]);
 
+  const openAttachmentUrl = useCallback(async (rawUrl: string | undefined | null, fallbackMessage: string) => {
+    const targetUrl = normalizeMediaUrl(rawUrl);
+    if (!targetUrl) {
+      Alert.alert("Attachment unavailable", fallbackMessage);
+      return;
+    }
+
+    try {
+      await Linking.openURL(targetUrl);
+    } catch (error) {
+      console.log("seller attachment open error:", error);
+      Alert.alert("Unable to open attachment", fallbackMessage);
+    }
+  }, []);
+
+  const handleMessagePress = useCallback((message: ChatMessage, attachment: AttachmentShape | null, locationPayload: { label: string; url: string } | null) => {
+    if (locationPayload?.url) {
+      Linking.openURL(locationPayload.url).catch((error) => {
+        console.log("seller open location error:", error);
+        Alert.alert("Unable to open map", "Please try again.");
+      });
+      return;
+    }
+
+    if (!attachment?.url) {
+      return;
+    }
+
+    if (isImageMessage(message)) {
+      setMessagePreview({
+        imageUrl: normalizeMediaUrl(attachment.url),
+        title: getAttachmentDisplayName(message),
+      });
+      return;
+    }
+
+    if (isVideoMessage(message)) {
+      openAttachmentUrl(attachment.url, "This video could not be opened right now.");
+      return;
+    }
+
+    if (isAudioMessage(message)) {
+      openAttachmentUrl(attachment.url, "This audio file could not be opened right now.");
+      return;
+    }
+
+    if (isDocumentMessage(message)) {
+      openAttachmentUrl(attachment.url, "This document could not be opened right now.");
+    }
+  }, [openAttachmentUrl]);
+
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isMine = String(getMessageSenderId(item)) === String(currentUserId || "");
     const attachment = getMessageAttachment(item);
@@ -1073,6 +1148,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       >
         <TouchableOpacity
           activeOpacity={0.92}
+          onPress={() => handleMessagePress(item, attachment, locationPayload)}
           onLongPress={() => reactToMessage(item._id!)}
           style={[
             styles.msgBubble,
@@ -1139,12 +1215,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           {locationPayload ? (
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => {
-                Linking.openURL(locationPayload.url).catch((error) => {
-                  console.log("seller open location error:", error);
-                  Alert.alert("Unable to open map", "Please try again.");
-                });
-              }}
+              onPress={() => handleMessagePress(item, attachment, locationPayload)}
               style={[styles.locationCard, isMine ? styles.myLocationCard : null]}
             >
               <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
@@ -1495,6 +1566,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             <Icon name="document-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
 
+          <TouchableOpacity style={styles.attachButton} onPress={sendAudioAttachment} disabled={uploading || loading}>
+            <Icon name="musical-notes-outline" size={22} color={colors.primary} />
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.attachButton} onPress={() => setShowLocationComposer(true)} disabled={uploading || loading}>
             <Icon name="location-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
@@ -1523,12 +1598,66 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               <Icon name="send" size={18} color="#fff" />
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity onPress={sendAudioAttachment} disabled={uploading || loading}>
-              <Icon name="mic-outline" size={24} color={colors.primary} />
-            </TouchableOpacity>
+            <VoiceRecorderButton
+              color={colors.primary}
+              disabled={uploading || loading}
+              onSend={async (voiceFile) => {
+                try {
+                  setUploading(true);
+                  const resolvedConversationId = await ensureConversation();
+                  const formData = new FormData();
+                  formData.append("conversationId", resolvedConversationId as string);
+                  formData.append("messageType", "voice");
+                  formData.append("file", {
+                    uri: voiceFile.uri,
+                    name: voiceFile.name,
+                    type: voiceFile.type,
+                  } as any);
+
+                  const res = await API.post("/message/send", formData, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                  });
+
+                  if (res.data?.message) {
+                    mergeMessage(res.data.message);
+                  }
+                } catch (error) {
+                  console.log("seller voice send error:", error);
+                  Alert.alert("Voice message failed", getReadableApiErrorMessage(error, "Unable to send voice message right now."));
+                } finally {
+                  setUploading(false);
+                }
+              }}
+            />
           )}
         </View>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={!!messagePreview}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMessagePreview(null)}
+      >
+        <View style={styles.previewOverlay}>
+          <TouchableOpacity
+            style={styles.previewCloseButton}
+            onPress={() => setMessagePreview(null)}
+          >
+            <Icon name="close" size={26} color="#fff" />
+          </TouchableOpacity>
+          <Image
+            source={{ uri: messagePreview?.imageUrl || "" }}
+            style={styles.previewImage}
+            resizeMode="contain"
+          />
+          {messagePreview?.title ? (
+            <Text style={styles.previewCaption} numberOfLines={1}>
+              {messagePreview.title}
+            </Text>
+          ) : null}
+        </View>
+      </Modal>
 
       <Modal visible={showLocationComposer} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -1848,6 +1977,31 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontWeight: "600",
     maxWidth: 180
+  },
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.96)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 24,
+  },
+  previewCloseButton: {
+    position: "absolute",
+    top: 48,
+    right: 18,
+    zIndex: 2,
+    padding: 6,
+  },
+  previewImage: {
+    width: "100%",
+    height: "78%",
+  },
+  previewCaption: {
+    marginTop: 16,
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
   },
   locationCard: {
     flexDirection: "row",

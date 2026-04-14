@@ -14,25 +14,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { API } from '../api/api';
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import { isGoogleCancelledError, loginWithGoogle } from "../utils/googleAuth";
 import { useAppTheme } from "../theme/AppThemeContext";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const OTP_SENDER_HINT = "Verification emails may currently arrive from our delivery inbox while Aline2 branded mail is being finalized.";
-
-const showOtpComingSoon = () => {
-  Alert.alert(
-    "Coming soon",
-    "Email OTP is being upgraded to Aline2-branded delivery and will be available again soon. Please use Google sign-in for now.",
-  );
-};
 
 const SignupScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
 
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
 
   const sendOtp = async () => {
 
@@ -89,11 +79,6 @@ const SignupScreen = ({ navigation }: any) => {
         return;
       }
 
-      if (String(err?.response?.data?.code || "").trim() === "OTP_NOT_CONFIGURED") {
-        showOtpComingSoon();
-        return;
-      }
-
       Alert.alert(
         "Unable to send OTP",
         getReadableApiErrorMessage(err, "Something went wrong. Try again.")
@@ -101,30 +86,6 @@ const SignupScreen = ({ navigation }: any) => {
 
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGoogleSignup = async () => {
-    try {
-      setGoogleLoading(true);
-      const result = await loginWithGoogle();
-
-      if (result.cancelled) {
-        return;
-      }
-
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "MainApp" }],
-      });
-    } catch (error: any) {
-      if (isGoogleCancelledError(error)) {
-        return;
-      }
-
-      Alert.alert("Google sign up failed", getReadableApiErrorMessage(error, "Please try again."));
-    } finally {
-      setGoogleLoading(false);
     }
   };
 
@@ -172,19 +133,6 @@ const SignupScreen = ({ navigation }: any) => {
           ) : (
             <Text style={styles.nextText}>Next</Text>
           )}
-        </TouchableOpacity>
-
-        <Text style={[styles.supportedHint, { color: colors.mutedText }]}>Supported sign up: Google now, email OTP when available</Text>
-        <Text style={[styles.supportedHint, { color: colors.mutedText }]}>{OTP_SENDER_HINT}</Text>
-
-        <TouchableOpacity
-          style={[styles.googleButton, { borderColor: colors.border, backgroundColor: colors.card }, googleLoading && styles.buttonDisabled]}
-          onPress={handleGoogleSignup}
-          disabled={googleLoading}
-        >
-          <Text style={[styles.googleText, { color: colors.text }]}>
-            {googleLoading ? "Connecting Google..." : "Continue with Google"}
-          </Text>
         </TouchableOpacity>
 
         <View style={styles.bottomContainer}>
@@ -248,39 +196,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 15,
   },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
 
   nextText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-  },
-
-  supportedHint: {
-    textAlign: 'center',
-    color: '#666',
-    fontSize: 13,
-    marginBottom: 12,
-  },
-
-  googleButton: {
-    height: 55,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-    backgroundColor: '#fff',
-  },
-
-  googleText: {
-    fontSize: 15,
-    color: '#222',
-    fontWeight: '600',
-  },
-
-  buttonDisabled: {
-    opacity: 0.7,
   },
 
   bottomContainer: {

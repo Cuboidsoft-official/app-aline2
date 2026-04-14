@@ -3,7 +3,7 @@ import { API } from '../api/api';
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { setStoredSession } from "../utils/authSession";
 import { registerPushToken } from "../utils/pushRegistration";
-import { isGoogleCancelledError, loginWithGoogle } from "../utils/googleAuth";
+
 
 import {
   Alert,
@@ -17,14 +17,6 @@ import {
 } from 'react-native';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const OTP_SENDER_HINT = "Verification emails may currently arrive from our delivery inbox while Aline2 branded mail is being finalized.";
-
-const showOtpComingSoon = () => {
-  Alert.alert(
-    "Coming soon",
-    "Email OTP is being upgraded to Aline2-branded delivery and will be available again soon. Please use password login or Google sign-in for now.",
-  );
-};
 
 const LoginScreen = ({ navigation, route }: any) => {
   const presetEmail = route?.params?.email || '';
@@ -32,7 +24,6 @@ const LoginScreen = ({ navigation, route }: any) => {
   const [email, setEmail] = useState(presetEmail || '');
   const [password, setPassword] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
 
   useEffect(() => {
     if (presetEmail) {
@@ -136,41 +127,11 @@ const LoginScreen = ({ navigation, route }: any) => {
 
       Alert.alert("Unable to send OTP", res?.data?.message || "Please try again.");
     } catch (error: any) {
-      if (String(error?.response?.data?.code || "").trim() === "OTP_NOT_CONFIGURED") {
-        showOtpComingSoon();
-        return;
-      }
-
       Alert.alert("Unable to send OTP", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setOtpLoading(false);
     }
   };
-
-  const handleGoogleLogin = async () => {
-    try {
-      setGoogleLoading(true);
-      const result = await loginWithGoogle();
-
-      if (result.cancelled) {
-        return;
-      }
-
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "MainApp" }],
-      });
-    } catch (error: any) {
-      if (isGoogleCancelledError(error)) {
-        return;
-      }
-
-      Alert.alert("Google login failed", getReadableApiErrorMessage(error, "Please try again."));
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
 
@@ -221,21 +182,6 @@ const LoginScreen = ({ navigation, route }: any) => {
 
         <TouchableOpacity onPress={handleEmailOtpLogin} disabled={otpLoading}>
           <Text style={styles.forgot}>{otpLoading ? "Sending OTP..." : "Use email OTP instead"}</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.supportedHint}>Supported sign in: password, Google, or email OTP when available</Text>
-        <Text style={styles.supportedHint}>{OTP_SENDER_HINT}</Text>
-
-        <View style={styles.divider} />
-
-        <TouchableOpacity
-          style={[styles.googleButton, googleLoading && styles.buttonDisabled]}
-          onPress={handleGoogleLogin}
-          disabled={googleLoading}
-        >
-          <Text style={styles.googleText}>
-            {googleLoading ? "Connecting Google..." : "Continue with Google"}
-          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.signupButton} onPress={() => navigation.navigate('Signup')}>
@@ -339,39 +285,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     color: '#555',
     fontWeight: '500',
-  },
-
-  supportedHint: {
-    textAlign: 'center',
-    marginBottom: 20,
-    color: '#666',
-    fontSize: 13,
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: '#ddd',
-    marginVertical: 15,
-  },
-
-  googleButton: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    paddingVertical: 15,
-    borderRadius: 30,
-    alignItems: 'center',
-    marginBottom: 12,
-    backgroundColor: '#fff',
-  },
-
-  googleText: {
-    color: '#222',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-
-  buttonDisabled: {
-    opacity: 0.7,
   },
 
   signupButton: {

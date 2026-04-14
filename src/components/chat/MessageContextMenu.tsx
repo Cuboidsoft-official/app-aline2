@@ -47,6 +47,7 @@ interface MessageContextMenuProps {
     isMine: boolean;
     onClose: () => void;
     onReact?: (messageId: string, emoji: string) => void;
+    onForward?: (messageId: string) => void;
     onMessageEdited?: (data: MessageEditedData) => void;
     onMessageDeleted?: (messageId: string) => void;
 }
@@ -57,6 +58,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
     isMine,
     onClose,
     onReact,
+    onForward,
     onMessageEdited,
     onMessageDeleted,
 }) => {
@@ -145,6 +147,13 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
         [message?._id, onClose, onReact]
     );
 
+    const handleForward = useCallback(() => {
+        if (onForward && message?._id) {
+            onForward(message._id);
+        }
+        onClose();
+    }, [message?._id, onClose, onForward]);
+
     if (!visible || !message) return null;
 
     return (
@@ -203,6 +212,13 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
                                 <TouchableOpacity style={styles.action} onPress={handleEditStart}>
                                     <Icon name="create-outline" size={20} color="#333" />
                                     <Text style={styles.actionText}>Edit</Text>
+                                </TouchableOpacity>
+                            ) : null}
+
+                            {onForward ? (
+                                <TouchableOpacity style={styles.action} onPress={handleForward}>
+                                    <Icon name="arrow-redo-outline" size={20} color="#333" />
+                                    <Text style={styles.actionText}>Forward</Text>
                                 </TouchableOpacity>
                             ) : null}
 

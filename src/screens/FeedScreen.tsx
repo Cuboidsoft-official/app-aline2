@@ -235,6 +235,20 @@ function FeedScreen({ navigation }: any) {
     navigation.navigate("PostDetail", { postId });
   };
 
+  const openUserProfile = useCallback((userId: string) => {
+    const normalizedUserId = String(userId || "");
+    if (!normalizedUserId) {
+      return;
+    }
+
+    if (normalizedUserId === String(currentUser?.id || "")) {
+      navigation.navigate("Profile");
+      return;
+    }
+
+    navigation.navigate("ProfilePreviewScreen", { userId: normalizedUserId });
+  }, [currentUser?.id, navigation]);
+
   const closeSheet = () => {
     setActiveSheet(null);
     setSelectedPost(null);
@@ -372,16 +386,18 @@ function FeedScreen({ navigation }: any) {
     return (
       <View style={[styles.postCard, { backgroundColor: colors.background }]}>
         <View style={styles.postHeader}>
-          <Image source={{ uri: item.user.avatarUrl || DEFAULT_AVATAR_URL }} style={styles.postAvatar} />
-          <View style={styles.userMeta}>
-            <View style={styles.row}>
-              <Text style={[styles.username, { color: colors.text }]}>{item.user.username}</Text>
-              {shouldShowVerifiedBadge(item.user) ? (
-                <Icon style={styles.verifiedIcon} name="checkmark-circle" color="#4ba8ff" size={14} />
-              ) : null}
+          <TouchableOpacity style={styles.postHeaderIdentity} onPress={() => openUserProfile(item.user.id)}>
+            <Image source={{ uri: item.user.avatarUrl || DEFAULT_AVATAR_URL }} style={styles.postAvatar} />
+            <View style={styles.userMeta}>
+              <View style={styles.row}>
+                <Text style={[styles.username, { color: colors.text }]}>{item.user.username}</Text>
+                {shouldShowVerifiedBadge(item.user) ? (
+                  <Icon style={styles.verifiedIcon} name="checkmark-circle" color="#4ba8ff" size={14} />
+                ) : null}
+              </View>
+              <Text style={[styles.postTime, { color: colors.mutedText }]}>{formatAgo(item.createdAt)}</Text>
             </View>
-            <Text style={[styles.postTime, { color: colors.mutedText }]}>{formatAgo(item.createdAt)}</Text>
-          </View>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.moreButton} onPress={() => openContentActions(item)}>
             <Icon name="ellipsis-horizontal" size={20} color={colors.text} />
           </TouchableOpacity>
@@ -414,7 +430,9 @@ function FeedScreen({ navigation }: any) {
         ) : null}
 
         <Text style={[styles.caption, { color: colors.text }]}>
-          <Text style={[styles.captionUser, { color: colors.text }]}>{item.user.username} </Text>
+          <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
+            {item.user.username}{" "}
+          </Text>
           {item.caption}
         </Text>
 
@@ -677,6 +695,7 @@ const styles = StyleSheet.create({
   storyName: { marginTop: 6, fontSize: 12, color: "#272727" },
   postCard: { marginBottom: 18 },
   postHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 9 },
+  postHeaderIdentity: { flexDirection: "row", alignItems: "center", flex: 1 },
   postAvatar: { width: 36, height: 36, borderRadius: 18 },
   userMeta: { marginLeft: 9 },
   row: { flexDirection: "row", alignItems: "center" },

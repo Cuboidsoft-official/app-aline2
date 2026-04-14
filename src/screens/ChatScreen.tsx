@@ -150,6 +150,11 @@ interface PendingAttachment {
   kind: "image" | "video";
 }
 
+interface MessagePreviewState {
+  imageUrl: string;
+  title?: string;
+}
+
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
 const buildLocationMessage = (query: string): string => {
@@ -289,6 +294,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [contextMessage, setContextMessage] = useState<ChatMessage | null>(null);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
+  const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
 
   // ─── Data fetching ──────────────────────────────────────────────────────
 
@@ -1082,6 +1088,57 @@ const ChatScreen = ({ navigation, route }: any) => {
       });
   }, [applyMessageReaction, currentUserId]);
 
+  const openAttachmentUrl = useCallback(async (rawUrl: string | undefined | null, fallbackMessage: string) => {
+    const targetUrl = normalizeMediaUrl(rawUrl);
+    if (!targetUrl) {
+      Alert.alert("Attachment unavailable", fallbackMessage);
+      return;
+    }
+
+    try {
+      await Linking.openURL(targetUrl);
+    } catch (error) {
+      console.log("Attachment open error:", error);
+      Alert.alert("Unable to open attachment", fallbackMessage);
+    }
+  }, []);
+
+  const handleMessagePress = useCallback((message: ChatMessage, attachment: MessageAttachment | null, locationPayload: LocationPayload | null) => {
+    if (locationPayload?.url) {
+      Linking.openURL(locationPayload.url).catch((error) => {
+        console.log("Open location error:", error);
+        Alert.alert("Unable to open map", "Please try again.");
+      });
+      return;
+    }
+
+    if (!attachment?.url) {
+      return;
+    }
+
+    if (isImageMessage(message)) {
+      setMessagePreview({
+        imageUrl: normalizeMediaUrl(attachment.url),
+        title: getAttachmentDisplayName(message),
+      });
+      return;
+    }
+
+    if (isVideoMessage(message)) {
+      openAttachmentUrl(attachment.url, "This video could not be opened right now.");
+      return;
+    }
+
+    if (isAudioMessage(message)) {
+      openAttachmentUrl(attachment.url, "This audio file could not be opened right now.");
+      return;
+    }
+
+    if (isDocumentMessage(message)) {
+      openAttachmentUrl(attachment.url, "This document could not be opened right now.");
+    }
+  }, [openAttachmentUrl]);
+
   // ─── Render message ───────────────────────────────────────────────────────
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
@@ -1103,6 +1160,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       >
         <TouchableOpacity
           activeOpacity={0.92}
+          onPress={() => handleMessagePress(item, attachment, locationPayload)}
           onLongPress={() => {
             setContextMessage(item);
             setShowContextMenu(true);
@@ -1168,12 +1226,7 @@ const ChatScreen = ({ navigation, route }: any) => {
           {locationPayload ? (
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => {
-                Linking.openURL(locationPayload.url).catch((error) => {
-                  console.log("Open location error:", error);
-                  Alert.alert("Unable to open map", "Please try again.");
-                });
-              }}
+              onPress={() => handleMessagePress(item, attachment, locationPayload)}
               style={[styles.locationCard, isMine && styles.myLocationCard]}
             >
               <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
@@ -1477,6 +1530,12 @@ const ChatScreen = ({ navigation, route }: any) => {
           isMine={String(typeof contextMessage?.sender === "object" ? contextMessage?.sender?._id : contextMessage?.sender) === String(currentUserId)}
           onClose={() => { setShowContextMenu(false); setContextMessage(null); }}
           onReact={reactToMessage}
+          onForward={(messageId: string) => {
+            navigation.navigate("AllChatsScreen", {
+              forwardMessageId: messageId,
+              sourceConversationId: currentConversationId,
+            });
+          }}
           onMessageEdited={(data: any) => {
             setMessages((prev) =>
               prev.map((msg) =>
@@ -1490,6 +1549,32 @@ const ChatScreen = ({ navigation, route }: any) => {
             setMessages((prev) => prev.filter((msg) => String(msg?._id) !== String(messageId)));
           }}
         />
+
+        <Modal
+          visible={!!messagePreview}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMessagePreview(null)}
+        >
+          <View style={styles.previewOverlay}>
+            <TouchableOpacity
+              style={styles.previewCloseButton}
+              onPress={() => setMessagePreview(null)}
+            >
+              <Icon name="close" size={26} color="#fff" />
+            </TouchableOpacity>
+            <Image
+              source={{ uri: messagePreview?.imageUrl || "" }}
+              style={styles.previewImage}
+              resizeMode="contain"
+            />
+            {messagePreview?.title ? (
+              <Text style={styles.previewCaption} numberOfLines={1}>
+                {messagePreview.title}
+              </Text>
+            ) : null}
+          </View>
+        </Modal>
 
         <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: Math.max(6, insets.bottom) }]}>
           <TouchableOpacity onPress={() => setShowTools(true)} disabled={uploading}>
@@ -1851,6 +1936,31 @@ const styles = StyleSheet.create({
   },
   attachmentPreviewClose: {
     marginLeft: 8,
+  },
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.96)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 24,
+  },
+  previewCloseButton: {
+    position: "absolute",
+    top: 48,
+    right: 18,
+    zIndex: 2,
+    padding: 6,
+  },
+  previewImage: {
+    width: "100%",
+    height: "78%",
+  },
+  previewCaption: {
+    marginTop: 16,
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
   },
   sendBtn: {
     backgroundColor: PRIMARY,

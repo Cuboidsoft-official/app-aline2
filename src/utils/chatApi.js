@@ -155,6 +155,25 @@ export const reactToChatMessage = async (messageId, emoji) => {
   return response.data;
 };
 
+export const forwardChatMessage = async ({ messageId, targetConversationId } = {}) => {
+  if (!messageId) {
+    throw new Error("messageId is required");
+  }
+
+  if (!targetConversationId) {
+    throw new Error("targetConversationId is required");
+  }
+
+  const headers = await buildAuthHeaders();
+  const response = await API.post(
+    `/message/${messageId}/forward`,
+    { targetConversationId },
+    { headers },
+  );
+
+  return response.data;
+};
+
 /**
  * @param {{ conversationId?: string; text?: string; file?: { uri?: string; name?: string | null; type?: string | null }; mediaUrl?: string; messageType?: string }} [params]
  */

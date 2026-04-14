@@ -1,4 +1,4 @@
-package com.aline2new
+package com.aline2
 
 import android.app.Application
 import com.facebook.react.PackageList

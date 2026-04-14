@@ -10,6 +10,7 @@ ActivityIndicator,
 RefreshControl,
 Modal,
 TextInput,
+Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -18,7 +19,7 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import Icon from "react-native-vector-icons/Ionicons";
 import { getStoredUserId } from "../utils/authSession";
-import { createGroupChatConversation, fetchChatConversations } from "../utils/chatApi";
+import { createChatConversation, createGroupChatConversation, fetchChatConversations, forwardChatMessage } from "../utils/chatApi";
 import { getConversationPreview } from "../utils/chatPresentation";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
@@ -61,7 +62,7 @@ interface Conversation {
 
 type ChatTab = "regular" | "seller" | "group";
 
-const AllChatsScreen = ({ navigation }: any) => {
+const AllChatsScreen = ({ navigation, route }: any) => {
   const { colors, isDarkMode } = useAppTheme();
   const tabsBackgroundColor = isDarkMode ? colors.surface : colors.card;
   const groupAvatarBackgroundColor = isDarkMode ? colors.surface : colors.card;
@@ -79,6 +80,8 @@ const AllChatsScreen = ({ navigation }: any) => {
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [eligibleGroupMemberIds, setEligibleGroupMemberIds] = useState<string[]>([]);
+  const forwardMessageId = String(route?.params?.forwardMessageId || "");
+  const isForwardMode = Boolean(forwardMessageId);
 
   const fetchChatData = useCallback(async (isRefresh = false) => {
     try {
@@ -243,6 +246,45 @@ const AllChatsScreen = ({ navigation }: any) => {
     }
   }, [closeGroupModal, fetchChatData, groupName, navigation, selectedGroupMembers]);
 
+  const completeForward = useCallback(async (targetConversationId: string) => {
+    if (!forwardMessageId || !targetConversationId) {
+      return;
+    }
+
+    try {
+      await forwardChatMessage({
+        messageId: forwardMessageId,
+        targetConversationId,
+      });
+      Alert.alert("Message forwarded", "The message was forwarded successfully.");
+      navigation.goBack();
+    } catch (error) {
+      Alert.alert("Forward failed", getReadableApiErrorMessage(error, "Unable to forward this message right now."));
+    }
+  }, [forwardMessageId, navigation]);
+
+  const handleForwardToUser = useCallback(async (user: ChatUser, conversationType: "direct" | "seller") => {
+    const existingConversation = conversationMap.get(user._id);
+    const createdConversation = !existingConversation
+      ? await createChatConversation({
+        receiverId: user._id,
+        conversationType,
+      })
+      : null;
+
+    const targetConversationId = String(
+      existingConversation?._id
+      || createdConversation?.conversation?._id
+      || "",
+    );
+
+    if (!targetConversationId) {
+      throw new Error("Unable to prepare a conversation for forwarding.");
+    }
+
+    await completeForward(targetConversationId);
+  }, [completeForward, conversationMap]);
+
   const renderChat = ({ item }: { item: ChatUser }) => {
     const conversation = conversationMap.get(item._id);
     const subtitle = getConversationPreview(conversation)
@@ -251,11 +293,20 @@ const AllChatsScreen = ({ navigation }: any) => {
     return (
       <TouchableOpacity
         style={[styles.chatCard, { borderColor: colors.border, backgroundColor: colors.card }]}
-        onPress={() => navigation.navigate("ChatScreen", {
-          userId: item._id,
-          conversationId: conversation?._id,
-          conversationType: activeTab === "seller" ? "seller" : "direct"
-        })}
+        onPress={() => {
+          if (isForwardMode) {
+            handleForwardToUser(item, activeTab === "seller" ? "seller" : "direct").catch((error) => {
+              Alert.alert("Forward failed", getReadableApiErrorMessage(error, "Unable to forward this message right now."));
+            });
+            return;
+          }
+
+          navigation.navigate("ChatScreen", {
+            userId: item._id,
+            conversationId: conversation?._id,
+            conversationType: activeTab === "seller" ? "seller" : "direct"
+          });
+        }}
       >
         <View style={styles.avatarContainer}>
           <Image
@@ -306,6 +357,13 @@ const AllChatsScreen = ({ navigation }: any) => {
 
     const handlePress = () => {
       if (!hasSellerLink) {
+        return;
+      }
+
+      if (isForwardMode) {
+        completeForward(String(item._id || "")).catch((error) => {
+          Alert.alert("Forward failed", getReadableApiErrorMessage(error, "Unable to forward this message right now."));
+        });
         return;
       }
 
@@ -379,13 +437,22 @@ const AllChatsScreen = ({ navigation }: any) => {
     return (
       <TouchableOpacity
         style={[styles.chatCard, { borderColor: colors.border, backgroundColor: colors.card }]}
-        onPress={() => navigation.navigate("ChatScreen", {
-          conversationId: item._id,
-          conversationType: "group",
-          groupName: item?.groupName,
-          groupAvatar: item?.groupAvatar,
-          memberCount: item?.memberCount || item?.members?.length || 0,
-        })}
+        onPress={() => {
+          if (isForwardMode) {
+            completeForward(String(item._id || "")).catch((error) => {
+              Alert.alert("Forward failed", getReadableApiErrorMessage(error, "Unable to forward this message right now."));
+            });
+            return;
+          }
+
+          navigation.navigate("ChatScreen", {
+            conversationId: item._id,
+            conversationType: "group",
+            groupName: item?.groupName,
+            groupAvatar: item?.groupAvatar,
+            memberCount: item?.memberCount || item?.members?.length || 0,
+          });
+        }}
       >
         {item?.groupAvatar ? (
           <Image source={{ uri: item.groupAvatar }} style={styles.avatar} />
