@@ -50,6 +50,7 @@ import {
 } from "../utils/musicApi";
 import { getStoredUserId } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
+import SocialVideo from "../features/social/components/SocialVideo";
 import PhotoFilterStrip from "../components/media/PhotoFilterStrip";
 import VideoTrimSheet from "../components/media/VideoTrimSheet";
 import FaceOverlayPicker from "../components/media/FaceOverlayPicker";
@@ -178,7 +179,6 @@ const appendCaptionEntities = (baseCaption: string, hashtags: string[], mentions
   return [caption, ...appendedHashtags, ...appendedMentions].filter(Boolean).join(" ").trim();
 };
 
-const isRemoteImage = (asset: ComposerAsset | undefined): boolean => !!asset && asset.source === "remote" && asset.mediaType === "image";
 const defaultClipDuration = (tab: ComposerTab, trackDuration: number): number => {
   const safeDuration = Math.max(1, Math.round(trackDuration || 0));
 
@@ -1037,14 +1037,27 @@ function CreatePostScreen({ navigation, route }: any) {
       );
     }
 
-    if (primaryAsset.mediaType === "video" && !primaryAsset.thumbnailUrl && !isRemoteImage(primaryAsset)) {
-      return (
-        <View style={styles.videoPreviewCard}>
-          <Icon name="videocam-outline" size={40} color="#fff" />
-          <Text style={styles.videoPreviewTitle}>Video selected</Text>
-          <Text style={styles.videoPreviewText}>{primaryAsset.fileName || "Ready to upload"}</Text>
-        </View>
+    if (primaryAsset.mediaType === "video") {
+      const previewVideo = (
+        <SocialVideo
+          uri={primaryAsset.uri}
+          posterUri={primaryAsset.thumbnailUrl || primaryAsset.uri}
+          style={styles.preview}
+          muted={false}
+          repeat
+          controls
+        />
       );
+
+      return activeTab === "story" ? (
+        <View
+          style={styles.storyPreviewFrame}
+          onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
+        >
+          {previewVideo}
+          {previewStickers}
+        </View>
+      ) : previewVideo;
     }
 
     return activeTab === "story" ? (

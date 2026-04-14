@@ -1,7 +1,8 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Image,
   RefreshControl,
@@ -93,11 +94,53 @@ function FeedScreen({ navigation }: any) {
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [activeSheet, setActiveSheet] = useState<null | "comments" | "share" | "actions">(null);
-  const [currentUser, setCurrentUser] = useState<{ id: string; avatarUrl: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{
+    id: string;
+    avatarUrl: string;
+    username: string;
+    name: string;
+  } | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [page, setPage] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [isVideoSoundEnabled, setIsVideoSoundEnabled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const sidebarWidth = Math.min(width * 0.82, 330);
+
+  const sidebarTranslateX = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-sidebarWidth - 24, 0],
+  });
+
+  const menuSections = useMemo(
+    () => [
+      {
+        title: "Account",
+        data: [
+          { icon: "person-outline", label: "My Profile", screen: "ProfileView" },
+          { icon: "wallet-outline", label: "My Balance", screen: "WalletScreen" },
+          { icon: "notifications-outline", label: "Notifications", screen: "NotificationScreen" },
+        ],
+      },
+      {
+        title: "Growth",
+        data: [
+          { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen" },
+          { icon: "storefront-outline", label: "Become a Seller", screen: "SellerRegistration" },
+        ],
+      },
+      {
+        title: "Support",
+        data: [
+          { icon: "settings-outline", label: "Settings", screen: "SettingsScreen" },
+          { icon: "help-circle-outline", label: "Help & Support", screen: "HelpSupportScreen" },
+        ],
+      },
+    ],
+    [],
+  );
 
   const loadFeed = useCallback(async () => {
     const [data, storedUser] = await Promise.all([socialApi.getFeed(), getStoredUser()]);
@@ -109,6 +152,8 @@ function FeedScreen({ navigation }: any) {
         ? {
           id: String(storedUser._id || storedUser.id || ""),
           avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
+          username: String(storedUser.username || ""),
+          name: String(storedUser.name || ""),
         }
         : null,
     );
@@ -130,6 +175,8 @@ function FeedScreen({ navigation }: any) {
                 ? {
                   id: String(storedUser._id || storedUser.id || ""),
                   avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
+                  username: String(storedUser.username || ""),
+                  name: String(storedUser.name || ""),
                 }
                 : null,
             );
@@ -254,6 +301,28 @@ function FeedScreen({ navigation }: any) {
     setSelectedPost(null);
   };
 
+  const animateMenu = useCallback((nextOpen: boolean) => {
+    setMenuOpen(nextOpen);
+    Animated.timing(slideAnim, {
+      toValue: nextOpen ? 1 : 0,
+      duration: 260,
+      useNativeDriver: true,
+    }).start();
+  }, [slideAnim]);
+
+  const toggleMenu = useCallback(() => {
+    animateMenu(!menuOpen);
+  }, [animateMenu, menuOpen]);
+
+  const closeMenu = useCallback(() => {
+    animateMenu(false);
+  }, [animateMenu]);
+
+  const navigateFromMenu = useCallback((screen: string) => {
+    closeMenu();
+    navigation.navigate(screen);
+  }, [closeMenu, navigation]);
+
   const openPostComments = (postId: string) => {
     navigation.navigate("PostComments", { postId });
   };
@@ -306,7 +375,7 @@ function FeedScreen({ navigation }: any) {
             uri={normalizeMediaUrl(primaryMedia.url)}
             posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || primaryMedia.url)}
             style={[styles.postImage, { width }]}
-            muted
+            muted={!isVideoSoundEnabled}
             repeat
           />
         );
@@ -338,7 +407,7 @@ function FeedScreen({ navigation }: any) {
               uri={normalizeMediaUrl(asset.url)}
               posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
               style={[styles.postImage, { width }]}
-              muted
+              muted={!isVideoSoundEnabled}
               repeat
             />
           ) : (
@@ -371,6 +440,7 @@ function FeedScreen({ navigation }: any) {
   };
 
   const renderPost = ({ item }: { item: Post }) => {
+    const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
     const tokens: string[] = [getPostTypeTag(item)];
 
     if (item.location) {
@@ -419,6 +489,16 @@ function FeedScreen({ navigation }: any) {
           <TouchableOpacity style={styles.iconButton} onPress={() => openPostShareSheet(item)}>
             <Icon name="paper-plane-outline" size={22} color={colors.text} />
           </TouchableOpacity>
+
+          {hasVideoMedia ? (
+            <TouchableOpacity style={styles.iconButton} onPress={() => setIsVideoSoundEnabled((current) => !current)}>
+              <Icon
+                name={isVideoSoundEnabled ? "volume-high-outline" : "volume-mute-outline"}
+                size={22}
+                color={colors.text}
+              />
+            </TouchableOpacity>
+          ) : null}
 
           <TouchableOpacity style={styles.bookmarkButton} onPress={() => handleSave(item.id)}>
             <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={22} color={colors.text} />
@@ -483,7 +563,9 @@ function FeedScreen({ navigation }: any) {
       <>
         <View style={[styles.topBar, { borderColor: colors.border, backgroundColor: colors.background }]}>
           <View style={styles.topLeft}>
-            <Image source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }} style={styles.logo} />
+            <TouchableOpacity style={styles.logoTapTarget} onPress={toggleMenu} activeOpacity={0.85}>
+              <Image source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }} style={styles.logo} />
+            </TouchableOpacity>
             <Text style={[styles.brand, { color: colors.primary }]}>Aline2</Text>
           </View>
 
@@ -548,39 +630,93 @@ function FeedScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <FlatList
-        data={feed.posts}
-        keyExtractor={(item) => item.id}
-        renderItem={renderPost}
-        ListHeaderComponent={renderHeader}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>{errorMessage ? "Feed unavailable" : "No posts yet"}</Text>
-            <Text style={[styles.emptyText, { color: colors.mutedText }]}>{errorMessage || "Posts from people you follow will appear here."}</Text>
-          </View>
-        }
-        onEndReachedThreshold={0.5}
-        onEndReached={() => {
-          if (!loadingMore && hasMore) {
-            const nextPage = page + 1;
-            setLoadingMore(true);
-            socialApi.getFeed(nextPage).then((data) => {
-              if (data.posts.length === 0) {
-                setHasMore(false);
-              } else {
-                setFeed((prev) => ({ ...prev, posts: [...prev.posts, ...data.posts] }));
-                setPage(nextPage);
-                if (data.posts.length < 20) setHasMore(false);
-              }
-            }).catch(() => { }).finally(() => setLoadingMore(false));
+      <View style={styles.screenShell}>
+        <FlatList
+          data={feed.posts}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPost}
+          ListHeaderComponent={renderHeader}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>{errorMessage ? "Feed unavailable" : "No posts yet"}</Text>
+              <Text style={[styles.emptyText, { color: colors.mutedText }]}>{errorMessage || "Posts from people you follow will appear here."}</Text>
+            </View>
           }
-        }}
-        ListFooterComponent={
-          loadingMore ? <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: 20 }} /> : null
-        }
-      />
+          onEndReachedThreshold={0.5}
+          onEndReached={() => {
+            if (!loadingMore && hasMore) {
+              const nextPage = page + 1;
+              setLoadingMore(true);
+              socialApi.getFeed(nextPage).then((data) => {
+                if (data.posts.length === 0) {
+                  setHasMore(false);
+                } else {
+                  setFeed((prev) => ({ ...prev, posts: [...prev.posts, ...data.posts] }));
+                  setPage(nextPage);
+                  if (data.posts.length < 20) setHasMore(false);
+                }
+              }).catch(() => { }).finally(() => setLoadingMore(false));
+            }
+          }}
+          ListFooterComponent={
+            loadingMore ? <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: 20 }} /> : null
+          }
+        />
+
+        {menuOpen ? (
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.overlay}
+            onPress={closeMenu}
+          />
+        ) : null}
+
+        <Animated.View
+          pointerEvents={menuOpen ? "auto" : "none"}
+          style={[
+            styles.sidebar,
+            {
+              width: sidebarWidth,
+              backgroundColor: colors.card,
+              transform: [{ translateX: sidebarTranslateX }],
+            },
+          ]}
+        >
+          <View style={[styles.sidebarHeader, { backgroundColor: colors.primary }]}>
+            <Image
+              source={{ uri: currentUser?.avatarUrl || "https://aline2.com/asstes/images/logo/logo.jpeg" }}
+              style={styles.sidebarAvatar}
+            />
+            <Text style={styles.sidebarTitle}>Aline2</Text>
+            <Text style={styles.sidebarSubtitle}>
+              {currentUser?.username || currentUser?.name || "Connect, share, and grow"}
+            </Text>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sidebarContent}>
+            {menuSections.map((section) => (
+              <View key={section.title} style={styles.sidebarSection}>
+                <Text style={[styles.sidebarSectionTitle, { color: colors.mutedText }]}>{section.title}</Text>
+                {section.data.map((item) => (
+                  <TouchableOpacity
+                    key={item.label}
+                    style={[styles.sidebarMenuItem, { borderColor: colors.border }]}
+                    onPress={() => navigateFromMenu(item.screen)}
+                  >
+                    <View style={[styles.sidebarMenuIconCircle, { backgroundColor: `${colors.primary}18` }]}>
+                      <Icon name={item.icon} size={18} color={colors.primary} />
+                    </View>
+                    <Text style={[styles.sidebarMenuLabel, { color: colors.text }]}>{item.label}</Text>
+                    <Icon name="chevron-forward" size={18} color={colors.mutedText} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))}
+          </ScrollView>
+        </Animated.View>
+      </View>
 
       <PostCommentsSheet
         visible={activeSheet === "comments"}
@@ -646,6 +782,7 @@ function FeedScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
+  screenShell: { flex: 1 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
   emptyState: { paddingHorizontal: 24, paddingTop: 72, alignItems: "center" },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111" },
@@ -661,10 +798,91 @@ const styles = StyleSheet.create({
     borderColor: "#ddd",
   },
   topLeft: { flexDirection: "row", alignItems: "center" },
+  logoTapTarget: { marginRight: 8, borderRadius: 18 },
   logo: { width: 34, height: 34, borderRadius: 17, marginRight: 8 },
   brand: { fontSize: 28, color: "#7b3fe4", fontWeight: "800" },
   topRight: { flexDirection: "row", alignItems: "center" },
   headerIconGap: { marginLeft: 14 },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.34)",
+    zIndex: 19,
+  },
+  sidebar: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 20,
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 6, height: 0 },
+  },
+  sidebarHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 52,
+    paddingBottom: 22,
+    borderBottomRightRadius: 24,
+  },
+  sidebarAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: "#fff",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  sidebarTitle: {
+    marginTop: 12,
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#fff",
+  },
+  sidebarSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    color: "rgba(255,255,255,0.88)",
+  },
+  sidebarContent: {
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 28,
+  },
+  sidebarSection: {
+    marginBottom: 16,
+  },
+  sidebarSectionTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    marginBottom: 8,
+    marginLeft: 6,
+    textTransform: "uppercase",
+  },
+  sidebarMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  sidebarMenuIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  sidebarMenuLabel: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "600",
+  },
   storyListContent: { paddingHorizontal: 10, paddingVertical: 14 },
   storyItem: { width: 84, alignItems: "center" },
   storyRing: {

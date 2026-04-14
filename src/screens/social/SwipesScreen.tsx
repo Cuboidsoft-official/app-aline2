@@ -70,6 +70,7 @@ function SwipesScreen({ navigation }: any) {
   const [reportNote, setReportNote] = useState("");
   const [threadComment, setThreadComment] = useState<SwipeComment | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [isSwipeSoundEnabled, setIsSwipeSoundEnabled] = useState(false);
 
   const isBusy = (type: "like" | "save" | "share", swipeId: string): boolean =>
     !!busyActions[`${type}_${swipeId}`];
@@ -180,6 +181,15 @@ function SwipesScreen({ navigation }: any) {
       setViewportHeight(nextHeight);
     }
   };
+
+  const openUserProfile = useCallback((userId: string) => {
+    const normalizedUserId = String(userId || "");
+    if (!normalizedUserId) {
+      return;
+    }
+
+    navigation.navigate("ProfilePreviewScreen", { userId: normalizedUserId });
+  }, [navigation]);
 
   const closeSheet = () => {
     setActiveSheet(null);
@@ -357,6 +367,7 @@ function SwipesScreen({ navigation }: any) {
         uri={normalizeMediaUrl(item.media.url)}
         posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
         style={styles.swipeMedia}
+        muted={!isSwipeSoundEnabled}
         repeat
       />
       <View style={styles.overlay}>
@@ -369,10 +380,10 @@ function SwipesScreen({ navigation }: any) {
         </View>
         <View style={styles.bottomRow}>
           <View style={styles.bottomTextBlock}>
-            <View style={styles.userRow}>
+            <TouchableOpacity style={styles.userRow} onPress={() => openUserProfile(item.user.id)}>
               <Text style={styles.userName}>@{item.user.username}</Text>
               {shouldShowVerifiedBadge(item.user) ? <Icon name="checkmark-circle" color="#6cbcff" size={16} /> : null}
-            </View>
+            </TouchableOpacity>
 
             <Text style={styles.caption}>{item.caption}</Text>
 
@@ -406,6 +417,14 @@ function SwipesScreen({ navigation }: any) {
 
             <TouchableOpacity style={styles.actionButton} onPress={() => handleSave(item.id)}>
               <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={23} color="#fff" />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.actionButton} onPress={() => setIsSwipeSoundEnabled((current) => !current)}>
+              <Icon
+                name={isSwipeSoundEnabled ? "volume-high-outline" : "volume-mute-outline"}
+                size={23}
+                color="#fff"
+              />
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionButton} onPress={() => openActionsSheet(item)}>
