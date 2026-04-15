@@ -207,6 +207,14 @@ const SettingsScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={[styles.item, isDarkMode ? styles.itemDark : null]}
+          onPress={() => navigation.navigate("SavedPosts")}
+        >
+          <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Saved posts</Text>
+          <Icon name="chevron-forward" size={20} color={isDarkMode ? colors.text : "#111"} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.item, isDarkMode ? styles.itemDark : null]}
           onPress={() => navigation.navigate("NotificationSettingsScreen")}
         >
           <Text style={[styles.text, isDarkMode ? styles.textDark : null]}>Notifications</Text>

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,8 +16,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
+import { createSound } from "react-native-nitro-sound";
 
 import CommentThreadSheet from "../../features/social/components/CommentThreadSheet";
 import ShareTargetsList from "../../features/social/components/ShareTargetsList";
@@ -53,6 +54,17 @@ const formatAgo = (timestamp: number): string => {
   return `${Math.floor(hours / 24)}d`;
 };
 
+const formatSwipeMusicLabel = (music?: Swipe["music"]): string => {
+  const trackName = String(music?.trackName || "").trim();
+  const artistName = String(music?.artistName || "").trim();
+
+  if (!trackName) {
+    return "";
+  }
+
+  return artistName ? `${trackName} • ${artistName}` : trackName;
+};
+
 function SwipesScreen({ navigation }: any) {
   const [viewportHeight, setViewportHeight] = useState(height);
   const [swipes, setSwipes] = useState<Swipe[]>([]);
@@ -70,7 +82,22 @@ function SwipesScreen({ navigation }: any) {
   const [reportNote, setReportNote] = useState("");
   const [threadComment, setThreadComment] = useState<SwipeComment | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [isSwipeSoundEnabled, setIsSwipeSoundEnabled] = useState(false);
+  const [isSwipeSoundEnabled, setIsSwipeSoundEnabled] = useState(true);
+  const [activeSwipeIndex, setActiveSwipeIndex] = useState(0);
+  const isScreenFocused = useIsFocused();
+
+  const swipeMusicPlayerRef = useRef(createSound());
+  const swipeMusicTrackKeyRef = useRef("");
+  const swipeMusicEndMsRef = useRef(0);
+
+  const activeSwipe = swipes[activeSwipeIndex] || null;
+  const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipe?.music?.previewUrl || "");
+  const activeSwipeMusicStartMs = Math.max(0, Number(activeSwipe?.music?.startTime || 0) * 1000);
+  const activeSwipeMusicDurationMs = Math.max(0, Number(activeSwipe?.music?.duration || 0) * 1000);
+  const activeSwipeMusicTrackKey = activeSwipe
+    ? `${activeSwipe.id}:${activeSwipeMusicUrl}:${activeSwipeMusicStartMs}:${activeSwipeMusicDurationMs}`
+    : "";
+  const isSwipePlaybackEnabled = isSwipeSoundEnabled && !activeSheet && isScreenFocused;
 
   const isBusy = (type: "like" | "save" | "share", swipeId: string): boolean =>
     !!busyActions[`${type}_${swipeId}`];
@@ -100,6 +127,18 @@ function SwipesScreen({ navigation }: any) {
 
       return () => {
         active = false;
+      };
+    }, []),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        const player = swipeMusicPlayerRef.current;
+
+        swipeMusicTrackKeyRef.current = "";
+        swipeMusicEndMsRef.current = 0;
+        player.stopPlayer().catch(() => undefined);
       };
     }, []),
   );
@@ -361,80 +400,191 @@ function SwipesScreen({ navigation }: any) {
     }
   };
 
-  const renderSwipe = ({ item }: { item: Swipe }) => (
-    <View style={[styles.swipeItem, { height: viewportHeight }]}>
-      <SocialVideo
-        uri={normalizeMediaUrl(item.media.url)}
-        posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
-        style={styles.swipeMedia}
-        muted={!isSwipeSoundEnabled}
-        repeat
-      />
-      <View style={styles.overlay}>
-        <View style={styles.topBar}>
-          <Text style={styles.screenTitle}>Swipes</Text>
-          <TouchableOpacity style={styles.createButton} onPress={() => navigation.navigate("Create", { initialTab: "swipe" })}>
-            <Icon name="add" size={18} color="#111" />
-            <Text style={styles.createButtonText}>Create</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.bottomRow}>
-          <View style={styles.bottomTextBlock}>
-            <TouchableOpacity style={styles.userRow} onPress={() => openUserProfile(item.user.id)}>
-              <Text style={styles.userName}>@{item.user.username}</Text>
-              {shouldShowVerifiedBadge(item.user) ? <Icon name="checkmark-circle" color="#6cbcff" size={16} /> : null}
+  useEffect(() => {
+    if (!swipes.length) {
+      setActiveSwipeIndex(0);
+      return;
+    }
+
+    if (activeSwipeIndex > swipes.length - 1) {
+      setActiveSwipeIndex(swipes.length - 1);
+    }
+  }, [activeSwipeIndex, swipes.length]);
+
+  useEffect(() => {
+    const player = swipeMusicPlayerRef.current;
+
+    player.setSubscriptionDuration(0.1);
+    player.addPlayBackListener((event: any) => {
+      const playbackEndMs = swipeMusicEndMsRef.current;
+      const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
+
+      if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
+        swipeMusicEndMsRef.current = 0;
+        player.pausePlayer().catch(() => undefined);
+      }
+    });
+    player.addPlaybackEndListener(() => {
+      swipeMusicEndMsRef.current = 0;
+    });
+
+    return () => {
+      try {
+        player.removePlayBackListener();
+      } catch {
+        // noop
+      }
+
+      try {
+        player.removePlaybackEndListener();
+      } catch {
+        // noop
+      }
+
+      player.stopPlayer().catch(() => undefined);
+      player.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    const player = swipeMusicPlayerRef.current;
+    const shouldPlayMusic = !!activeSwipeMusicUrl && isSwipePlaybackEnabled;
+
+    const stopMusic = async () => {
+      swipeMusicTrackKeyRef.current = "";
+      swipeMusicEndMsRef.current = 0;
+
+      try {
+        await player.stopPlayer();
+      } catch {
+        // noop
+      }
+    };
+
+    if (!shouldPlayMusic) {
+      stopMusic().catch(() => undefined);
+      return;
+    }
+
+    if (swipeMusicTrackKeyRef.current === activeSwipeMusicTrackKey) {
+      player.resumePlayer().catch(() => undefined);
+      return;
+    }
+
+    let cancelled = false;
+
+    const playMusic = async () => {
+      await stopMusic();
+      if (cancelled || !activeSwipeMusicUrl) {
+        return;
+      }
+
+      swipeMusicTrackKeyRef.current = activeSwipeMusicTrackKey;
+      swipeMusicEndMsRef.current =
+        activeSwipeMusicDurationMs > 0 ? activeSwipeMusicStartMs + activeSwipeMusicDurationMs : 0;
+
+      await player.startPlayer(activeSwipeMusicUrl);
+      await player.seekToPlayer(activeSwipeMusicStartMs);
+      await player.setVolume(1);
+    };
+
+    playMusic().catch((error) => {
+      console.log("swipe music playback error", error);
+      stopMusic().catch(() => undefined);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSwipeMusicDurationMs,
+    activeSwipeMusicStartMs,
+    activeSwipeMusicTrackKey,
+    activeSwipeMusicUrl,
+    isSwipePlaybackEnabled,
+  ]);
+
+  const renderSwipe = ({ item, index }: { item: Swipe; index: number }) => {
+    const isActive = index === activeSwipeIndex;
+    const musicLabel = formatSwipeMusicLabel(item.music);
+    const hasAttachedMusic = !!item.music?.previewUrl;
+
+    return (
+      <View style={[styles.swipeItem, { height: viewportHeight }]}>
+        <SocialVideo
+          uri={normalizeMediaUrl(item.media.url)}
+          posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
+          style={styles.swipeMedia}
+          paused={!isActive || !!activeSheet || !isScreenFocused}
+          muted={!isSwipePlaybackEnabled || hasAttachedMusic}
+          repeat
+        />
+        <View style={styles.overlay}>
+          <View style={styles.topBar}>
+            <Text style={styles.screenTitle}>Swipes</Text>
+            <TouchableOpacity style={styles.createButton} onPress={() => navigation.navigate("Create", { initialTab: "swipe" })}>
+              <Icon name="add" size={18} color="#111" />
+              <Text style={styles.createButtonText}>Create</Text>
             </TouchableOpacity>
-
-            <Text style={styles.caption}>{item.caption}</Text>
-
-            {item.hashtags.length ? (
-              <Text style={styles.hashTags}>{item.hashtags.map((tag) => `#${tag}`).join(" ")}</Text>
-            ) : null}
-
-            {item.music ? (
-              <View style={styles.musicRow}>
-                <Icon name="musical-notes" size={13} color="#fff" />
-                <Text style={styles.musicText}>{item.music}</Text>
-              </View>
-            ) : null}
           </View>
+          <View style={styles.bottomRow}>
+            <View style={styles.bottomTextBlock}>
+              <TouchableOpacity style={styles.userRow} onPress={() => openUserProfile(item.user.id)}>
+                <Text style={styles.userName}>@{item.user.username}</Text>
+                {shouldShowVerifiedBadge(item.user) ? <Icon name="checkmark-circle" color="#6cbcff" size={16} /> : null}
+              </TouchableOpacity>
 
-          <View style={styles.actionRail}>
-            <TouchableOpacity style={styles.actionButton} onPress={() => handleLike(item.id)}>
-              <Icon name={item.liked ? "heart" : "heart-outline"} size={28} color={item.liked ? "#ff4f73" : "#fff"} />
-              <Text style={styles.actionText}>{formatCount(item.likesCount)}</Text>
-            </TouchableOpacity>
+              <Text style={styles.caption}>{item.caption}</Text>
 
-            <TouchableOpacity style={styles.actionButton} onPress={() => openCommentsSheet(item)}>
-              <Icon name="chatbubble-outline" size={25} color="#fff" />
-              <Text style={styles.actionText}>{formatCount(item.commentsCount)}</Text>
-            </TouchableOpacity>
+              {item.hashtags.length ? (
+                <Text style={styles.hashTags}>{item.hashtags.map((tag) => `#${tag}`).join(" ")}</Text>
+              ) : null}
 
-            <TouchableOpacity style={styles.actionButton} onPress={() => openShareSheet(item)}>
-              <Icon name="paper-plane-outline" size={25} color="#fff" />
-              <Text style={styles.actionText}>{formatCount(item.sharesCount)}</Text>
-            </TouchableOpacity>
+              {musicLabel ? (
+                <View style={styles.musicRow}>
+                  <Icon name="musical-notes" size={13} color="#fff" />
+                  <Text style={styles.musicText}>{musicLabel}</Text>
+                </View>
+              ) : null}
+            </View>
 
-            <TouchableOpacity style={styles.actionButton} onPress={() => handleSave(item.id)}>
-              <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={23} color="#fff" />
-            </TouchableOpacity>
+            <View style={styles.actionRail}>
+              <TouchableOpacity style={styles.actionButton} onPress={() => handleLike(item.id)}>
+                <Icon name={item.liked ? "heart" : "heart-outline"} size={28} color={item.liked ? "#ff4f73" : "#fff"} />
+                <Text style={styles.actionText}>{formatCount(item.likesCount)}</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.actionButton} onPress={() => setIsSwipeSoundEnabled((current) => !current)}>
-              <Icon
-                name={isSwipeSoundEnabled ? "volume-high-outline" : "volume-mute-outline"}
-                size={23}
-                color="#fff"
-              />
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.actionButton} onPress={() => openCommentsSheet(item)}>
+                <Icon name="chatbubble-outline" size={25} color="#fff" />
+                <Text style={styles.actionText}>{formatCount(item.commentsCount)}</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.actionButton} onPress={() => openActionsSheet(item)}>
-              <Icon name="ellipsis-horizontal" size={23} color="#fff" />
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.actionButton} onPress={() => openShareSheet(item)}>
+                <Icon name="paper-plane-outline" size={25} color="#fff" />
+                <Text style={styles.actionText}>{formatCount(item.sharesCount)}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.actionButton} onPress={() => handleSave(item.id)}>
+                <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={23} color="#fff" />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.actionButton} onPress={() => setIsSwipeSoundEnabled((current) => !current)}>
+                <Icon
+                  name={isSwipePlaybackEnabled ? "volume-high-outline" : "volume-mute-outline"}
+                  size={23}
+                  color="#fff"
+                />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.actionButton} onPress={() => openActionsSheet(item)}>
+                <Icon name="ellipsis-horizontal" size={23} color="#fff" />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   if (loading) {
     return (
@@ -462,6 +612,12 @@ function SwipesScreen({ navigation }: any) {
           index,
         })}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />}
+        onMomentumScrollEnd={(event) => {
+          const nextIndex = Math.round(
+            Number(event?.nativeEvent?.contentOffset?.y || 0) / Math.max(1, viewportHeight),
+          );
+          setActiveSwipeIndex(Math.max(0, Math.min(swipes.length - 1, nextIndex)));
+        }}
         onEndReachedThreshold={0.5}
         onEndReached={() => {
           if (!loadingMore) {

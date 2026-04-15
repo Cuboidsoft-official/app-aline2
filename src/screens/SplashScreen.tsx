@@ -39,7 +39,10 @@ try {
   }
  });
 
- navigation.replace("MainApp");
+ navigation.reset({
+  index: 0,
+  routes: [{ name: "MainApp" }],
+ });
 } catch (error: any) {
  console.log("Session validation failed:", error);
  console.log("Session validation error details:", {

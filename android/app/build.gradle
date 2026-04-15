@@ -58,10 +58,10 @@ react {
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
 def enableProguardInReleaseBuilds = false
-def releaseStoreFile = System.getenv("ANDROID_UPLOAD_STORE_FILE") ?: project.findProperty("ANDROID_UPLOAD_STORE_FILE")
-def releaseStorePassword = System.getenv("ANDROID_UPLOAD_STORE_PASSWORD") ?: project.findProperty("ANDROID_UPLOAD_STORE_PASSWORD")
-def releaseKeyAlias = System.getenv("ANDROID_UPLOAD_KEY_ALIAS") ?: project.findProperty("ANDROID_UPLOAD_KEY_ALIAS")
-def releaseKeyPassword = System.getenv("ANDROID_UPLOAD_KEY_PASSWORD") ?: project.findProperty("ANDROID_UPLOAD_KEY_PASSWORD")
+def releaseStoreFile = System.getenv("ANDROID_UPLOAD_STORE_FILE") ?: project.findProperty("ANDROID_UPLOAD_STORE_FILE") ?: "aline2-upload.keystore"
+def releaseStorePassword = System.getenv("ANDROID_UPLOAD_STORE_PASSWORD") ?: project.findProperty("ANDROID_UPLOAD_STORE_PASSWORD") ?: "aline2pass123"
+def releaseKeyAlias = System.getenv("ANDROID_UPLOAD_KEY_ALIAS") ?: project.findProperty("ANDROID_UPLOAD_KEY_ALIAS") ?: "aline2"
+def releaseKeyPassword = System.getenv("ANDROID_UPLOAD_KEY_PASSWORD") ?: project.findProperty("ANDROID_UPLOAD_KEY_PASSWORD") ?: "aline2pass123"
 def hasReleaseSigning =
         releaseStoreFile &&
         releaseStorePassword &&
@@ -121,6 +121,8 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
         }
         release {
             signingConfig signingConfigs.release
@@ -133,6 +135,10 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

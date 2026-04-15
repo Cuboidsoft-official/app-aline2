@@ -1133,6 +1133,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isMine = String(getMessageSenderId(item)) === String(currentUserId || "");
+    const isSystemMessage = String(item?.messageType || "") === "system";
     const attachment = getMessageAttachment(item);
     const textValue = getMessageText(item);
     const locationPayload = parseLocationMessage(textValue);
@@ -1147,9 +1148,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         ]}
       >
         <TouchableOpacity
-          activeOpacity={0.92}
-          onPress={() => handleMessagePress(item, attachment, locationPayload)}
-          onLongPress={() => reactToMessage(item._id!)}
+          activeOpacity={isSystemMessage ? 1 : 0.92}
+          onPress={isSystemMessage ? undefined : () => handleMessagePress(item, attachment, locationPayload)}
+          onLongPress={isSystemMessage ? undefined : () => reactToMessage(item._id!)}
           style={[
             styles.msgBubble,
             isMine ? styles.myMsg : styles.otherMsg

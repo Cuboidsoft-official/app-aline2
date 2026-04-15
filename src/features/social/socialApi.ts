@@ -517,7 +517,7 @@ class RemoteSocialApi implements SocialApi {
       caption: post?.caption || "",
       media: primary,
       thumbnailUrl: primary.thumbnailUrl || primary.url,
-      music: formatMusicLabel(post?.music),
+      music: mapStoryMusicDetails(post?.music, post?.musicConfig),
       hashtags: Array.isArray(post?.hashtags) ? post.hashtags : [],
       mentions: this.mapMentionNames(post?.mentions),
       location: typeof post?.location === "string" ? post.location : post?.location?.name,
@@ -1013,6 +1013,13 @@ class RemoteSocialApi implements SocialApi {
 
   async getPostArchive(): Promise<Post[]> {
     const res = await API.get("/posts/archive");
+    const posts: Post[] = (res?.data?.posts || []).map((post: any) => this.mapPost(post));
+    posts.forEach((post) => this.postCache.set(post.id, post));
+    return posts;
+  }
+
+  async getSavedPosts(): Promise<Post[]> {
+    const res = await API.get("/user/posts/saved");
     const posts: Post[] = (res?.data?.posts || []).map((post: any) => this.mapPost(post));
     posts.forEach((post) => this.postCache.set(post.id, post));
     return posts;
@@ -1722,6 +1729,24 @@ class RemoteSocialApi implements SocialApi {
         },
       });
     }
+
+    (payload.extraEmojiStickers || []).slice(0, 8).forEach((sticker) => {
+      stickers.push({
+        type: "emoji",
+        text: sticker.text,
+        position: resolveStoryStickerPosition(
+          sticker.position,
+          undefined,
+          "emoji",
+          sticker.scale,
+          sticker.rotation,
+        ),
+        style: {
+          fontSize: Math.round(36 * (sticker.scale || 1)),
+          alignment: "center",
+        },
+      });
+    });
 
     (payload.hashtags || []).slice(0, 3).forEach((tag, index) => {
       stickers.push({

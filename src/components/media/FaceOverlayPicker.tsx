@@ -5,7 +5,7 @@
  * drag-position on their photos/videos before posting.
  * This is the "AR-lite" approach — no face tracking SDK needed.
  */
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     Animated,
     FlatList,
@@ -17,26 +17,59 @@ import {
     View,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
-import { FACE_STICKER_CATEGORIES, ALL_FACE_STICKERS } from "../../utils/faceOverlayStickers";
+import { FACE_STICKER_CATEGORIES } from "../../utils/faceOverlayStickers";
 
 const PRIMARY = "#7b3fe4";
+const DEFAULT_CANVAS_SIZE = { width: 320, height: 560 };
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-interface FaceSticker {
+export interface FaceSticker {
     id: string;
     name: string;
     emoji: string;
     placementId?: number;
+    position?: {
+        x: number;
+        y: number;
+    };
+    scale?: number;
+    rotation?: number;
 }
 
 interface FaceOverlayPickerProps {
     visible: boolean;
     onClose: () => void;
+    stickers?: FaceSticker[];
     onStickersChanged?: (stickers: FaceSticker[]) => void;
 }
 /** A single draggable sticker placed on the canvas */
-const DraggableSticker: React.FC<{ emoji: string; onRemove: (id: number) => void; id: number }> = ({ emoji, onRemove, id }) => {
-    const pan = useRef(new Animated.ValueXY()).current;
+const DraggableSticker: React.FC<{
+    canvasSize: { width: number; height: number };
+    emoji: string;
+    id: number;
+    onPositionChange: (id: number, position: { x: number; y: number }) => void;
+    onRemove: (id: number) => void;
+    sticker: FaceSticker;
+}> = ({ canvasSize, emoji, id, onPositionChange, onRemove, sticker }) => {
+    const safeCanvasSize = useMemo(
+        () => ({
+            width: Math.max(canvasSize.width || 0, DEFAULT_CANVAS_SIZE.width),
+            height: Math.max(canvasSize.height || 0, DEFAULT_CANVAS_SIZE.height),
+        }),
+        [canvasSize.height, canvasSize.width],
+    );
+    const normalizedPosition = {
+        x: clamp(sticker.position?.x ?? 0.34, 0.04, 0.88),
+        y: clamp(sticker.position?.y ?? 0.18, 0.04, 0.88),
+    };
+    const absoluteX = normalizedPosition.x * safeCanvasSize.width;
+    const absoluteY = normalizedPosition.y * safeCanvasSize.height;
+    const pan = useRef(new Animated.ValueXY({ x: absoluteX, y: absoluteY })).current;
     const scale = useRef(new Animated.Value(1)).current;
+
+    useEffect(() => {
+        pan.setValue({ x: absoluteX, y: absoluteY });
+    }, [absoluteX, absoluteY, pan]);
 
     const panResponder = useRef(
         PanResponder.create({
@@ -53,6 +86,14 @@ const DraggableSticker: React.FC<{ emoji: string; onRemove: (id: number) => void
             onPanResponderRelease: () => {
                 pan.flattenOffset();
                 Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start();
+
+                const rawX = Number((pan.x as any)._value || 0);
+                const rawY = Number((pan.y as any)._value || 0);
+
+                onPositionChange(id, {
+                    x: clamp(rawX / safeCanvasSize.width, 0.04, 0.88),
+                    y: clamp(rawY / safeCanvasSize.height, 0.04, 0.88),
+                });
             },
         })
     ).current;
@@ -73,16 +114,30 @@ const DraggableSticker: React.FC<{ emoji: string; onRemove: (id: number) => void
     );
 };
 
-const FaceOverlayPicker: React.FC<FaceOverlayPickerProps> = ({ visible, onClose, onStickersChanged }) => {
+const FaceOverlayPicker: React.FC<FaceOverlayPickerProps> = ({ visible, onClose, onStickersChanged, stickers = [] }) => {
     const [placedStickers, setPlacedStickers] = useState<FaceSticker[]>([]);
     const [activeCategory, setActiveCategory] = useState(0);
+    const [canvasSize, setCanvasSize] = useState(DEFAULT_CANVAS_SIZE);
     const nextId = useRef(1);
+
+    useEffect(() => {
+        setPlacedStickers(stickers);
+        const maxPlacementId = stickers.reduce((max, sticker) => Math.max(max, Number(sticker.placementId || 0)), 0);
+        nextId.current = maxPlacementId + 1;
+    }, [stickers, visible]);
 
     const addSticker = useCallback(
         (sticker: FaceSticker) => {
+            const placementIndex = placedStickers.length;
             const newSticker = {
                 ...sticker,
                 placementId: nextId.current++,
+                position: {
+                    x: clamp(0.18 + (placementIndex % 3) * 0.18, 0.08, 0.74),
+                    y: clamp(0.18 + Math.floor(placementIndex / 3) * 0.12, 0.08, 0.74),
+                },
+                scale: 1,
+                rotation: 0,
             };
             const updated = [...placedStickers, newSticker];
             setPlacedStickers(updated);
@@ -91,6 +146,17 @@ const FaceOverlayPicker: React.FC<FaceOverlayPickerProps> = ({ visible, onClose,
             }
         },
         [onStickersChanged, placedStickers]
+    );
+
+    const updateStickerPosition = useCallback(
+        (placementId: number, position: { x: number; y: number }) => {
+            const updated = placedStickers.map((sticker) =>
+                sticker.placementId === placementId ? { ...sticker, position } : sticker,
+            );
+            setPlacedStickers(updated);
+            onStickersChanged?.(updated);
+        },
+        [onStickersChanged, placedStickers],
     );
 
     const removeSticker = useCallback(
@@ -119,13 +185,26 @@ const FaceOverlayPicker: React.FC<FaceOverlayPickerProps> = ({ visible, onClose,
         <Modal visible transparent animationType="slide" onRequestClose={onClose}>
             <View style={styles.container}>
                 {/* Canvas area with placed stickers */}
-                <TouchableOpacity style={styles.canvasOverlay} activeOpacity={1} onPress={onClose}>
+                <TouchableOpacity
+                    style={styles.canvasOverlay}
+                    activeOpacity={1}
+                    onLayout={(event) => {
+                        const { width, height } = event.nativeEvent.layout;
+                        if (width && height) {
+                            setCanvasSize({ width, height });
+                        }
+                    }}
+                    onPress={onClose}
+                >
                     {placedStickers.map((sticker) => (
                         <DraggableSticker
                             key={sticker.placementId!}
+                            canvasSize={canvasSize}
                             id={sticker.placementId!}
                             emoji={sticker.emoji}
+                            onPositionChange={updateStickerPosition}
                             onRemove={removeSticker}
+                            sticker={sticker}
                         />
                     ))}
                 </TouchableOpacity>
@@ -195,8 +274,6 @@ const styles = StyleSheet.create({
     },
     draggableSticker: {
         position: "absolute",
-        top: "40%",
-        left: "40%",
     },
     dragEmoji: {
         fontSize: 56,

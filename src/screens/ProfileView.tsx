@@ -408,6 +408,14 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
     </TouchableOpacity>
    </View>
 
+   <TouchableOpacity
+    style={[styles.requestsBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+    onPress={() => navigation.navigate("SavedPosts")}
+   >
+    <Icon name="bookmark-outline" size={18} color={colors.text} />
+    <Text style={[styles.requestsBtnText, { color: colors.text }]}>Saved Posts</Text>
+   </TouchableOpacity>
+
    <View style={styles.tabs}>
 
     <TouchableOpacity

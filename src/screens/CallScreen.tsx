@@ -125,6 +125,9 @@ const CallScreen = ({ navigation, route }: any) => {
   const localStreamRef = useRef<any>(null);
   const directRemoteStreamRef = useRef<any>(null);
   const groupRemoteStreamsRef = useRef<Record<string, any>>({});
+  const callSessionRef = useRef<any>(initialCallSession);
+  const currentUserIdRef = useRef("");
+  const isGroupCallRef = useRef(false);
   const directOfferStartedRef = useRef(false);
   const joinSentRef = useRef(false);
   const closingRef = useRef(false);
@@ -196,6 +199,12 @@ const CallScreen = ({ navigation, route }: any) => {
     ? conversationMeta?.groupAvatar || avatarUrl || DEFAULT_AVATAR_URL
     : otherParticipant?.profilePic || avatarUrl || DEFAULT_AVATAR_URL;
   const hasActiveCall = callSession && !TERMINAL_STATUSES.has(String(callSession.status || ""));
+
+  useEffect(() => {
+    callSessionRef.current = callSession;
+    currentUserIdRef.current = currentUserId;
+    isGroupCallRef.current = isGroupCall;
+  }, [callSession, currentUserId, isGroupCall]);
 
   const closeGroupPeerConnection = useCallback((remoteUserId: string) => {
     const peerConnection = groupPeerConnectionsRef.current[remoteUserId];
@@ -602,20 +611,22 @@ const CallScreen = ({ navigation, route }: any) => {
 
       setCallSession(nextCallSession);
 
+      const nextIsGroupCall = String(nextCallSession?.conversation?.conversationType || "") === "group";
+
       if (TERMINAL_STATUSES.has(String(nextCallSession.status || ""))) {
         applyTerminalState(nextCallSession);
         return;
       }
 
-      if (!isGroupCall && String(nextCallSession.status) === "ongoing" && mode === "outgoing") {
+      if (!nextIsGroupCall && String(nextCallSession.status) === "ongoing" && mode === "outgoing") {
         startDirectOffer().catch(() => {});
       }
 
-      if (isGroupCall) {
+      if (nextIsGroupCall) {
         const joinedRemoteIds = (Array.isArray(nextCallSession?.participantStates) ? nextCallSession.participantStates : [])
           .filter((entry: any) => String(entry?.status || "") === "joined")
           .map((entry: any) => String(entry?.user?._id || entry?.user || ""))
-          .filter((userId: string) => userId && userId !== currentUserId);
+          .filter((userId: string) => userId && userId !== currentUserIdRef.current);
 
         Object.keys(groupPeerConnectionsRef.current).forEach((userId) => {
           if (!joinedRemoteIds.includes(userId)) {
@@ -626,16 +637,16 @@ const CallScreen = ({ navigation, route }: any) => {
     };
 
     const handleParticipantJoined = (payload: any) => {
-      if (!isGroupCall || String(payload?.callSessionId || "") !== String(callSessionId || "")) {
+      if (!isGroupCallRef.current || String(payload?.callSessionId || "") !== String(callSessionId || "")) {
         return;
       }
 
       const remoteUserId = String(payload?.userId || "");
-      if (!remoteUserId || remoteUserId === currentUserId) {
+      if (!remoteUserId || remoteUserId === currentUserIdRef.current) {
         return;
       }
 
-      if (String(callSession?.currentParticipantState?.status || "") !== "joined") {
+      if (String(callSessionRef.current?.currentParticipantState?.status || "") !== "joined") {
         return;
       }
 
@@ -650,7 +661,7 @@ const CallScreen = ({ navigation, route }: any) => {
       try {
         await ensureLocalStream();
 
-        if (isGroupCall && payload?.fromUserId) {
+        if (isGroupCallRef.current && payload?.fromUserId) {
           const remoteUserId = String(payload.fromUserId);
           const peerConnection = await ensureGroupPeerConnection(remoteUserId);
           await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.description));
@@ -685,7 +696,7 @@ const CallScreen = ({ navigation, route }: any) => {
       }
 
       try {
-        if (isGroupCall && payload?.fromUserId) {
+        if (isGroupCallRef.current && payload?.fromUserId) {
           const peerConnection = await ensureGroupPeerConnection(String(payload.fromUserId));
           await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.description));
           return;
@@ -704,7 +715,7 @@ const CallScreen = ({ navigation, route }: any) => {
       }
 
       try {
-        if (isGroupCall && payload?.fromUserId) {
+        if (isGroupCallRef.current && payload?.fromUserId) {
           const peerConnection = await ensureGroupPeerConnection(String(payload.fromUserId));
           await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
           return;
@@ -729,23 +740,22 @@ const CallScreen = ({ navigation, route }: any) => {
       socket.off("call:offer", handleOffer);
       socket.off("call:answer", handleAnswer);
       socket.off("call:ice-candidate", handleIceCandidate);
-      cleanupMedia();
     };
   }, [
     applyTerminalState,
-    callSession,
     callSessionId,
-    cleanupMedia,
     closeGroupPeerConnection,
-    currentUserId,
     ensureDirectPeerConnection,
     ensureGroupPeerConnection,
     ensureLocalStream,
-    isGroupCall,
     mode,
     startDirectOffer,
     startGroupOffer,
   ]);
+
+  useEffect(() => () => {
+    cleanupMedia();
+  }, [cleanupMedia]);
 
   useEffect(() => {
     if (String(callSession?.status || "") !== "ongoing") {

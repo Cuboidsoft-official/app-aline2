@@ -29,6 +29,7 @@ import { API } from "../api/api";
 
 let Notifications: any = null;
 let Device: any = null;
+let lastHandledNotificationResponseId = "";
 
 try {
     Notifications = require("expo-notifications");
@@ -96,6 +97,101 @@ async function ensureAndroidChannel() {
     }
 }
 
+async function syncPushTokenToBackend(token: string | null | undefined) {
+    const normalizedToken = String(token || "").trim();
+
+    if (!normalizedToken) {
+        return null;
+    }
+
+    await API.put("/user/profile", { fcmToken: normalizedToken });
+    return normalizedToken;
+}
+
+function navigateFromNotificationData(data: any, navigationRef?: any) {
+    if (!data || !navigationRef?.current) return;
+
+    const nav = navigationRef.current;
+
+    switch (data.type) {
+        case "like":
+        case "comment":
+        case "comment_reply":
+        case "mention_post":
+        case "tag_post":
+        case "post_share":
+            if (data.postId) {
+                nav.navigate("PostDetail", { postId: data.postId });
+            }
+            break;
+
+        case "follow":
+            if (data.senderId) {
+                nav.navigate("ProfileView", { userId: data.senderId });
+            }
+            break;
+
+        case "story_view":
+        case "story_reply":
+        case "mention_story":
+        case "tag_story":
+            if (data.storyId) {
+                nav.navigate("StoryViewer", { storyId: data.storyId });
+            }
+            break;
+
+        case "service_request":
+        case "service_request_update":
+            nav.navigate("ServiceRequestsScreen", { mode: "seller" });
+            break;
+
+        case "chat_message":
+            if (data.conversationId) {
+                nav.navigate("ChatScreen", { conversationId: data.conversationId });
+            } else {
+                nav.navigate("AllChatsScreen");
+            }
+            break;
+
+        case "incoming_call":
+            if (data.callSessionId) {
+                nav.navigate("CallScreen", {
+                    callSessionId: data.callSessionId,
+                    mode: "incoming",
+                    callType: data.callType || "audio",
+                    title: data.title || "Incoming call",
+                    avatarUrl: data.avatarUrl || "",
+                });
+            } else {
+                nav.navigate("AllChatsScreen");
+            }
+            break;
+
+        default:
+            nav.navigate("NotificationScreen");
+            break;
+    }
+}
+
+async function handleNotificationResponse(response: any, navigationRef?: any) {
+    const responseId = String(
+        response?.notification?.request?.identifier
+        || response?.notification?.request?.content?.data?.notificationId
+        || ""
+    ).trim();
+
+    if (responseId && responseId === lastHandledNotificationResponseId) {
+        return;
+    }
+
+    if (responseId) {
+        lastHandledNotificationResponseId = responseId;
+    }
+
+    const data = response?.notification?.request?.content?.data;
+    navigateFromNotificationData(data, navigationRef);
+}
+
 // ─────────────────────────────────────────────
 // Token registration
 // ─────────────────────────────────────────────
@@ -150,8 +246,7 @@ export async function registerPushToken(): Promise<string | null> {
             return null;
         }
 
-        // Send to backend
-        await API.put("/user/profile", { fcmToken: token });
+        await syncPushTokenToBackend(token);
         console.log(
             "[Push] Native device token registered:",
             String(token).substring(0, 20) + "..."
@@ -183,6 +278,10 @@ export function setupNotificationListeners(navigationRef?: any): () => void {
         return () => { };
     }
 
+    ensureAndroidChannel().catch((error) => {
+        console.log("[Push] Android channel bootstrap error:", error);
+    });
+
     // Clean up any previous subscriptions
     listenerSubs.forEach((sub) => sub.remove());
     listenerSubs = [];
@@ -198,84 +297,49 @@ export function setupNotificationListeners(navigationRef?: any): () => void {
     // When user taps on a notification
     const responseSub = Notifications.addNotificationResponseReceivedListener(
         (response: any) => {
-            const data = response?.notification?.request?.content?.data;
-
-            if (!data || !navigationRef?.current) return;
-
-            const nav = navigationRef.current;
-
-            try {
-                switch (data.type) {
-                    case "like":
-                    case "comment":
-                    case "comment_reply":
-                    case "mention_post":
-                    case "tag_post":
-                    case "post_share":
-                        if (data.postId) {
-                            nav.navigate("PostDetail", { postId: data.postId });
-                        }
-                        break;
-
-                    case "follow":
-                        if (data.senderId) {
-                            nav.navigate("ProfileView", { userId: data.senderId });
-                        }
-                        break;
-
-                    case "story_view":
-                    case "story_reply":
-                    case "mention_story":
-                    case "tag_story":
-                        if (data.storyId) {
-                            nav.navigate("StoryViewer", { storyId: data.storyId });
-                        }
-                        break;
-
-                    case "service_request":
-                    case "service_request_update":
-                        nav.navigate("ServiceRequestsScreen", { mode: "seller" });
-                        break;
-
-                    case "chat_message":
-                        if (data.conversationId) {
-                            nav.navigate("ChatScreen", { conversationId: data.conversationId });
-                        } else {
-                            nav.navigate("AllChatsScreen");
-                        }
-                        break;
-
-                    case "incoming_call":
-                        if (data.callSessionId) {
-                            nav.navigate("CallScreen", {
-                                callSessionId: data.callSessionId,
-                                mode: "incoming",
-                                callType: data.callType || "audio",
-                                title: data.title || "Incoming call",
-                                avatarUrl: data.avatarUrl || "",
-                            });
-                        } else {
-                            nav.navigate("AllChatsScreen");
-                        }
-                        break;
-
-                    default:
-                        // Open the notifications screen as fallback
-                        nav.navigate("NotificationScreen");
-                        break;
-                }
-            } catch (error) {
+            handleNotificationResponse(response, navigationRef).catch((error) => {
                 console.log("[Push] Navigation error on tap:", error);
-            }
+            });
         }
     );
 
-    listenerSubs = [receivedSub, responseSub];
+    const tokenSub =
+        typeof Notifications.addPushTokenListener === "function"
+            ? Notifications.addPushTokenListener((tokenData: any) => {
+                syncPushTokenToBackend(tokenData?.data).catch((error) => {
+                    console.log("[Push] Token refresh sync error:", error);
+                });
+            })
+            : null;
+
+    if (typeof Notifications.getLastNotificationResponseAsync === "function") {
+        Notifications.getLastNotificationResponseAsync()
+            .then((response: any) => {
+                if (!response) {
+                    return;
+                }
+
+                return handleNotificationResponse(response, navigationRef);
+            })
+            .then(() => {
+                if (typeof Notifications.clearLastNotificationResponseAsync === "function") {
+                    return Notifications.clearLastNotificationResponseAsync();
+                }
+
+                return undefined;
+            })
+            .catch((error: any) => {
+                console.log("[Push] Last response bootstrap error:", error);
+            });
+    }
+
+    listenerSubs = [receivedSub, responseSub, ...(tokenSub ? [tokenSub] : [])];
 
     // Return cleanup function
     return () => {
         receivedSub.remove();
         responseSub.remove();
+        tokenSub?.remove?.();
         listenerSubs = [];
     };
 }

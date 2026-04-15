@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
 View,
 Text,
@@ -23,6 +23,7 @@ import { createChatConversation, createGroupChatConversation, fetchChatConversat
 import { getConversationPreview } from "../utils/chatPresentation";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { connectSocket, socket } from "../socket";
 
 interface ChatUser {
   _id: string;
@@ -148,6 +149,42 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       fetchChatData();
     }, [fetchChatData])
   );
+
+  useEffect(() => {
+    let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleRefresh = () => {
+      if (refreshTimeout) {
+        clearTimeout(refreshTimeout);
+      }
+
+      refreshTimeout = setTimeout(() => {
+        fetchChatData(true).catch((error) => {
+          console.log("Chats realtime refresh error:", error);
+        });
+      }, 180);
+    };
+
+    connectSocket().catch((error) => {
+      console.log("Chats socket connect error:", error);
+    });
+
+    socket.on("receiveMessage", scheduleRefresh);
+    socket.on("messageSeen", scheduleRefresh);
+    socket.on("call:incoming", scheduleRefresh);
+    socket.on("call:status", scheduleRefresh);
+
+    return () => {
+      if (refreshTimeout) {
+        clearTimeout(refreshTimeout);
+      }
+
+      socket.off("receiveMessage", scheduleRefresh);
+      socket.off("messageSeen", scheduleRefresh);
+      socket.off("call:incoming", scheduleRefresh);
+      socket.off("call:status", scheduleRefresh);
+    };
+  }, [fetchChatData]);
 
   const conversationMap = useMemo(() => {
     return new Map(

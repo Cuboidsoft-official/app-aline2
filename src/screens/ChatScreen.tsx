@@ -1143,6 +1143,7 @@ const ChatScreen = ({ navigation, route }: any) => {
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isMine = String(getMessageSenderId(item)) === String(currentUserId || "");
+    const isSystemMessage = String(item?.messageType || "") === "system";
     const attachment: MessageAttachment | null = getMessageAttachment(item);
     const textValue = getMessageText(item);
     const locationPayload = parseLocationMessage(textValue);
@@ -1159,9 +1160,9 @@ const ChatScreen = ({ navigation, route }: any) => {
         ]}
       >
         <TouchableOpacity
-          activeOpacity={0.92}
-          onPress={() => handleMessagePress(item, attachment, locationPayload)}
-          onLongPress={() => {
+          activeOpacity={isSystemMessage ? 1 : 0.92}
+          onPress={isSystemMessage ? undefined : () => handleMessagePress(item, attachment, locationPayload)}
+          onLongPress={isSystemMessage ? undefined : () => {
             setContextMessage(item);
             setShowContextMenu(true);
           }}

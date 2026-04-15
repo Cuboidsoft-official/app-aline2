@@ -21,6 +21,7 @@ const MAX_COMMENT_LENGTH = 2200;
 const MAX_STORY_TEXT_LENGTH = 180;
 const MAX_REPORT_NOTE_LENGTH = 500;
 const MAX_CLIP_DURATION = 60;
+const MAX_STORY_EMOJI_STICKERS = 8;
 
 const URL_PROTOCOL_PATTERN = /^https?:\/\//i;
 const USERNAME_TOKEN = /^[a-zA-Z0-9_.]{1,30}$/;
@@ -235,6 +236,26 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
   const customEmojiStickerRotation = input.customEmojiStickerRotation;
   const customTextStickerTheme = input.customTextStickerTheme;
   const customTextStickerAlignment = input.customTextStickerAlignment;
+  const extraEmojiStickers =
+    Array.isArray(input.extraEmojiStickers)
+      ? input.extraEmojiStickers
+        .map((sticker) => ({
+          text: cleanText(sticker?.text),
+          position: {
+            x: Number(sticker?.position?.x),
+            y: Number(sticker?.position?.y),
+          },
+          scale:
+            sticker?.scale === undefined || sticker?.scale === null
+              ? undefined
+              : Number(sticker.scale),
+          rotation:
+            sticker?.rotation === undefined || sticker?.rotation === null
+              ? undefined
+              : Number(sticker.rotation),
+        }))
+        .filter((sticker) => sticker.text)
+      : [];
   const hashtags = normalizeTagList(input.hashtags, MAX_HASHTAGS, "hashtags");
   const mentions = normalizeTagList(input.mentions, MAX_MENTIONS, "mentions");
   const music = normalizeSelectedMusic(input.music);
@@ -284,6 +305,13 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
 
   assertLength(customTextSticker, 60, "Story text sticker");
   assertLength(customEmojiSticker, 16, "Story emoji sticker");
+
+  if (extraEmojiStickers.length > MAX_STORY_EMOJI_STICKERS) {
+    throw new SocialValidationError(
+      "validation_error",
+      `Maximum ${MAX_STORY_EMOJI_STICKERS} extra emoji stickers are allowed.`,
+    );
+  }
 
   if (
     customTextStickerPlacement !== undefined &&
@@ -365,6 +393,35 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
     throw new SocialValidationError("validation_error", "Invalid emoji sticker rotation.");
   }
 
+  extraEmojiStickers.forEach((sticker) => {
+    assertLength(sticker.text, 16, "Story emoji sticker");
+
+    if (
+      !Number.isFinite(sticker.position.x) ||
+      !Number.isFinite(sticker.position.y) ||
+      sticker.position.x < 0 ||
+      sticker.position.x > 1 ||
+      sticker.position.y < 0 ||
+      sticker.position.y > 1
+    ) {
+      throw new SocialValidationError("validation_error", "Invalid extra emoji sticker position.");
+    }
+
+    if (
+      sticker.scale !== undefined &&
+      (typeof sticker.scale !== "number" || sticker.scale < 0.6 || sticker.scale > 2)
+    ) {
+      throw new SocialValidationError("validation_error", "Invalid extra emoji sticker size.");
+    }
+
+    if (
+      sticker.rotation !== undefined &&
+      (typeof sticker.rotation !== "number" || sticker.rotation < -180 || sticker.rotation > 180)
+    ) {
+      throw new SocialValidationError("validation_error", "Invalid extra emoji sticker rotation.");
+    }
+  });
+
   return {
     ...input,
     media,
@@ -385,6 +442,7 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
     customEmojiStickerPosition,
     customEmojiStickerScale,
     customEmojiStickerRotation,
+    extraEmojiStickers: extraEmojiStickers.length ? extraEmojiStickers : undefined,
     hashtags,
     mentions,
     allowReplies: input.allowReplies !== false,

@@ -48,12 +48,20 @@ import {
   searchMusicCatalog,
   getUserOriginalSounds,
 } from "../utils/musicApi";
+import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
 import { getStoredUserId } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
 import SocialVideo from "../features/social/components/SocialVideo";
 import PhotoFilterStrip from "../components/media/PhotoFilterStrip";
 import VideoTrimSheet from "../components/media/VideoTrimSheet";
-import FaceOverlayPicker from "../components/media/FaceOverlayPicker";
+import FaceOverlayPicker, { FaceSticker } from "../components/media/FaceOverlayPicker";
+
+let ColorMatrix: any = null;
+try {
+  ColorMatrix = require("react-native-color-matrix-image-filters").ColorMatrix;
+} catch {
+  ColorMatrix = null;
+}
 
 type ComposerTab = "post" | "story" | "swipe";
 
@@ -158,6 +166,11 @@ type AudienceCandidate = {
   name: string;
 };
 
+type LocationSuggestion = {
+  name: string;
+  count: number;
+};
+
 type MusicSelections = Record<ComposerTab, SelectedMusicClip | null>;
 type MusicBrowseMode = "trending" | "original" | "search";
 
@@ -234,6 +247,8 @@ function CreatePostScreen({ navigation, route }: any) {
 
   const [caption, setCaption] = useState("");
   const [location, setLocation] = useState("");
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
+  const [locationLoading, setLocationLoading] = useState(false);
 
   const [hashtagsRaw, setHashtagsRaw] = useState("");
   const [mentionsRaw, setMentionsRaw] = useState("");
@@ -256,6 +271,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const [showFaceOverlay, setShowFaceOverlay] = useState(false);
   const [storyLinkUrl, setStoryLinkUrl] = useState("");
   const [storyLocation, setStoryLocation] = useState("");
+  const [storyLocationSuggestions, setStoryLocationSuggestions] = useState<LocationSuggestion[]>([]);
+  const [storyLocationLoading, setStoryLocationLoading] = useState(false);
   const [storyHashtagsRaw, setStoryHashtagsRaw] = useState("");
   const [storyMentionsRaw, setStoryMentionsRaw] = useState("");
   const [storyStickerText, setStoryStickerText] = useState("");
@@ -274,6 +291,7 @@ function CreatePostScreen({ navigation, route }: any) {
   );
   const [storyStickerEmojiScale, setStoryStickerEmojiScale] = useState(1);
   const [storyStickerEmojiRotation, setStoryStickerEmojiRotation] = useState(0);
+  const [storyFaceStickers, setStoryFaceStickers] = useState<FaceSticker[]>([]);
   const [storyPreviewSize, setStoryPreviewSize] = useState({ width: 0, height: 0 });
   const [storyVisibility, setStoryVisibility] = useState<Visibility>("public");
   const [storyVisibleToUserIds, setStoryVisibleToUserIds] = useState<string[]>([]);
@@ -311,6 +329,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const textStickerDragStartRef = useRef(storyStickerPresetPositions.bottom_left);
   const emojiStickerDragStartRef = useRef(storyStickerPresetPositions.top_right);
   const musicPreviewPlayerRef = useRef(createSound());
+  const locationLookupRequestRef = useRef(0);
+  const storyLocationLookupRequestRef = useRef(0);
 
   const stopMusicPreview = useCallback(async () => {
     const player = musicPreviewPlayerRef.current;
@@ -423,6 +443,107 @@ function CreatePostScreen({ navigation, route }: any) {
       initialMediaType: undefined,
     });
   }, [navigation, route?.params]);
+
+  const fetchLocationSuggestions = useCallback(async (query: string): Promise<LocationSuggestion[]> => {
+    const trimmedQuery = String(query || "").trim();
+
+    if (trimmedQuery.length < 2) {
+      return [];
+    }
+
+    const response = await API.get(`/search?type=locations&query=${encodeURIComponent(trimmedQuery)}`);
+    const results = Array.isArray(response?.data?.results?.locations) ? response.data.results.locations : [];
+
+    return results
+      .map((entry: any) => ({
+        name: String(entry?.name || "").trim(),
+        count: Math.max(0, Number(entry?.count || 0)),
+      }))
+      .filter((entry: LocationSuggestion) => !!entry.name)
+      .slice(0, 6);
+  }, []);
+
+  useEffect(() => {
+    const trimmedQuery = location.trim();
+    const requestId = ++locationLookupRequestRef.current;
+
+    if (trimmedQuery.length < 2) {
+      setLocationLoading(false);
+      setLocationSuggestions([]);
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      setLocationLoading(true);
+
+      fetchLocationSuggestions(trimmedQuery)
+        .then((results) => {
+          if (locationLookupRequestRef.current !== requestId) {
+            return;
+          }
+
+          setLocationSuggestions(results);
+        })
+        .catch((error) => {
+          if (locationLookupRequestRef.current !== requestId) {
+            return;
+          }
+
+          console.log("location suggestions error:", error);
+          setLocationSuggestions([]);
+        })
+        .finally(() => {
+          if (locationLookupRequestRef.current === requestId) {
+            setLocationLoading(false);
+          }
+        });
+    }, 220);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [fetchLocationSuggestions, location]);
+
+  useEffect(() => {
+    const trimmedQuery = storyLocation.trim();
+    const requestId = ++storyLocationLookupRequestRef.current;
+
+    if (trimmedQuery.length < 2) {
+      setStoryLocationLoading(false);
+      setStoryLocationSuggestions([]);
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      setStoryLocationLoading(true);
+
+      fetchLocationSuggestions(trimmedQuery)
+        .then((results) => {
+          if (storyLocationLookupRequestRef.current !== requestId) {
+            return;
+          }
+
+          setStoryLocationSuggestions(results);
+        })
+        .catch((error) => {
+          if (storyLocationLookupRequestRef.current !== requestId) {
+            return;
+          }
+
+          console.log("story location suggestions error:", error);
+          setStoryLocationSuggestions([]);
+        })
+        .finally(() => {
+          if (storyLocationLookupRequestRef.current === requestId) {
+            setStoryLocationLoading(false);
+          }
+        });
+    }, 220);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [fetchLocationSuggestions, storyLocation]);
 
   const primaryAsset = useMemo(() => selectedAssets[0] || null, [selectedAssets]);
 
@@ -887,6 +1008,14 @@ function CreatePostScreen({ navigation, route }: any) {
       customEmojiStickerPosition: storyStickerEmoji.trim() ? getStickerPosition("emoji") : undefined,
       customEmojiStickerScale: storyStickerEmoji.trim() ? storyStickerEmojiScale : undefined,
       customEmojiStickerRotation: storyStickerEmoji.trim() ? storyStickerEmojiRotation : undefined,
+      extraEmojiStickers: storyFaceStickers.length
+        ? storyFaceStickers.map((sticker) => ({
+          text: sticker.emoji,
+          position: sticker.position || { x: 0.34, y: 0.24 },
+          scale: sticker.scale,
+          rotation: sticker.rotation,
+        }))
+        : undefined,
       hashtags: splitTokens(storyHashtagsRaw),
       mentions: splitTokens(storyMentionsRaw),
       visibility: storyVisibility,
@@ -1012,6 +1141,29 @@ function CreatePostScreen({ navigation, route }: any) {
           ) : null}
         </View>
       ) : null;
+    const previewFaceStickers =
+      activeTab === "story" && storyFaceStickers.length ? (
+        <View pointerEvents="none" style={styles.storyPreviewStickerLayer}>
+          {storyFaceStickers.map((sticker) => (
+            <View
+              key={`story-face-sticker-${sticker.placementId || sticker.id}`}
+              style={[
+                styles.storyPreviewEmojiSticker,
+                {
+                  left: `${(sticker.position?.x ?? 0.34) * 100}%`,
+                  top: `${(sticker.position?.y ?? 0.24) * 100}%`,
+                  transform: [
+                    { rotate: `${sticker.rotation || 0}deg` },
+                    { scale: sticker.scale || 1 },
+                  ],
+                },
+              ]}
+            >
+              <Text style={styles.storyPreviewEmojiText}>{sticker.emoji}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null;
 
     if (activeTab === "story" && storyType === "text") {
       return (
@@ -1022,6 +1174,7 @@ function CreatePostScreen({ navigation, route }: any) {
           <Text style={styles.textStoryPreviewText}>
             {storyCaption.trim() || "Type your story text"}
           </Text>
+          {previewFaceStickers}
           {previewStickers}
         </View>
       );
@@ -1055,20 +1208,32 @@ function CreatePostScreen({ navigation, route }: any) {
           onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
         >
           {previewVideo}
+          {previewFaceStickers}
           {previewStickers}
         </View>
       ) : previewVideo;
     }
+
+    const rawPreviewImage = (
+      <Image
+        source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }}
+        style={styles.preview}
+      />
+    );
+    const activePhotoFilter = selectedPhotoFilter !== "none"
+      ? PHOTO_FILTER_LIST.find((filter) => filter.id === selectedPhotoFilter)
+      : null;
+    const filteredPostPreview =
+      activeTab === "post" && ColorMatrix && activePhotoFilter?.matrix
+        ? <ColorMatrix matrix={activePhotoFilter.matrix}>{rawPreviewImage}</ColorMatrix>
+        : rawPreviewImage;
 
     return activeTab === "story" ? (
       <View
         style={styles.storyPreviewFrame}
         onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
       >
-        <Image
-          source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }}
-          style={styles.preview}
-        />
+        {rawPreviewImage}
         {storyFilterStyle ? (
           <View
             pointerEvents="none"
@@ -1081,13 +1246,11 @@ function CreatePostScreen({ navigation, route }: any) {
             ]}
           />
         ) : null}
+        {previewFaceStickers}
         {previewStickers}
       </View>
     ) : (
-      <Image
-        source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }}
-        style={styles.preview}
-      />
+      filteredPostPreview
     );
   };
 
@@ -1140,23 +1303,26 @@ function CreatePostScreen({ navigation, route }: any) {
 
   /** Face overlay stickers button */
   const renderFaceOverlayButton = () => {
-    if (activeTab !== "post" && activeTab !== "story") {
+    if (activeTab !== "story") {
       return null;
     }
 
     return (
       <>
         <TouchableOpacity
-          style={[styles.mediaActionButton, { backgroundColor: "#FF6B35", marginLeft: 8 }]}
+          style={[styles.mediaActionButton, { backgroundColor: "#FF6B35", marginLeft: primaryAsset?.mediaType === "video" ? 8 : 0 }]}
           onPress={() => setShowFaceOverlay(true)}
         >
           <Icon name="happy-outline" size={18} color="#fff" />
-          <Text style={styles.mediaActionText}>Face Stickers</Text>
+          <Text style={styles.mediaActionText}>
+            {storyFaceStickers.length ? `Story Stickers (${storyFaceStickers.length})` : "Story Stickers"}
+          </Text>
         </TouchableOpacity>
         <FaceOverlayPicker
           visible={showFaceOverlay}
+          stickers={storyFaceStickers}
           onClose={() => setShowFaceOverlay(false)}
-          onStickersChanged={() => { }}
+          onStickersChanged={setStoryFaceStickers}
         />
       </>
     );
@@ -1184,6 +1350,46 @@ function CreatePostScreen({ navigation, route }: any) {
           </View>
         ))}
       </ScrollView>
+    );
+  };
+
+  const renderLocationSuggestions = (
+    suggestions: LocationSuggestion[],
+    loading: boolean,
+    onSelect: (value: string) => void,
+  ) => {
+    if (!loading && !suggestions.length) {
+      return null;
+    }
+
+    return (
+      <View style={[styles.locationSuggestionsCard, { backgroundColor: elevatedSurfaceColor, borderColor: colors.border }]}>
+        {loading && !suggestions.length ? (
+          <View style={styles.locationSuggestionsLoadingRow}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={[styles.locationSuggestionMeta, helperTextStyle]}>Looking up places...</Text>
+          </View>
+        ) : null}
+
+        {suggestions.map((suggestion) => (
+          <TouchableOpacity
+            key={`${suggestion.name}:${suggestion.count}`}
+            style={styles.locationSuggestionButton}
+            activeOpacity={0.82}
+            onPress={() => onSelect(suggestion.name)}
+          >
+            <View style={styles.locationSuggestionBody}>
+              <Text style={[styles.locationSuggestionName, { color: colors.text }]} numberOfLines={1}>
+                {suggestion.name}
+              </Text>
+              <Text style={[styles.locationSuggestionMeta, helperTextStyle]}>
+                {suggestion.count > 0 ? `${suggestion.count} posts` : "Suggested location"}
+              </Text>
+            </View>
+            <Icon name="location-outline" size={16} color={colors.primary} />
+          </TouchableOpacity>
+        ))}
+      </View>
     );
   };
 
@@ -1399,7 +1605,18 @@ function CreatePostScreen({ navigation, route }: any) {
       <Text style={[styles.counter, helperTextStyle]}>{caption.length}/{limits.caption}</Text>
 
       <Text style={[styles.sectionLabel, { color: colors.text }]}>Location</Text>
-      <TextInput style={[styles.inputSingle, inputStyle]} value={location} onChangeText={setLocation} placeholder="Add location" placeholderTextColor={colors.mutedText} maxLength={limits.location} />
+      <TextInput
+        style={[styles.inputSingle, inputStyle]}
+        value={location}
+        onChangeText={setLocation}
+        placeholder="Add location"
+        placeholderTextColor={colors.mutedText}
+        maxLength={limits.location}
+      />
+      {renderLocationSuggestions(locationSuggestions, locationLoading, (value) => {
+        setLocation(value);
+        setLocationSuggestions([]);
+      })}
       {renderMusicPicker("post")}
 
       <Text style={[styles.sectionLabel, { color: colors.text }]}>Hashtags (comma separated)</Text>
@@ -1586,12 +1803,17 @@ function CreatePostScreen({ navigation, route }: any) {
 
       <Text style={styles.sectionLabel}>Location</Text>
       <TextInput
-        style={styles.inputSingle}
+        style={[styles.inputSingle, inputStyle]}
         value={storyLocation}
         onChangeText={setStoryLocation}
         placeholder="Add location sticker"
+        placeholderTextColor={colors.mutedText}
         maxLength={limits.location}
       />
+      {renderLocationSuggestions(storyLocationSuggestions, storyLocationLoading, (value) => {
+        setStoryLocation(value);
+        setStoryLocationSuggestions([]);
+      })}
 
       <Text style={styles.sectionLabel}>Hashtags</Text>
       <TextInput
@@ -1749,7 +1971,18 @@ function CreatePostScreen({ navigation, route }: any) {
       {renderMusicPicker("swipe")}
 
       <Text style={[styles.sectionLabel, { color: colors.text }]}>Location</Text>
-      <TextInput style={[styles.inputSingle, inputStyle]} value={location} onChangeText={setLocation} placeholder="Add location" placeholderTextColor={colors.mutedText} maxLength={limits.location} />
+      <TextInput
+        style={[styles.inputSingle, inputStyle]}
+        value={location}
+        onChangeText={setLocation}
+        placeholder="Add location"
+        placeholderTextColor={colors.mutedText}
+        maxLength={limits.location}
+      />
+      {renderLocationSuggestions(locationSuggestions, locationLoading, (value) => {
+        setLocation(value);
+        setLocationSuggestions([]);
+      })}
 
       <Text style={[styles.sectionLabel, { color: colors.text }]}>Hashtags</Text>
       <TextInput style={[styles.inputSingle, inputStyle]} value={hashtagsRaw} onChangeText={setHashtagsRaw} placeholder="fitlife, travel" placeholderTextColor={colors.mutedText} />
@@ -2206,6 +2439,39 @@ const styles = StyleSheet.create({
     borderColor: "#ddd",
     borderRadius: 14,
     paddingHorizontal: 12,
+  },
+  locationSuggestionsCard: {
+    marginTop: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  locationSuggestionsLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  locationSuggestionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  locationSuggestionBody: {
+    flex: 1,
+  },
+  locationSuggestionName: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  locationSuggestionMeta: {
+    marginTop: 2,
+    fontSize: 12,
+    color: "#6b7280",
   },
   counter: { marginTop: 6, color: "#666", fontSize: 12 },
   switchRow: {

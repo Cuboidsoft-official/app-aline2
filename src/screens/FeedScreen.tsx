@@ -127,6 +127,7 @@ function FeedScreen({ navigation }: any) {
       {
         title: "Growth",
         data: [
+          { icon: "megaphone-outline", label: "Promotions", screen: "WalletScreen" },
           { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen" },
           { icon: "storefront-outline", label: "Become a Seller", screen: "SellerRegistration" },
         ],
@@ -278,9 +279,13 @@ function FeedScreen({ navigation }: any) {
     }
   };
 
-  const openPostDetail = (postId: string) => {
-    navigation.navigate("PostDetail", { postId });
-  };
+  const openPostDetail = useCallback((post: Post) => {
+    if (String(post?.user?.id || "") !== String(currentUser?.id || "")) {
+      return;
+    }
+
+    navigation.navigate("PostDetail", { postId: post.id });
+  }, [currentUser?.id, navigation]);
 
   const openUserProfile = useCallback((userId: string) => {
     const normalizedUserId = String(userId || "");
@@ -473,7 +478,11 @@ function FeedScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity activeOpacity={0.95} onPress={() => openPostDetail(item.id)}>
+        <TouchableOpacity
+          activeOpacity={String(item.user.id) === String(currentUser?.id || "") ? 0.95 : 1}
+          disabled={String(item.user.id) !== String(currentUser?.id || "")}
+          onPress={() => openPostDetail(item)}
+        >
           {renderPostMedia(item)}
         </TouchableOpacity>
 
@@ -581,8 +590,8 @@ function FeedScreen({ navigation }: any) {
               <Icon name="notifications-outline" size={23} color={colors.text} />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.headerIconGap} onPress={() => navigation.navigate("Swipes")}>
-              <Icon name="play-circle-outline" size={23} color={colors.text} />
+            <TouchableOpacity style={styles.headerIconGap} onPress={() => navigation.navigate("WalletScreen")}>
+              <Icon name="megaphone-outline" size={23} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>

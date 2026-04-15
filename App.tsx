@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Snackbar } from 'react-native-snackbar';
 
 import LoginScreen from './src/screens/LoginScreen';
 import SplashScreen from './src/screens/SplashScreen';
@@ -44,6 +45,7 @@ import StoryViewerScreen from './src/screens/social/StoryViewerScreen';
 import PostDetailScreen from './src/screens/social/PostDetailScreen';
 import StoryArchiveScreen from './src/screens/social/StoryArchiveScreen';
 import PostArchiveScreen from './src/screens/social/PostArchiveScreen';
+import SavedPostsScreen from './src/screens/social/SavedPostsScreen';
 import PostCommentsScreen from './src/screens/social/PostCommentsScreen';
 import SwipeCommentsScreen from './src/screens/social/SwipeCommentsScreen';
 import StoryInsightsScreen from './src/screens/social/StoryInsightsScreen';
@@ -60,8 +62,8 @@ import BottomTabs from './src/navigation/BottomTabs';
 import { callingDisabledMessage, productFlags } from './src/config/productFlags';
 import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
 import { connectSocket, disconnectSocket, socket } from './src/socket';
-import { setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
-import { setupNotificationListeners } from './src/utils/pushRegistration';
+import { getStoredToken, setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
+import { registerPushToken, setupNotificationListeners } from './src/utils/pushRegistration';
 
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef();
@@ -75,6 +77,104 @@ const transparentSheetOptions = {
 function AppNavigator() {
   const { navigationTheme } = useAppTheme();
 
+  const openRealtimeNotificationTarget = (payload: any) => {
+    if (!navigationRef.isReady()) {
+      return;
+    }
+
+    const type = String(payload?.type || '').trim();
+    const senderId = String(payload?.sender?._id || payload?.sender?.id || payload?.senderId || '').trim();
+    const postId = String(payload?.post?._id || payload?.post?.id || payload?.postId || '').trim();
+    const storyId = String(payload?.story?._id || payload?.story?.id || payload?.storyId || '').trim();
+
+    switch (type) {
+      case 'follow':
+        if (senderId) {
+          (navigationRef as any).navigate('ProfileView', { userId: senderId });
+          return;
+        }
+        break;
+      case 'like':
+      case 'comment':
+      case 'comment_reply':
+      case 'mention_post':
+      case 'tag_post':
+      case 'post_share':
+        if (postId) {
+          (navigationRef as any).navigate('PostDetail', { postId });
+          return;
+        }
+        break;
+      case 'story_reply':
+      case 'story_view':
+      case 'mention_story':
+      case 'tag_story':
+        if (storyId) {
+          (navigationRef as any).navigate('StoryViewer', { storyId });
+          return;
+        }
+        break;
+      case 'service_request':
+      case 'service_request_update':
+        (navigationRef as any).navigate('ServiceRequestsScreen', { mode: 'seller' });
+        return;
+      default:
+        break;
+    }
+
+    (navigationRef as any).navigate('NotificationScreen');
+  };
+
+  const buildRealtimeNotificationText = (payload: any) => {
+    const senderName =
+      String(payload?.sender?.name || payload?.sender?.username || '').trim()
+      || 'Someone';
+    const type = String(payload?.type || '').trim();
+
+    switch (type) {
+      case 'follow':
+        return `${senderName} started following you`;
+      case 'like':
+        return `${senderName} liked your post`;
+      case 'comment':
+        return `${senderName} commented on your post`;
+      case 'comment_reply':
+        return `${senderName} replied to your comment`;
+      case 'story_reply':
+        return `${senderName} replied to your story`;
+      case 'story_view':
+        return `${senderName} viewed your story`;
+      case 'mention_post':
+      case 'mention_story':
+        return `${senderName} mentioned you`;
+      case 'tag_post':
+      case 'tag_story':
+        return `${senderName} tagged you`;
+      case 'service_request':
+        return `${senderName} sent a service request`;
+      case 'service_request_update':
+        return `${senderName} updated a service request`;
+      default:
+        return `${senderName} sent you a notification`;
+    }
+  };
+
+  const showRealtimeBanner = (text: string, onPress?: () => void) => {
+    Snackbar.show({
+      text,
+      duration: Snackbar.LENGTH_LONG,
+      backgroundColor: '#111827',
+      textColor: '#ffffff',
+      action: onPress
+        ? {
+            text: 'OPEN',
+            textColor: '#facc15',
+            onPress,
+          }
+        : undefined,
+    });
+  };
+
   useEffect(() => {
     return setSessionInvalidationHandler(() => {
       if (navigationRef.isReady()) {
@@ -84,6 +184,30 @@ function AppNavigator() {
         });
       }
     });
+  }, []);
+
+  useEffect(() => {
+    const syncPushRegistration = async () => {
+      const token = await getStoredToken();
+
+      if (!token) {
+        return;
+      }
+
+      await registerPushToken();
+    };
+
+    syncPushRegistration().catch((error) => {
+      console.log("global push registration error", error);
+    });
+
+    const unsubscribe = subscribeSessionChanges(() => {
+      syncPushRegistration().catch((error) => {
+        console.log("session push registration error", error);
+      });
+    });
+
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -151,6 +275,67 @@ function AppNavigator() {
     };
   }, []);
 
+  useEffect(() => {
+    const handleRealtimeNotification = (payload: any) => {
+      if (!navigationRef.isReady()) {
+        return;
+      }
+
+      const currentRoute: any = navigationRef.getCurrentRoute();
+      if (currentRoute?.name === 'NotificationScreen') {
+        return;
+      }
+
+      showRealtimeBanner(
+        buildRealtimeNotificationText(payload),
+        () => openRealtimeNotificationTarget(payload),
+      );
+    };
+
+    const handleRealtimeMessage = (payload: any) => {
+      if (!navigationRef.isReady()) {
+        return;
+      }
+
+      const conversationId = String(payload?.conversation?._id || payload?.conversation || payload?.conversationId || '').trim();
+      if (!conversationId) {
+        return;
+      }
+
+      const currentRoute: any = navigationRef.getCurrentRoute();
+      const activeConversationId = String(currentRoute?.params?.conversationId || '').trim();
+
+      if (
+        (currentRoute?.name === 'ChatScreen' || currentRoute?.name === 'SellerChatScreen')
+        && activeConversationId === conversationId
+      ) {
+        return;
+      }
+
+      const senderName =
+        String(payload?.sender?.name || payload?.sender?.username || '').trim()
+        || 'New message';
+      const body =
+        String(payload?.text || '').trim()
+        || (payload?.messageType ? `Sent a ${String(payload.messageType).trim()}` : 'Open chat');
+
+      showRealtimeBanner(
+        `${senderName}: ${body}`,
+        () => {
+          (navigationRef as any).navigate('ChatScreen', { conversationId });
+        },
+      );
+    };
+
+    socket.on('receiveNotification', handleRealtimeNotification);
+    socket.on('receiveMessage', handleRealtimeMessage);
+
+    return () => {
+      socket.off('receiveNotification', handleRealtimeNotification);
+      socket.off('receiveMessage', handleRealtimeMessage);
+    };
+  }, []);
+
   return (
     <NavigationContainer ref={navigationRef} theme={navigationTheme}>
       <Stack.Navigator
@@ -212,6 +397,7 @@ function AppNavigator() {
         <Stack.Screen name="PostDetail" component={PostDetailScreen} />
         <Stack.Screen name="StoryArchive" component={StoryArchiveScreen} />
         <Stack.Screen name="PostArchive" component={PostArchiveScreen} />
+        <Stack.Screen name="SavedPosts" component={SavedPostsScreen} />
         <Stack.Screen name="PostComments" component={PostCommentsScreen} options={transparentSheetOptions} />
         <Stack.Screen name="SwipeComments" component={SwipeCommentsScreen} options={transparentSheetOptions} />
         <Stack.Screen name="StoryInsights" component={StoryInsightsScreen} options={transparentSheetOptions} />

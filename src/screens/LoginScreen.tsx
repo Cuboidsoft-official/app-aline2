@@ -72,7 +72,10 @@ const LoginScreen = ({ navigation, route }: any) => {
 
         registerPushToken().catch(() => { });
 
-        navigation.replace("MainApp");
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "MainApp" }],
+        });
 
       } else {
         Alert.alert("Login failed", res?.data?.message || "Login failed");

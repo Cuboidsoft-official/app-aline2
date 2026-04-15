@@ -24,6 +24,15 @@ const SignupScreen = ({ navigation }: any) => {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const goToLogin = (params?: Record<string, any>) => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.replace("Login", params);
+  };
+
   const sendOtp = async () => {
 
     const cleanEmail = email.trim().toLowerCase();
@@ -72,7 +81,7 @@ const SignupScreen = ({ navigation }: any) => {
             { text: "Cancel", style: "cancel" },
             {
               text: "Go to Login",
-              onPress: () => navigation.navigate("Login", { email: cleanEmail })
+              onPress: () => navigation.replace("Login", { email: cleanEmail })
             }
           ]
         );
@@ -96,7 +105,7 @@ const SignupScreen = ({ navigation }: any) => {
     >
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
 
-        <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+        <TouchableOpacity onPress={() => goToLogin()}>
           <Text style={[styles.backArrow, { color: colors.text }]}>← Back</Text>
         </TouchableOpacity>
 
@@ -136,7 +145,7 @@ const SignupScreen = ({ navigation }: any) => {
         </TouchableOpacity>
 
         <View style={styles.bottomContainer}>
-          <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+          <TouchableOpacity onPress={() => goToLogin()}>
             <Text style={styles.loginText}>
               I already have an account
             </Text>

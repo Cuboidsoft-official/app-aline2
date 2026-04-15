@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
+import { createSound } from "react-native-nitro-sound";
 
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
 import SocialVideo from "../../features/social/components/SocialVideo";
@@ -91,7 +92,11 @@ function StoryViewerScreen({ route, navigation }: any) {
   const [showOwnerActivity, setShowOwnerActivity] = useState(false);
   const [ownerActivityTab, setOwnerActivityTab] = useState<"views" | "likes" | "replies">("views");
   const [loadError, setLoadError] = useState("This story may have expired or is no longer visible to you.");
+  const [isMusicEnabled, setIsMusicEnabled] = useState(true);
   const replyInputRef = useRef<TextInput | null>(null);
+  const storyMusicPlayerRef = useRef(createSound());
+  const storyMusicTrackKeyRef = useRef("");
+  const storyMusicEndMsRef = useRef(0);
 
   useEffect(() => {
     let mounted = true;
@@ -133,6 +138,15 @@ function StoryViewerScreen({ route, navigation }: any) {
   const storyDuration = useMemo(() => getStoryDuration(currentStory), [currentStory]);
   const canReplyToCurrentStory = !!currentStory && currentStory.allowReplies !== false;
   const canAccessOwnerTools = !!currentStory?.isOwner && isSyncedStoryId(currentStory?.id);
+  const storyMusicUrl = useMemo(
+    () => normalizeMediaUrl(currentStory?.music?.previewUrl || ""),
+    [currentStory?.music?.previewUrl],
+  );
+  const storyMusicStartMs = Math.max(0, Number(currentStory?.music?.startTime || 0) * 1000);
+  const storyMusicDurationMs = Math.max(0, Number(currentStory?.music?.duration || 0) * 1000);
+  const storyMusicTrackKey = currentStory
+    ? `${currentStory.id}:${storyMusicUrl}:${storyMusicStartMs}:${storyMusicDurationMs}`
+    : "";
 
   useEffect(() => {
     setProgress(0);
@@ -176,6 +190,105 @@ function StoryViewerScreen({ route, navigation }: any) {
 
     return () => clearInterval(timer);
   }, [currentStory, paused, storyDuration]);
+
+  useEffect(() => {
+    const player = storyMusicPlayerRef.current;
+
+    player.setSubscriptionDuration(0.1);
+    player.addPlayBackListener((event: any) => {
+      const playbackEndMs = storyMusicEndMsRef.current;
+      const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
+
+      if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
+        storyMusicEndMsRef.current = 0;
+        player.pausePlayer().catch(() => undefined);
+      }
+    });
+    player.addPlaybackEndListener(() => {
+      storyMusicEndMsRef.current = 0;
+    });
+
+    return () => {
+      try {
+        player.removePlayBackListener();
+      } catch {
+        // noop
+      }
+
+      try {
+        player.removePlaybackEndListener();
+      } catch {
+        // noop
+      }
+
+      player.stopPlayer().catch(() => undefined);
+      player.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    const player = storyMusicPlayerRef.current;
+    const shouldPlayMusic = !!storyMusicUrl && isMusicEnabled;
+
+    const stopMusic = async () => {
+      storyMusicTrackKeyRef.current = "";
+      storyMusicEndMsRef.current = 0;
+
+      try {
+        await player.stopPlayer();
+      } catch {
+        // noop
+      }
+    };
+
+    if (!shouldPlayMusic) {
+      stopMusic().catch(() => undefined);
+      return;
+    }
+
+    if (paused) {
+      player.pausePlayer().catch(() => undefined);
+      return;
+    }
+
+    if (storyMusicTrackKeyRef.current === storyMusicTrackKey) {
+      player.resumePlayer().catch(() => undefined);
+      return;
+    }
+
+    let cancelled = false;
+
+    const playMusic = async () => {
+      await stopMusic();
+      if (cancelled || !storyMusicUrl) {
+        return;
+      }
+
+      storyMusicTrackKeyRef.current = storyMusicTrackKey;
+      storyMusicEndMsRef.current =
+        storyMusicDurationMs > 0 ? storyMusicStartMs + storyMusicDurationMs : 0;
+
+      await player.startPlayer(storyMusicUrl);
+      await player.seekToPlayer(storyMusicStartMs);
+      await player.setVolume(1);
+    };
+
+    playMusic().catch((error) => {
+      console.log("story music playback error", error);
+      stopMusic().catch(() => undefined);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isMusicEnabled,
+    paused,
+    storyMusicDurationMs,
+    storyMusicStartMs,
+    storyMusicTrackKey,
+    storyMusicUrl,
+  ]);
 
   useEffect(() => {
     if (!currentStory || paused || progress < 1) {
@@ -387,6 +500,7 @@ function StoryViewerScreen({ route, navigation }: any) {
           posterUri={normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url)}
           style={styles.storyImage}
           paused={paused}
+          muted={!!currentStory.music?.previewUrl && isMusicEnabled}
           onEnd={next}
         />
       );
@@ -589,6 +703,16 @@ function StoryViewerScreen({ route, navigation }: any) {
         ) : (
           <View style={styles.iconButtonSpacer} />
         )}
+
+        {currentStory.music?.previewUrl ? (
+          <TouchableOpacity style={styles.iconButton} onPress={() => setIsMusicEnabled((current) => !current)}>
+            <Icon
+              name={isMusicEnabled ? "volume-high-outline" : "volume-mute-outline"}
+              size={22}
+              color="#fff"
+            />
+          </TouchableOpacity>
+        ) : null}
 
         <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
           <Icon name="close" size={26} color="#fff" />

@@ -159,7 +159,7 @@ export interface Reel {
   caption: string;
   media: MediaAsset;
   thumbnailUrl: string;
-  music?: string;
+  music?: StoryMusic;
   hashtags: string[];
   mentions: string[];
   location?: string;
@@ -277,6 +277,12 @@ export interface CreateStoryInput {
   customEmojiStickerPosition?: { x: number; y: number };
   customEmojiStickerScale?: number;
   customEmojiStickerRotation?: number;
+  extraEmojiStickers?: Array<{
+    text: string;
+    position: { x: number; y: number };
+    scale?: number;
+    rotation?: number;
+  }>;
   mentions?: string[];
   hashtags?: string[];
   visibility?: Visibility;
@@ -335,6 +341,7 @@ export interface SocialApi {
   getStory(storyId: string): Promise<Story>;
   getStoryArchive(): Promise<Story[]>;
   getPostArchive(): Promise<Post[]>;
+  getSavedPosts(): Promise<Post[]>;
 
   markStoryViewed(storyId: string): Promise<Story>;
   toggleStoryLike(storyId: string): Promise<Story>;

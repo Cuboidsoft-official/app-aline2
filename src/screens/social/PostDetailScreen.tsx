@@ -60,6 +60,12 @@ function PostDetailScreen({ route, navigation }: any) {
             return;
           }
 
+          if (data.user.id !== nextUserId) {
+            Alert.alert("Unavailable", "Post details are only available for posts you own.");
+            navigation.goBack();
+            return;
+          }
+
           setPost(data);
           setCurrentUserId(nextUserId);
           setCaption(data.caption);
