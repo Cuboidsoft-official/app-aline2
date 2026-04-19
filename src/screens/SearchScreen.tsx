@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
   RefreshControl
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 
 import { API } from "../api/api";
@@ -20,6 +20,7 @@ import { getStoredUserId } from "../utils/authSession";
 import { formatPrimaryServicePrice } from "../utils/servicePricing";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 
 type UserItem = {
   _id: string;
@@ -75,6 +76,10 @@ const TAB_LABELS = {
 
 const SearchScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const accentColor = colors.primary;
+  const accentSoft = `${accentColor}16`;
+  const accentBorder = `${accentColor}36`;
   const [allUsers, setAllUsers] = useState<UserItem[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [suggestedUsers, setSuggestedUsers] = useState<UserItem[]>([]);
@@ -90,6 +95,16 @@ const SearchScreen = ({ navigation }: any) => {
   const [errorMessage, setErrorMessage] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<keyof typeof TAB_LABELS>("users");
+  const activeTabHeadline = activeTab === "users"
+    ? "People and creators"
+    : activeTab === "sellers"
+      ? "Trusted sellers nearby"
+      : "Services worth checking out";
+  const activeTabSubline = activeTab === "users"
+    ? "Search profiles, mutuals, and suggested accounts."
+    : activeTab === "sellers"
+      ? "Browse available experts with faster, cleaner results."
+      : "Find services, hashtags, and featured offers in one place.";
 
   const applyUserResults = useCallback((items: UserItem[], userId: string | null) => {
     const filtered = items.filter((item) => item?._id && item._id !== userId);
@@ -247,7 +262,7 @@ const SearchScreen = ({ navigation }: any) => {
 
   const renderUser = ({ item }: { item: UserItem }) => (
     <TouchableOpacity
-      style={styles.userCard}
+      style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.border }]}
       onPress={() =>
         navigation.navigate("ProfilePreviewScreen", {
           userId: item._id
@@ -263,17 +278,17 @@ const SearchScreen = ({ navigation }: any) => {
 
       <View style={styles.cardContent}>
         <View style={styles.inlineRow}>
-          <Text style={styles.username}>{item.username || "user"}</Text>
+          <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>{item.username || "user"}</Text>
           {item.isPrivate ? (
-            <View style={styles.privateBadge}>
-              <Icon name="lock-closed" size={12} color="#7B4DFF" />
+            <View style={[styles.privateBadge, { backgroundColor: accentSoft }]}>
+              <Icon name="lock-closed" size={12} color={accentColor} />
               <Text style={styles.privateText}>Private</Text>
             </View>
           ) : null}
         </View>
-        <Text style={styles.name}>{item.name || item.username || "Aline2 user"}</Text>
+        <Text style={[styles.name, { color: colors.mutedText }]} numberOfLines={1}>{item.name || item.username || "Aline2 user"}</Text>
         {!!item.interests?.length && (
-          <Text style={styles.metaLine} numberOfLines={1}>
+          <Text style={[styles.metaLine, { color: colors.mutedText }]} numberOfLines={1}>
             {item.interests.join(" • ")}
           </Text>
         )}
@@ -283,7 +298,7 @@ const SearchScreen = ({ navigation }: any) => {
 
   const renderSeller = ({ item }: { item: SellerItem }) => (
     <TouchableOpacity
-      style={styles.userCard}
+      style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.border }]}
       onPress={() =>
         navigation.navigate("SellerPreviewScreen", {
           sellerId: item._id
@@ -299,16 +314,16 @@ const SearchScreen = ({ navigation }: any) => {
 
       <View style={styles.cardContent}>
         <View style={styles.inlineRow}>
-          <Text style={styles.username}>{item.sellerName || "Seller"}</Text>
+          <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>{item.sellerName || "Seller"}</Text>
           <View style={[styles.statusBadge, item.availabilityStatus ? styles.availableBadge : styles.busyBadge]}>
             <Text style={[styles.statusText, item.availabilityStatus ? styles.availableText : styles.busyText]}>
               {item.availabilityStatus ? "Available" : "Busy"}
             </Text>
           </View>
         </View>
-        <Text style={styles.name}>{item.specialization || "Service provider"}</Text>
+        <Text style={[styles.name, { color: colors.mutedText }]} numberOfLines={1}>{item.specialization || "Service provider"}</Text>
         {!!item.bio && (
-          <Text style={styles.metaLine} numberOfLines={1}>
+          <Text style={[styles.metaLine, { color: colors.mutedText }]} numberOfLines={1}>
             {item.bio}
           </Text>
         )}
@@ -318,7 +333,11 @@ const SearchScreen = ({ navigation }: any) => {
 
   const renderService = ({ item }: { item: ServiceItem }) => (
     <TouchableOpacity
-      style={[styles.serviceCard, !item?.seller?._id && styles.disabledCard]}
+      style={[
+        styles.serviceCard,
+        { backgroundColor: colors.card, borderColor: colors.border },
+        !item?.seller?._id && styles.disabledCard
+      ]}
       disabled={!item?.seller?._id}
       onPress={() =>
         navigation.navigate("SellerPreviewScreen", {
@@ -334,16 +353,16 @@ const SearchScreen = ({ navigation }: any) => {
       />
 
       <View style={styles.cardContent}>
-        <Text style={styles.username}>{item.serviceName || "Service"}</Text>
-        <Text style={styles.name}>
+        <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>{item.serviceName || "Service"}</Text>
+        <Text style={[styles.name, { color: colors.mutedText }]} numberOfLines={1}>
           {item?.seller?.sellerName || "Seller"}{item?.seller?.specialization ? ` • ${item.seller.specialization}` : ""}
         </Text>
         {!!item.description && (
-          <Text style={styles.metaLine} numberOfLines={2}>
+          <Text style={[styles.metaLine, { color: colors.mutedText }]} numberOfLines={2}>
             {item.description}
           </Text>
         )}
-        <Text style={styles.priceText}>{formatPrimaryServicePrice(item)}</Text>
+        <Text style={[styles.priceText, { color: accentColor }]}>{formatPrimaryServicePrice(item)}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -359,21 +378,25 @@ const SearchScreen = ({ navigation }: any) => {
 
     return (
       <View style={styles.sectionBlock}>
-        <Text style={styles.sectionTitle}>Suggested for you</Text>
+        <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Quick picks</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Suggested for you</Text>
+        <Text style={[styles.sectionSubtitle, { color: colors.mutedText }]}>
+          Start with familiar profiles and active people from your network.
+        </Text>
         {suggestedUsers.map((item) => (
           <TouchableOpacity
             key={item._id}
-            style={styles.suggestionRow}
+            style={[styles.suggestionRow, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: item._id })}
           >
             <Image source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }} style={styles.suggestionAvatar} />
             <View style={styles.cardContent}>
-              <Text style={styles.username}>{item.username || "user"}</Text>
-              <Text style={styles.name}>{item.name || item.username || "Aline2 user"}</Text>
+              <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>{item.username || "user"}</Text>
+              <Text style={[styles.name, { color: colors.mutedText }]} numberOfLines={1}>{item.name || item.username || "Aline2 user"}</Text>
             </View>
           </TouchableOpacity>
         ))}
-        <Text style={styles.sectionTitle}>Browse all users</Text>
+        <Text style={[styles.sectionTitle, styles.sectionTitleStandalone, { color: colors.text }]}>Browse all users</Text>
       </View>
     );
   };
@@ -385,281 +408,352 @@ const SearchScreen = ({ navigation }: any) => {
 
     return (
       <View style={styles.sectionBlock}>
-        <Text style={styles.sectionTitle}>Trending hashtags</Text>
+        <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Discover</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Trending hashtags</Text>
         <View style={styles.tagWrap}>
           {trendingHashtags.length ? trendingHashtags.map((item) => (
             <TouchableOpacity
               key={item.tag}
-              style={styles.tagChip}
+              style={[styles.tagChip, { backgroundColor: accentSoft, borderColor: accentBorder }]}
               onPress={() => openHashtagResults(item.tag)}
             >
               <Text style={styles.tagText}>#{item.tag}</Text>
             </TouchableOpacity>
           )) : (
-            <Text style={styles.helperText}>No trending hashtags yet.</Text>
+            <Text style={[styles.helperText, { color: colors.mutedText }]}>No trending hashtags yet.</Text>
           )}
         </View>
-        <Text style={styles.sectionTitle}>Discover services</Text>
+        <Text style={[styles.sectionTitle, styles.sectionTitleStandalone, { color: colors.text }]}>Discover services</Text>
       </View>
     );
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.center, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" />
-      </SafeAreaView>
+      <View style={styles.screen}>
+        <SafeAreaView style={[styles.center, { backgroundColor: colors.background }]}>
+          <ActivityIndicator size="large" />
+        </SafeAreaView>
+        <AppBottomDock navigation={navigation} />
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-
-      {/* HEADER */}
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Search</Text>
-
-        <View style={styles.headerSpacer} />
-      </View>
-
-      {/* SEARCH */}
-      <View style={[styles.searchBar, { backgroundColor: colors.input, borderColor: colors.border }]}>
-        <Icon name="search-outline" size={20} color={colors.mutedText} />
-        <TextInput
-          placeholder={`Search ${activeTab}...`}
-          placeholderTextColor={colors.placeholder}
-          style={[styles.searchInput, { color: colors.text }]}
-          value={search}
-          onChangeText={searchData}
-        />
-      </View>
-
-      {/* TABS */}
-      <View style={styles.tabs}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === "users" && styles.activeTab]}
-          onPress={() => setActiveTab("users")}
-        >
-          <Text style={[styles.tabText, { color: activeTab === "users" ? "#7B4DFF" : colors.mutedText }, activeTab === "users" && styles.activeText]}>
-            Users
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, activeTab === "sellers" && styles.activeTab]}
-          onPress={() => setActiveTab("sellers")}
-        >
-          <Text style={[styles.tabText, { color: activeTab === "sellers" ? "#7B4DFF" : colors.mutedText }, activeTab === "sellers" && styles.activeText]}>
-            Sellers
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, activeTab === "services" && styles.activeTab]}
-          onPress={() => setActiveTab("services")}
-        >
-          <Text style={[styles.tabText, { color: activeTab === "services" ? "#7B4DFF" : colors.mutedText }, activeTab === "services" && styles.activeText]}>
-            Services
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {searching ? (
-        <View style={styles.searchingBox}>
-          <ActivityIndicator size="small" color="#7B4DFF" />
-          <Text style={[styles.searchingText, { color: colors.mutedText }]}>Updating results...</Text>
-        </View>
-      ) : null}
-
-      <FlatList
-        data={currentData}
-        keyExtractor={(item: any, index) => String(item?._id || index)}
-        renderItem={
-          activeTab === "users"
-            ? renderUser
-            : activeTab === "sellers"
-              ? renderSeller
-              : renderService
-        }
-        ListHeaderComponent={activeTab === "services" ? renderServiceHeader : renderDiscoverHeader}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>
-              {errorMessage ? "Search unavailable" : `No ${TAB_LABELS[activeTab]} found`}
-            </Text>
-            <Text style={[styles.emptyText, { color: colors.mutedText }]}>
-              {errorMessage || "Try another search or check back later."}
-            </Text>
-            {errorMessage ? (
-              <TouchableOpacity style={styles.retryButton} onPress={() => init()}>
-                <Text style={styles.retryText}>Retry</Text>
+    <View style={styles.screen}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.headerWrap}>
+          <View style={[styles.headerShell, { backgroundColor: colors.card, borderColor: accentBorder }]}>
+            <View style={styles.headerRow}>
+              <TouchableOpacity
+                style={[styles.iconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
+                onPress={() => navigation.goBack()}
+              >
+                <Icon name="arrow-back" size={20} color={accentColor} />
               </TouchableOpacity>
+
+              <View style={styles.heroCopy}>
+                <Text style={[styles.heroEyebrow, { color: accentColor }]}>Explore</Text>
+                <Text style={[styles.headerTitle, { color: colors.text }]}>Search</Text>
+                <Text style={[styles.headerSubtitle, { color: colors.mutedText }]} numberOfLines={2}>
+                  {activeTabHeadline}
+                </Text>
+              </View>
+            </View>
+
+            <View style={[styles.searchBar, { backgroundColor: colors.input, borderColor: colors.border }]}>
+              <Icon name="search-outline" size={18} color={colors.mutedText} />
+              <TextInput
+                placeholder={`Search ${activeTab}...`}
+                placeholderTextColor={colors.placeholder}
+                style={[styles.searchInput, { color: colors.text }]}
+                value={search}
+                onChangeText={searchData}
+              />
+            </View>
+
+            <Text style={[styles.searchHint, { color: colors.mutedText }]} numberOfLines={2}>
+              {activeTabSubline}
+            </Text>
+
+            <View style={[styles.tabsShell, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <TouchableOpacity
+                style={[styles.tab, activeTab === "users" ? { backgroundColor: accentColor } : null]}
+                onPress={() => setActiveTab("users")}
+              >
+                <Text style={[styles.tabText, { color: activeTab === "users" ? "#fff" : colors.mutedText }, activeTab === "users" && styles.activeText]}>
+                  Users
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tab, activeTab === "sellers" ? { backgroundColor: accentColor } : null]}
+                onPress={() => setActiveTab("sellers")}
+              >
+                <Text style={[styles.tabText, { color: activeTab === "sellers" ? "#fff" : colors.mutedText }, activeTab === "sellers" && styles.activeText]}>
+                  Sellers
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tab, activeTab === "services" ? { backgroundColor: accentColor } : null]}
+                onPress={() => setActiveTab("services")}
+              >
+                <Text style={[styles.tabText, { color: activeTab === "services" ? "#fff" : colors.mutedText }, activeTab === "services" && styles.activeText]}>
+                  Services
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {searching ? (
+              <View style={[styles.searchingBox, { backgroundColor: accentSoft }]}>
+                <ActivityIndicator size="small" color={accentColor} />
+                <Text style={[styles.searchingText, { color: colors.mutedText }]}>Updating results...</Text>
+              </View>
             ) : null}
           </View>
-        }
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7B4DFF" />}
-        contentContainerStyle={[styles.listContent, !currentData.length && styles.listContentEmpty]}
-      />
+        </View>
 
-    </SafeAreaView>
+        <FlatList
+          data={currentData}
+          keyExtractor={(item: any, index) => String(item?._id || index)}
+          renderItem={
+            activeTab === "users"
+              ? renderUser
+              : activeTab === "sellers"
+                ? renderSeller
+                : renderService
+          }
+          ListHeaderComponent={activeTab === "services" ? renderServiceHeader : renderDiscoverHeader}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                {errorMessage ? "Search unavailable" : `No ${TAB_LABELS[activeTab]} found`}
+              </Text>
+              <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+                {errorMessage || "Try another search or check back later."}
+              </Text>
+              {errorMessage ? (
+                <TouchableOpacity style={[styles.retryButton, { backgroundColor: accentColor }]} onPress={() => init()}>
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accentColor} />}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: APP_BOTTOM_DOCK_BASE_HEIGHT + Math.max(insets.bottom, 10) + 24 },
+            !currentData.length && styles.listContentEmpty,
+          ]}
+        />
+      </SafeAreaView>
+      <AppBottomDock navigation={navigation} />
+    </View>
   );
 };
 
 export default SearchScreen;
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    backgroundColor: "#fff"
+    backgroundColor: "#fff",
   },
-
-  header: {
+  headerWrap: {
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
+  headerShell: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 24,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 12,
+  },
+  headerRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    marginBottom: 10
+    marginBottom: 12,
   },
-  headerSpacer: {
-    width: 24
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
   },
-
+  heroCopy: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 12,
+  },
+  heroEyebrow: {
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: "bold"
+    fontSize: 24,
+    fontWeight: "800",
+    marginTop: 2,
   },
-
+  headerSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "500",
+  },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#f5f4fb",
-    marginHorizontal: 15,
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    height: 48,
-    marginBottom: 12
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    height: 50,
   },
-
   searchInput: {
     flex: 1,
-    marginLeft: 8,
-    color: "#111"
+    marginLeft: 10,
+    color: "#111",
+    fontSize: 15,
   },
-
-  tabs: {
+  searchHint: {
+    marginTop: 10,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  tabsShell: {
     flexDirection: "row",
-    marginHorizontal: 15,
-    marginBottom: 10
+    marginTop: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    padding: 4,
   },
-
   tab: {
     flex: 1,
-    padding: 10,
+    paddingVertical: 11,
     alignItems: "center",
-    borderBottomWidth: 2,
-    borderColor: "transparent"
+    borderRadius: 14,
   },
-
-  activeTab: {
-    borderColor: "#7B4DFF"
-  },
-
   activeText: {
-    fontWeight: "bold",
-    color: "#7B4DFF"
+    fontWeight: "700",
   },
   tabText: {
-    fontWeight: "600"
+    fontWeight: "600",
+    fontSize: 13.5,
   },
-
   userCard: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 15,
-    borderBottomWidth: 1,
-    borderColor: "#eee"
+    marginHorizontal: 14,
+    marginBottom: 10,
+    padding: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 20,
   },
   serviceCard: {
     flexDirection: "row",
     alignItems: "flex-start",
-    padding: 15,
-    borderBottomWidth: 1,
-    borderColor: "#eee"
+    marginHorizontal: 14,
+    marginBottom: 10,
+    padding: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 20,
   },
   disabledCard: {
-    opacity: 0.6
+    opacity: 0.6,
   },
-
   avatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    marginRight: 15
+    marginRight: 15,
   },
   suggestionAvatar: {
     width: 42,
     height: 42,
     borderRadius: 21,
-    marginRight: 12
+    marginRight: 12,
   },
   serviceImage: {
     width: 62,
     height: 62,
     borderRadius: 14,
-    marginRight: 15
+    marginRight: 15,
   },
   cardContent: {
-    flex: 1
+    flex: 1,
+    minWidth: 0,
   },
   inlineRow: {
     flexDirection: "row",
     alignItems: "center",
-    flexWrap: "wrap"
+    flexWrap: "wrap",
   },
-
   username: {
     fontWeight: "700",
-    color: "#111"
+    color: "#111",
+    fontSize: 15,
+    flexShrink: 1,
   },
-
   name: {
     color: "#666",
-    marginTop: 2
+    marginTop: 4,
+    fontSize: 13.5,
   },
   metaLine: {
     color: "#777",
-    marginTop: 4
+    marginTop: 5,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
   priceText: {
-    marginTop: 8,
+    marginTop: 10,
     color: "#7B4DFF",
-    fontWeight: "700"
+    fontWeight: "700",
+    fontSize: 13.5,
   },
   sectionBlock: {
-    paddingHorizontal: 15,
-    paddingTop: 6,
-    paddingBottom: 8
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    paddingBottom: 10,
+  },
+  sectionEyebrow: {
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
   },
   sectionTitle: {
-    fontSize: 15,
-    fontWeight: "700",
+    fontSize: 18,
+    fontWeight: "800",
     color: "#222",
-    marginBottom: 10
+    marginTop: 6,
+    marginBottom: 6,
+  },
+  sectionTitleStandalone: {
+    marginTop: 12,
+  },
+  sectionSubtitle: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    marginBottom: 12,
   },
   suggestionRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#faf8ff",
-    borderRadius: 14,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
     padding: 12,
-    marginBottom: 10
+    marginBottom: 10,
   },
   privateBadge: {
     flexDirection: "row",
@@ -668,102 +762,108 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    marginLeft: 8
+    marginLeft: 8,
   },
   privateText: {
     marginLeft: 4,
     color: "#7B4DFF",
     fontSize: 11,
-    fontWeight: "600"
+    fontWeight: "600",
   },
   statusBadge: {
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    marginLeft: 8
+    marginLeft: 8,
   },
   availableBadge: {
-    backgroundColor: "#E8F7EE"
+    backgroundColor: "#E8F7EE",
   },
   busyBadge: {
-    backgroundColor: "#FEECEC"
+    backgroundColor: "#FEECEC",
   },
   statusText: {
     fontSize: 11,
-    fontWeight: "600"
+    fontWeight: "600",
   },
   availableText: {
-    color: "#137A3A"
+    color: "#137A3A",
   },
   busyText: {
-    color: "#C23B3B"
+    color: "#C23B3B",
   },
   tagWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginBottom: 14
+    marginBottom: 6,
   },
   tagChip: {
     backgroundColor: "#f1ebff",
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 7,
     marginRight: 8,
-    marginBottom: 8
+    marginBottom: 8,
   },
   tagText: {
     color: "#7B4DFF",
-    fontWeight: "600"
+    fontWeight: "600",
   },
   helperText: {
-    color: "#777"
+    color: "#777",
   },
   listContent: {
-    paddingBottom: 24
+    paddingTop: 2,
+    paddingBottom: 24,
   },
   listContentEmpty: {
-    flexGrow: 1
+    flexGrow: 1,
   },
   emptyState: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 24
+    paddingHorizontal: 24,
+    paddingTop: 32,
   },
   emptyTitle: {
     fontSize: 16,
-    fontWeight: "700"
+    fontWeight: "700",
   },
   emptyText: {
     textAlign: "center",
     marginTop: 8,
-    color: "#666"
+    color: "#666",
+    lineHeight: 20,
   },
   retryButton: {
     marginTop: 16,
     backgroundColor: "#7B4DFF",
     borderRadius: 999,
     paddingHorizontal: 16,
-    paddingVertical: 10
+    paddingVertical: 10,
   },
   retryText: {
     color: "#fff",
-    fontWeight: "700"
+    fontWeight: "700",
   },
   searchingBox: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 18,
-    paddingBottom: 8
+    alignSelf: "flex-start",
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
   },
   searchingText: {
     marginLeft: 8,
-    color: "#666"
+    color: "#666",
   },
-
   center: {
     flex: 1,
     justifyContent: "center",
-    alignItems: "center"
+    alignItems: "center",
   }
 });

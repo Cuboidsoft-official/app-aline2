@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   Modal,
@@ -10,13 +9,17 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
+import { Alert } from "../../../utils/appAlert";
 
 import CommentThreadSheet from "./CommentThreadSheet";
+import CommentAudioBubble from "./CommentAudioBubble";
 import { socialApi } from "../socialApi";
-import { Comment, Post } from "../types";
+import { Comment, CommentAudioFile, Post } from "../types";
 import { toUserSafeMessage } from "../validation";
+import VoiceRecorderButton from "../../../components/chat/VoiceRecorderButton";
+import { normalizeMediaUrl } from "../../../utils/mediaUrls";
 
 const formatAgo = (timestamp: number): string => {
   const mins = Math.max(1, Math.floor((Date.now() - timestamp) / (1000 * 60)));
@@ -89,7 +92,7 @@ function PostCommentsSheet({
 
   const commentsDisabled = !!post?.settings.disableComments;
 
-  const onSubmit = async () => {
+  const submitComment = async (audioFile?: CommentAudioFile) => {
     if (!post || submitting) {
       return;
     }
@@ -99,13 +102,13 @@ function PostCommentsSheet({
       return;
     }
 
-    if (!draft.trim()) {
+    if (!draft.trim() && !audioFile?.uri) {
       return;
     }
 
     try {
       setSubmitting(true);
-      const added = await socialApi.addPostComment(post.id, draft);
+      const added = await socialApi.addPostComment(post.id, draft, undefined, audioFile);
       setComments((prev) => [added, ...prev]);
       onPostUpdate({ ...post, commentsCount: post.commentsCount + 1 });
       setDraft("");
@@ -114,6 +117,10 @@ function PostCommentsSheet({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const onSubmit = async () => {
+    await submitComment();
   };
 
   const onToggleLike = async (commentId: string) => {
@@ -193,16 +200,20 @@ function PostCommentsSheet({
             <FlatList
               data={comments}
               keyExtractor={(item) => item.id}
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.listContent}
               renderItem={({ item }) => (
                 <View style={styles.commentRow}>
-                  <Image source={{ uri: item.user.avatarUrl }} style={styles.avatar} />
+                  <Image source={{ uri: normalizeMediaUrl(item.user.avatarUrl) }} style={styles.avatar} />
                   <View style={styles.commentBody}>
                     <View style={styles.commentTop}>
                       <Text style={styles.username}>@{item.user.username}</Text>
                       <Text style={styles.time}>{formatAgo(item.createdAt)}</Text>
                     </View>
-                    <Text style={styles.commentText}>{item.text}</Text>
+                    {item.text ? <Text style={styles.commentText}>{item.text}</Text> : null}
+                    {item.audioUrl ? (
+                      <CommentAudioBubble audioUrl={item.audioUrl} audioDuration={item.audioDuration} />
+                    ) : null}
                     <View style={styles.actionRow}>
                       <TouchableOpacity onPress={() => onToggleLike(item.id)}>
                         <Text style={styles.actionText}>
@@ -264,6 +275,15 @@ function PostCommentsSheet({
               <TouchableOpacity disabled={!draft.trim() || submitting} onPress={onSubmit}>
                 <Text style={[styles.sendText, (!draft.trim() || submitting) && styles.sendTextDisabled]}>Post</Text>
               </TouchableOpacity>
+              <VoiceRecorderButton
+                color="#2563eb"
+                disabled={submitting}
+                onSend={(voiceFile) => {
+                  submitComment(voiceFile).catch((error) => {
+                    Alert.alert("Could not send voice comment", toUserSafeMessage(error));
+                  });
+                }}
+              />
             </View>
           )}
         </View>

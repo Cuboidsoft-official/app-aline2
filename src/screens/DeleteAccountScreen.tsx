@@ -3,12 +3,12 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Alert,
   StyleSheet,
   TextInput,
   ActivityIndicator,
-  ScrollView,
+  ScrollView
 } from "react-native";
+import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";

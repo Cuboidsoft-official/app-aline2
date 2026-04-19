@@ -1,22 +1,24 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
+import { Alert } from "../../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
 
-import ShareTargetsList from "./ShareTargetsList";
+import ShareTargetsList, { ShareTarget } from "./ShareTargetsList";
 import { socialApi } from "../socialApi";
 import { Post } from "../types";
 import { toUserSafeMessage } from "../validation";
 import { createChatConversation, sendChatMessage } from "../../../utils/chatApi";
-import { createShortShareUrl, shareContentLink } from "../../../utils/shareLinks";
+import { buildSharedPostMessage } from "../../../utils/chatPresentation";
+import { shareContentLink } from "../../../utils/shareLinks";
 import { appConfig } from "../../../config/env";
 import { API } from "../../../api/api";
 
@@ -36,6 +38,13 @@ function PostShareSheet({
   onOpenStoryComposer,
 }: PostShareSheetProps) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [selectedTargets, setSelectedTargets] = useState<ShareTarget[]>([]);
+
+  useEffect(() => {
+    if (!visible) {
+      setSelectedTargets([]);
+    }
+  }, [visible]);
 
   const buildPostShareUrl = (targetPost: Post) => {
     const shareBase = (appConfig.publicShareBaseUrl || "https://aline2.com").replace(/\/+$/, "");
@@ -50,21 +59,17 @@ function PostShareSheet({
     return `${shareBase}/profile/${encodeURIComponent(String(profileSlug))}${query}`;
   };
 
-  const buildPostShareMessage = async (targetPost: Post) => {
-    const originalUrl = buildPostShareUrl(targetPost);
-    const shortUrl = originalUrl
-      ? await createShortShareUrl({
-          originalUrl,
-          title: `${targetPost.user.username}'s post`,
-          description: targetPost.caption || "",
-        })
-      : null;
+  const selectedTargetIds = useMemo(
+    () => selectedTargets.map((target) => target.id),
+    [selectedTargets],
+  );
 
-    const header = targetPost.caption
-      ? `Check out @${targetPost.user.username}'s post on Aline2:\n\n${targetPost.caption}`
-      : `Check out @${targetPost.user.username}'s post on Aline2.`;
-
-    return [header, shortUrl || originalUrl].filter(Boolean).join("\n\n");
+  const toggleTarget = (target: ShareTarget) => {
+    setSelectedTargets((current) =>
+      current.some((item) => item.id === target.id)
+        ? current.filter((item) => item.id !== target.id)
+        : [...current, target],
+    );
   };
 
   const shareToStory = async () => {
@@ -123,6 +128,70 @@ function PostShareSheet({
     }
   };
 
+  const shareToSelectedUsers = async () => {
+    if (!post || busy || !selectedTargets.length) {
+      return;
+    }
+
+    try {
+      setBusy("send");
+      const shareMessage = buildSharedPostMessage(post);
+      const sendResults = await Promise.allSettled(
+        selectedTargets.map(async (target) => {
+          const conversation = await createChatConversation({
+            receiverId: target.id,
+            conversationType: "direct",
+          });
+
+          const conversationId = conversation?.conversation?._id;
+          if (!conversationId) {
+            throw new Error(`Could not open a conversation with @${target.username}.`);
+          }
+
+          await sendChatMessage({
+            conversationId,
+            text: shareMessage,
+          });
+
+          await API.post(`/posts/${post.id}/share`, {
+            shareType: "conversation",
+            conversationId,
+          }).catch((error) => {
+            console.log("post share count update error:", error);
+          });
+
+          return target;
+        }),
+      );
+
+      const successCount = sendResults.filter((result) => result.status === "fulfilled").length;
+      const failedCount = sendResults.length - successCount;
+
+      if (!successCount) {
+        const firstFailure = sendResults.find((result) => result.status === "rejected");
+        throw firstFailure?.status === "rejected" ? firstFailure.reason : new Error("Could not send post.");
+      }
+
+      onPostUpdate({
+        ...post,
+        sharesCount: post.sharesCount + successCount,
+      });
+
+      if (failedCount > 0) {
+        Alert.alert("Partially sent", `Sent to ${successCount} people. ${failedCount} failed.`);
+      } else {
+        Alert.alert("Sent", `Post sent to ${successCount} ${successCount === 1 ? "person" : "people"}.`);
+      }
+
+      setSelectedTargets([]);
+      onClose();
+    } catch (error) {
+      Alert.alert("Could not send post", toUserSafeMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
@@ -136,59 +205,64 @@ function PostShareSheet({
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={shareToStory}>
-            <Icon name="sparkles-outline" size={20} color="#111" />
-            <Text style={styles.actionText}>Add to your story</Text>
-            {busy === "story" ? <ActivityIndicator size="small" color="#111" /> : null}
-          </TouchableOpacity>
+          <Text style={styles.subtitle}>Choose people first, then use the other share options below.</Text>
 
-          <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={shareExternally}>
-            <Icon name="share-social-outline" size={20} color="#111" />
-            <Text style={styles.actionText}>Share externally</Text>
-            {busy === "external" ? <ActivityIndicator size="small" color="#111" /> : null}
-          </TouchableOpacity>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+            <View style={styles.peoplePanel}>
+              <View style={styles.peopleHeader}>
+                <Text style={styles.sectionTitle}>People</Text>
+                <Text style={styles.sectionMeta}>
+                  {selectedTargets.length ? `${selectedTargets.length} selected` : "Tap profiles to select"}
+                </Text>
+              </View>
 
-          <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={toggleSave}>
-            <Icon name={post?.saved ? "bookmark" : "bookmark-outline"} size={20} color="#111" />
-            <Text style={styles.actionText}>{post?.saved ? "Remove from saved" : "Save"}</Text>
-            {busy === "save" ? <ActivityIndicator size="small" color="#111" /> : null}
-          </TouchableOpacity>
+              <ShareTargetsList
+                title="Send to"
+                selectedTargetIds={selectedTargetIds}
+                onToggleTarget={toggleTarget}
+                scrollEnabled={false}
+              />
+            </View>
 
-          <ShareTargetsList
-            onSend={async (target) => {
-              if (!post) {
-                return;
-              }
+            <TouchableOpacity
+              style={[
+                styles.sendButton,
+                (!selectedTargets.length || !!busy) && styles.sendButtonDisabled,
+              ]}
+              disabled={!selectedTargets.length || !!busy}
+              onPress={shareToSelectedUsers}
+            >
+              {busy === "send" ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.sendButtonText}>
+                  {selectedTargets.length ? `Send to ${selectedTargets.length}` : "Select people"}
+                </Text>
+              )}
+            </TouchableOpacity>
 
-              const conversation = await createChatConversation({
-                receiverId: target.id,
-                conversationType: "direct",
-              });
+            <View style={styles.actionsPanel}>
+              <Text style={styles.sectionTitle}>Other options</Text>
 
-              const conversationId = conversation?.conversation?._id;
-              if (!conversationId) {
-                throw new Error("Could not open a conversation with this user.");
-              }
+              <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={shareToStory}>
+                <Icon name="sparkles-outline" size={20} color="#111" />
+                <Text style={styles.actionText}>Add to your story</Text>
+                {busy === "story" ? <ActivityIndicator size="small" color="#111" /> : null}
+              </TouchableOpacity>
 
-              await sendChatMessage({
-                conversationId,
-                text: await buildPostShareMessage(post),
-              });
+              <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={shareExternally}>
+                <Icon name="share-social-outline" size={20} color="#111" />
+                <Text style={styles.actionText}>Share externally</Text>
+                {busy === "external" ? <ActivityIndicator size="small" color="#111" /> : null}
+              </TouchableOpacity>
 
-              await API.post(`/posts/${post.id}/share`, {
-                shareType: "conversation",
-                conversationId,
-              });
-
-              onPostUpdate({
-                ...post,
-                sharesCount: post.sharesCount + 1,
-              });
-
-              Alert.alert("Sent", `Post sent to @${target.username}.`);
-              onClose();
-            }}
-          />
+              <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={toggleSave}>
+                <Icon name={post?.saved ? "bookmark" : "bookmark-outline"} size={20} color="#111" />
+                <Text style={styles.actionText}>{post?.saved ? "Remove from saved" : "Save"}</Text>
+                {busy === "save" ? <ActivityIndicator size="small" color="#111" /> : null}
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -216,7 +290,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#d1d5db",
     marginBottom: 10,
   },
-  sheetContent: { paddingHorizontal: 16, paddingBottom: 24 },
+  sheetContent: { paddingHorizontal: 16, paddingBottom: 24, minHeight: 520, maxHeight: "86%" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -224,6 +298,49 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   title: { fontSize: 18, fontWeight: "800", color: "#111827" },
+  subtitle: {
+    color: "#6b7280",
+    fontSize: 12.5,
+    marginBottom: 12,
+  },
+  scrollContent: {
+    paddingBottom: 8,
+  },
+  peoplePanel: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#e5e7eb",
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 8,
+    backgroundColor: "#fafafa",
+  },
+  peopleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  sectionMeta: {
+    color: "#6b7280",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  actionsPanel: {
+    marginTop: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#e5e7eb",
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 4,
+    backgroundColor: "#fff",
+  },
   actionRow: {
     minHeight: 52,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -232,6 +349,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   actionText: { marginLeft: 12, marginRight: "auto", color: "#111827", fontWeight: "600", fontSize: 14 },
+  sendButton: {
+    marginTop: 14,
+    minHeight: 48,
+    borderRadius: 18,
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sendButtonDisabled: {
+    opacity: 0.45,
+  },
+  sendButtonText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 14,
+  },
 });
 
 export default PostShareSheet;

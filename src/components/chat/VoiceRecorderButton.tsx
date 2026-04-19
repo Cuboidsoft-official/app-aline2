@@ -1,34 +1,79 @@
 /**
- * VoiceRecorderButton — Hold-to-record voice message component
+ * VoiceRecorderButton — voice message recorder
  *
- * Press and hold the mic button to start recording.
- * Release to send the voice message automatically.
- * Slide left to cancel. Shows duration + animated pulsing indicator.
+ * Tap the mic button to start recording.
+ * Tap the mic again to send. Slide left to cancel while recording.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    Alert,
-    Animated,
-    PanResponder,
-    Platform,
-    PermissionsAndroid,
-    StyleSheet,
-    TouchableOpacity,
-    Text,
-    View,
+  Animated,
+  PanResponder,
+  Platform,
+  PermissionsAndroid,
+  StyleSheet,
+  TouchableOpacity,
+  Text,
+  View
 } from "react-native";
+import { Alert } from "../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
-import Sound, { AudioEncoderAndroidType, AudioSourceAndroidType } from "react-native-nitro-sound";
+import Sound, {
+    AudioEncoderAndroidType,
+    AudioSourceAndroidType,
+    OutputFormatAndroidType,
+} from "react-native-nitro-sound";
 
 Sound.setSubscriptionDuration(0.15);
 
 const CANCEL_THRESHOLD = -80;
+const VOICE_MIME_TYPES: Record<string, string> = {
+    aac: "audio/aac",
+    m4a: "audio/m4a",
+    mp3: "audio/mpeg",
+    mp4: "audio/mp4",
+    wav: "audio/wav",
+    webm: "audio/webm",
+};
+
+const normalizeRecordedUri = (value: string) => {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+        return "";
+    }
+
+    if (/^(file|content):\/\//i.test(normalizedValue)) {
+        return normalizedValue;
+    }
+
+    if (normalizedValue.startsWith("/")) {
+        return `file://${normalizedValue}`;
+    }
+
+    return normalizedValue;
+};
 
 const formatRecordTime = (ms: number) => {
     const totalSec = Math.floor((ms || 0) / 1000);
     const m = Math.floor(totalSec / 60);
     const s = totalSec % 60;
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+};
+
+const getRecordedVoiceMetadata = (value: string) => {
+    const uri = normalizeRecordedUri(value);
+    const fallbackExtension = Platform.OS === "android" ? "mp4" : "m4a";
+    const sanitizedPath = uri.replace(/^file:\/\//i, "").split(/[?#]/)[0];
+    const fileNameFromPath = sanitizedPath.split("/").pop() || "";
+    const extensionMatch = fileNameFromPath.match(/\.([a-z0-9]+)$/i);
+    const extension = String(extensionMatch?.[1] || fallbackExtension).toLowerCase();
+    const mimeType = VOICE_MIME_TYPES[extension] || (Platform.OS === "android" ? "audio/mp4" : "audio/m4a");
+    const fileName = fileNameFromPath || `voice_${Date.now()}.${extension}`;
+
+    return {
+        uri,
+        name: /\.[a-z0-9]+$/i.test(fileName) ? fileName : `${fileName}.${extension}`,
+        type: mimeType,
+    };
 };
 
 interface VoiceFile {
@@ -54,6 +99,7 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
     const slideX = useRef(new Animated.Value(0)).current;
     const cancelledRef = useRef(false);
     const isRecordingRef = useRef(false);
+    const pendingStopSendRef = useRef<boolean | null>(null);
 
     const startPulse = useCallback(() => {
         Animated.loop(
@@ -106,6 +152,12 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
         setStarting(true);
 
         try {
+            try {
+                Sound.removeRecordBackListener();
+            } catch {
+                // Ignore stale listener cleanup failures.
+            }
+
             Sound.addRecordBackListener((e: any) => {
                 if (isRecordingRef.current) {
                     setDuration(e.currentPosition || 0);
@@ -115,6 +167,7 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             await Sound.startRecorder(undefined, {
                 AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
                 AudioSourceAndroid: AudioSourceAndroidType.MIC,
+                OutputFormatAndroid: OutputFormatAndroidType.MPEG_4,
                 AudioSamplingRate: 44100,
                 AudioEncodingBitRate: 128000,
                 AudioChannels: 1,
@@ -123,17 +176,29 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             isRecordingRef.current = true;
             setRecording(true);
             startPulse();
+
+            if (pendingStopSendRef.current !== null) {
+                const shouldSend = pendingStopSendRef.current;
+                pendingStopSendRef.current = null;
+                stopRecording(shouldSend);
+            }
         } catch (err) {
             Sound.removeRecordBackListener();
             console.log("voice recorder start error:", err);
             Alert.alert("Voice Recording Error", "Could not start voice recording. Please try again.");
+            pendingStopSendRef.current = null;
         } finally {
             setStarting(false);
         }
     };
 
     const stopRecording = async (send = true) => {
-        if (!recording && !starting) {
+        if (starting && !recording) {
+            pendingStopSendRef.current = send;
+            return;
+        }
+
+        if (!recording) {
             return;
         }
 
@@ -148,15 +213,14 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             Sound.removeRecordBackListener();
 
             if (send && !cancelledRef.current && result && onSend) {
-                const durationSec = Math.round((duration || 0) / 1000);
-                if (durationSec >= 1) {
-                    onSend({
-                        uri: result,
-                        name: `voice_${Date.now()}.m4a`,
-                        type: "audio/m4a",
-                        duration: durationSec,
-                    });
-                }
+                const durationSec = Math.max(1, Math.ceil((duration || 0) / 1000));
+                const metadata = getRecordedVoiceMetadata(result);
+                onSend({
+                    uri: metadata.uri,
+                    name: metadata.name,
+                    type: metadata.type,
+                    duration: durationSec,
+                });
             }
         } catch (err) {
             console.log("voice recorder stop error:", err);
@@ -165,6 +229,7 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             setStopping(false);
             setDuration(0);
             setCancelled(false);
+            pendingStopSendRef.current = null;
         }
     };
 
@@ -212,17 +277,26 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
                     {starting ? "Starting..." : stopping ? "Finishing..." : cancelled ? "Release to cancel" : formatRecordTime(duration)}
                 </Text>
                 <Text style={styles.slideHint}>
-                    {cancelled || starting || stopping ? "" : "◁ Slide to cancel"}
+                    {cancelled || starting || stopping ? "" : "Slide left to cancel or tap mic to send"}
                 </Text>
-                <View style={[styles.recordingMic, { backgroundColor: cancelled ? "#ccc" : color }]}>
+                <TouchableOpacity
+                    disabled={cancelled || starting || stopping}
+                    onPress={() => stopRecording(true)}
+                    style={[styles.recordingMic, { backgroundColor: cancelled ? "#ccc" : color }]}
+                >
                     <Icon name="mic" size={22} color="#fff" />
-                </View>
+                </TouchableOpacity>
             </Animated.View>
         );
     }
 
     return (
-        <TouchableOpacity {...panResponder.panHandlers} disabled={disabled} style={styles.micButton}>
+        <TouchableOpacity
+            disabled={disabled}
+            onPress={startRecording}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.micButton}
+        >
             <Icon name="mic" size={24} color={disabled ? "#ccc" : color} />
         </TouchableOpacity>
     );
@@ -230,6 +304,11 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
 
 const styles = StyleSheet.create({
     micButton: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        alignItems: "center",
+        justifyContent: "center",
         padding: 4,
     },
     recordingContainer: {

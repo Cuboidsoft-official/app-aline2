@@ -1,21 +1,24 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Image,
+  TextInput,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import Icon from "react-native-vector-icons/Ionicons";
 
 import { API } from "../../../api/api";
 import { SocialUser } from "../types";
 import { getStoredUserId } from "../../../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../../../constants/defaultAssets";
 import { shouldShowVerifiedBadge } from "../../../utils/verificationBadges";
+import { normalizeMediaUrl } from "../../../utils/mediaUrls";
 
-interface ShareTarget {
+export interface ShareTarget {
   id: string;
   username: string;
   name: string;
@@ -24,13 +27,22 @@ interface ShareTarget {
 }
 
 interface ShareTargetsListProps {
-  onSend: (target: ShareTarget) => Promise<void> | void;
+  selectedTargetIds: string[];
+  onToggleTarget: (target: ShareTarget) => void;
+  title?: string;
+  scrollEnabled?: boolean;
 }
 
-function ShareTargetsList({ onSend }: ShareTargetsListProps) {
+function ShareTargetsList({
+  selectedTargetIds,
+  onToggleTarget,
+  title = "Send to",
+  scrollEnabled = true,
+}: ShareTargetsListProps) {
   const [targets, setTargets] = useState<ShareTarget[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sendingTargetId, setSendingTargetId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   useEffect(() => {
     let mounted = true;
@@ -83,55 +95,78 @@ function ShareTargetsList({ onSend }: ShareTargetsListProps) {
       return "";
     }
 
+    if (deferredSearchQuery.trim()) {
+      return "No matching people found.";
+    }
+
     return "No share targets available yet.";
-  }, [loading]);
+  }, [deferredSearchQuery, loading]);
+
+  const filteredTargets = useMemo(() => {
+    const searchValue = deferredSearchQuery.trim().toLowerCase();
+    if (!searchValue) {
+      return targets;
+    }
+
+    return targets.filter((target) => {
+      const combined = `${target.name} ${target.username}`.toLowerCase();
+      return combined.includes(searchValue);
+    });
+  }, [deferredSearchQuery, targets]);
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Send to</Text>
+      <Text style={styles.title}>{title}</Text>
+      <View style={styles.searchWrap}>
+        <Icon name="search" size={16} color="#6b7280" />
+        <TextInput
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search people"
+          placeholderTextColor="#9ca3af"
+          style={styles.searchInput}
+        />
+      </View>
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="small" color="#111827" />
         </View>
       ) : null}
       <FlatList
-        data={targets}
+        data={filteredTargets}
         keyExtractor={(item) => item.id}
-        horizontal
+        keyboardShouldPersistTaps="handled"
+        scrollEnabled={scrollEnabled}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
+        numColumns={4}
         ListEmptyComponent={emptyMessage ? <Text style={styles.emptyText}>{emptyMessage}</Text> : null}
         renderItem={({ item }) => (
-          <View style={styles.card}>
-            <Image
-              source={{ uri: item.avatarUrl || DEFAULT_AVATAR_URL }}
-              style={styles.avatar}
-            />
-            <Text style={styles.name} numberOfLines={1}>
-              {item.name}
-            </Text>
+          <TouchableOpacity style={styles.card} activeOpacity={0.86} onPress={() => onToggleTarget(item)}>
+            <View style={styles.avatarWrap}>
+              <Image
+                source={{ uri: normalizeMediaUrl(item.avatarUrl || DEFAULT_AVATAR_URL) }}
+                style={styles.avatar}
+              />
+              <View
+                style={[
+                  styles.checkCircle,
+                  selectedTargetIds.includes(item.id) && styles.checkCircleSelected,
+                ]}
+              >
+                {selectedTargetIds.includes(item.id) ? <Icon name="checkmark" size={12} color="#fff" /> : null}
+              </View>
+            </View>
+            <View style={styles.nameRow}>
+              <Text style={styles.name} numberOfLines={1}>
+                {item.name}
+              </Text>
+              {item.isVerified ? <Icon name="checkmark-circle" size={12} color="#2563eb" /> : null}
+            </View>
             <Text style={styles.username} numberOfLines={1}>
               @{item.username}
             </Text>
-            <TouchableOpacity
-              style={[styles.sendButton, sendingTargetId === item.id && styles.sendButtonDisabled]}
-              disabled={!!sendingTargetId}
-              onPress={async () => {
-                try {
-                  setSendingTargetId(item.id);
-                  await onSend(item);
-                } finally {
-                  setSendingTargetId("");
-                }
-              }}
-            >
-              {sendingTargetId === item.id ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.sendButtonText}>Send</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
         )}
       />
     </View>
@@ -141,34 +176,68 @@ function ShareTargetsList({ onSend }: ShareTargetsListProps) {
 const styles = StyleSheet.create({
   container: { paddingTop: 12 },
   title: { color: "#111827", fontWeight: "700", fontSize: 13, marginBottom: 10 },
-  loadingWrap: { paddingVertical: 10 },
-  listContent: { paddingRight: 8 },
-  card: {
-    width: 92,
-    marginRight: 10,
+  searchWrap: {
+    height: 42,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#d1d5db",
+    backgroundColor: "#f9fafb",
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    flexDirection: "row",
     alignItems: "center",
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 8,
+    color: "#111827",
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  loadingWrap: { paddingVertical: 10 },
+  listContent: { paddingBottom: 8 },
+  card: {
+    width: "25%",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    paddingVertical: 10,
+  },
+  avatarWrap: {
+    position: "relative",
   },
   avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
     backgroundColor: "#e5e7eb",
   },
-  name: { marginTop: 8, color: "#111827", fontWeight: "700", fontSize: 12.5 },
-  username: { marginTop: 2, color: "#6b7280", fontSize: 11.5 },
-  emptyText: { color: "#6b7280", fontSize: 12.5, paddingVertical: 6 },
-  sendButton: {
-    marginTop: 8,
-    minWidth: 62,
-    height: 30,
-    borderRadius: 999,
-    backgroundColor: "#111827",
-    justifyContent: "center",
+  nameRow: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
+    justifyContent: "center",
+    marginTop: 8,
+    maxWidth: "100%",
   },
-  sendButtonDisabled: { opacity: 0.75 },
-  sendButtonText: { color: "#fff", fontWeight: "700", fontSize: 12 },
+  name: { color: "#111827", fontWeight: "700", fontSize: 12.5, marginRight: 4, maxWidth: "86%" },
+  username: { marginTop: 2, color: "#6b7280", fontSize: 11.5, textAlign: "center", maxWidth: "100%" },
+  checkCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#cbd5e1",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    backgroundColor: "#fff",
+  },
+  checkCircleSelected: {
+    backgroundColor: "#111827",
+    borderColor: "#111827",
+  },
+  emptyText: { color: "#6b7280", fontSize: 12.5, paddingVertical: 6 },
 });
 
 export default ShareTargetsList;

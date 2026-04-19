@@ -6,13 +6,13 @@
  */
 import React, { useCallback, useState } from "react";
 import {
-    Alert,
-    Modal,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from "react-native";
+import { Alert } from "../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
 import { ASPECT_RATIOS, VIDEO_DURATION_LIMITS } from "../../utils/videoTrimConfig";
 

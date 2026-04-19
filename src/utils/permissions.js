@@ -1,4 +1,5 @@
-import { Alert, PermissionsAndroid, Platform } from "react-native";
+import { PermissionsAndroid, Platform } from "react-native";
+import { Alert } from "./appAlert";
 
 const isAndroid = Platform.OS === "android";
 
@@ -15,6 +16,27 @@ export const ensureCameraPermission = async (message = "Allow Aline2 to use your
 
   const result = await PermissionsAndroid.request(permission, {
     title: "Camera permission",
+    message,
+    buttonPositive: "Allow",
+    buttonNegative: "Deny",
+  });
+
+  return result === PermissionsAndroid.RESULTS.GRANTED;
+};
+
+export const ensureMicrophonePermission = async (message = "Allow Aline2 to use your microphone.") => {
+  if (Platform.OS !== "android") {
+    return true;
+  }
+
+  const permission = PermissionsAndroid.PERMISSIONS.RECORD_AUDIO;
+  const alreadyGranted = await PermissionsAndroid.check(permission);
+  if (alreadyGranted) {
+    return true;
+  }
+
+  const result = await PermissionsAndroid.request(permission, {
+    title: "Microphone permission",
     message,
     buttonPositive: "Allow",
     buttonNegative: "Deny",

@@ -7,9 +7,9 @@ import {
   StyleSheet,
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
-  Alert
+  Platform
 } from 'react-native';
+import { Alert } from '../utils/appAlert';
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { API } from '../api/api';

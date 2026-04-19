@@ -1,19 +1,24 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  type DimensionValue,
   Image,
   KeyboardAvoidingView,
   PanResponder,
+  PermissionsAndroid,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
+import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import LinearGradient from "react-native-linear-gradient";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createSound } from "react-native-nitro-sound";
 import Icon from "react-native-vector-icons/Ionicons";
 
@@ -52,9 +57,15 @@ import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
 import { getStoredUserId } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
 import SocialVideo from "../features/social/components/SocialVideo";
+import {
+  InstagramComposerHeader,
+  InstagramComposerStepStrip,
+  InstagramComposerTypeTabs,
+} from "../features/social/components/create/InstagramComposerChrome";
 import PhotoFilterStrip from "../components/media/PhotoFilterStrip";
 import VideoTrimSheet from "../components/media/VideoTrimSheet";
 import FaceOverlayPicker, { FaceSticker } from "../components/media/FaceOverlayPicker";
+import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 
 let ColorMatrix: any = null;
 try {
@@ -64,12 +75,92 @@ try {
 }
 
 type ComposerTab = "post" | "story" | "swipe";
+type ComposerStep = "select" | "edit" | "share";
+type ComposerFramePreset = "square" | "portrait" | "landscape" | "vertical";
 
 const tabs: ComposerTab[] = ["post", "story", "swipe"];
+const composerSteps: ComposerStep[] = ["select", "edit", "share"];
+const CREATE_DRAFT_STORAGE_KEY = "aline2:create-composer-draft";
+const composerFramePresets: Record<
+  ComposerFramePreset,
+  {
+    id: ComposerFramePreset;
+    label: string;
+    detail: string;
+    aspectRatio: number;
+  }
+> = {
+  square: {
+    id: "square",
+    label: "4:4",
+    detail: "Classic",
+    aspectRatio: 1,
+  },
+  portrait: {
+    id: "portrait",
+    label: "4:5",
+    detail: "Portrait",
+    aspectRatio: 4 / 5,
+  },
+  landscape: {
+    id: "landscape",
+    label: "16:9",
+    detail: "Landscape",
+    aspectRatio: 16 / 9,
+  },
+  vertical: {
+    id: "vertical",
+    label: "9:16",
+    detail: "Full",
+    aspectRatio: 9 / 16,
+  },
+};
+const frameOptionsByTab: Record<ComposerTab, ComposerFramePreset[]> = {
+  post: ["square", "portrait", "landscape"],
+  story: ["vertical", "square", "landscape"],
+  swipe: ["vertical", "portrait", "landscape"],
+};
+const composerBlueprints: Record<
+  ComposerTab,
+  {
+    label: string;
+    title: string;
+    description: string;
+    icon: string;
+    gradient: string[];
+    meta: string;
+  }
+> = {
+  post: {
+    label: "Post",
+    title: "Feed Post",
+    description: "Square crop, filters, caption, tags, location, and privacy controls.",
+    icon: "grid-outline",
+    gradient: ["#667eea", "#764ba2", "#f093fb"],
+    meta: "1:1 canvas",
+  },
+  story: {
+    label: "Story",
+    title: "Story Studio",
+    description: "Vertical canvas with stickers, text, music, polls, links, and close friends.",
+    icon: "radio-button-on-outline",
+    gradient: ["#ff7a18", "#af002d", "#319197"],
+    meta: "9:16 canvas",
+  },
+  swipe: {
+    label: "Reel",
+    title: "Reel Editor",
+    description: "Short video with trim, timeline audio, speed, effects, hashtags, and sharing.",
+    icon: "play-circle-outline",
+    gradient: ["#00c6ff", "#7f00ff", "#ff4ecd"],
+    meta: "Short video",
+  },
+};
 const postModes: PostType[] = ["photo", "video", "carousel"];
 const storyModes: StoryType[] = ["media", "text", "poll", "question"];
 const MAX_CAROUSEL_ITEMS = 10;
 const textStoryColors = ["#1f2937", "#7c3aed", "#db2777", "#0f766e", "#b45309", "#2563eb"];
+const locationSeedOptions = ["Nearby", "Cafe", "Restaurant", "Studio", "Park", "Office"];
 const storyStickerPlacements: StoryStickerPlacement[] = ["top_left", "top_right", "center", "bottom_left", "bottom_right"];
 const storyTextStickerThemes: StoryTextStickerTheme[] = ["dark", "light", "accent", "outline"];
 const storyTextStickerThemeLabels: Record<StoryTextStickerTheme, string> = {
@@ -112,6 +203,7 @@ const storyStickerDimensions = {
 } as const;
 const clampStickerScale = (value: number): number => Math.min(2, Math.max(0.6, Math.round(value * 10) / 10));
 const clampStickerRotation = (value: number): number => Math.min(180, Math.max(-180, Math.round(value)));
+const clampNormalizedValue = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const getStoryFilterOverlayStyle = (
   preset: StoryFilterPreset,
   intensity = 1,
@@ -231,6 +323,37 @@ const isValidHttpUrl = (value: string): boolean => {
   }
 };
 
+const formatCoordinateLocation = (latitude: number, longitude: number): string =>
+  `Current location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+
+const reverseGeocodeLocation = async (latitude: number, longitude: number): Promise<string> => {
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=16`,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Could not reverse geocode your location.");
+  }
+
+  const payload = await response.json();
+  const address = payload?.address || {};
+  const parts = [
+    address?.suburb,
+    address?.neighbourhood,
+    address?.city || address?.town || address?.village,
+    address?.state,
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+
+  return parts.length ? parts.slice(0, 3).join(", ") : formatCoordinateLocation(latitude, longitude);
+};
+
 function CreatePostScreen({ navigation, route }: any) {
   const { colors, isDarkMode } = useAppTheme();
   const initialTab = (route?.params?.initialTab as ComposerTab | undefined) || "post";
@@ -238,9 +361,17 @@ function CreatePostScreen({ navigation, route }: any) {
   const initialMediaType = (route?.params?.initialMediaType as "image" | "video" | undefined) || "image";
 
   const [activeTab, setActiveTab] = useState<ComposerTab>(initialTab);
+  const [activeStep, setActiveStep] = useState<ComposerStep>(initialMedia ? "edit" : "select");
   const [publishing, setPublishing] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [pickingMedia, setPickingMedia] = useState(false);
   const [publishError, setPublishError] = useState("");
+  const [showStickerPickerSheet, setShowStickerPickerSheet] = useState(false);
+  const [framePresetByTab, setFramePresetByTab] = useState<Record<ComposerTab, ComposerFramePreset>>({
+    post: "square",
+    story: "vertical",
+    swipe: "vertical",
+  });
 
   const [postType, setPostType] = useState<PostType>("photo");
   const [storyType, setStoryType] = useState<StoryType>("media");
@@ -249,11 +380,16 @@ function CreatePostScreen({ navigation, route }: any) {
   const [location, setLocation] = useState("");
   const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [locationFetchTarget, setLocationFetchTarget] = useState<ComposerTab | null>(null);
+  const [activeAssetIndex, setActiveAssetIndex] = useState(0);
+  const [taggableFriends, setTaggableFriends] = useState<AudienceCandidate[]>([]);
+  const [taggableFriendsLoading, setTaggableFriendsLoading] = useState(false);
 
   const [hashtagsRaw, setHashtagsRaw] = useState("");
   const [mentionsRaw, setMentionsRaw] = useState("");
 
   const [disableComments, setDisableComments] = useState(false);
+  const [sharePostToStory, setSharePostToStory] = useState(false);
   const [hideLikeCount, setHideLikeCount] = useState(false);
 
   const [selectedAssets, setSelectedAssets] = useState<ComposerAsset[]>(
@@ -319,18 +455,26 @@ function CreatePostScreen({ navigation, route }: any) {
   const [musicPreviewPositionMs, setMusicPreviewPositionMs] = useState(0);
   const [musicPreviewDurationMs, setMusicPreviewDurationMs] = useState(0);
 
-  const surfaceColor = isDarkMode ? colors.surface : colors.card;
-  const elevatedSurfaceColor = isDarkMode ? colors.card : "#f8fafc";
-  const subtleSurfaceColor = isDarkMode ? colors.surface : "#f3f4f6";
-  const inputStyle = { borderColor: colors.border, backgroundColor: surfaceColor, color: colors.text };
-  const helperTextStyle = { color: colors.mutedText };
-  const controlBorderStyle = { borderColor: colors.border };
-  const activePillStyle = { backgroundColor: colors.primary, borderColor: colors.primary };
+  const composerBackground = colors.background;
+  const surfaceColor = colors.card;
+  const elevatedSurfaceColor = colors.card;
+  const subtleSurfaceColor = colors.surface;
+  const composerBorderColor = colors.border;
+  const composerMutedText = colors.mutedText;
+  const composerAccent = colors.primary || "#E1306C";
+  const composerText = colors.text;
+  const inputStyle = { borderColor: composerBorderColor, backgroundColor: surfaceColor, color: composerText };
+  const helperTextStyle = { color: composerMutedText };
+  const controlBorderStyle = { borderColor: composerBorderColor };
+  const activePillStyle = { backgroundColor: composerAccent, borderColor: composerAccent };
   const textStickerDragStartRef = useRef(storyStickerPresetPositions.bottom_left);
   const emojiStickerDragStartRef = useRef(storyStickerPresetPositions.top_right);
   const musicPreviewPlayerRef = useRef(createSound());
-  const locationLookupRequestRef = useRef(0);
-  const storyLocationLookupRequestRef = useRef(0);
+  const activeFramePreset = framePresetByTab[activeTab];
+  const activeFrameConfig = composerFramePresets[activeFramePreset];
+  const hasSelectedCanvasMedia = selectedAssets.length > 0 || (activeTab === "story" && storyType === "text");
+  const headerTitle = activeTab === "swipe" ? "New Reel" : activeTab === "story" ? "New Story" : "New Post";
+  const headerPrimaryLabel = activeStep === "share" ? "Share" : "Next";
 
   const stopMusicPreview = useCallback(async () => {
     const player = musicPreviewPlayerRef.current;
@@ -435,6 +579,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
     if (routeMedia) {
       setSelectedAssets([createRemoteComposerAsset(routeMedia, routeMediaType)]);
+      setActiveStep("edit");
     }
 
     navigation.setParams({
@@ -463,89 +608,145 @@ function CreatePostScreen({ navigation, route }: any) {
       .slice(0, 6);
   }, []);
 
-  useEffect(() => {
-    const trimmedQuery = location.trim();
-    const requestId = ++locationLookupRequestRef.current;
-
-    if (trimmedQuery.length < 2) {
-      setLocationLoading(false);
-      setLocationSuggestions([]);
-      return;
+  const requestCurrentLocationPermission = useCallback(async (): Promise<boolean> => {
+    if (Platform.OS !== "android") {
+      return true;
     }
 
-    const timeoutId = setTimeout(() => {
-      setLocationLoading(true);
+    const permission = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      {
+        title: "Use your current location",
+        message: "Allow Aline2 to fetch your current location for posts, stories, and reels.",
+        buttonPositive: "Allow",
+        buttonNegative: "Not now",
+      },
+    );
 
-      fetchLocationSuggestions(trimmedQuery)
-        .then((results) => {
-          if (locationLookupRequestRef.current !== requestId) {
-            return;
-          }
+    return permission === PermissionsAndroid.RESULTS.GRANTED;
+  }, []);
 
-          setLocationSuggestions(results);
-        })
-        .catch((error) => {
-          if (locationLookupRequestRef.current !== requestId) {
-            return;
-          }
+  const useCurrentLocation = useCallback(
+    async (target: ComposerTab) => {
+      try {
+        setLocationFetchTarget(target);
 
-          console.log("location suggestions error:", error);
-          setLocationSuggestions([]);
-        })
-        .finally(() => {
-          if (locationLookupRequestRef.current === requestId) {
-            setLocationLoading(false);
-          }
+        const hasPermission = await requestCurrentLocationPermission();
+        if (!hasPermission) {
+          throw new Error("Location permission was denied.");
+        }
+
+        const geolocation = (globalThis as any)?.navigator?.geolocation;
+        if (!geolocation?.getCurrentPosition) {
+          throw new Error("Current location is not available on this device build yet.");
+        }
+
+        const position = await new Promise<{ coords: { latitude: number; longitude: number } }>((resolve, reject) => {
+          geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 30000,
+          });
         });
-    }, 220);
 
-    return () => {
-      clearTimeout(timeoutId);
-    };
-  }, [fetchLocationSuggestions, location]);
+        const latitude = Number(position?.coords?.latitude);
+        const longitude = Number(position?.coords?.longitude);
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          throw new Error("We could not read your current coordinates.");
+        }
+
+        let nextLabel = formatCoordinateLocation(latitude, longitude);
+        try {
+          nextLabel = await reverseGeocodeLocation(latitude, longitude);
+        } catch {
+          // Keep coordinate fallback if reverse geocoding fails.
+        }
+
+        if (target === "story") {
+          setStoryLocation(nextLabel);
+          setStoryLocationSuggestions([
+            {
+              name: nextLabel,
+              count: 0,
+            },
+          ]);
+          return;
+        }
+
+        setLocation(nextLabel);
+        setLocationSuggestions([
+          {
+            name: nextLabel,
+            count: 0,
+          },
+        ]);
+      } catch (error) {
+        Alert.alert("Location unavailable", toUserSafeMessage(error));
+      } finally {
+        setLocationFetchTarget(null);
+      }
+    },
+    [requestCurrentLocationPermission],
+  );
 
   useEffect(() => {
-    const trimmedQuery = storyLocation.trim();
-    const requestId = ++storyLocationLookupRequestRef.current;
+    setLocationLoading(false);
+  }, [location]);
 
-    if (trimmedQuery.length < 2) {
-      setStoryLocationLoading(false);
-      setStoryLocationSuggestions([]);
-      return;
-    }
+  useEffect(() => {
+    setStoryLocationLoading(false);
+  }, [storyLocation]);
 
-    const timeoutId = setTimeout(() => {
-      setStoryLocationLoading(true);
+  useEffect(() => {
+    setActiveAssetIndex((current) => Math.min(current, Math.max(0, selectedAssets.length - 1)));
+  }, [selectedAssets.length]);
 
-      fetchLocationSuggestions(trimmedQuery)
-        .then((results) => {
-          if (storyLocationLookupRequestRef.current !== requestId) {
-            return;
-          }
+  useEffect(() => {
+    let mounted = true;
 
-          setStoryLocationSuggestions(results);
-        })
-        .catch((error) => {
-          if (storyLocationLookupRequestRef.current !== requestId) {
-            return;
-          }
+    const loadTaggableFriends = async () => {
+      if (taggableFriends.length || taggableFriendsLoading) {
+        return;
+      }
 
-          console.log("story location suggestions error:", error);
-          setStoryLocationSuggestions([]);
-        })
-        .finally(() => {
-          if (storyLocationLookupRequestRef.current === requestId) {
-            setStoryLocationLoading(false);
-          }
-        });
-    }, 220);
+      try {
+        setTaggableFriendsLoading(true);
+        const res = await API.get("/auth/users");
+        const users = Array.isArray(res?.data?.users) ? res.data.users : [];
+
+        if (!mounted) {
+          return;
+        }
+
+        setTaggableFriends(
+          users
+            .map((user: any) => ({
+              id: String(user?._id || user?.id || ""),
+              username: String(user?.username || ""),
+              name: String(user?.name || user?.username || "User"),
+            }))
+            .filter((user: AudienceCandidate) => !!user.id && !!user.username),
+        );
+      } catch (error) {
+        if (mounted) {
+          console.log("taggable friends error:", error);
+        }
+      } finally {
+        if (mounted) {
+          setTaggableFriendsLoading(false);
+        }
+      }
+    };
+
+    loadTaggableFriends();
 
     return () => {
-      clearTimeout(timeoutId);
+      mounted = false;
     };
-  }, [fetchLocationSuggestions, storyLocation]);
+  }, [taggableFriends.length, taggableFriendsLoading]);
 
-  const primaryAsset = useMemo(() => selectedAssets[0] || null, [selectedAssets]);
+  const primaryAsset = useMemo(() => selectedAssets[activeAssetIndex] || selectedAssets[0] || null, [activeAssetIndex, selectedAssets]);
 
   const getStickerPosition = useCallback(
     (type: "text" | "emoji") =>
@@ -707,9 +908,92 @@ function CreatePostScreen({ navigation, route }: any) {
   };
 
   const onSelectTab = (tab: ComposerTab) => {
-    setActiveTab(tab);
-    resetAssetsForTab(tab);
-    setPublishError("");
+    startTransition(() => {
+      setActiveTab(tab);
+      setActiveStep("select");
+      resetAssetsForTab(tab);
+      setPublishError("");
+    });
+  };
+
+  const moveToStep = (step: ComposerStep) => {
+    if ((step === "edit" || step === "share") && !hasSelectedCanvasMedia) {
+      Alert.alert(
+        "Add media first",
+        activeTab === "story" && storyType === "text"
+          ? "Choose a story mode or add media before moving ahead."
+          : `Pick ${activeTab === "swipe" ? "a reel video" : "photo or video"} first so the next screen has something to preview.`,
+      );
+      return;
+    }
+
+    startTransition(() => {
+      setActiveStep(step);
+    });
+  };
+
+  const handleBackPress = () => {
+    const currentStepIndex = composerSteps.indexOf(activeStep);
+
+    if (currentStepIndex > 0) {
+      moveToStep(composerSteps[currentStepIndex - 1]);
+      return;
+    }
+
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate(activeTab === "swipe" ? "Swipes" : "Feed");
+  };
+
+  const handlePrimaryHeaderAction = () => {
+    if (activeStep === "share") {
+      publish().catch(() => undefined);
+      return;
+    }
+
+    const currentStepIndex = composerSteps.indexOf(activeStep);
+    const nextStep = composerSteps[Math.min(composerSteps.length - 1, currentStepIndex + 1)];
+    moveToStep(nextStep);
+  };
+
+  const setFramePresetForTab = (tab: ComposerTab, preset: ComposerFramePreset) => {
+    setFramePresetByTab((prev) => ({
+      ...prev,
+      [tab]: preset,
+    }));
+  };
+
+  const cycleActiveFramePreset = () => {
+    const options = frameOptionsByTab[activeTab];
+    const currentIndex = options.indexOf(activeFramePreset);
+    const nextPreset = options[(currentIndex + 1) % options.length];
+    setFramePresetForTab(activeTab, nextPreset);
+  };
+
+  const addStoryStickerFromPicker = (sticker: any) => {
+    const emoji = String(sticker?.emoji || "").trim() || "✨";
+
+    setStoryFaceStickers((prev) => {
+      const placementIndex = prev.length;
+      const nextSticker: FaceSticker = {
+        id: String(sticker?._id || sticker?.id || `story_sticker_${Date.now()}`),
+        name: String(sticker?.name || "Sticker"),
+        emoji,
+        placementId: Date.now(),
+        position: {
+          x: clampNormalizedValue(0.18 + (placementIndex % 3) * 0.18, 0.08, 0.74),
+          y: clampNormalizedValue(0.18 + Math.floor(placementIndex / 3) * 0.12, 0.08, 0.74),
+        },
+        scale: 1,
+        rotation: 0,
+      };
+
+      return [...prev, nextSticker].slice(0, 8);
+    });
+    setShowStickerPickerSheet(false);
   };
 
   const setMusicForTab = (tab: ComposerTab, selection: SelectedMusicClip | null) => {
@@ -849,10 +1133,12 @@ function CreatePostScreen({ navigation, route }: any) {
 
       if (activeTab === "post" && postType === "carousel") {
         setSelectedAssets(pickedAssets.slice(0, MAX_CAROUSEL_ITEMS));
+        setActiveAssetIndex(0);
         return;
       }
 
       setSelectedAssets([pickedAssets[0]]);
+      setActiveAssetIndex(0);
     } catch (error) {
       Alert.alert("Could not pick media", toUserSafeMessage(error));
     } finally {
@@ -887,6 +1173,7 @@ function CreatePostScreen({ navigation, route }: any) {
       }
 
       setSelectedAssets([capturedAssets[0]]);
+      setActiveAssetIndex(0);
     } catch (error) {
       Alert.alert("Could not open camera", toUserSafeMessage(error));
     } finally {
@@ -902,6 +1189,34 @@ function CreatePostScreen({ navigation, route }: any) {
     setStoryVisibleToUserIds((prev) =>
       prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
     );
+  };
+
+  const toggleMentionFriend = (target: "post" | "story" | "swipe", username: string) => {
+    const readRaw = target === "story" ? storyMentionsRaw : mentionsRaw;
+    const writeRaw = target === "story" ? setStoryMentionsRaw : setMentionsRaw;
+    const currentMentions = splitTokens(readRaw);
+    const normalizedUsername = String(username || "").replace(/^@/, "").trim();
+
+    if (!normalizedUsername) {
+      return;
+    }
+
+    const nextMentions = currentMentions.includes(normalizedUsername)
+      ? currentMentions.filter((item) => item !== normalizedUsername)
+      : [...currentMentions, normalizedUsername];
+
+    writeRaw(nextMentions.join(", "));
+  };
+
+  const requestLocationSuggestions = async (target: "post" | "story" | "swipe", query: string) => {
+    const results = await fetchLocationSuggestions(query);
+
+    if (target === "story") {
+      setStoryLocationSuggestions(results);
+      return;
+    }
+
+    setLocationSuggestions(results);
   };
 
   const requireAssets = (message: string): ComposerAsset[] => {
@@ -949,6 +1264,44 @@ function CreatePostScreen({ navigation, route }: any) {
         allowRemix: false,
       },
       filterPreset: selectedPhotoFilter !== "none" ? selectedPhotoFilter : undefined,
+      stickers: [
+        storyStickerText.trim()
+          ? {
+              id: "post_text_sticker",
+              type: "text" as const,
+              text: storyStickerText.trim(),
+              position: {
+                ...getStickerPosition("text"),
+                width: storyStickerDimensions.text.width,
+                height: storyStickerDimensions.text.height,
+                rotation: storyStickerTextRotation,
+                scale: storyStickerTextScale,
+              },
+              style: {
+                ...getStoryTextStickerThemeStyle(storyStickerTextTheme),
+                alignment: storyStickerTextAlignment,
+                fontSize: Math.round(18 * storyStickerTextScale),
+              },
+            }
+          : null,
+        storyStickerEmoji.trim()
+          ? {
+              id: "post_emoji_sticker",
+              type: "emoji" as const,
+              text: storyStickerEmoji.trim(),
+              position: {
+                ...getStickerPosition("emoji"),
+                width: storyStickerDimensions.emoji.width,
+                height: storyStickerDimensions.emoji.height,
+                rotation: storyStickerEmojiRotation,
+                scale: storyStickerEmojiScale,
+              },
+              style: {
+                fontSize: Math.round(36 * storyStickerEmojiScale),
+              },
+            }
+          : null,
+      ].filter(Boolean) as CreatePostInput["stickers"],
     };
   };
 
@@ -1089,6 +1442,369 @@ function CreatePostScreen({ navigation, route }: any) {
     }
   };
 
+  const saveDraft = async () => {
+    if (savingDraft) {
+      return;
+    }
+
+    try {
+      setSavingDraft(true);
+      await AsyncStorage.setItem(
+        CREATE_DRAFT_STORAGE_KEY,
+        JSON.stringify({
+          activeTab,
+          postType,
+          storyType,
+          caption,
+          storyCaption,
+          location,
+          storyLocation,
+          hashtagsRaw,
+          mentionsRaw,
+          storyHashtagsRaw,
+          storyMentionsRaw,
+          storyBackgroundColor,
+          storyFilterPreset,
+          storyFilterIntensity,
+          storyStickerText,
+          storyStickerEmoji,
+          storyVisibility,
+          sharePostToStory,
+          disableComments,
+          hideLikeCount,
+          framePresetByTab,
+          selectedAssets,
+          musicSelections,
+          savedAt: Date.now(),
+        }),
+      );
+      Alert.alert("Draft saved", "Your draft was saved on this device.");
+    } catch (error) {
+      Alert.alert("Could not save draft", toUserSafeMessage(error));
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const renderCreateModeCards = () => (
+    <View style={[styles.bottomModeDock, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]}>
+      {tabs.map((tab) => {
+        const blueprint = composerBlueprints[tab];
+        const isActive = activeTab === tab;
+
+        return (
+          <TouchableOpacity
+            key={`create-card-${tab}`}
+            activeOpacity={0.92}
+            style={[
+              styles.bottomModeTab,
+              isActive && { backgroundColor: composerAccent },
+            ]}
+            onPress={() => onSelectTab(tab)}
+          >
+            <Icon name={blueprint.icon} size={18} color={isActive ? "#fff" : composerMutedText} />
+            <Text style={[styles.bottomModeText, { color: isActive ? "#fff" : composerMutedText }]}>
+              {tab === "swipe" ? "Swipes" : blueprint.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+  void renderCreateModeCards;
+
+  const renderStudioSummary = () => {
+    const blueprint = composerBlueprints[activeTab];
+    const selectedMusic = musicSelections[activeTab];
+    const mediaLabel = selectedAssets.length
+      ? `${selectedAssets.length} ${selectedAssets.length === 1 ? "asset" : "assets"} selected`
+      : activeTab === "story" && storyType === "text"
+        ? "Text story canvas"
+        : "Select media";
+    const activeStepLabel = activeStep === "select"
+      ? "Select screen"
+      : activeStep === "edit"
+        ? "Edit screen"
+        : "Share screen";
+
+    return (
+      <LinearGradient colors={blueprint.gradient} style={styles.instagramHero}>
+        <View style={styles.instagramHeroTop}>
+          <View>
+            <Text style={styles.instagramEyebrow}>Studio</Text>
+            <Text style={styles.instagramTitle}>{blueprint.title}</Text>
+            <Text style={styles.instagramSubtitle}>
+              {blueprint.description}
+            </Text>
+          </View>
+          <View style={[styles.instagramHeroIcon, { backgroundColor: "rgba(255,255,255,0.08)" }]}>
+            <Icon name={blueprint.icon} size={20} color="#fff" />
+          </View>
+        </View>
+        <View style={styles.instagramMetricRow}>
+          <View style={[styles.instagramMetricCard, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
+            <Text style={styles.instagramMetricValue}>{mediaLabel}</Text>
+            <Text style={styles.instagramMetricLabel}>Media</Text>
+          </View>
+          <View style={[styles.instagramMetricCard, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
+            <Text style={styles.instagramMetricValue}>{activeStepLabel}</Text>
+            <Text style={styles.instagramMetricLabel}>Stage</Text>
+          </View>
+          <View style={[styles.instagramMetricCard, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
+            <Text style={styles.instagramMetricValue}>{activeFrameConfig.label}</Text>
+            <Text style={styles.instagramMetricLabel}>Frame</Text>
+          </View>
+          <View style={[styles.instagramMetricCard, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
+            <Text style={styles.instagramMetricValue}>{selectedMusic ? "Attached" : "Optional"}</Text>
+            <Text style={styles.instagramMetricLabel}>Music</Text>
+          </View>
+        </View>
+      </LinearGradient>
+    );
+  };
+  void renderStudioSummary;
+
+  const renderFrameSelector = () => (
+    <View style={[styles.frameCard, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
+      <View style={styles.panelHeaderRow}>
+        <View>
+          <Text style={[styles.panelEyebrow, { color: composerAccent }]}>Post frame</Text>
+          <Text style={[styles.panelTitle, { color: composerText }]}>Choose frame</Text>
+        </View>
+        <View style={[styles.pipelineBadge, { backgroundColor: subtleSurfaceColor, borderColor: composerBorderColor }]}>
+          <Icon name="scan-outline" size={13} color={composerAccent} />
+          <Text style={[styles.pipelineBadgeText, { color: composerText }]}>{activeFrameConfig.label}</Text>
+        </View>
+      </View>
+      <View style={styles.frameOptionRow}>
+        {frameOptionsByTab[activeTab].map((preset) => {
+          const config = composerFramePresets[preset];
+          const selected = activeFramePreset === preset;
+
+          return (
+            <TouchableOpacity
+              key={`frame-${activeTab}-${preset}`}
+              style={[
+                styles.frameChip,
+                { backgroundColor: subtleSurfaceColor, borderColor: composerBorderColor },
+                selected && { backgroundColor: composerAccent, borderColor: composerAccent },
+              ]}
+              onPress={() => setFramePresetForTab(activeTab, preset)}
+            >
+              <Text style={[styles.frameChipLabel, { color: selected ? "#fff" : composerText }]}>{config.label}</Text>
+              <Text style={[styles.frameChipDetail, { color: selected ? "rgba(255,255,255,0.8)" : composerMutedText }]}>
+                {config.detail}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+
+  const renderEditorToolRail = () => {
+    const activeImageFilter =
+      activeTab === "post"
+        ? selectedPhotoFilter
+        : activeTab === "story"
+          ? storyFilterPreset
+          : "none";
+
+    const quickTools = [
+      {
+        id: "gallery",
+        icon: "images-outline",
+        label: "Gallery",
+        detail: "Pick",
+        onPress: onPickMedia,
+      },
+      {
+        id: "camera",
+        icon: "camera-outline",
+        label: "Camera",
+        detail: "Shoot",
+        onPress: onCaptureMedia,
+      },
+      {
+        id: "frame",
+        icon: "crop-outline",
+        label: activeFrameConfig.label,
+        detail: "Frame",
+        onPress: cycleActiveFramePreset,
+      },
+      primaryAsset?.mediaType === "video"
+        ? {
+          id: "trim",
+          icon: "cut-outline",
+          label: "Trim",
+          detail: "Editor",
+          onPress: () => setShowVideoTrim(true),
+        }
+        : {
+          id: "filter",
+          icon: "color-filter-outline",
+          label: activeImageFilter === "none" ? "Filter" : "Filtered",
+          detail: activeImageFilter,
+          onPress: () => {
+            if (activeTab === "story") {
+              const nextIndex = (storyFilterPresets.indexOf(storyFilterPreset) + 1) % storyFilterPresets.length;
+              setStoryFilterPreset(storyFilterPresets[nextIndex]);
+              return;
+            }
+
+            const nextIndex = (PHOTO_FILTER_LIST.findIndex((filter) => filter.id === selectedPhotoFilter) + 1) % PHOTO_FILTER_LIST.length;
+            setSelectedPhotoFilter(PHOTO_FILTER_LIST[nextIndex]?.id || "none");
+          },
+        },
+      activeTab === "story"
+        ? {
+          id: "stickers",
+          icon: "happy-outline",
+          label: "Sticker",
+          detail: "Add",
+          onPress: () => setShowStickerPickerSheet(true),
+        }
+        : {
+          id: "music",
+          icon: "musical-notes-outline",
+          label: musicSelections[activeTab] ? "Music" : "Sound",
+          detail: musicSelections[activeTab] ? "Attached" : "Browse",
+          onPress: loadTrendingMusic,
+        },
+    ];
+
+    return (
+      <View style={[styles.quickToolCard, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
+        <View style={styles.panelHeaderRow}>
+          <View>
+            <Text style={[styles.panelEyebrow, { color: composerAccent }]}>Tools</Text>
+            <Text style={[styles.panelTitle, { color: composerText }]}>Trim, filter, crop, music</Text>
+          </View>
+          <View style={[styles.pipelineBadge, { backgroundColor: subtleSurfaceColor, borderColor: composerBorderColor }]}>
+            <Icon name="sparkles-outline" size={13} color={composerAccent} />
+            <Text style={[styles.pipelineBadgeText, { color: composerText }]}>Live</Text>
+          </View>
+        </View>
+        <View style={styles.quickToolRow}>
+          {quickTools.map((tool) => (
+            <TouchableOpacity
+              key={`quick-tool-${tool.id}`}
+              style={[styles.quickToolButton, { backgroundColor: subtleSurfaceColor, borderColor: composerBorderColor }]}
+              onPress={tool.onPress}
+            >
+              <Icon name={tool.icon} size={18} color={composerText} />
+              <Text style={[styles.quickToolLabel, { color: composerText }]}>{tool.label}</Text>
+              <Text style={[styles.quickToolDetail, { color: composerMutedText }]}>{tool.detail}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  const renderMediaSelectorPanel = () => {
+    if (activeTab === "story" && storyType === "text") {
+      return (
+        <View style={[styles.mediaSelectorPanel, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
+          <View style={styles.panelHeaderRow}>
+            <View>
+              <Text style={[styles.panelEyebrow, { color: composerAccent }]}>Canvas</Text>
+              <Text style={[styles.panelTitle, { color: composerText }]}>Gradient story mode</Text>
+            </View>
+            <Icon name="color-palette-outline" size={22} color={composerAccent} />
+          </View>
+          <Text style={[styles.helperText, helperTextStyle]}>
+            Text stories publish without media, while stickers and music still layer onto the preview.
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={[styles.mediaSelectorPanel, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
+        <View style={styles.panelHeaderRow}>
+          <View>
+            <Text style={[styles.panelEyebrow, { color: composerAccent }]}>Media selector</Text>
+            <Text style={[styles.panelTitle, { color: composerText }]}>Gallery, camera, videos</Text>
+          </View>
+          <View style={styles.mediaActionsRow}>
+            <TouchableOpacity
+              style={[styles.secondaryPickButton, { backgroundColor: subtleSurfaceColor, borderColor: composerBorderColor }]}
+              disabled={pickingMedia}
+              onPress={onCaptureMedia}
+            >
+              <Icon name="camera-outline" size={18} color={composerText} />
+              <Text style={[styles.secondaryPickButtonText, { color: composerText }]}>Camera</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.pickButton, { backgroundColor: composerAccent }]} disabled={pickingMedia} onPress={onPickMedia}>
+              {pickingMedia ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="images-outline" size={18} color="#fff" />}
+              <Text style={styles.pickButtonText}>{selectedAssets.length ? "Replace" : "Choose"}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.galleryTabsRow}>
+          {["Gallery", "Camera", "Videos"].map((label, index) => (
+            <View
+              key={`gallery-tab-${label}`}
+              style={[
+                styles.galleryTab,
+                { backgroundColor: index === 0 ? composerAccent : subtleSurfaceColor, borderColor: composerBorderColor },
+              ]}
+            >
+              <Text style={[styles.galleryTabText, { color: index === 0 ? "#fff" : composerText }]}>{label}</Text>
+            </View>
+          ))}
+        </View>
+
+        {selectedAssets.length ? renderSelectedAssets() : (
+          <View style={styles.selectorSkeletonGrid}>
+            {[0, 1, 2, 3, 4, 5].map((item) => (
+              <View key={`selector-skeleton-${item}`} style={[styles.selectorSkeletonCell, { backgroundColor: subtleSurfaceColor }]}>
+                {item === 0 ? <Icon name="add-outline" size={22} color={composerMutedText} /> : null}
+              </View>
+            ))}
+          </View>
+        )}
+        <View style={styles.inlineMediaToolRow}>
+          {renderVideoTrimButton()}
+          {renderFaceOverlayButton()}
+        </View>
+      </View>
+    );
+  };
+
+  const renderPreviewSharePanel = () => (
+    <View style={[styles.previewSharePanel, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
+      <View style={styles.panelHeaderRow}>
+        <View>
+          <Text style={[styles.panelEyebrow, { color: composerAccent }]}>Preview and share</Text>
+          <Text style={[styles.panelTitle, { color: composerText }]}>
+            Final checks for {composerBlueprints[activeTab].label}
+          </Text>
+        </View>
+        <Icon name="shield-checkmark-outline" size={22} color={composerAccent} />
+      </View>
+      <View style={styles.shareOptionRow}>
+        {["Public", "Followers", "Private"].map((option, index) => (
+          <View
+            key={`visibility-${option}`}
+            style={[
+              styles.visibilityChip,
+              { backgroundColor: index === 0 ? composerAccent : subtleSurfaceColor, borderColor: composerBorderColor },
+            ]}
+          >
+            <Text style={[styles.visibilityChipText, { color: index === 0 ? "#fff" : composerText }]}>{option}</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={[styles.helperText, helperTextStyle]}>
+        Reels can use the first frame as a thumbnail, stories support close friends, and posts keep comments and privacy controls ready before publishing.
+      </Text>
+    </View>
+  );
+  void renderPreviewSharePanel;
+
   const renderMediaPreview = () => {
     const textStickerPosition = getStickerPosition("text");
     const emojiStickerPosition = getStickerPosition("emoji");
@@ -1096,7 +1812,7 @@ function CreatePostScreen({ navigation, route }: any) {
     const storyFilterStyle =
       activeTab === "story" ? getStoryFilterOverlayStyle(storyFilterPreset, storyFilterIntensity) : null;
     const previewStickers =
-      activeTab === "story" && (storyStickerText.trim() || storyStickerEmoji.trim()) ? (
+      activeTab !== "swipe" && (storyStickerText.trim() || storyStickerEmoji.trim()) ? (
         <View style={styles.storyPreviewStickerLayer}>
           {storyStickerEmoji.trim() ? (
             <View
@@ -1164,11 +1880,41 @@ function CreatePostScreen({ navigation, route }: any) {
           ))}
         </View>
       ) : null;
+    const previewWidth: DimensionValue =
+      activeTab === "post"
+        ? "100%"
+        : activeFramePreset === "landscape"
+          ? "100%"
+          : activeFramePreset === "portrait"
+            ? "82%"
+            : "76%";
+    const previewFrameStyle = [
+      styles.dynamicPreviewShell,
+      {
+        width: previewWidth,
+        aspectRatio: activeFrameConfig.aspectRatio,
+        borderRadius: activeTab === "post" ? 28 : 32,
+      },
+    ];
+    const previewMetaItems = [
+      { id: "frame", label: activeFrameConfig.label },
+      activeTab === "story" ? (storyLocation.trim() ? { id: "location", label: storyLocation.trim() } : null) : (location.trim() ? { id: "location", label: location.trim() } : null),
+      buildMusicLabel(musicSelections[activeTab]) ? { id: "music", label: buildMusicLabel(musicSelections[activeTab]) } : null,
+    ].filter(Boolean) as Array<{ id: string; label: string }>;
+    const previewMetaOverlay = previewMetaItems.length ? (
+      <View style={styles.previewMetaOverlay}>
+        {previewMetaItems.map((item) => (
+          <View key={`preview-meta-${item.id}`} style={styles.previewMetaChip}>
+            <Text style={styles.previewMetaChipText} numberOfLines={1}>{item.label}</Text>
+          </View>
+        ))}
+      </View>
+    ) : null;
 
     if (activeTab === "story" && storyType === "text") {
       return (
         <View
-          style={[styles.textStoryPreview, { backgroundColor: storyBackgroundColor }]}
+          style={[styles.textStoryPreview, previewFrameStyle, { backgroundColor: storyBackgroundColor }]}
           onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
         >
           <Text style={styles.textStoryPreviewText}>
@@ -1176,13 +1922,14 @@ function CreatePostScreen({ navigation, route }: any) {
           </Text>
           {previewFaceStickers}
           {previewStickers}
+          {previewMetaOverlay}
         </View>
       );
     }
 
     if (!primaryAsset) {
       return (
-        <View style={styles.emptyPreview}>
+        <View style={[styles.emptyPreview, previewFrameStyle]}>
           <Icon name="images-outline" size={36} color="#6b7280" />
           <Text style={styles.emptyPreviewTitle}>No media selected</Text>
           <Text style={styles.emptyPreviewText}>Pick media from your device before publishing.</Text>
@@ -1190,34 +1937,70 @@ function CreatePostScreen({ navigation, route }: any) {
       );
     }
 
+    if (activeTab === "post" && postType === "carousel" && selectedAssets.length > 1) {
+      return (
+        <View style={previewFrameStyle}>
+          <ScrollView
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(event) => {
+              const nextIndex = Math.round(
+                Number(event?.nativeEvent?.contentOffset?.x || 0) / Math.max(1, storyPreviewSize.width || 1),
+              );
+              setActiveAssetIndex(Math.max(0, Math.min(selectedAssets.length - 1, nextIndex)));
+            }}
+            onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
+          >
+            {selectedAssets.map((asset) => (
+              <Image
+                key={`preview-carousel-${asset.id}`}
+                source={{ uri: asset.thumbnailUrl || asset.uri }}
+                style={[styles.previewMediaFill, { width: storyPreviewSize.width || 280 }]}
+                resizeMode="cover"
+              />
+            ))}
+          </ScrollView>
+          <View style={styles.previewPagerRow}>
+            {selectedAssets.map((asset, index) => (
+              <View
+                key={`preview-dot-${asset.id}`}
+                style={[styles.previewPagerDot, index === activeAssetIndex && styles.previewPagerDotActive]}
+              />
+            ))}
+          </View>
+          {previewMetaOverlay}
+        </View>
+      );
+    }
+
     if (primaryAsset.mediaType === "video") {
       const previewVideo = (
-        <SocialVideo
-          uri={primaryAsset.uri}
-          posterUri={primaryAsset.thumbnailUrl || primaryAsset.uri}
-          style={styles.preview}
-          muted={false}
-          repeat
-          controls
-        />
-      );
-
-      return activeTab === "story" ? (
         <View
-          style={styles.storyPreviewFrame}
+          style={previewFrameStyle}
           onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
         >
-          {previewVideo}
-          {previewFaceStickers}
-          {previewStickers}
+          <SocialVideo
+            uri={primaryAsset.uri}
+            posterUri={primaryAsset.thumbnailUrl || primaryAsset.uri}
+            style={styles.previewMediaFill}
+            muted={false}
+            repeat
+            controls
+          />
+          {activeTab === "story" ? previewFaceStickers : null}
+          {activeTab === "story" ? previewStickers : null}
+          {previewMetaOverlay}
         </View>
-      ) : previewVideo;
+      );
+
+      return previewVideo;
     }
 
     const rawPreviewImage = (
       <Image
         source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }}
-        style={styles.preview}
+        style={styles.previewMediaFill}
       />
     );
     const activePhotoFilter = selectedPhotoFilter !== "none"
@@ -1228,13 +2011,13 @@ function CreatePostScreen({ navigation, route }: any) {
         ? <ColorMatrix matrix={activePhotoFilter.matrix}>{rawPreviewImage}</ColorMatrix>
         : rawPreviewImage;
 
-    return activeTab === "story" ? (
+    return (
       <View
-        style={styles.storyPreviewFrame}
+        style={previewFrameStyle}
         onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
       >
-        {rawPreviewImage}
-        {storyFilterStyle ? (
+        {activeTab === "post" ? filteredPostPreview : rawPreviewImage}
+        {storyFilterStyle && activeTab === "story" ? (
           <View
             pointerEvents="none"
             style={[
@@ -1246,11 +2029,10 @@ function CreatePostScreen({ navigation, route }: any) {
             ]}
           />
         ) : null}
-        {previewFaceStickers}
-        {previewStickers}
+        {activeTab === "story" ? previewFaceStickers : null}
+        {activeTab === "story" ? previewStickers : null}
+        {previewMetaOverlay}
       </View>
-    ) : (
-      filteredPostPreview
     );
   };
 
@@ -1278,7 +2060,7 @@ function CreatePostScreen({ navigation, route }: any) {
     return (
       <>
         <TouchableOpacity
-          style={[styles.mediaActionButton, { backgroundColor: colors.primary }]}
+          style={[styles.mediaActionButton, { backgroundColor: composerAccent }]}
           onPress={() => setShowVideoTrim(true)}
         >
           <Icon name="cut-outline" size={18} color="#fff" />
@@ -1335,8 +2117,13 @@ function CreatePostScreen({ navigation, route }: any) {
 
     return (
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.assetRow}>
-        {selectedAssets.map((asset) => (
-          <View key={asset.id} style={styles.assetChip}>
+        {selectedAssets.map((asset, index) => (
+          <TouchableOpacity
+            key={asset.id}
+            style={[styles.assetChip, index === activeAssetIndex && styles.assetChipActive]}
+            activeOpacity={0.88}
+            onPress={() => setActiveAssetIndex(index)}
+          >
             {asset.mediaType === "video" && !asset.thumbnailUrl && asset.source === "local" ? (
               <View style={[styles.assetThumb, styles.assetThumbVideo]}>
                 <Icon name="videocam-outline" size={18} color="#fff" />
@@ -1344,10 +2131,13 @@ function CreatePostScreen({ navigation, route }: any) {
             ) : (
               <Image source={{ uri: asset.thumbnailUrl || asset.uri }} style={styles.assetThumb} />
             )}
+            <View style={styles.assetIndexBadge}>
+              <Text style={styles.assetIndexText}>{index + 1}</Text>
+            </View>
             <TouchableOpacity style={styles.assetRemove} onPress={() => removeAsset(asset.id)}>
               <Icon name="close" size={14} color="#fff" />
             </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
         ))}
       </ScrollView>
     );
@@ -1363,10 +2153,10 @@ function CreatePostScreen({ navigation, route }: any) {
     }
 
     return (
-      <View style={[styles.locationSuggestionsCard, { backgroundColor: elevatedSurfaceColor, borderColor: colors.border }]}>
+      <View style={[styles.locationSuggestionsCard, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
         {loading && !suggestions.length ? (
           <View style={styles.locationSuggestionsLoadingRow}>
-            <ActivityIndicator size="small" color={colors.primary} />
+            <ActivityIndicator size="small" color={composerAccent} />
             <Text style={[styles.locationSuggestionMeta, helperTextStyle]}>Looking up places...</Text>
           </View>
         ) : null}
@@ -1379,16 +2169,133 @@ function CreatePostScreen({ navigation, route }: any) {
             onPress={() => onSelect(suggestion.name)}
           >
             <View style={styles.locationSuggestionBody}>
-              <Text style={[styles.locationSuggestionName, { color: colors.text }]} numberOfLines={1}>
+              <Text style={[styles.locationSuggestionName, { color: composerText }]} numberOfLines={1}>
                 {suggestion.name}
               </Text>
               <Text style={[styles.locationSuggestionMeta, helperTextStyle]}>
                 {suggestion.count > 0 ? `${suggestion.count} posts` : "Suggested location"}
               </Text>
             </View>
-            <Icon name="location-outline" size={16} color={colors.primary} />
+            <Icon name="location-outline" size={16} color={composerAccent} />
           </TouchableOpacity>
         ))}
+      </View>
+    );
+  };
+
+  const renderLocationPicker = (
+    target: "post" | "story" | "swipe",
+    value: string,
+    suggestions: LocationSuggestion[],
+    loading: boolean,
+    onChangeText: (value: string) => void,
+    onSelect: (value: string) => void,
+  ) => (
+    <View style={[styles.selectorCard, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
+      <View style={styles.selectorCardHeader}>
+        <Text style={[styles.selectorTitle, { color: composerText }]}>
+          {value ? value : "Choose a place from suggestions"}
+        </Text>
+        <Icon name="location-outline" size={18} color={composerAccent} />
+      </View>
+      <View style={styles.locationInputRow}>
+        <TextInput
+          style={[styles.locationSearchInput, inputStyle]}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder="Search city, area, or place"
+          placeholderTextColor={composerMutedText}
+          autoCapitalize="words"
+          returnKeyType="search"
+          onSubmitEditing={() => {
+            const setLoading = target === "story" ? setStoryLocationLoading : setLocationLoading;
+            setLoading(true);
+            requestLocationSuggestions(target, value)
+              .catch((error) => {
+                Alert.alert("Could not search locations", toUserSafeMessage(error));
+              })
+              .finally(() => setLoading(false));
+          }}
+        />
+        <TouchableOpacity
+          style={[styles.locationActionButton, { backgroundColor: composerAccent }]}
+          onPress={() => {
+            const setLoading = target === "story" ? setStoryLocationLoading : setLocationLoading;
+            setLoading(true);
+            requestLocationSuggestions(target, value)
+              .catch((error) => {
+                Alert.alert("Could not search locations", toUserSafeMessage(error));
+              })
+              .finally(() => setLoading(false));
+          }}
+        >
+          <Icon name="search-outline" size={16} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.locationActionButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]}
+          onPress={() => {
+            useCurrentLocation(target).catch(() => undefined);
+          }}
+          disabled={locationFetchTarget === target}
+        >
+          {locationFetchTarget === target ? (
+            <ActivityIndicator size="small" color={composerText} />
+          ) : (
+            <Icon name="locate-outline" size={16} color={composerText} />
+          )}
+        </TouchableOpacity>
+      </View>
+      <View style={styles.seedRow}>
+        {locationSeedOptions.map((seed) => (
+          <TouchableOpacity
+            key={`${target}-${seed}`}
+            style={[styles.seedChip, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]}
+            onPress={() => {
+              const setLoading = target === "story" ? setStoryLocationLoading : setLocationLoading;
+              setLoading(true);
+              requestLocationSuggestions(target, seed)
+                .catch((error) => {
+                  console.log("seeded location suggestion error:", error);
+                })
+                .finally(() => setLoading(false));
+            }}
+          >
+            <Text style={[styles.seedChipText, { color: composerText }]}>{seed}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {renderLocationSuggestions(suggestions, loading, onSelect)}
+    </View>
+  );
+
+  const renderMentionSelector = (target: "post" | "story" | "swipe", rawValue: string) => {
+    const selectedMentions = splitTokens(rawValue);
+
+    return (
+      <View style={[styles.selectorCard, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
+        <View style={styles.selectorCardHeader}>
+          <Text style={[styles.selectorTitle, { color: composerText }]}>Tag friends</Text>
+          {taggableFriendsLoading ? <ActivityIndicator size="small" color={composerAccent} /> : null}
+        </View>
+        <View style={styles.friendSelectorWrap}>
+          {taggableFriends.map((friend) => {
+            const selected = selectedMentions.includes(friend.username);
+            return (
+              <TouchableOpacity
+                key={`${target}-${friend.id}`}
+                style={[
+                  styles.friendSelectorChip,
+                  { backgroundColor: selected ? composerAccent : surfaceColor, borderColor: composerBorderColor },
+                ]}
+                onPress={() => toggleMentionFriend(target, friend.username)}
+              >
+                <Text style={[styles.friendSelectorText, { color: selected ? "#fff" : composerText }]}>
+                  @{friend.username}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
     );
   };
@@ -1399,19 +2306,19 @@ function CreatePostScreen({ navigation, route }: any) {
 
     return (
       <>
-        <Text style={[styles.sectionLabel, { color: colors.text }]}>Music</Text>
+        <Text style={[styles.sectionLabel, { color: composerText }]}>Music</Text>
         <View style={styles.modeRow}>
           <TouchableOpacity
             style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, musicBrowseMode === "trending" && [styles.pillActive, activePillStyle]]}
             onPress={loadTrendingMusic}
           >
-            <Text style={[styles.pillText, { color: musicBrowseMode === "trending" ? "#fff" : colors.text }, musicBrowseMode === "trending" && styles.pillTextActive]}>Trending</Text>
+            <Text style={[styles.pillText, { color: musicBrowseMode === "trending" ? "#fff" : composerText }, musicBrowseMode === "trending" && styles.pillTextActive]}>Trending</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, musicBrowseMode === "original" && [styles.pillActive, activePillStyle]]}
             onPress={loadOriginalSounds}
           >
-            <Text style={[styles.pillText, { color: musicBrowseMode === "original" ? "#fff" : colors.text }, musicBrowseMode === "original" && styles.pillTextActive]}>My Audio</Text>
+            <Text style={[styles.pillText, { color: musicBrowseMode === "original" ? "#fff" : composerText }, musicBrowseMode === "original" && styles.pillTextActive]}>My Audio</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.musicSearchRow}>
@@ -1420,36 +2327,36 @@ function CreatePostScreen({ navigation, route }: any) {
             value={musicQuery}
             onChangeText={setMusicQuery}
             placeholder="Search tracks or original sounds"
-            placeholderTextColor={colors.mutedText}
+            placeholderTextColor={composerMutedText}
             maxLength={limits.music}
             returnKeyType="search"
             onSubmitEditing={runMusicSearch}
           />
-          <TouchableOpacity style={[styles.musicActionButton, { backgroundColor: colors.primary }]} onPress={runMusicSearch} disabled={musicLoading}>
+          <TouchableOpacity style={[styles.musicActionButton, { backgroundColor: composerAccent }]} onPress={runMusicSearch} disabled={musicLoading}>
             {musicLoading ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="search-outline" size={16} color="#fff" />}
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.musicSecondaryButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={loadTrendingMusic} disabled={musicLoading}>
-            <Icon name="flame-outline" size={16} color={colors.text} />
+          <TouchableOpacity style={[styles.musicSecondaryButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={loadTrendingMusic} disabled={musicLoading}>
+            <Icon name="flame-outline" size={16} color={composerText} />
           </TouchableOpacity>
         </View>
 
         {current ? (
-          <View style={[styles.musicCard, { backgroundColor: elevatedSurfaceColor, borderColor: colors.border }]}>
+          <View style={[styles.musicCard, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
             <View style={styles.musicCardHeader}>
               <View style={styles.musicTitleBlock}>
-                <Text style={[styles.musicTitle, { color: colors.text }]}>{buildMusicLabel(current)}</Text>
+                <Text style={[styles.musicTitle, { color: composerText }]}>{buildMusicLabel(current)}</Text>
                 <Text style={[styles.musicMeta, helperTextStyle]}>
                   {[current.source || "catalog", current.isOriginal ? "original" : null, `${formatDuration(current.duration)} track`]
                     .filter(Boolean)
                     .join(" • ")}
                 </Text>
               </View>
-              <TouchableOpacity style={[styles.musicClearButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setMusicForTab(tab, null)}>
-                <Text style={[styles.musicClearText, { color: colors.text }]}>Remove</Text>
+              <TouchableOpacity style={[styles.musicClearButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setMusicForTab(tab, null)}>
+                <Text style={[styles.musicClearText, { color: composerText }]}>Remove</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={[styles.sectionLabel, { color: colors.text }]}>Clip length</Text>
+            <Text style={[styles.sectionLabel, { color: composerText }]}>Clip length</Text>
             <View style={styles.modeRow}>
               {clipPresets
                 .filter((preset) => preset <= current.duration)
@@ -1459,24 +2366,34 @@ function CreatePostScreen({ navigation, route }: any) {
                     style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, (current.clipDuration || 0) === preset && [styles.pillActive, activePillStyle]]}
                     onPress={() => setSelectedMusicClipDuration(preset)}
                   >
-                    <Text style={[styles.pillText, { color: (current.clipDuration || 0) === preset ? "#fff" : colors.text }, (current.clipDuration || 0) === preset && styles.pillTextActive]}>
+                    <Text style={[styles.pillText, { color: (current.clipDuration || 0) === preset ? "#fff" : composerText }, (current.clipDuration || 0) === preset && styles.pillTextActive]}>
                       {preset}s
                     </Text>
                   </TouchableOpacity>
                 ))}
             </View>
 
-            <Text style={[styles.sectionLabel, { color: colors.text }]}>Clip start</Text>
+            <Text style={[styles.sectionLabel, { color: composerText }]}>Clip start</Text>
             <View style={styles.clipAdjustRow}>
-              <TouchableOpacity style={[styles.clipAdjustButton, { backgroundColor: colors.primary }]} onPress={() => nudgeSelectedMusicStart(-5)}>
-                <Text style={styles.clipAdjustText}>-5s</Text>
-              </TouchableOpacity>
-              <Text style={[styles.clipAdjustValue, { color: colors.text }]}>
+              <View style={styles.clipAdjustGroup}>
+                <TouchableOpacity style={[styles.clipAdjustButton, { backgroundColor: composerAccent }]} onPress={() => nudgeSelectedMusicStart(-1)}>
+                  <Text style={styles.clipAdjustText}>-1s</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.clipAdjustButton, { backgroundColor: composerAccent }]} onPress={() => nudgeSelectedMusicStart(-5)}>
+                  <Text style={styles.clipAdjustText}>-5s</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={[styles.clipAdjustValue, { color: composerText }]}>
                 Starts at {formatDuration(current.clipStartTime)} for {formatDuration(current.clipDuration)}
               </Text>
-              <TouchableOpacity style={[styles.clipAdjustButton, { backgroundColor: colors.primary }]} onPress={() => nudgeSelectedMusicStart(5)}>
-                <Text style={styles.clipAdjustText}>+5s</Text>
-              </TouchableOpacity>
+              <View style={styles.clipAdjustGroup}>
+                <TouchableOpacity style={[styles.clipAdjustButton, { backgroundColor: composerAccent }]} onPress={() => nudgeSelectedMusicStart(1)}>
+                  <Text style={styles.clipAdjustText}>+1s</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.clipAdjustButton, { backgroundColor: composerAccent }]} onPress={() => nudgeSelectedMusicStart(5)}>
+                  <Text style={styles.clipAdjustText}>+5s</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         ) : (
@@ -1485,7 +2402,7 @@ function CreatePostScreen({ navigation, route }: any) {
           </Text>
         )}
 
-        {musicError ? <Text style={[styles.musicError, { color: isDarkMode ? "#FCA5A5" : "#b91c1c" }]}>{musicError}</Text> : null}
+        {musicError ? <Text style={[styles.musicError, { color: "#fca5a5" }]}>{musicError}</Text> : null}
 
         {!musicLoading && !musicResults.length ? (
           <Text style={[styles.helperText, helperTextStyle]}>
@@ -1517,8 +2434,8 @@ function CreatePostScreen({ navigation, route }: any) {
                 key={`${item.id}:${item.title}`}
                 style={[
                   styles.musicResultCard,
-                  { backgroundColor: surfaceColor, borderColor: colors.border },
-                  isCurrent && [styles.musicResultCardActive, { backgroundColor: elevatedSurfaceColor, borderColor: colors.primary }],
+                  { backgroundColor: surfaceColor, borderColor: composerBorderColor },
+                  isCurrent && [styles.musicResultCardActive, { backgroundColor: elevatedSurfaceColor, borderColor: composerAccent }],
                 ]}
               >
                 <TouchableOpacity
@@ -1526,7 +2443,7 @@ function CreatePostScreen({ navigation, route }: any) {
                   onPress={() => attachMusic(item)}
                   disabled={isImporting}
                 >
-                  <Text style={[styles.musicResultTitle, { color: colors.text }]}>{buildMusicLabel(item)}</Text>
+                  <Text style={[styles.musicResultTitle, { color: composerText }]}>{buildMusicLabel(item)}</Text>
                   <Text style={[styles.musicResultMeta, helperTextStyle]}>
                     {[item.source || "catalog", item.isOriginal ? "original" : null, formatDuration(item.duration)]
                       .filter(Boolean)
@@ -1536,33 +2453,33 @@ function CreatePostScreen({ navigation, route }: any) {
                 </TouchableOpacity>
                 <View style={styles.musicResultActions}>
                   <TouchableOpacity
-                    style={[styles.musicResultIconButton, { backgroundColor: elevatedSurfaceColor, borderColor: colors.border }]}
+                    style={[styles.musicResultIconButton, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}
                     onPress={() => {
                       toggleMusicPreview(item).catch(() => undefined);
                     }}
                     disabled={!item.previewUrl || isImporting || isPreviewLoading}
                   >
                     {isPreviewLoading ? (
-                      <ActivityIndicator size="small" color={colors.text} />
+                      <ActivityIndicator size="small" color={composerText} />
                     ) : (
                       <Icon
                         name={isPreviewing ? "pause" : "play"}
                         size={16}
-                        color={item.previewUrl ? colors.text : colors.mutedText}
+                        color={item.previewUrl ? composerText : composerMutedText}
                       />
                     )}
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.musicResultIconButton, { backgroundColor: elevatedSurfaceColor, borderColor: colors.border }]}
+                    style={[styles.musicResultIconButton, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}
                     onPress={() => {
                       attachMusic(item).catch(() => undefined);
                     }}
                     disabled={isImporting}
                   >
                     {isImporting ? (
-                      <ActivityIndicator size="small" color={colors.text} />
+                      <ActivityIndicator size="small" color={composerText} />
                     ) : (
-                      <Icon name={isCurrent ? "checkmark-circle" : "add-circle-outline"} size={20} color={colors.text} />
+                      <Icon name={isCurrent ? "checkmark-circle" : "add-circle-outline"} size={20} color={composerText} />
                     )}
                   </TouchableOpacity>
                 </View>
@@ -1576,7 +2493,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
   const renderPostControls = () => (
     <>
-      <Text style={[styles.sectionLabel, { color: colors.text }]}>Post Type</Text>
+      <Text style={[styles.sectionLabel, { color: composerText }]}>Post Type</Text>
       <View style={styles.modeRow}>
         {postModes.map((mode) => (
           <TouchableOpacity
@@ -1587,46 +2504,110 @@ function CreatePostScreen({ navigation, route }: any) {
               setSelectedAssets([]);
             }}
           >
-            <Text style={[styles.pillText, { color: postType === mode ? "#fff" : colors.text }, postType === mode && styles.pillTextActive]}>{mode}</Text>
+            <Text style={[styles.pillText, { color: postType === mode ? "#fff" : composerText }, postType === mode && styles.pillTextActive]}>{mode}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <Text style={[styles.sectionLabel, { color: colors.text }]}>Caption</Text>
+      <Text style={[styles.sectionLabel, { color: composerText }]}>Caption</Text>
       <TextInput
         style={[styles.input, inputStyle]}
         value={caption}
         onChangeText={setCaption}
         placeholder="Write caption"
-        placeholderTextColor={colors.mutedText}
+        placeholderTextColor={composerMutedText}
         multiline
         maxLength={limits.caption}
       />
       <Text style={[styles.counter, helperTextStyle]}>{caption.length}/{limits.caption}</Text>
 
-      <Text style={[styles.sectionLabel, { color: colors.text }]}>Location</Text>
-      <TextInput
-        style={[styles.inputSingle, inputStyle]}
-        value={location}
-        onChangeText={setLocation}
-        placeholder="Add location"
-        placeholderTextColor={colors.mutedText}
-        maxLength={limits.location}
-      />
-      {renderLocationSuggestions(locationSuggestions, locationLoading, (value) => {
+      <Text style={[styles.sectionLabel, { color: composerText }]}>Location</Text>
+      {renderLocationPicker("post", location, locationSuggestions, locationLoading, setLocation, (value) => {
         setLocation(value);
         setLocationSuggestions([]);
       })}
       {renderMusicPicker("post")}
 
-      <Text style={[styles.sectionLabel, { color: colors.text }]}>Hashtags (comma separated)</Text>
-      <TextInput style={[styles.inputSingle, inputStyle]} value={hashtagsRaw} onChangeText={setHashtagsRaw} placeholder="fashion, travel" placeholderTextColor={colors.mutedText} />
+      <Text style={[styles.sectionLabel, { color: composerText }]}>Hashtags (comma separated)</Text>
+      <TextInput style={[styles.inputSingle, inputStyle]} value={hashtagsRaw} onChangeText={setHashtagsRaw} placeholder="fashion, travel" placeholderTextColor={composerMutedText} />
 
-      <Text style={[styles.sectionLabel, { color: colors.text }]}>Mentions (comma separated)</Text>
-      <TextInput style={[styles.inputSingle, inputStyle]} value={mentionsRaw} onChangeText={setMentionsRaw} placeholder="alice, bob" placeholderTextColor={colors.mutedText} />
+      <Text style={[styles.sectionLabel, { color: composerText }]}>Tag People</Text>
+      {renderMentionSelector("post", mentionsRaw)}
 
-      <View style={styles.switchRow}><Text style={[styles.switchLabel, { color: colors.text }]}>Disable comments</Text><Switch value={disableComments} onValueChange={setDisableComments} /></View>
-      <View style={styles.switchRow}><Text style={[styles.switchLabel, { color: colors.text }]}>Hide like count</Text><Switch value={hideLikeCount} onValueChange={setHideLikeCount} /></View>
+      <Text style={[styles.sectionLabel, { color: composerText }]}>Text sticker</Text>
+      <TextInput
+        style={[styles.inputSingle, inputStyle]}
+        value={storyStickerText}
+        onChangeText={setStoryStickerText}
+        placeholder="Add a text sticker on the post"
+        placeholderTextColor={composerMutedText}
+        maxLength={60}
+      />
+      {storyStickerText.trim() ? (
+        <>
+          <View style={styles.modeRow}>
+            {storyTextStickerThemes.map((theme) => (
+              <TouchableOpacity
+                key={`post-text-theme-${theme}`}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyStickerTextTheme === theme && [styles.pillActive, activePillStyle]]}
+                onPress={() => setStoryStickerTextTheme(theme)}
+              >
+                <Text style={[styles.pillText, { color: storyStickerTextTheme === theme ? "#fff" : composerText }, storyStickerTextTheme === theme && styles.pillTextActive]}>
+                  {storyTextStickerThemeLabels[theme]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.modeRow}>
+            {storyStickerPlacements.map((placement) => (
+              <TouchableOpacity
+                key={`post-text-${placement}`}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyStickerTextPlacement === placement && [styles.pillActive, activePillStyle]]}
+                onPress={() => {
+                  setStoryStickerTextPlacement(placement);
+                  setStoryStickerTextPosition(storyStickerPresetPositions[placement]);
+                }}
+              >
+                <Text style={[styles.pillText, { color: storyStickerTextPlacement === placement ? "#fff" : composerText }, storyStickerTextPlacement === placement && styles.pillTextActive]}>
+                  {storyStickerPlacementLabels[placement]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>
+      ) : null}
+
+      <Text style={[styles.sectionLabel, { color: composerText }]}>Emoji sticker</Text>
+      <TextInput
+        style={[styles.inputSingle, inputStyle]}
+        value={storyStickerEmoji}
+        onChangeText={setStoryStickerEmoji}
+        placeholder="✨"
+        placeholderTextColor={composerMutedText}
+        maxLength={16}
+      />
+      {storyStickerEmoji.trim() ? (
+        <View style={styles.modeRow}>
+          {storyStickerPlacements.map((placement) => (
+            <TouchableOpacity
+              key={`post-emoji-${placement}`}
+              style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyStickerEmojiPlacement === placement && [styles.pillActive, activePillStyle]]}
+              onPress={() => {
+                setStoryStickerEmojiPlacement(placement);
+                setStoryStickerEmojiPosition(storyStickerPresetPositions[placement]);
+              }}
+            >
+              <Text style={[styles.pillText, { color: storyStickerEmojiPlacement === placement ? "#fff" : composerText }, storyStickerEmojiPlacement === placement && styles.pillTextActive]}>
+                {storyStickerPlacementLabels[placement]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
+
+      <View style={styles.switchRow}><Text style={[styles.switchLabel, { color: composerText }]}>Allow comments</Text><Switch value={!disableComments} onValueChange={(value) => setDisableComments(!value)} /></View>
+      <View style={styles.switchRow}><Text style={[styles.switchLabel, { color: composerText }]}>Share to story</Text><Switch value={sharePostToStory} onValueChange={setSharePostToStory} /></View>
+      <View style={styles.switchRow}><Text style={[styles.switchLabel, { color: composerText }]}>Hide like count</Text><Switch value={hideLikeCount} onValueChange={setHideLikeCount} /></View>
 
       <Text style={[styles.helperText, helperTextStyle]}>
         {postType === "carousel"
@@ -1641,12 +2622,6 @@ function CreatePostScreen({ navigation, route }: any) {
 
       {/* Photo Filters for image posts */}
       {renderPhotoFilterStrip()}
-
-      {/* Video trim + Face overlay buttons */}
-      <View style={{ flexDirection: "row", marginTop: 8 }}>
-        {renderVideoTrimButton()}
-        {renderFaceOverlayButton()}
-      </View>
     </>
   );
 
@@ -1667,19 +2642,19 @@ function CreatePostScreen({ navigation, route }: any) {
 
       {storyType === "poll" ? (
         <>
-          <Text style={styles.sectionLabel}>Poll Question</Text>
-          <TextInput style={styles.inputSingle} value={pollQuestion} onChangeText={setPollQuestion} placeholder="Ask a poll question" />
-          <Text style={styles.sectionLabel}>Option A</Text>
-          <TextInput style={styles.inputSingle} value={pollOptionA} onChangeText={setPollOptionA} placeholder="Option A" />
-          <Text style={styles.sectionLabel}>Option B</Text>
-          <TextInput style={styles.inputSingle} value={pollOptionB} onChangeText={setPollOptionB} placeholder="Option B" />
+          <Text style={[styles.sectionLabel, { color: colors.text }]}>Poll Question</Text>
+          <TextInput style={[styles.inputSingle, inputStyle]} value={pollQuestion} onChangeText={setPollQuestion} placeholder="Ask a poll question" placeholderTextColor={colors.mutedText} />
+          <Text style={[styles.sectionLabel, { color: colors.text }]}>Option A</Text>
+          <TextInput style={[styles.inputSingle, inputStyle]} value={pollOptionA} onChangeText={setPollOptionA} placeholder="Option A" placeholderTextColor={colors.mutedText} />
+          <Text style={[styles.sectionLabel, { color: colors.text }]}>Option B</Text>
+          <TextInput style={[styles.inputSingle, inputStyle]} value={pollOptionB} onChangeText={setPollOptionB} placeholder="Option B" placeholderTextColor={colors.mutedText} />
         </>
       ) : null}
 
       {storyType === "question" ? (
         <>
-          <Text style={styles.sectionLabel}>Question Prompt</Text>
-          <TextInput style={styles.inputSingle} value={questionPrompt} onChangeText={setQuestionPrompt} placeholder="Ask followers anything" />
+          <Text style={[styles.sectionLabel, { color: colors.text }]}>Question Prompt</Text>
+          <TextInput style={[styles.inputSingle, inputStyle]} value={questionPrompt} onChangeText={setQuestionPrompt} placeholder="Ask followers anything" placeholderTextColor={colors.mutedText} />
         </>
       ) : null}
 
@@ -1697,7 +2672,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
       {storyType === "text" ? (
         <>
-          <Text style={styles.sectionLabel}>Background</Text>
+          <Text style={[styles.sectionLabel, { color: colors.text }]}>Background</Text>
           <View style={styles.colorRow}>
             {textStoryColors.map((color) => {
               const selected = storyBackgroundColor === color;
@@ -1764,7 +2739,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
       {storyVisibility === "custom" ? (
         <>
-          <Text style={styles.sectionLabel}>Custom audience</Text>
+          <Text style={[styles.sectionLabel, { color: colors.text }]}>Custom audience</Text>
           {storyAudienceLoading ? (
             <ActivityIndicator size="small" color="#111827" />
           ) : (
@@ -1785,58 +2760,48 @@ function CreatePostScreen({ navigation, route }: any) {
               })}
             </View>
           )}
-          <Text style={styles.helperText}>Only selected users will be able to view this story.</Text>
+          <Text style={[styles.helperText, helperTextStyle]}>Only selected users will be able to view this story.</Text>
         </>
       ) : null}
 
       {renderMusicPicker("story")}
 
-      <Text style={styles.sectionLabel}>Link</Text>
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Link</Text>
       <TextInput
-        style={styles.inputSingle}
+        style={[styles.inputSingle, inputStyle]}
         value={storyLinkUrl}
         onChangeText={setStoryLinkUrl}
         placeholder="https://example.com"
+        placeholderTextColor={colors.mutedText}
         autoCapitalize="none"
         autoCorrect={false}
       />
 
-      <Text style={styles.sectionLabel}>Location</Text>
-      <TextInput
-        style={[styles.inputSingle, inputStyle]}
-        value={storyLocation}
-        onChangeText={setStoryLocation}
-        placeholder="Add location sticker"
-        placeholderTextColor={colors.mutedText}
-        maxLength={limits.location}
-      />
-      {renderLocationSuggestions(storyLocationSuggestions, storyLocationLoading, (value) => {
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Location</Text>
+      {renderLocationPicker("story", storyLocation, storyLocationSuggestions, storyLocationLoading, setStoryLocation, (value) => {
         setStoryLocation(value);
         setStoryLocationSuggestions([]);
       })}
 
-      <Text style={styles.sectionLabel}>Hashtags</Text>
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Hashtags</Text>
       <TextInput
-        style={styles.inputSingle}
+        style={[styles.inputSingle, inputStyle]}
         value={storyHashtagsRaw}
         onChangeText={setStoryHashtagsRaw}
         placeholder="travel, sunrise"
+        placeholderTextColor={colors.mutedText}
       />
 
-      <Text style={styles.sectionLabel}>Mentions</Text>
-      <TextInput
-        style={styles.inputSingle}
-        value={storyMentionsRaw}
-        onChangeText={setStoryMentionsRaw}
-        placeholder="alice, bob"
-      />
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Tag People</Text>
+      {renderMentionSelector("story", storyMentionsRaw)}
 
-      <Text style={styles.sectionLabel}>Text sticker</Text>
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Text sticker</Text>
       <TextInput
-        style={styles.inputSingle}
+        style={[styles.inputSingle, inputStyle]}
         value={storyStickerText}
         onChangeText={setStoryStickerText}
         placeholder="Add a headline sticker"
+        placeholderTextColor={colors.mutedText}
         maxLength={60}
       />
       {storyStickerText.trim() ? (
@@ -1845,10 +2810,10 @@ function CreatePostScreen({ navigation, route }: any) {
             {storyTextStickerThemes.map((theme) => (
               <TouchableOpacity
                 key={`text-theme-${theme}`}
-                style={[styles.pill, storyStickerTextTheme === theme && styles.pillActive]}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyStickerTextTheme === theme && [styles.pillActive, activePillStyle]]}
                 onPress={() => setStoryStickerTextTheme(theme)}
               >
-                <Text style={[styles.pillText, storyStickerTextTheme === theme && styles.pillTextActive]}>
+                <Text style={[styles.pillText, { color: storyStickerTextTheme === theme ? "#fff" : colors.text }, storyStickerTextTheme === theme && styles.pillTextActive]}>
                   {storyTextStickerThemeLabels[theme]}
                 </Text>
               </TouchableOpacity>
@@ -1858,10 +2823,10 @@ function CreatePostScreen({ navigation, route }: any) {
             {storyTextStickerAlignments.map((alignment) => (
               <TouchableOpacity
                 key={`text-align-${alignment}`}
-                style={[styles.pill, storyStickerTextAlignment === alignment && styles.pillActive]}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyStickerTextAlignment === alignment && [styles.pillActive, activePillStyle]]}
                 onPress={() => setStoryStickerTextAlignment(alignment)}
               >
-                <Text style={[styles.pillText, storyStickerTextAlignment === alignment && styles.pillTextActive]}>
+                <Text style={[styles.pillText, { color: storyStickerTextAlignment === alignment ? "#fff" : colors.text }, storyStickerTextAlignment === alignment && styles.pillTextActive]}>
                   {storyTextStickerAlignmentLabels[alignment]}
                 </Text>
               </TouchableOpacity>
@@ -1871,45 +2836,46 @@ function CreatePostScreen({ navigation, route }: any) {
             {storyStickerPlacements.map((placement) => (
               <TouchableOpacity
                 key={`text-${placement}`}
-                style={[styles.pill, storyStickerTextPlacement === placement && styles.pillActive]}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyStickerTextPlacement === placement && [styles.pillActive, activePillStyle]]}
                 onPress={() => {
                   setStoryStickerTextPlacement(placement);
                   setStoryStickerTextPosition(storyStickerPresetPositions[placement]);
                 }}
               >
-                <Text style={[styles.pillText, storyStickerTextPlacement === placement && styles.pillTextActive]}>
+                <Text style={[styles.pillText, { color: storyStickerTextPlacement === placement ? "#fff" : colors.text }, storyStickerTextPlacement === placement && styles.pillTextActive]}>
                   {storyStickerPlacementLabels[placement]}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
           <View style={styles.stickerScaleRow}>
-            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerTextScale((value) => clampStickerScale(value - 0.1))}>
-              <Text style={styles.scaleButtonText}>A-</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setStoryStickerTextScale((value) => clampStickerScale(value - 0.1))}>
+              <Text style={[styles.scaleButtonText, { color: colors.text }]}>A-</Text>
             </TouchableOpacity>
-            <Text style={styles.scaleValueText}>Text size {storyStickerTextScale.toFixed(1)}x</Text>
-            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerTextScale((value) => clampStickerScale(value + 0.1))}>
-              <Text style={styles.scaleButtonText}>A+</Text>
+            <Text style={[styles.scaleValueText, { color: colors.text }]}>Text size {storyStickerTextScale.toFixed(1)}x</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setStoryStickerTextScale((value) => clampStickerScale(value + 0.1))}>
+              <Text style={[styles.scaleButtonText, { color: colors.text }]}>A+</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.stickerScaleRow}>
-            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerTextRotation((value) => clampStickerRotation(value - 15))}>
-              <Text style={styles.scaleButtonText}>↺</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setStoryStickerTextRotation((value) => clampStickerRotation(value - 15))}>
+              <Text style={[styles.scaleButtonText, { color: colors.text }]}>↺</Text>
             </TouchableOpacity>
-            <Text style={styles.scaleValueText}>Text angle {storyStickerTextRotation}deg</Text>
-            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerTextRotation((value) => clampStickerRotation(value + 15))}>
-              <Text style={styles.scaleButtonText}>↻</Text>
+            <Text style={[styles.scaleValueText, { color: colors.text }]}>Text angle {storyStickerTextRotation}deg</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setStoryStickerTextRotation((value) => clampStickerRotation(value + 15))}>
+              <Text style={[styles.scaleButtonText, { color: colors.text }]}>↻</Text>
             </TouchableOpacity>
           </View>
         </>
       ) : null}
 
-      <Text style={styles.sectionLabel}>Emoji sticker</Text>
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Emoji sticker</Text>
       <TextInput
-        style={styles.inputSingle}
+        style={[styles.inputSingle, inputStyle]}
         value={storyStickerEmoji}
         onChangeText={setStoryStickerEmoji}
         placeholder="✨"
+        placeholderTextColor={colors.mutedText}
         maxLength={16}
       />
       {storyStickerEmoji.trim() ? (
@@ -1918,43 +2884,43 @@ function CreatePostScreen({ navigation, route }: any) {
             {storyStickerPlacements.map((placement) => (
               <TouchableOpacity
                 key={`emoji-${placement}`}
-                style={[styles.pill, storyStickerEmojiPlacement === placement && styles.pillActive]}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyStickerEmojiPlacement === placement && [styles.pillActive, activePillStyle]]}
                 onPress={() => {
                   setStoryStickerEmojiPlacement(placement);
                   setStoryStickerEmojiPosition(storyStickerPresetPositions[placement]);
                 }}
               >
-                <Text style={[styles.pillText, storyStickerEmojiPlacement === placement && styles.pillTextActive]}>
+                <Text style={[styles.pillText, { color: storyStickerEmojiPlacement === placement ? "#fff" : colors.text }, storyStickerEmojiPlacement === placement && styles.pillTextActive]}>
                   {storyStickerPlacementLabels[placement]}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
           <View style={styles.stickerScaleRow}>
-            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerEmojiScale((value) => clampStickerScale(value - 0.1))}>
-              <Text style={styles.scaleButtonText}>-</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setStoryStickerEmojiScale((value) => clampStickerScale(value - 0.1))}>
+              <Text style={[styles.scaleButtonText, { color: colors.text }]}>-</Text>
             </TouchableOpacity>
-            <Text style={styles.scaleValueText}>Emoji size {storyStickerEmojiScale.toFixed(1)}x</Text>
-            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerEmojiScale((value) => clampStickerScale(value + 0.1))}>
-              <Text style={styles.scaleButtonText}>+</Text>
+            <Text style={[styles.scaleValueText, { color: colors.text }]}>Emoji size {storyStickerEmojiScale.toFixed(1)}x</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setStoryStickerEmojiScale((value) => clampStickerScale(value + 0.1))}>
+              <Text style={[styles.scaleButtonText, { color: colors.text }]}>+</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.stickerScaleRow}>
-            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerEmojiRotation((value) => clampStickerRotation(value - 15))}>
-              <Text style={styles.scaleButtonText}>↺</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setStoryStickerEmojiRotation((value) => clampStickerRotation(value - 15))}>
+              <Text style={[styles.scaleButtonText, { color: colors.text }]}>↺</Text>
             </TouchableOpacity>
-            <Text style={styles.scaleValueText}>Emoji angle {storyStickerEmojiRotation}deg</Text>
-            <TouchableOpacity style={styles.scaleButton} onPress={() => setStoryStickerEmojiRotation((value) => clampStickerRotation(value + 15))}>
-              <Text style={styles.scaleButtonText}>↻</Text>
+            <Text style={[styles.scaleValueText, { color: colors.text }]}>Emoji angle {storyStickerEmojiRotation}deg</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setStoryStickerEmojiRotation((value) => clampStickerRotation(value + 15))}>
+              <Text style={[styles.scaleButtonText, { color: colors.text }]}>↻</Text>
             </TouchableOpacity>
           </View>
         </>
       ) : null}
 
-      <View style={styles.switchRow}><Text style={styles.switchLabel}>Allow replies</Text><Switch value={storyAllowReplies} onValueChange={setStoryAllowReplies} /></View>
-      <View style={styles.switchRow}><Text style={styles.switchLabel}>Allow sharing</Text><Switch value={storyAllowSharing} onValueChange={setStoryAllowSharing} /></View>
+      <View style={styles.switchRow}><Text style={[styles.switchLabel, { color: colors.text }]}>Allow replies</Text><Switch value={storyAllowReplies} onValueChange={setStoryAllowReplies} /></View>
+      <View style={styles.switchRow}><Text style={[styles.switchLabel, { color: colors.text }]}>Allow sharing</Text><Switch value={storyAllowSharing} onValueChange={setStoryAllowSharing} /></View>
 
-      <Text style={styles.helperText}>
+      <Text style={[styles.helperText, helperTextStyle]}>
         {storyType === "text"
           ? "Text stories now publish without requiring media. Polls and questions still need an image background."
           : "Links, location, hashtag, mention, custom text, and emoji story stickers now publish with draggable placement, size, and rotation controls in the preview. Polls and questions still require an image background."}
@@ -1971,15 +2937,7 @@ function CreatePostScreen({ navigation, route }: any) {
       {renderMusicPicker("swipe")}
 
       <Text style={[styles.sectionLabel, { color: colors.text }]}>Location</Text>
-      <TextInput
-        style={[styles.inputSingle, inputStyle]}
-        value={location}
-        onChangeText={setLocation}
-        placeholder="Add location"
-        placeholderTextColor={colors.mutedText}
-        maxLength={limits.location}
-      />
-      {renderLocationSuggestions(locationSuggestions, locationLoading, (value) => {
+      {renderLocationPicker("swipe", location, locationSuggestions, locationLoading, setLocation, (value) => {
         setLocation(value);
         setLocationSuggestions([]);
       })}
@@ -1987,39 +2945,214 @@ function CreatePostScreen({ navigation, route }: any) {
       <Text style={[styles.sectionLabel, { color: colors.text }]}>Hashtags</Text>
       <TextInput style={[styles.inputSingle, inputStyle]} value={hashtagsRaw} onChangeText={setHashtagsRaw} placeholder="fitlife, travel" placeholderTextColor={colors.mutedText} />
 
-      <Text style={[styles.sectionLabel, { color: colors.text }]}>Mentions</Text>
-      <TextInput style={[styles.inputSingle, inputStyle]} value={mentionsRaw} onChangeText={setMentionsRaw} placeholder="alice, bob" placeholderTextColor={colors.mutedText} />
+      <Text style={[styles.sectionLabel, { color: colors.text }]}>Tag People</Text>
+      {renderMentionSelector("swipe", mentionsRaw)}
 
       <Text style={[styles.helperText, helperTextStyle]}>Swipes require a single short-form video. The backend will create a thumbnail automatically.</Text>
     </>
   );
 
+  const renderStepIntroCard = (title: string, icon: string, description?: string) => (
+    <View style={[styles.stepIntroCard, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
+      <View style={[styles.stepIntroIcon, { backgroundColor: subtleSurfaceColor }]}>
+        <Icon name={icon} size={18} color={composerAccent} />
+      </View>
+      <View style={styles.stepIntroCopy}>
+        <Text style={[styles.stepIntroTitle, { color: composerText }]}>{title}</Text>
+        {description ? (
+          <Text style={[styles.stepIntroDescription, { color: composerMutedText }]}>{description}</Text>
+        ) : null}
+      </View>
+    </View>
+  );
+
+  const renderCanvasPanel = (title: string, eyebrow: string) => (
+    <View style={[styles.canvasPanel, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
+      <View style={styles.panelHeaderRow}>
+        <View>
+          <Text style={[styles.panelEyebrow, { color: composerAccent }]}>{eyebrow}</Text>
+          <Text style={[styles.panelTitle, { color: composerText }]}>{title}</Text>
+        </View>
+        <Text style={[styles.canvasRatioBadge, { color: composerText, backgroundColor: surfaceColor, borderColor: composerBorderColor }]}>
+          {activeFrameConfig.label}
+        </Text>
+      </View>
+      {renderMediaPreview()}
+    </View>
+  );
+
+  const renderSelectStage = () => (
+    <>
+      {renderStepIntroCard(
+        "Choose media",
+        "images-outline",
+      )}
+
+      {activeTab === "post" ? (
+        <>
+          <Text style={[styles.sectionLabel, { color: composerText }]}>Post Type</Text>
+          <View style={styles.modeRow}>
+            {postModes.map((mode) => (
+              <TouchableOpacity
+                key={mode}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, postType === mode && [styles.pillActive, activePillStyle]]}
+                onPress={() => {
+                  setPostType(mode);
+                  setSelectedAssets([]);
+                }}
+              >
+                <Text style={[styles.pillText, { color: postType === mode ? "#fff" : composerText }, postType === mode && styles.pillTextActive]}>{mode}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>
+      ) : null}
+
+      {activeTab === "story" ? (
+        <>
+          <Text style={[styles.sectionLabel, { color: composerText }]}>Story Type</Text>
+          <View style={styles.modeRow}>
+            {storyModes.map((mode) => (
+              <TouchableOpacity
+                key={mode}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyType === mode && [styles.pillActive, activePillStyle]]}
+                onPress={() => setStoryType(mode)}
+              >
+                <Text style={[styles.pillText, { color: storyType === mode ? "#fff" : composerText }, storyType === mode && styles.pillTextActive]}>{mode}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>
+      ) : null}
+
+      {renderCanvasPanel(
+        activeTab === "story" ? "Story canvas" : activeTab === "swipe" ? "Reel cover preview" : "Post preview",
+        "Select",
+      )}
+      {renderFrameSelector()}
+      {renderMediaSelectorPanel()}
+    </>
+  );
+
+  const renderEditStage = () => (
+    <>
+      {renderStepIntroCard(
+        "Adjust content",
+        "sparkles-outline",
+      )}
+      {renderCanvasPanel(
+        activeTab === "story" ? "Preview your story edits" : activeTab === "swipe" ? "Preview your reel edits" : "Preview your post edits",
+        "Edit",
+      )}
+      {renderEditorToolRail()}
+      {activeTab === "post" ? renderPhotoFilterStrip() : null}
+      {activeTab === "story" && storyType === "text" ? (
+        <>
+          <Text style={[styles.sectionLabel, { color: composerText }]}>Background</Text>
+          <View style={styles.colorRow}>
+            {textStoryColors.map((color) => {
+              const selected = storyBackgroundColor === color;
+              return (
+                <TouchableOpacity
+                  key={`edit-${color}`}
+                  style={[styles.colorChip, { backgroundColor: color }, selected && styles.colorChipSelected]}
+                  onPress={() => setStoryBackgroundColor(color)}
+                />
+              );
+            })}
+          </View>
+        </>
+      ) : null}
+      {activeTab === "story" && storyType !== "text" ? (
+        <>
+          <Text style={[styles.sectionLabel, { color: composerText }]}>Story Filter</Text>
+          <View style={styles.modeRow}>
+            {storyFilterPresets.map((preset) => (
+              <TouchableOpacity
+                key={`edit-story-filter-${preset}`}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyFilterPreset === preset && [styles.pillActive, activePillStyle]]}
+                onPress={() => setStoryFilterPreset(preset)}
+              >
+                <Text style={[styles.pillText, { color: storyFilterPreset === preset ? "#fff" : composerText }, storyFilterPreset === preset && styles.pillTextActive]}>
+                  {storyFilterPresetLabels[preset]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>
+      ) : null}
+    </>
+  );
+
+  const renderShareStage = () => (
+    <>
+      {renderStepIntroCard(
+        "Details and publish",
+        "paper-plane-outline",
+      )}
+      {renderCanvasPanel(
+        activeTab === "story" ? "Ready-to-publish story" : activeTab === "swipe" ? "Ready-to-publish reel" : "Ready-to-publish post",
+        "Share",
+      )}
+      {activeTab === "post" ? renderPostControls() : null}
+      {activeTab === "story" ? renderStoryControls() : null}
+      {activeTab === "swipe" ? renderSwipeControls() : null}
+    </>
+  );
+
+  const renderActiveStep = () => {
+    if (activeStep === "select") {
+      return renderSelectStage();
+    }
+
+    if (activeStep === "edit") {
+      return renderEditStage();
+    }
+
+    return renderShareStage();
+  };
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: composerBackground }]}>
       <KeyboardAvoidingView style={styles.container} behavior="padding">
-        <View style={[styles.header, { borderColor: colors.border, backgroundColor: colors.background }]}>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Advanced Create</Text>
-        </View>
-
-        <View style={styles.tabsRow}>
-          {tabs.map((tab) => (
-            <TouchableOpacity
-              key={tab}
-              style={[
-                styles.tabButton,
-                { borderColor: colors.border, backgroundColor: surfaceColor },
-                activeTab === tab && [styles.tabButtonActive, activePillStyle],
-              ]}
-              onPress={() => onSelectTab(tab)}
-            >
-              <Text style={[styles.tabText, { color: activeTab === tab ? "#fff" : colors.mutedText }, activeTab === tab && styles.tabTextActive]}>
-                {tab.toUpperCase()}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
+        <InstagramComposerHeader
+          title={headerTitle}
+          borderColor={composerBorderColor}
+          backgroundColor={surfaceColor}
+          accentColor={composerAccent}
+          textColor={composerText}
+          mutedTextColor={composerMutedText}
+          draftBusy={savingDraft}
+          primaryBusy={publishing}
+          primaryLabel={headerPrimaryLabel}
+          onBack={handleBackPress}
+          onDraft={() => {
+            saveDraft().catch(() => undefined);
+          }}
+          onPrimary={handlePrimaryHeaderAction}
+        />
+        <InstagramComposerTypeTabs
+          activeTab={activeTab}
+          accentColor={composerAccent}
+          textColor={composerText}
+          mutedTextColor={composerMutedText}
+          borderColor={composerBorderColor}
+          surfaceColor={surfaceColor}
+          onSelectTab={onSelectTab}
+        />
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          {renderStudioSummary()}
+          <InstagramComposerStepStrip
+            activeStep={activeStep}
+            accentColor={composerAccent}
+            textColor={composerText}
+            mutedTextColor={composerMutedText}
+            borderColor={composerBorderColor}
+            surfaceColor={surfaceColor}
+            subtleSurfaceColor={subtleSurfaceColor}
+            onSelectStep={moveToStep}
+          />
+
           {publishError ? (
             <View
               style={[
@@ -2034,62 +3167,517 @@ function CreatePostScreen({ navigation, route }: any) {
               <Text style={[styles.errorBannerText, { color: isDarkMode ? "#FCA5A5" : "#B91C1C" }]}>{publishError}</Text>
             </View>
           ) : null}
-          {renderMediaPreview()}
 
-          {!(activeTab === "story" && storyType === "text") ? (
-            <>
-              <View style={styles.mediaSectionHeader}>
-                <Text style={[styles.sectionLabel, { color: colors.text }]}>Media</Text>
-                <View style={styles.mediaActionsRow}>
-                  <TouchableOpacity
-                    style={[styles.secondaryPickButton, { backgroundColor: subtleSurfaceColor, borderColor: colors.border }]}
-                    disabled={pickingMedia}
-                    onPress={onCaptureMedia}
-                  >
-                    <Icon name="camera-outline" size={18} color={colors.text} />
-                    <Text style={[styles.secondaryPickButtonText, { color: colors.text }]}>Camera</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.pickButton, { backgroundColor: colors.primary }]} disabled={pickingMedia} onPress={onPickMedia}>
-                    {pickingMedia ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="images-outline" size={18} color="#fff" />}
-                    <Text style={styles.pickButtonText}>{selectedAssets.length ? "Replace" : "Choose"}</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {renderSelectedAssets()}
-            </>
-          ) : null}
-
-          {activeTab === "post" ? renderPostControls() : null}
-          {activeTab === "story" ? renderStoryControls() : null}
-          {activeTab === "swipe" ? renderSwipeControls() : null}
+          {renderActiveStep()}
 
           <TouchableOpacity
-            style={[styles.publishButton, { backgroundColor: colors.primary }, publishing && styles.publishButtonDisabled]}
-            onPress={publish}
-            disabled={publishing}
+            style={[styles.saveDraftButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }, savingDraft && styles.publishButtonDisabled]}
+            onPress={saveDraft}
+            disabled={savingDraft}
           >
-            <Icon name="cloud-upload-outline" size={18} color="#fff" />
-            <Text style={styles.publishText}>
-              {publishing ? "Publishing..." : `Publish ${activeTab}`}
+            <Icon name="bookmark-outline" size={18} color={composerText} />
+            <Text style={[styles.saveDraftText, { color: composerText }]}>
+              {savingDraft ? "Saving Draft..." : "Save Draft"}
             </Text>
           </TouchableOpacity>
+
+          {activeStep === "share" ? (
+            <TouchableOpacity
+              style={[styles.publishButton, { backgroundColor: composerAccent }, publishing && styles.publishButtonDisabled]}
+              onPress={publish}
+              disabled={publishing}
+            >
+              <Icon name="cloud-upload-outline" size={18} color="#fff" />
+              <Text style={styles.publishText}>
+                {publishing ? "Publishing..." : `Publish ${composerBlueprints[activeTab].label}`}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.publishButton, { backgroundColor: composerAccent }]}
+              onPress={handlePrimaryHeaderAction}
+            >
+              <Icon name="arrow-forward-outline" size={18} color="#fff" />
+              <Text style={styles.publishText}>Continue to {activeStep === "select" ? "Edit" : "Share"}</Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
+        <StickerPickerSheet
+          visible={showStickerPickerSheet}
+          onClose={() => setShowStickerPickerSheet(false)}
+          preferredMode="stickers"
+          onSend={addStoryStickerFromPicker}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1, backgroundColor: "#050608" },
   header: {
-    paddingTop: 44,
-    paddingBottom: 14,
+    paddingTop: 12,
+    paddingBottom: 12,
     paddingHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: "#ddd",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  headerTitle: { fontSize: 24, fontWeight: "800", color: "#171717" },
+  headerKicker: { fontSize: 11, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" },
+  headerTitle: { fontSize: 24, fontWeight: "900", color: "#ffffff", letterSpacing: -0.6 },
+  headerAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+  },
+  headerActionText: { fontSize: 12, fontWeight: "800" },
+  stepIntroCard: {
+    marginBottom: 16,
+    borderWidth: 1,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  stepIntroIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepIntroCopy: {
+    flex: 1,
+  },
+  stepIntroTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  stepIntroDescription: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  instagramHero: {
+    borderRadius: 30,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 6,
+  },
+  instagramHeroTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  instagramEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.8)",
+  },
+  instagramTitle: {
+    marginTop: 4,
+    fontSize: 30,
+    fontWeight: "900",
+    letterSpacing: -0.8,
+    color: "#ffffff",
+  },
+  instagramSubtitle: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 19,
+    color: "rgba(255,255,255,0.84)",
+  },
+  instagramHeroIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  instagramMetricRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 18,
+  },
+  instagramMetricCard: {
+    minWidth: "47%",
+    flexGrow: 1,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  instagramMetricValue: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  instagramMetricLabel: {
+    marginTop: 4,
+    color: "rgba(255,255,255,0.68)",
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  frameCard: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 14,
+  },
+  frameOptionRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  frameChip: {
+    minWidth: 96,
+    flexGrow: 1,
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  frameChipLabel: {
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  frameChipDetail: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  quickToolCard: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 14,
+  },
+  quickToolRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  quickToolButton: {
+    minWidth: "30%",
+    flexGrow: 1,
+    borderWidth: 1,
+    borderRadius: 18,
+    minHeight: 86,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  quickToolLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  quickToolDetail: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  dynamicPreviewShell: {
+    alignSelf: "center",
+    overflow: "hidden",
+    position: "relative",
+    backgroundColor: "#0b0d12",
+  },
+  previewMediaFill: {
+    width: "100%",
+    height: "100%",
+  },
+  previewMetaOverlay: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 12,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  previewMetaChip: {
+    maxWidth: "82%",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: "rgba(9,11,15,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  previewMetaChipText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  previewPagerRow: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 14,
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 6,
+  },
+  previewPagerDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.42)",
+  },
+  previewPagerDotActive: {
+    width: 20,
+    backgroundColor: "#ffffff",
+  },
+  bottomModeDock: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 14,
+    borderTopWidth: 1,
+  },
+  bottomModeTab: {
+    flex: 1,
+    minHeight: 50,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  bottomModeText: {
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  modeCardsGrid: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  createModeCard: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 22,
+    overflow: "hidden",
+    shadowColor: "#111827",
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+  },
+  createModeCardActive: {
+    transform: [{ translateY: -2 }],
+    shadowOpacity: 0.16,
+    elevation: 6,
+  },
+  createModePreview: {
+    height: 92,
+    padding: 12,
+    justifyContent: "space-between",
+    overflow: "hidden",
+  },
+  previewGridOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.28,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
+  },
+  previewSpark: {
+    position: "absolute",
+    right: -18,
+    top: -24,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "rgba(255,255,255,0.28)",
+  },
+  previewSparkSmall: {
+    left: 12,
+    top: 54,
+    right: undefined,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+  },
+  createModeMeta: {
+    alignSelf: "flex-start",
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  createModeBody: { paddingHorizontal: 12, paddingVertical: 12 },
+  createModeTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  createModeTitle: { fontSize: 15, fontWeight: "900" },
+  createModeDescription: { marginTop: 6, fontSize: 11.5, lineHeight: 16 },
+  studioHero: {
+    marginTop: 16,
+    borderRadius: 28,
+    overflow: "hidden",
+    shadowColor: "#111827",
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 7,
+  },
+  studioHeroShade: {
+    padding: 18,
+    backgroundColor: "rgba(5,8,22,0.16)",
+  },
+  studioHeroTop: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" },
+  studioKicker: { color: "rgba(255,255,255,0.78)", fontWeight: "900", fontSize: 11, letterSpacing: 1.2, textTransform: "uppercase" },
+  studioTitle: { color: "#fff", fontSize: 29, fontWeight: "900", letterSpacing: -0.8, marginTop: 4 },
+  studioIconBubble: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.32)",
+  },
+  studioDescription: { color: "rgba(255,255,255,0.88)", marginTop: 12, lineHeight: 20, fontWeight: "600" },
+  studioMetricRow: { flexDirection: "row", gap: 8, marginTop: 16 },
+  studioMetric: {
+    flex: 1,
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  studioMetricValue: { color: "#fff", fontSize: 12, fontWeight: "900", textTransform: "capitalize" },
+  studioMetricLabel: { color: "rgba(255,255,255,0.72)", marginTop: 3, fontSize: 10, fontWeight: "700" },
+  canvasPanel: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderRadius: 26,
+    padding: 12,
+  },
+  panelHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 12,
+  },
+  panelEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  panelTitle: { marginTop: 3, fontSize: 16, fontWeight: "900", letterSpacing: -0.2 },
+  canvasRatioBadge: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    fontWeight: "900",
+    fontSize: 12,
+  },
+  mediaSelectorPanel: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 14,
+  },
+  galleryTabsRow: { flexDirection: "row", gap: 8, marginTop: 4 },
+  galleryTab: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+  },
+  galleryTabText: { fontSize: 12, fontWeight: "900" },
+  selectorSkeletonGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
+  selectorSkeletonCell: {
+    width: "31.6%",
+    aspectRatio: 1,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inlineMediaToolRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  toolRailCard: {
+    marginTop: 14,
+  },
+  pipelineBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  pipelineBadgeText: { fontSize: 11, fontWeight: "900" },
+  toolRail: { gap: 10, paddingRight: 4 },
+  toolCard: {
+    width: 122,
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 12,
+  },
+  toolIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  toolTitle: { marginTop: 10, fontSize: 14, fontWeight: "900" },
+  toolDetail: { marginTop: 4, fontSize: 11.5, lineHeight: 16 },
+  pipelineText: { marginTop: 10, lineHeight: 19 },
+  previewSharePanel: {
+    marginTop: 18,
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 14,
+  },
+  shareOptionRow: { flexDirection: "row", gap: 8 },
+  visibilityChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+  },
+  visibilityChipText: { fontWeight: "900", fontSize: 12 },
   mediaActionsRow: {
     flexDirection: "row",
     gap: 8,
@@ -2130,7 +3718,7 @@ const styles = StyleSheet.create({
   },
   tabText: { fontWeight: "700", color: "#595959", fontSize: 12 },
   tabTextActive: { color: "#fff" },
-  content: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 32 },
+  content: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 116 },
   errorBanner: {
     backgroundColor: "#FEF2F2",
     borderWidth: 1,
@@ -2151,26 +3739,40 @@ const styles = StyleSheet.create({
   },
   preview: {
     width: "100%",
-    height: 250,
-    borderRadius: 18,
+    aspectRatio: 1,
+    borderRadius: 22,
     backgroundColor: "#efefef",
   },
+  verticalPreview: {
+    width: "76%",
+    aspectRatio: 9 / 16,
+    alignSelf: "center",
+    borderRadius: 24,
+    backgroundColor: "#050816",
+  },
   storyPreviewFrame: {
-    width: "100%",
-    height: 250,
-    borderRadius: 18,
+    width: "76%",
+    aspectRatio: 9 / 16,
+    alignSelf: "center",
+    borderRadius: 24,
     overflow: "hidden",
     position: "relative",
+    backgroundColor: "#050816",
   },
   emptyPreview: {
-    height: 250,
-    borderRadius: 18,
+    aspectRatio: 1,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: "#e5e7eb",
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#f8fafc",
     paddingHorizontal: 24,
+  },
+  emptyPreviewVertical: {
+    width: "76%",
+    aspectRatio: 9 / 16,
+    alignSelf: "center",
   },
   emptyPreviewTitle: { marginTop: 12, fontSize: 16, fontWeight: "700", color: "#111827" },
   emptyPreviewText: { marginTop: 6, textAlign: "center", color: "#6b7280", lineHeight: 20 },
@@ -2184,8 +3786,10 @@ const styles = StyleSheet.create({
   videoPreviewTitle: { marginTop: 12, color: "#fff", fontSize: 18, fontWeight: "700" },
   videoPreviewText: { marginTop: 6, color: "#cbd5e1" },
   textStoryPreview: {
-    minHeight: 250,
-    borderRadius: 18,
+    width: "76%",
+    aspectRatio: 9 / 16,
+    alignSelf: "center",
+    borderRadius: 24,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 24,
@@ -2294,6 +3898,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 8,
   },
+  clipAdjustGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   clipAdjustButton: {
     borderRadius: 999,
     paddingHorizontal: 14,
@@ -2347,8 +3956,22 @@ const styles = StyleSheet.create({
   pickButtonText: { color: "#fff", fontWeight: "700" },
   assetRow: { paddingTop: 12, paddingBottom: 4 },
   assetChip: { marginRight: 10, position: "relative" },
+  assetChipActive: { transform: [{ translateY: -2 }] },
   assetThumb: { width: 76, height: 76, borderRadius: 14, backgroundColor: "#e5e7eb" },
   assetThumbVideo: { justifyContent: "center", alignItems: "center", backgroundColor: "#111827" },
+  assetIndexBadge: {
+    position: "absolute",
+    left: 6,
+    bottom: 6,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    backgroundColor: "rgba(17,24,39,0.82)",
+  },
+  assetIndexText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   assetRemove: {
     position: "absolute",
     top: -6,
@@ -2394,6 +4017,7 @@ const styles = StyleSheet.create({
   scaleValueText: {
     color: "#374151",
     fontWeight: "700",
+    flexShrink: 1,
   },
   audienceWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   audienceChip: {
@@ -2473,17 +4097,100 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#6b7280",
   },
+  selectorCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 12,
+  },
+  selectorCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  selectorTitle: {
+    flex: 1,
+    fontSize: 13.5,
+    fontWeight: "800",
+  },
+  locationInputRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  locationSearchInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 14,
+    minHeight: 46,
+    paddingHorizontal: 14,
+    color: "#111827",
+    backgroundColor: "#fff",
+  },
+  locationActionButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  seedRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
+  seedChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  seedChipText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  friendSelectorWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
+  friendSelectorChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  friendSelectorText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
   counter: { marginTop: 6, color: "#666", fontSize: 12 },
   switchRow: {
     marginTop: 14,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 12,
   },
-  switchLabel: { color: "#222", fontWeight: "600" },
+  switchLabel: { color: "#222", fontWeight: "600", flex: 1, paddingRight: 8 },
   helperText: { marginTop: 10, color: "#6b7280", lineHeight: 20 },
+  saveDraftButton: {
+    marginTop: 22,
+    borderWidth: 1,
+    borderRadius: 16,
+    minHeight: 52,
+    justifyContent: "center",
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+  },
+  saveDraftText: { fontWeight: "900", fontSize: 15 },
   publishButton: {
-    marginTop: 26,
+    marginTop: 10,
     borderRadius: 16,
     backgroundColor: "#111827",
     minHeight: 52,

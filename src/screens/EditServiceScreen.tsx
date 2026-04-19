@@ -7,10 +7,10 @@ import {
   TouchableOpacity,
   ScrollView,
   Image,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView
 } from "react-native";
+import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";

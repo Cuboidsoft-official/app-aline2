@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Linking,
   Pressable,
@@ -10,8 +9,9 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
+import { Alert } from "../../utils/appAlert";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
 import { createSound } from "react-native-nitro-sound";
@@ -93,10 +93,15 @@ function StoryViewerScreen({ route, navigation }: any) {
   const [ownerActivityTab, setOwnerActivityTab] = useState<"views" | "likes" | "replies">("views");
   const [loadError, setLoadError] = useState("This story may have expired or is no longer visible to you.");
   const [isMusicEnabled, setIsMusicEnabled] = useState(true);
+  const [showLikeBurst, setShowLikeBurst] = useState(false);
   const replyInputRef = useRef<TextInput | null>(null);
   const storyMusicPlayerRef = useRef(createSound());
   const storyMusicTrackKeyRef = useRef("");
   const storyMusicEndMsRef = useRef(0);
+  const storyTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
+    time: 0,
+    timeout: null,
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -209,6 +214,10 @@ function StoryViewerScreen({ route, navigation }: any) {
     });
 
     return () => {
+      if (storyTapRef.current.timeout) {
+        clearTimeout(storyTapRef.current.timeout);
+      }
+
       try {
         player.removePlayBackListener();
       } catch {
@@ -320,7 +329,7 @@ function StoryViewerScreen({ route, navigation }: any) {
     setActiveIndex((prevIndex) => prevIndex - 1);
   };
 
-  const toggleLike = async () => {
+  const toggleLike = useCallback(async () => {
     if (!currentStory || liking || currentStory.liked) {
       return;
     }
@@ -334,7 +343,39 @@ function StoryViewerScreen({ route, navigation }: any) {
     } finally {
       setLiking(false);
     }
-  };
+  }, [currentStory, liking]);
+
+  const triggerStoryLikeBurst = useCallback(() => {
+    setShowLikeBurst(true);
+    setTimeout(() => {
+      setShowLikeBurst(false);
+    }, 720);
+  }, []);
+
+  const handleStoryCenterTap = useCallback(() => {
+    const now = Date.now();
+    const lastTap = storyTapRef.current;
+
+    if (now - lastTap.time < 260) {
+      if (lastTap.timeout) {
+        clearTimeout(lastTap.timeout);
+      }
+      storyTapRef.current = { time: 0, timeout: null };
+      triggerStoryLikeBurst();
+      toggleLike().catch(() => undefined);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setIsMusicEnabled((current) => !current);
+      storyTapRef.current = { time: 0, timeout: null };
+    }, 260);
+
+    storyTapRef.current = {
+      time: now,
+      timeout,
+    };
+  }, [toggleLike, triggerStoryLikeBurst]);
 
   const votePoll = async (optionIndex: 0 | 1) => {
     if (!currentStory || busyPollVote) {
@@ -483,9 +524,12 @@ function StoryViewerScreen({ route, navigation }: any) {
 
     if (currentStory.type === "text") {
       return (
-        <View style={[styles.textStoryWrap, { backgroundColor: currentStory.backgroundColor || "#1f2937" }]}>
+        <LinearGradient
+          colors={[currentStory.backgroundColor || "#1f2937", "#0f172a", "#020617"]}
+          style={styles.textStoryWrap}
+        >
           <Text style={styles.textStoryContent}>{currentStory.text}</Text>
-        </View>
+        </LinearGradient>
       );
     }
 
@@ -775,6 +819,19 @@ function StoryViewerScreen({ route, navigation }: any) {
           })}
       </View>
 
+      {showLikeBurst ? (
+        <View pointerEvents="none" style={styles.likeBurstOverlay}>
+          <Icon name="heart" size={92} color="rgba(255,255,255,0.92)" />
+        </View>
+      ) : null}
+
+      {(currentStory.music?.previewUrl || currentStory.media?.mediaType === "video") ? (
+        <View style={styles.mediaSoundHint}>
+          <Icon name={isMusicEnabled ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
+          <Text style={styles.mediaSoundHintText}>{isMusicEnabled ? "Sound on" : "Muted"}</Text>
+        </View>
+      ) : null}
+
       <Pressable
         style={styles.leftTouch}
         onPress={prev}
@@ -784,6 +841,12 @@ function StoryViewerScreen({ route, navigation }: any) {
       <Pressable
         style={styles.rightTouch}
         onPress={next}
+        onPressIn={() => setPaused(true)}
+        onPressOut={() => setPaused(false)}
+      />
+      <Pressable
+        style={styles.centerTouch}
+        onPress={handleStoryCenterTap}
         onPressIn={() => setPaused(true)}
         onPressOut={() => setPaused(false)}
       />
@@ -929,8 +992,8 @@ const styles = StyleSheet.create({
   unavailableButtonText: { color: "#fff", fontWeight: "700" },
   storyImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   storyFallback: { backgroundColor: "#111827" },
-  topFade: { ...StyleSheet.absoluteFillObject, height: 180 },
-  bottomFade: { ...StyleSheet.absoluteFillObject, top: undefined, height: 300, bottom: 0 },
+  topFade: { ...StyleSheet.absoluteFillObject, height: 220 },
+  bottomFade: { ...StyleSheet.absoluteFillObject, top: undefined, height: 340, bottom: 0 },
   textStoryWrap: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
@@ -939,10 +1002,13 @@ const styles = StyleSheet.create({
   },
   textStoryContent: {
     color: "#fff",
-    fontSize: 28,
-    fontWeight: "800",
+    fontSize: 34,
+    fontWeight: "900",
     textAlign: "center",
-    lineHeight: 38,
+    lineHeight: 42,
+    letterSpacing: -0.7,
+    textShadowColor: "rgba(0,0,0,0.24)",
+    textShadowRadius: 18,
   },
   floatingStickerLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -979,7 +1045,7 @@ const styles = StyleSheet.create({
   },
   progressTrack: {
     flex: 1,
-    height: 3,
+    height: 4,
     backgroundColor: "rgba(255,255,255,0.28)",
     marginHorizontal: 2,
     borderRadius: 999,
@@ -989,14 +1055,14 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingTop: 10,
+    paddingHorizontal: 14,
+    paddingTop: 12,
   },
-  avatar: { width: 34, height: 34, borderRadius: 17 },
+  avatar: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: "rgba(255,255,255,0.72)" },
   headerMeta: { marginLeft: 10, flex: 1 },
   headerUserRow: { flexDirection: "row", alignItems: "center" },
-  username: { color: "#fff", fontWeight: "700", fontSize: 14 },
-  storyMetaLine: { color: "rgba(255,255,255,0.72)", fontSize: 12, marginTop: 2 },
+  username: { color: "#fff", fontWeight: "900", fontSize: 14.5 },
+  storyMetaLine: { color: "rgba(255,255,255,0.76)", fontSize: 12, marginTop: 2, fontWeight: "700", textTransform: "capitalize" },
   closeFriendsBadge: {
     marginLeft: 8,
     color: "#052e16",
@@ -1007,25 +1073,72 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
   },
-  iconButton: { marginRight: 10 },
-  closeButton: { marginLeft: 2 },
+  iconButton: {
+    marginRight: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.24)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  closeButton: {
+    marginLeft: 2,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.28)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
   floatingMeta: { paddingHorizontal: 12, marginTop: 10, gap: 8 },
+  likeBurstOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mediaSoundHint: {
+    position: "absolute",
+    right: 16,
+    top: 110,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: "rgba(0,0,0,0.56)",
+  },
+  mediaSoundHintText: { color: "#fff", fontSize: 11.5, fontWeight: "800" },
   metaChip: {
     alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.42)",
+    backgroundColor: "rgba(255,255,255,0.13)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
-  metaChipText: { color: "#fff", marginLeft: 7, fontSize: 12.5, fontWeight: "600" },
+  metaChipText: { color: "#fff", marginLeft: 7, fontSize: 12.5, fontWeight: "800" },
   leftTouch: {
     position: "absolute",
     left: 0,
     width: "38%",
     top: 0,
     bottom: 0,
+  },
+  centerTouch: {
+    position: "absolute",
+    left: "38%",
+    width: "24%",
+    top: 110,
+    bottom: 120,
   },
   rightTouch: {
     position: "absolute",
@@ -1036,8 +1149,10 @@ const styles = StyleSheet.create({
   },
   bottomSheet: { marginTop: "auto", paddingHorizontal: 12, paddingBottom: 18 },
   stickerBlock: {
-    backgroundColor: "rgba(0,0,0,0.42)",
-    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    borderRadius: 20,
     padding: 14,
     marginBottom: 12,
   },
@@ -1057,21 +1172,25 @@ const styles = StyleSheet.create({
   pollPercent: { color: "#fff", fontWeight: "700" },
   quickReactionRow: { flexDirection: "row", marginBottom: 10, flexWrap: "wrap" },
   emojiChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
     marginRight: 8,
     marginBottom: 6,
   },
   emojiText: { fontSize: 15 },
   ownerPanel: {
     flexDirection: "row",
-    backgroundColor: "rgba(0,0,0,0.38)",
-    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.42)",
+    borderRadius: 22,
     paddingHorizontal: 12,
     paddingVertical: 12,
     justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
   },
   ownerHint: { color: "#fff", fontWeight: "600", fontSize: 12.5 },
   ownerMetric: { flexDirection: "row", alignItems: "center" },
@@ -1080,13 +1199,14 @@ const styles = StyleSheet.create({
   bottomBar: { flexDirection: "row", alignItems: "center" },
   replyInput: {
     flex: 1,
-    height: 46,
-    borderRadius: 23,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.45)",
+    borderColor: "rgba(255,255,255,0.28)",
     color: "#fff",
-    paddingHorizontal: 14,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    paddingHorizontal: 16,
+    backgroundColor: "rgba(0,0,0,0.42)",
+    fontWeight: "700",
   },
   replyInputDisabled: { opacity: 0.6 },
   bottomIcon: { marginLeft: 12 },

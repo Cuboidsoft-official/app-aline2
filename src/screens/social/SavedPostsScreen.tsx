@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   RefreshControl,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
+import { Alert } from "../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import { socialApi } from "../../features/social/socialApi";

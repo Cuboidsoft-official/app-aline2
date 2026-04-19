@@ -6,11 +6,11 @@ import {
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
-  Alert,
   Image,
   Modal,
-  RefreshControl,
+  RefreshControl
 } from "react-native";
+import { Alert } from "../utils/appAlert";
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";

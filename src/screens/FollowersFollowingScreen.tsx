@@ -32,6 +32,39 @@ interface FollowUser {
 const getSearchableText = (user: FollowUser) =>
  `${user.username || ""} ${user.name || ""}`.trim().toLowerCase();
 
+const normalizeFollowUsers = (list: unknown): FollowUser[] => {
+ if (!Array.isArray(list)) {
+  return [];
+ }
+
+ const seen = new Set<string>();
+ const normalized: FollowUser[] = [];
+
+ for (const entry of list) {
+  if (!entry || typeof entry !== "object") {
+   continue;
+  }
+
+  const user = entry as FollowUser;
+  const id = String(user._id || "").trim();
+
+  if (!id || seen.has(id)) {
+   continue;
+  }
+
+  seen.add(id);
+  normalized.push({
+   _id: id,
+   username: user.username,
+   name: user.name,
+   profilePic: user.profilePic,
+   isVerified: user.isVerified,
+  });
+ }
+
+ return normalized;
+};
+
 const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigation: any }) => {
  const { colors } = useAppTheme();
  const { userId, type } = route.params as { userId: string; type: FollowTab };
@@ -64,7 +97,7 @@ const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigatio
    const res = await API.get(`/auth/${tabType}/${userId}`);
    const list = tabType === "followers" ? res.data?.followers : res.data?.following;
 
-   setUsers(Array.isArray(list) ? (list as FollowUser[]) : []);
+   setUsers(normalizeFollowUsers(list));
    setErrorMessage("");
   } catch (error) {
    setUsers([]);

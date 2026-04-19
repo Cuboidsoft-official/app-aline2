@@ -5,31 +5,31 @@ import { DarkTheme, DefaultTheme } from "@react-navigation/native";
 const STORAGE_KEY = "darkMode";
 
 const lightColors = {
-  primary: "#7B4DFF",
-  background: "#FFFFFF",
-  surface: "#F8F8FC",
+  primary: "#9b4dff",
+  background: "#F4F7FB",
+  surface: "#EDF2F8",
   card: "#FFFFFF",
-  input: "#F4F5FA",
-  border: "#E7E9F2",
-  text: "#111111",
-  mutedText: "#667085",
-  placeholder: "#98A2B3",
-  tabInactive: "#667085",
-  danger: "#EF4444",
+  input: "#EEF3F8",
+  border: "#D7DFEA",
+  text: "#0F172A",
+  mutedText: "#5F6B7C",
+  placeholder: "#8A95A6",
+  tabInactive: "#7A8699",
+  danger: "#FF3B30",
 };
 
 const darkColors = {
-  primary: "#9A7BFF",
-  background: "#0F172A",
-  surface: "#111827",
-  card: "#172033",
-  input: "#1F2937",
-  border: "#243146",
-  text: "#F8FAFC",
-  mutedText: "#9CA3AF",
-  placeholder: "#6B7280",
-  tabInactive: "#94A3B8",
-  danger: "#F87171",
+  primary: "#9b4dff",
+  background: "#0B1220",
+  surface: "#111A2B",
+  card: "#151F32",
+  input: "#1B263A",
+  border: "#2A3851",
+  text: "#F6F8FC",
+  mutedText: "#97A3B6",
+  placeholder: "#6F7D93",
+  tabInactive: "#8A96AA",
+  danger: "#FF6961",
 };
 
 type ThemeValue = {
@@ -42,7 +42,7 @@ type ThemeValue = {
 const AppThemeContext = createContext<ThemeValue | undefined>(undefined);
 
 export const AppThemeProvider = ({ children }: { children: React.ReactNode }) => {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true);
 
   useEffect(() => {
     let mounted = true;

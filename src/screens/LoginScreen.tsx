@@ -6,7 +6,6 @@ import { registerPushToken } from "../utils/pushRegistration";
 
 
 import {
-  Alert,
   View,
   Text,
   TextInput,
@@ -15,6 +14,7 @@ import {
   SafeAreaView,
   Image,
 } from 'react-native';
+import { Alert } from '../utils/appAlert';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

@@ -1,4 +1,4 @@
-import React, { Dispatch, SetStateAction, useState, useEffect } from 'react';
+import React, { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,10 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
-  Alert
+  ActivityIndicator
 } from 'react-native';
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Alert } from '../utils/appAlert';
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { API } from '../api/api';
 import { getReadableApiErrorMessage } from "../api/networkErrors";
@@ -21,9 +21,33 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { getStoredRefreshToken, getStoredSessionMeta, getStoredUser, getStoredToken, setStoredSession } from "../utils/authSession";
 import { uploadImageAsset } from "../utils/uploadMedia";
 import { useAppTheme } from "../theme/AppThemeContext";
+import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
+
+const MAIN_TAB_ROUTES = ["Feed", "Swipes", "Create", "Chats", "ProfileView"];
+
+const hasMainTabParent = (navigation: any) => {
+  let currentNavigation = navigation;
+
+  while (currentNavigation?.getParent) {
+    currentNavigation = currentNavigation.getParent();
+
+    const routeNames = currentNavigation?.getState?.()?.routeNames;
+    if (
+      Array.isArray(routeNames)
+      && MAIN_TAB_ROUTES.every((routeName) => routeNames.includes(routeName))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+};
 
 const ProfileScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const isInsideTabNavigator = useMemo(() => hasMainTabParent(navigation), [navigation]);
+  const bottomDockOffset = isInsideTabNavigator ? 0 : APP_BOTTOM_DOCK_BASE_HEIGHT + Math.max(insets.bottom, 10);
 
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
@@ -177,14 +201,18 @@ const ProfileScreen = ({ navigation }: any) => {
 
   if (pageLoading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
+      <View style={styles.screen}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" />
+        </View>
+        {!isInsideTabNavigator ? <AppBottomDock navigation={navigation} activeRouteName="ProfileView" /> : null}
       </View>
     );
   }
 
 
   return (
+    <View style={styles.screen}>
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
 
       {/* Header */}
@@ -208,7 +236,10 @@ const ProfileScreen = ({ navigation }: any) => {
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: bottomDockOffset + 120 },
+          ]}
         >
 
           {/* Profile Image */}
@@ -252,7 +283,12 @@ const ProfileScreen = ({ navigation }: any) => {
 
         {/* Save Button */}
 
-        <View style={styles.bottomContainer}>
+        <View
+          style={[
+            styles.bottomContainer,
+            { bottom: bottomDockOffset },
+          ]}
+        >
 
           <TouchableOpacity
             style={[
@@ -279,6 +315,8 @@ const ProfileScreen = ({ navigation }: any) => {
       </KeyboardAvoidingView>
 
     </SafeAreaView>
+    {!isInsideTabNavigator ? <AppBottomDock navigation={navigation} activeRouteName="ProfileView" /> : null}
+    </View>
   );
 };
 
@@ -332,6 +370,9 @@ const renderReadonlyField = (
 export default ProfileScreen;
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
 
   container: {
     flex: 1,

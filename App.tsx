@@ -1,8 +1,8 @@
 import React, { useEffect } from 'react';
-import { Alert } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { AppState } from 'react-native';
 import { Snackbar } from 'react-native-snackbar';
 
 import LoginScreen from './src/screens/LoginScreen';
@@ -59,11 +59,16 @@ import GroupDetailsScreen from './src/screens/GroupDetailsScreen';
 import CallScreen from './src/screens/CallScreen';
 
 import BottomTabs from './src/navigation/BottomTabs';
+import AppAlertProvider from './src/components/AppAlertProvider';
 import { callingDisabledMessage, productFlags } from './src/config/productFlags';
 import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
+import { installReadableUiDefaults } from './src/theme/readability';
 import { connectSocket, disconnectSocket, socket } from './src/socket';
+import { Alert } from './src/utils/appAlert';
 import { getStoredToken, setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
 import { registerPushToken, setupNotificationListeners } from './src/utils/pushRegistration';
+
+installReadableUiDefaults();
 
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef();
@@ -206,8 +211,20 @@ function AppNavigator() {
         console.log("session push registration error", error);
       });
     });
+    const appStateSubscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active") {
+        return;
+      }
 
-    return unsubscribe;
+      syncPushRegistration().catch((error) => {
+        console.log("foreground push registration error", error);
+      });
+    });
+
+    return () => {
+      unsubscribe();
+      appStateSubscription.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -219,9 +236,17 @@ function AppNavigator() {
 
     syncSocketConnection();
     const unsubscribe = subscribeSessionChanges(syncSocketConnection);
+    const appStateSubscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active") {
+        return;
+      }
+
+      syncSocketConnection();
+    });
 
     return () => {
       unsubscribe();
+      appStateSubscription.remove();
       disconnectSocket();
     };
   }, []);
@@ -413,7 +438,9 @@ export default function App() {
   return (
     <GestureHandlerRootView style={rootStyle}>
       <AppThemeProvider>
-        <AppNavigator />
+        <AppAlertProvider>
+          <AppNavigator />
+        </AppAlertProvider>
       </AppThemeProvider>
     </GestureHandlerRootView>
   );

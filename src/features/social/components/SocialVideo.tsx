@@ -10,6 +10,7 @@ type SocialVideoProps = {
   muted?: boolean;
   repeat?: boolean;
   controls?: boolean;
+  resizeMode?: "cover" | "contain" | "stretch" | "none";
   onEnd?: () => void;
 };
 
@@ -21,6 +22,7 @@ function SocialVideo({
   muted = false,
   repeat = false,
   controls = false,
+  resizeMode = "cover",
   onEnd,
 }: SocialVideoProps) {
   if (!uri) {
@@ -32,7 +34,7 @@ function SocialVideo({
       <Video
         source={{ uri }}
         style={StyleSheet.absoluteFill}
-        resizeMode="cover"
+        resizeMode={resizeMode}
         paused={paused}
         muted={muted}
         repeat={repeat}

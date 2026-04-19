@@ -1,6 +1,7 @@
 import { API } from "../../api/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getStoredUserId } from "../../utils/authSession";
+import { postMultipart } from "../../utils/multipartUpload";
 import {
   ContentKind,
   Comment,
@@ -27,6 +28,7 @@ import {
   UpdatePostInput,
   UpdateStoryInput,
   DeleteCommentResult,
+  CommentAudioFile,
 } from "./types";
 import {
   normalizeReportNote,
@@ -260,6 +262,23 @@ const buildStoryMusicSticker = (music: any) => {
   };
 };
 
+const normalizeUploadUri = (value: string | undefined | null): string => {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+
+  if (/^(file|content):\/\//i.test(rawValue)) {
+    return rawValue;
+  }
+
+  if (/^[a-z]:\\/i.test(rawValue) || rawValue.startsWith("/")) {
+    return `file://${rawValue.replace(/\\/g, "/")}`;
+  }
+
+  return rawValue;
+};
+
 const getTextStickerThemeStyle = (
   theme: StoryTextStickerTheme | undefined,
 ): { color: string; backgroundColor: string } => {
@@ -479,6 +498,7 @@ class RemoteSocialApi implements SocialApi {
   private mapPost(post: any, overrides: Partial<Post> = {}): Post {
     const media = this.getPostMedia(post);
     const type = media.length > 1 ? "carousel" : media[0]?.mediaType === "video" || post?.postType === "reel" ? "video" : "photo";
+    const stickers = Array.isArray(post?.stickers) ? post.stickers : [];
 
     return {
       id: this.getId(post),
@@ -487,7 +507,7 @@ class RemoteSocialApi implements SocialApi {
       caption: post?.caption || "",
       media,
       location: typeof post?.location === "string" ? post.location : post?.location?.name,
-      music: formatMusicLabel(post?.music),
+      music: mapStoryMusicDetails(post?.music, post?.musicConfig),
       hashtags: Array.isArray(post?.hashtags) ? post.hashtags : [],
       mentions: this.mapMentionNames(post?.mentions),
       collaboratorIds: Array.isArray(post?.collaborators) ? post.collaborators.map((item: any) => this.getId(item)) : [],
@@ -497,6 +517,28 @@ class RemoteSocialApi implements SocialApi {
         allowRemix: true,
       },
       createdAt: this.toTimestamp(post?.createdAt),
+      filterPreset: typeof post?.filterPreset === "string" ? post.filterPreset : undefined,
+      stickers: stickers
+        .filter((item: any) => item?.type === "text" || item?.type === "emoji")
+        .map((item: any, index: number) => ({
+          id: this.getId(item) || `${this.getId(post)}_post_sticker_${index}`,
+          type: item?.type === "emoji" ? "emoji" : "text",
+          text: String(item?.text || "").trim(),
+          position: {
+            x: typeof item?.position?.x === "number" ? item.position.x : 0.18,
+            y: typeof item?.position?.y === "number" ? item.position.y : 0.22 + index * 0.12,
+            width: typeof item?.position?.width === "number" ? item.position.width : item?.type === "emoji" ? 0.18 : 0.56,
+            height: typeof item?.position?.height === "number" ? item.position.height : item?.type === "emoji" ? 0.14 : 0.12,
+            rotation: typeof item?.position?.rotation === "number" ? item.position.rotation : 0,
+            scale: typeof item?.position?.scale === "number" ? item.position.scale : 1,
+          },
+          style: {
+            color: item?.style?.color,
+            backgroundColor: item?.style?.backgroundColor,
+            fontSize: item?.style?.fontSize,
+            alignment: item?.style?.alignment,
+          },
+        })),
       editedAt: post?.updatedAt && post?.updatedAt !== post?.createdAt ? this.toTimestamp(post.updatedAt) : undefined,
       likesCount: typeof post?.likes === "number" ? post.likes : 0,
       commentsCount: typeof post?.comments === "number" ? post.comments : 0,
@@ -635,6 +677,14 @@ class RemoteSocialApi implements SocialApi {
   }
 
   private mapComment(comment: any, context: { postId?: string; storyId?: string }, currentUserId: string): Comment {
+    const inferredAudioUrl =
+      comment?.audioUrl ||
+      comment?.voiceUrl ||
+      comment?.audio?.url ||
+      (["audio", "voice"].includes(String(comment?.messageType || comment?.type || "").toLowerCase())
+        ? comment?.mediaUrl
+        : undefined);
+
     return {
       id: this.getId(comment),
       postId: context.postId,
@@ -642,6 +692,15 @@ class RemoteSocialApi implements SocialApi {
       parentCommentId: this.getId(comment?.parentComment) || null,
       user: this.mapUser(comment?.user),
       text: comment?.text || "",
+      audioUrl: inferredAudioUrl || undefined,
+      audioDuration:
+        typeof comment?.audioDuration === "number"
+          ? comment.audioDuration
+          : typeof comment?.audio?.duration === "number"
+            ? comment.audio.duration
+            : typeof comment?.duration === "number"
+              ? comment.duration
+              : undefined,
       createdAt: this.toTimestamp(comment?.createdAt),
       liked: !!comment?.likedByViewer,
       likesCount: typeof comment?.likes === "number" ? comment.likes : 0,
@@ -652,14 +711,31 @@ class RemoteSocialApi implements SocialApi {
   }
 
   private mapReelComment(comment: any, reelId: string, currentUserId: string): ReelComment {
+    const inferredAudioUrl =
+      comment?.audioUrl ||
+      comment?.voiceUrl ||
+      comment?.audio?.url ||
+      (["audio", "voice"].includes(String(comment?.messageType || comment?.type || "").toLowerCase())
+        ? comment?.mediaUrl
+        : undefined);
+
     return {
       id: this.getId(comment),
       reelId,
       parentCommentId: this.getId(comment?.parentComment) || null,
       user: this.mapUser(comment?.user),
       text: comment?.text || "",
+      audioUrl: inferredAudioUrl || undefined,
+      audioDuration:
+        typeof comment?.audioDuration === "number"
+          ? comment.audioDuration
+          : typeof comment?.audio?.duration === "number"
+            ? comment.audio.duration
+            : typeof comment?.duration === "number"
+              ? comment.duration
+              : undefined,
       createdAt: this.toTimestamp(comment?.createdAt),
-      liked: false,
+      liked: !!comment?.likedByViewer,
       likesCount: typeof comment?.likes === "number" ? comment.likes : 0,
       canDelete: this.getId(comment?.user) === currentUserId,
       replyCount: typeof comment?.replyCount === "number" ? comment.replyCount : 0,
@@ -1324,13 +1400,38 @@ class RemoteSocialApi implements SocialApi {
     return updated;
   }
 
-  async addPostComment(postId: string, text: string, parentCommentId?: string): Promise<Comment> {
+  async addPostComment(postId: string, text: string, parentCommentId?: string, audioFile?: CommentAudioFile): Promise<Comment> {
     const cleanText = normalizeCommentText(text);
-    const res = await API.post("/comments/add", {
-      postId,
-      text: cleanText,
-      parentCommentId,
-    });
+    const res = audioFile?.uri
+      ? await (() => {
+          const body = new FormData();
+          body.append("postId", postId);
+          if (cleanText) {
+            body.append("text", cleanText);
+          }
+          if (parentCommentId) {
+            body.append("parentCommentId", parentCommentId);
+          }
+          if (typeof audioFile.duration === "number") {
+            body.append("duration", String(audioFile.duration));
+          }
+          body.append("messageType", "voice");
+          body.append("file", {
+            uri: normalizeUploadUri(audioFile.uri),
+            name: audioFile.name,
+            type: audioFile.type,
+          } as any);
+          return postMultipart({
+            path: "/comments/add",
+            body,
+            timeoutMs: 120000,
+          });
+        })()
+      : await API.post("/comments/add", {
+          postId,
+          text: cleanText,
+          parentCommentId,
+        });
 
     const currentUserId = await this.getCurrentUserId();
     const comment = this.mapComment(res?.data?.comment, { postId }, currentUserId);
@@ -1521,17 +1622,42 @@ class RemoteSocialApi implements SocialApi {
     ) as ReelComment[];
   }
 
-  async addReelComment(reelId: string, text: string, parentCommentId?: string): Promise<ReelComment> {
-    return this.addSwipeComment(reelId, text, parentCommentId);
+  async addReelComment(reelId: string, text: string, parentCommentId?: string, audioFile?: CommentAudioFile): Promise<ReelComment> {
+    return this.addSwipeComment(reelId, text, parentCommentId, audioFile);
   }
 
-  async addSwipeComment(swipeId: string, text: string, parentCommentId?: string): Promise<ReelComment> {
+  async addSwipeComment(swipeId: string, text: string, parentCommentId?: string, audioFile?: CommentAudioFile): Promise<ReelComment> {
     const cleanText = normalizeCommentText(text);
-    const res = await API.post("/comments/add", {
-      postId: swipeId,
-      text: cleanText,
-      parentCommentId,
-    });
+    const res = audioFile?.uri
+      ? await (() => {
+          const body = new FormData();
+          body.append("postId", swipeId);
+          if (cleanText) {
+            body.append("text", cleanText);
+          }
+          if (parentCommentId) {
+            body.append("parentCommentId", parentCommentId);
+          }
+          if (typeof audioFile.duration === "number") {
+            body.append("duration", String(audioFile.duration));
+          }
+          body.append("messageType", "voice");
+          body.append("file", {
+            uri: normalizeUploadUri(audioFile.uri),
+            name: audioFile.name,
+            type: audioFile.type,
+          } as any);
+          return postMultipart({
+            path: "/comments/add",
+            body,
+            timeoutMs: 120000,
+          });
+        })()
+      : await API.post("/comments/add", {
+          postId: swipeId,
+          text: cleanText,
+          parentCommentId,
+        });
 
     const currentUserId = await this.getCurrentUserId();
     const comment = this.mapReelComment(res?.data?.comment, swipeId, currentUserId);
@@ -1624,6 +1750,20 @@ class RemoteSocialApi implements SocialApi {
       location: payload.location ? { name: payload.location } : undefined,
       commentsDisabled: payload.settings?.disableComments || false,
       likesHidden: payload.settings?.hideLikeCount || false,
+      filterPreset: payload.filterPreset || undefined,
+      stickers: (payload.stickers || []).map((sticker) => ({
+        type: sticker.type,
+        text: sticker.text,
+        position: {
+          x: sticker.position.x,
+          y: sticker.position.y,
+          width: sticker.position.width,
+          height: sticker.position.height,
+          rotation: sticker.position.rotation || 0,
+          scale: sticker.position.scale || 1,
+        },
+        style: sticker.style,
+      })),
       collaborators: payload.collaboratorIds || [],
       hashtags: payload.hashtags,
       mentions: payload.mentions,

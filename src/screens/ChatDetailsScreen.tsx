@@ -6,17 +6,17 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    View,
-    Text,
-    StyleSheet,
-    TouchableOpacity,
-    Image,
-    FlatList,
-    ActivityIndicator,
-    Alert,
-    TextInput,
-    ScrollView,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  FlatList,
+  ActivityIndicator,
+  TextInput,
+  ScrollView
 } from "react-native";
+import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";

@@ -19,4 +19,12 @@ buildscript {
     }
 }
 
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url "https://maven.zego.im" }
+    }
+}
+
 apply plugin: "com.facebook.react.rootproject"

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   Modal,
@@ -11,13 +10,17 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
+import { Alert } from "../../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
 
+import CommentAudioBubble from "./CommentAudioBubble";
 import { socialApi } from "../socialApi";
-import { Comment, SwipeComment } from "../types";
+import { Comment, CommentAudioFile, SwipeComment } from "../types";
 import { toUserSafeMessage } from "../validation";
+import VoiceRecorderButton from "../../../components/chat/VoiceRecorderButton";
+import { normalizeMediaUrl } from "../../../utils/mediaUrls";
 
 type ThreadComment = Comment | SwipeComment;
 type ThreadContentType = "post" | "swipe";
@@ -128,8 +131,12 @@ function CommentThreadSheet({
     });
   };
 
-  const onSubmit = async () => {
-    if (!contentId || !threadComment?.id || !draft.trim() || submitting) {
+  const submitReply = async (audioFile?: CommentAudioFile) => {
+    if (!contentId || !threadComment?.id || submitting) {
+      return;
+    }
+
+    if (!draft.trim() && !audioFile?.uri) {
       return;
     }
 
@@ -137,8 +144,8 @@ function CommentThreadSheet({
       setSubmitting(true);
       const added =
         contentType === "post"
-          ? await socialApi.addPostComment(contentId, draft, threadComment.id)
-          : await socialApi.addSwipeComment(contentId, draft, threadComment.id);
+          ? await socialApi.addPostComment(contentId, draft, threadComment.id, audioFile)
+          : await socialApi.addSwipeComment(contentId, draft, threadComment.id, audioFile);
 
       setReplies((prev) => [...prev, added as unknown as Comment]);
       updateParentComment((current) => ({
@@ -151,6 +158,10 @@ function CommentThreadSheet({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const onSubmit = async () => {
+    await submitReply();
   };
 
   const onToggleLike = async (commentId: string) => {
@@ -222,13 +233,16 @@ function CommentThreadSheet({
 
           {threadComment ? (
             <View style={styles.parentCard}>
-              <Image source={{ uri: threadComment.user.avatarUrl }} style={styles.avatar} />
+              <Image source={{ uri: normalizeMediaUrl(threadComment.user.avatarUrl) }} style={styles.avatar} />
               <View style={styles.replyBody}>
                 <View style={styles.replyTop}>
                   <Text style={styles.username}>@{threadComment.user.username}</Text>
                   <Text style={styles.time}>{formatAgo(threadComment.createdAt)}</Text>
                 </View>
-                <Text style={styles.replyText}>{threadComment.text}</Text>
+                {threadComment.text ? <Text style={styles.replyText}>{threadComment.text}</Text> : null}
+                {threadComment.audioUrl ? (
+                  <CommentAudioBubble audioUrl={threadComment.audioUrl} audioDuration={threadComment.audioDuration} />
+                ) : null}
                 <Text style={styles.parentMeta}>{threadComment.replyCount || 0} replies</Text>
               </View>
             </View>
@@ -242,15 +256,19 @@ function CommentThreadSheet({
             <FlatList
               data={replies}
               keyExtractor={(item) => item.id}
+              keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => (
                 <View style={styles.replyRow}>
-                  <Image source={{ uri: item.user.avatarUrl }} style={styles.avatar} />
+                  <Image source={{ uri: normalizeMediaUrl(item.user.avatarUrl) }} style={styles.avatar} />
                   <View style={styles.replyBody}>
                     <View style={styles.replyTop}>
                       <Text style={styles.username}>@{item.user.username}</Text>
                       <Text style={styles.time}>{formatAgo(item.createdAt)}</Text>
                     </View>
-                    <Text style={styles.replyText}>{item.text}</Text>
+                    {item.text ? <Text style={styles.replyText}>{item.text}</Text> : null}
+                    {item.audioUrl ? (
+                      <CommentAudioBubble audioUrl={item.audioUrl} audioDuration={item.audioDuration} />
+                    ) : null}
                     <View style={styles.actionRow}>
                       <TouchableOpacity onPress={() => onToggleLike(item.id)}>
                         <Text style={styles.actionText}>{item.liked ? "Unlike" : "Like"}</Text>
@@ -282,6 +300,15 @@ function CommentThreadSheet({
             <TouchableOpacity disabled={!draft.trim() || submitting} onPress={onSubmit}>
               <Text style={[styles.sendText, (!draft.trim() || submitting) && styles.sendTextDisabled]}>Reply</Text>
             </TouchableOpacity>
+            <VoiceRecorderButton
+              color="#3345d1"
+              disabled={submitting}
+              onSend={(voiceFile) => {
+                submitReply(voiceFile).catch((error) => {
+                  Alert.alert("Could not send voice reply", toUserSafeMessage(error));
+                });
+              }}
+            />
           </View>
         </View>
       </View>

@@ -1,5 +1,6 @@
 import { API } from "../api/api";
 import { getStoredToken } from "./authSession";
+import { postMultipart } from "./multipartUpload";
 
 const buildAuthHeaders = async (extraHeaders = {}) => {
   const token = await getStoredToken();
@@ -8,6 +9,23 @@ const buildAuthHeaders = async (extraHeaders = {}) => {
     ...extraHeaders,
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+};
+
+const normalizeUploadUri = (value) => {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+
+  if (/^(file|content):\/\//i.test(rawValue)) {
+    return rawValue;
+  }
+
+  if (/^[a-z]:\\/i.test(rawValue) || rawValue.startsWith("/")) {
+    return `file://${rawValue.replace(/\\/g, "/")}`;
+  }
+
+  return rawValue;
 };
 
 /**
@@ -175,10 +193,21 @@ export const forwardChatMessage = async ({ messageId, targetConversationId } = {
 };
 
 /**
- * @param {{ conversationId?: string; text?: string; file?: { uri?: string; name?: string | null; type?: string | null }; mediaUrl?: string; messageType?: string }} [params]
+ * @param {{ conversationId?: string; text?: string; file?: { uri?: string; name?: string | null; type?: string | null }; mediaUrl?: string; messageType?: string; replyToMessageId?: string; duration?: number }} [params]
  */
-export const sendChatMessage = async ({ conversationId, text, file, mediaUrl, messageType } = {}) => {
+export const sendChatMessage = async ({ conversationId, text, file, mediaUrl, messageType, replyToMessageId, duration } = {}) => {
   const trimmedText = String(text || "").trim();
+  const normalizedReplyToMessageId = String(replyToMessageId || "").trim();
+  const normalizedDuration = Number(duration);
+  const hasDuration = Number.isFinite(normalizedDuration) && normalizedDuration > 0;
+  const replyFields = normalizedReplyToMessageId
+    ? {
+        replyToMessageId: normalizedReplyToMessageId,
+        replyMessageId: normalizedReplyToMessageId,
+        parentMessageId: normalizedReplyToMessageId,
+        replyTo: normalizedReplyToMessageId,
+      }
+    : {};
 
   if (!conversationId) {
     throw new Error("conversationId is required");
@@ -198,6 +227,8 @@ export const sendChatMessage = async ({ conversationId, text, file, mediaUrl, me
         text: trimmedText,
         mediaUrl,
         messageType,
+        ...replyFields,
+        ...(hasDuration ? { duration: normalizedDuration } : {}),
       },
       { headers }
     );
@@ -212,19 +243,33 @@ export const sendChatMessage = async ({ conversationId, text, file, mediaUrl, me
     body.append("text", trimmedText);
   }
 
+  if (messageType) {
+    body.append("messageType", messageType);
+  }
+
+  if (normalizedReplyToMessageId) {
+    body.append("replyToMessageId", normalizedReplyToMessageId);
+    body.append("replyMessageId", normalizedReplyToMessageId);
+    body.append("parentMessageId", normalizedReplyToMessageId);
+    body.append("replyTo", normalizedReplyToMessageId);
+  }
+
+  if (hasDuration) {
+    body.append("duration", String(normalizedDuration));
+  }
+
   body.append(
     "file",
     {
-      uri: file.uri,
+      uri: normalizeUploadUri(file.uri),
       name: file.name || `upload_${Date.now()}`,
       type: file.type || "application/octet-stream",
     }
   );
 
-  const response = await API.post("/message/send", body, {
-    headers: await buildAuthHeaders({ "Content-Type": "multipart/form-data" }),
-    timeout: 120000,
+  return postMultipart({
+    path: "/message/send",
+    body,
+    timeoutMs: 120000,
   });
-
-  return response.data;
 };

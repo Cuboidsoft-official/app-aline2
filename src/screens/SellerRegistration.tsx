@@ -1,19 +1,21 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  View,
-  Text,
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
   StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
-  Image,
-  ScrollView,
-  Switch,
-  Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView
+  useWindowDimensions,
+  View
 } from "react-native";
+import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { launchImageLibrary } from "react-native-image-picker";
+import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import {
   errorCodes,
   isErrorWithCode,
@@ -31,6 +33,61 @@ import { useAppTheme } from "../theme/AppThemeContext";
 
 const DEFAULT_COVER = DEFAULT_COVER_URL;
 const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
+const TOTAL_STEPS = 6;
+
+const SPECIALIZATION_OPTIONS = [
+  "Creator",
+  "Business",
+  "Lawyer",
+  "Doctor",
+  "Coach",
+  "Consultant",
+  "Trainer",
+  "Other",
+];
+
+const PLAN_OPTIONS = [
+  {
+    key: "starter",
+    title: "Starter",
+    amount: 100,
+    maxHourlyRate: 1000,
+    description: "Good for new sellers. Max rate INR 1000 per hour.",
+  },
+  {
+    key: "premium",
+    title: "Premium",
+    amount: 1000,
+    maxHourlyRate: 10000,
+    description: "For advanced sellers. Max rate INR 10000 per hour.",
+  },
+] as const;
+
+const EXPERIENCE_OPTIONS = ["0-1 years", "2-5 years", "5-10 years", "10+ years"];
+const DEGREE_OPTIONS = [
+  "MBBS",
+  "MD",
+  "LLB",
+  "CA",
+  "B.Com",
+  "MBA",
+  "Certified Coach",
+  "Certified Trainer",
+  "Other",
+];
+const CERTIFICATE_OPTIONS = [
+  "Board Certified",
+  "Government Registered",
+  "Licensed Professional",
+  "Certified Practitioner",
+  "Independent Professional",
+  "Other",
+];
+const DURATION_OPTIONS = ["15", "30", "45", "60"];
+
+type PlanKey = typeof PLAN_OPTIONS[number]["key"];
+type SellerRegistrationMode = "create" | "edit";
+type DropdownField = "specialization" | "experience" | "degree" | "certificate" | "duration";
 
 type DocumentFile = {
   uri: string;
@@ -40,34 +97,41 @@ type DocumentFile = {
 
 type ImageFile = DocumentFile;
 
-type PickerSetter<T> = (value: T) => void;
-
-type SellerRegistrationMode = "create" | "edit";
-
 type SellerProfileResponse = {
   sellerName?: string;
   specialization?: string;
   bio?: string;
   experience?: string;
-  clinicLink?: string;
-  availabilityStatus?: boolean;
   degree?: string;
-  license?: string;
-  gst?: string;
+  certificateType?: string;
+  registrationNumber?: string;
   aadhaar?: string;
   pan?: string;
+  bankAccountName?: string;
+  bankAccountNumber?: string;
+  bankIfsc?: string;
+  bankName?: string;
+  premiumPlan?: PlanKey;
+  onboardingServiceName?: string;
+  onboardingServiceDurationMinutes?: number | string;
+  onboardingServiceRate?: number | string;
   degreeDoc?: string;
   licenseDoc?: string;
   aadhaarDoc?: string;
   panDoc?: string;
   idProof?: string;
+  faceCheckDoc?: string;
   profilePic?: string;
   coverPic?: string;
-  digilockerVerified?: boolean;
+  degreeChecked?: boolean;
+  kycChecked?: boolean;
+  faceChecked?: boolean;
 };
 
 const toDocumentFile = (uri?: string): DocumentFile | null =>
   uri ? { uri, name: uri.split("/").pop() || "document" } : null;
+
+const isRemoteUri = (uri?: string | null) => /^https?:\/\//i.test(String(uri || ""));
 
 const getDocumentPickerMessage = (error: unknown): string => {
   if (!isErrorWithCode(error)) {
@@ -90,59 +154,104 @@ const getDocumentPickerMessage = (error: unknown): string => {
 
 const SellerRegistration = ({ navigation, route }: any) => {
   const { colors } = useAppTheme();
+  const { width } = useWindowDimensions();
+  const isCompact = width < 380;
   const mode: SellerRegistrationMode = route?.params?.mode === "edit" ? "edit" : "create";
+
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(mode === "edit");
   const [errorMessage, setErrorMessage] = useState("");
+  const [activeDropdown, setActiveDropdown] = useState<DropdownField | null>(null);
 
   const [name, setName] = useState("");
   const [specialization, setSpecialization] = useState("");
+  const [customSpecialization, setCustomSpecialization] = useState("");
   const [bio, setBio] = useState("");
-  const [experience, setExperience] = useState("");
-  const [clinicLink, setClinicLink] = useState("");
-  const [status, setStatus] = useState(true);
 
   const [avatar, setAvatar] = useState<string | null>(null);
   const [cover, setCover] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<ImageFile | null>(null);
   const [coverFile, setCoverFile] = useState<ImageFile | null>(null);
 
+  const [premiumPlan, setPremiumPlan] = useState<PlanKey>("starter");
+
+  const [experience, setExperience] = useState("");
   const [degree, setDegree] = useState("");
-  const [license, setLicense] = useState("");
-  const [gst, setGst] = useState("");
+  const [certificateType, setCertificateType] = useState("");
+  const [registrationNumber, setRegistrationNumber] = useState("");
+  const [degreeDoc, setDegreeDoc] = useState<DocumentFile | null>(null);
+  const [licenseDoc, setLicenseDoc] = useState<DocumentFile | null>(null);
+  const [degreeChecked, setDegreeChecked] = useState(false);
 
   const [aadhaar, setAadhaar] = useState("");
   const [pan, setPan] = useState("");
-
-  const [degreeDoc, setDegreeDoc] = useState<DocumentFile | null>(null);
-  const [licenseDoc, setLicenseDoc] = useState<DocumentFile | null>(null);
+  const [bankAccountName, setBankAccountName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankIfsc, setBankIfsc] = useState("");
+  const [bankName, setBankName] = useState("");
   const [aadhaarDoc, setAadhaarDoc] = useState<DocumentFile | null>(null);
   const [panDoc, setPanDoc] = useState<DocumentFile | null>(null);
   const [idProof, setIdProof] = useState<DocumentFile | null>(null);
+  const [kycChecked, setKycChecked] = useState(false);
 
-  const [digilockerVerified, setDigilockerVerified] = useState(false);
+  const [faceCheckPreview, setFaceCheckPreview] = useState<string | null>(null);
+  const [faceCheckDoc, setFaceCheckDoc] = useState<ImageFile | null>(null);
+  const [faceChecked, setFaceChecked] = useState(false);
+
+  const [serviceName, setServiceName] = useState("");
+  const [serviceDurationMinutes, setServiceDurationMinutes] = useState("15");
+  const [serviceRate, setServiceRate] = useState("");
+
+  const selectedPlan = useMemo(
+    () => PLAN_OPTIONS.find((plan) => plan.key === premiumPlan) || PLAN_OPTIONS[0],
+    [premiumPlan],
+  );
+  const durationMinutes = Number(serviceDurationMinutes) || 0;
+  const rateLimit = Math.floor((selectedPlan.maxHourlyRate * durationMinutes) / 60);
+  const specializationValue = specialization === "Other" ? customSpecialization.trim() : specialization;
 
   const hydrateSellerProfile = useCallback((seller: SellerProfileResponse) => {
     setName(seller?.sellerName || "");
-    setSpecialization(seller?.specialization || "");
+    setSpecialization(
+      seller?.specialization && SPECIALIZATION_OPTIONS.includes(seller.specialization)
+        ? seller.specialization
+        : seller?.specialization
+          ? "Other"
+          : "",
+    );
+    setCustomSpecialization(
+      seller?.specialization && !SPECIALIZATION_OPTIONS.includes(seller.specialization)
+        ? seller.specialization
+        : "",
+    );
     setBio(seller?.bio || "");
-    setExperience(seller?.experience || "");
-    setClinicLink(seller?.clinicLink || "");
-    setStatus(Boolean(seller?.availabilityStatus));
     setAvatar(seller?.profilePic || null);
     setCover(seller?.coverPic || null);
+    setPremiumPlan(seller?.premiumPlan || "starter");
+    setExperience(seller?.experience || "");
     setDegree(seller?.degree || "");
-    setLicense(seller?.license || "");
-    setGst(seller?.gst || "");
-    setAadhaar(seller?.aadhaar || "");
-    setPan(seller?.pan || "");
+    setCertificateType(seller?.certificateType || "");
+    setRegistrationNumber(seller?.registrationNumber || "");
     setDegreeDoc(toDocumentFile(seller?.degreeDoc));
     setLicenseDoc(toDocumentFile(seller?.licenseDoc));
+    setDegreeChecked(Boolean(seller?.degreeChecked || seller?.degreeDoc));
+    setAadhaar(seller?.aadhaar || "");
+    setPan(seller?.pan || "");
+    setBankAccountName(seller?.bankAccountName || "");
+    setBankAccountNumber(seller?.bankAccountNumber || "");
+    setBankIfsc(seller?.bankIfsc || "");
+    setBankName(seller?.bankName || "");
     setAadhaarDoc(toDocumentFile(seller?.aadhaarDoc));
     setPanDoc(toDocumentFile(seller?.panDoc));
     setIdProof(toDocumentFile(seller?.idProof));
-    setDigilockerVerified(Boolean(seller?.digilockerVerified));
+    setKycChecked(Boolean(seller?.kycChecked || seller?.aadhaarDoc || seller?.panDoc));
+    setFaceCheckPreview(seller?.faceCheckDoc || null);
+    setFaceCheckDoc(toDocumentFile(seller?.faceCheckDoc));
+    setFaceChecked(Boolean(seller?.faceChecked || seller?.faceCheckDoc));
+    setServiceName(seller?.onboardingServiceName || "");
+    setServiceDurationMinutes(String(seller?.onboardingServiceDurationMinutes || "15"));
+    setServiceRate(String(seller?.onboardingServiceRate || ""));
   }, []);
 
   useEffect(() => {
@@ -178,11 +287,11 @@ const SellerRegistration = ({ navigation, route }: any) => {
     return () => {
       active = false;
     };
-  }, [hydrateSellerProfile, mode, navigation]);
+  }, [hydrateSellerProfile, mode]);
 
   const pickImage = (
-    previewSetter: PickerSetter<string | null>,
-    fileSetter: PickerSetter<ImageFile | null>,
+    previewSetter: (value: string | null) => void,
+    fileSetter: (value: ImageFile | null) => void,
   ) => {
     launchImageLibrary({ mediaType: "photo" }, response => {
       if (response?.didCancel) return;
@@ -200,6 +309,28 @@ const SellerRegistration = ({ navigation, route }: any) => {
           name: asset.fileName,
           type: asset.type,
         });
+      }
+    });
+  };
+
+  const captureFaceCheck = () => {
+    launchCamera({ mediaType: "photo", cameraType: "front" }, response => {
+      if (response?.didCancel) return;
+
+      if (response?.errorCode) {
+        Alert.alert("Error", "Face check failed");
+        return;
+      }
+
+      const asset = response.assets?.[0];
+      if (asset?.uri) {
+        setFaceCheckPreview(asset.uri);
+        setFaceCheckDoc({
+          uri: asset.uri,
+          name: asset.fileName || `face_check_${Date.now()}.jpg`,
+          type: asset.type,
+        });
+        setFaceChecked(true);
       }
     });
   };
@@ -242,12 +373,12 @@ const SellerRegistration = ({ navigation, route }: any) => {
     };
   }, []);
 
-  const pickDocument = async (setter: PickerSetter<DocumentFile | null>) => {
+  const pickDocument = async (setter: (value: DocumentFile | null) => void) => {
     try {
       const [file] = await pick({
         mode: "import",
         allowMultiSelection: false,
-        type: [types.allFiles]
+        type: [types.allFiles],
       });
 
       if (!file?.uri) {
@@ -281,75 +412,172 @@ const SellerRegistration = ({ navigation, route }: any) => {
     }
   };
 
-  const renderUpload = (
-    title: string,
-    file: DocumentFile | null,
-    setter: PickerSetter<DocumentFile | null>
-  ) => (
-    <TouchableOpacity
-      style={styles.uploadBox}
-      onPress={() => pickDocument(setter)}
-      activeOpacity={0.8}
-    >
-      <Icon name="document" size={22} color="#7B4DFF" />
-      <View style={styles.uploadContent}>
-        <Text style={styles.uploadText}>
-          {file ? `${title} Uploaded ✓` : `Upload ${title}`}
-        </Text>
-        {!!file?.name && (
-          <Text style={styles.fileName} numberOfLines={1}>
-            {file.name}
-          </Text>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
+  const uploadDocumentOrKeep = async (file: DocumentFile | null) => {
+    if (!file?.uri) {
+      return "";
+    }
+
+    if (isRemoteUri(file.uri)) {
+      return file.uri;
+    }
+
+    return uploadDocumentAsset(file);
+  };
+
+  const uploadImageOrKeep = async (file: ImageFile | null, existingUri: string | null) => {
+    if (file?.uri && !isRemoteUri(file.uri)) {
+      return uploadImageAsset(file);
+    }
+
+    return existingUri || file?.uri || "";
+  };
+
+  const getDropdownMeta = () => {
+    switch (activeDropdown) {
+      case "specialization":
+        return { title: "Select specialization", options: SPECIALIZATION_OPTIONS };
+      case "experience":
+        return { title: "Select experience", options: EXPERIENCE_OPTIONS };
+      case "degree":
+        return { title: "Select degree", options: DEGREE_OPTIONS };
+      case "certificate":
+        return { title: "Select certificate type", options: CERTIFICATE_OPTIONS };
+      case "duration":
+        return { title: "Select duration", options: DURATION_OPTIONS };
+      default:
+        return { title: "", options: [] as string[] };
+    }
+  };
+
+  const applyDropdownValue = (value: string) => {
+    switch (activeDropdown) {
+      case "specialization":
+        setSpecialization(value);
+        if (value !== "Other") {
+          setCustomSpecialization("");
+        }
+        break;
+      case "experience":
+        setExperience(value);
+        break;
+      case "degree":
+        setDegree(value);
+        setDegreeChecked(false);
+        break;
+      case "certificate":
+        setCertificateType(value);
+        setDegreeChecked(false);
+        break;
+      case "duration":
+        setServiceDurationMinutes(value);
+        break;
+      default:
+        break;
+    }
+
+    setActiveDropdown(null);
+  };
+
+  const handleDegreeCheck = () => {
+    if (!degree || !certificateType || !registrationNumber.trim() || !degreeDoc || !licenseDoc) {
+      Alert.alert("Professional details", "Complete the dropdowns, registration number, and uploads first.");
+      return;
+    }
+
+    setDegreeChecked(true);
+    Alert.alert("Checked", "Professional details are ready for review.");
+  };
+
+  const handleKycCheck = () => {
+    if (
+      !aadhaar.trim()
+      || !pan.trim()
+      || !bankAccountName.trim()
+      || !bankAccountNumber.trim()
+      || !bankIfsc.trim()
+      || !aadhaarDoc
+      || !panDoc
+      || !idProof
+    ) {
+      Alert.alert("KYC", "Complete Aadhaar, PAN, bank details, and uploads first.");
+      return;
+    }
+
+    setKycChecked(true);
+    Alert.alert("Checked", "KYC and bank details are ready for review.");
+  };
 
   const validateCurrentStep = () => {
     if (step === 1) {
       if (!name.trim()) {
-        Alert.alert("Validation", "Please enter seller name");
+        Alert.alert("Validation", "Please enter seller name.");
         return false;
       }
-      if (!specialization.trim()) {
-        Alert.alert("Validation", "Please enter specialization");
-        return false;
-      }
-      if (!bio.trim()) {
-        Alert.alert("Validation", "Please add a short professional bio");
+      if (!specializationValue) {
+        Alert.alert("Validation", "Please select specialization.");
         return false;
       }
     }
 
     if (step === 2) {
-      if (!experience.trim()) {
-        Alert.alert("Validation", "Please enter experience");
-        return false;
-      }
-      if (!degree.trim()) {
-        Alert.alert("Validation", "Please enter degree");
-        return false;
-      }
-      if (!license.trim()) {
-        Alert.alert("Validation", "Please enter license number");
+      if (!bio.trim()) {
+        Alert.alert("Validation", "Please add description.");
         return false;
       }
     }
 
     if (step === 3) {
-      if (!aadhaar.trim()) {
-        Alert.alert("Validation", "Please enter Aadhaar number");
+      if (!experience || !degree || !certificateType || !registrationNumber.trim()) {
+        Alert.alert("Validation", "Please complete professional details.");
         return false;
       }
-      if (!pan.trim()) {
-        Alert.alert("Validation", "Please enter PAN number");
+      if (!degreeDoc || !licenseDoc) {
+        Alert.alert("Validation", "Please upload degree and certificate documents.");
+        return false;
+      }
+      if (!degreeChecked) {
+        Alert.alert("Validation", "Tap Check on professional details before continuing.");
         return false;
       }
     }
 
     if (step === 4) {
-      if (!degreeDoc || !licenseDoc || !aadhaarDoc || !panDoc || !idProof) {
-        Alert.alert("Validation", "Please upload all required documents");
+      if (!aadhaar.trim() || !pan.trim() || !bankAccountName.trim() || !bankAccountNumber.trim() || !bankIfsc.trim()) {
+        Alert.alert("Validation", "Please complete Aadhaar, PAN, and bank details.");
+        return false;
+      }
+      if (!aadhaarDoc || !panDoc || !idProof) {
+        Alert.alert("Validation", "Please upload Aadhaar, PAN, and bank proof.");
+        return false;
+      }
+      if (!kycChecked) {
+        Alert.alert("Validation", "Tap Check on KYC before continuing.");
+        return false;
+      }
+    }
+
+    if (step === 5 && !faceChecked) {
+      Alert.alert("Validation", "Please complete face check.");
+      return false;
+    }
+
+    if (step === 6) {
+      const rate = Number(serviceRate) || 0;
+
+      if (!serviceName.trim()) {
+        Alert.alert("Validation", "Please enter service name.");
+        return false;
+      }
+      if (durationMinutes <= 0) {
+        Alert.alert("Validation", "Please select service duration.");
+        return false;
+      }
+      if (rate <= 0) {
+        Alert.alert("Validation", "Please enter service rate.");
+        return false;
+      }
+      if (rate > rateLimit) {
+        Alert.alert("Rate limit", `For ${durationMinutes} min, max allowed rate is INR ${rateLimit}.`);
         return false;
       }
     }
@@ -359,24 +587,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
   const handleNext = () => {
     if (!validateCurrentStep()) return;
-    setStep(prev => prev + 1);
-  };
-
-  const handleDigiLockerVerify = async () => {
-    if (digilockerVerified) {
-      Alert.alert("Verified", "Your seller profile is already marked as DigiLocker verified.");
-      return;
-    }
-
-    if (!aadhaar.trim() || !pan.trim()) {
-      Alert.alert("Validation", "Please enter Aadhaar and PAN first");
-      return;
-    }
-
-    Alert.alert(
-      "Manual review required",
-      "DigiLocker verification is not self-serve in this build. Submit your documents and the verification state will be updated after review."
-    );
+    setStep((prev) => Math.min(TOTAL_STEPS, prev + 1));
   };
 
   const submitSellerRegistration = async () => {
@@ -393,340 +604,497 @@ const SellerRegistration = ({ navigation, route }: any) => {
         uploadedAadhaarDoc,
         uploadedPanDoc,
         uploadedIdProof,
+        uploadedFaceCheckDoc,
       ] = await Promise.all([
-        avatarFile ? uploadImageAsset(avatarFile) : avatar || "",
-        coverFile ? uploadImageAsset(coverFile) : cover || "",
-        degreeDoc ? uploadDocumentAsset(degreeDoc) : "",
-        licenseDoc ? uploadDocumentAsset(licenseDoc) : "",
-        aadhaarDoc ? uploadDocumentAsset(aadhaarDoc) : "",
-        panDoc ? uploadDocumentAsset(panDoc) : "",
-        idProof ? uploadDocumentAsset(idProof) : "",
+        uploadImageOrKeep(avatarFile, avatar),
+        uploadImageOrKeep(coverFile, cover),
+        uploadDocumentOrKeep(degreeDoc),
+        uploadDocumentOrKeep(licenseDoc),
+        uploadDocumentOrKeep(aadhaarDoc),
+        uploadDocumentOrKeep(panDoc),
+        uploadDocumentOrKeep(idProof),
+        uploadImageOrKeep(faceCheckDoc, faceCheckPreview),
       ]);
 
       const payload = {
-        sellerName: name,
-        specialization,
-        bio,
+        sellerName: name.trim(),
+        specialization: specializationValue,
+        bio: bio.trim(),
+        premiumPlan,
+        premiumPlanAmount: selectedPlan.amount,
+        maxHourlyRate: selectedPlan.maxHourlyRate,
         experience,
-        clinicLink,
-        availabilityStatus: status,
         degree,
-        license,
-        gst,
-        aadhaar,
-        pan,
+        certificateType,
+        registrationNumber: registrationNumber.trim(),
+        aadhaar: aadhaar.trim(),
+        pan: pan.trim(),
+        bankAccountName: bankAccountName.trim(),
+        bankAccountNumber: bankAccountNumber.trim(),
+        bankIfsc: bankIfsc.trim().toUpperCase(),
+        bankName: bankName.trim(),
         degreeDoc: uploadedDegreeDoc,
         licenseDoc: uploadedLicenseDoc,
         aadhaarDoc: uploadedAadhaarDoc,
         panDoc: uploadedPanDoc,
         idProof: uploadedIdProof,
+        faceCheckDoc: uploadedFaceCheckDoc,
         profilePic: uploadedProfilePic,
-        coverPic: uploadedCoverPic
+        coverPic: uploadedCoverPic,
+        degreeChecked,
+        kycChecked,
+        faceChecked,
+        onboardingServiceName: serviceName.trim(),
+        onboardingServiceDurationMinutes: durationMinutes,
+        onboardingServiceRate: Number(serviceRate) || 0,
+        onboardingServiceRateLimit: rateLimit,
       };
 
       const endpoint = mode === "edit" ? "/seller/update" : "/seller/register";
       const method = mode === "edit" ? API.put : API.post;
-
       const res = await method(endpoint, payload);
 
       if (res?.data?.success) {
         setErrorMessage("");
-        Alert.alert(
-          "Success",
-          mode === "edit"
-            ? "Seller profile updated successfully"
-            : "Seller registration submitted successfully"
-        );
+        Alert.alert("Success", mode === "edit" ? "Seller profile updated." : "Seller profile ready.");
         navigation.replace("SellerDashboardScreen");
       } else {
         const fallbackMessage = mode === "edit" ? "Profile update failed" : "Registration failed";
         setErrorMessage(res?.data?.message || fallbackMessage);
-        Alert.alert(
-          "Error",
-          res?.data?.message || fallbackMessage
-        );
+        Alert.alert("Error", res?.data?.message || fallbackMessage);
       }
     } catch (error: any) {
       console.log("seller register error:", error?.response?.data || error.message);
       const nextMessage = getReadableApiErrorMessage(
         error,
-        mode === "edit" ? "Seller update failed" : "Seller registration failed"
+        mode === "edit" ? "Seller update failed" : "Seller registration failed",
       );
       setErrorMessage(nextMessage);
-
-      Alert.alert(
-        "Error",
-        nextMessage
-      );
+      Alert.alert("Error", nextMessage);
     } finally {
       setLoading(false);
     }
   };
 
+  const renderUpload = (
+    title: string,
+    file: DocumentFile | null,
+    setter: (value: DocumentFile | null) => void,
+  ) => (
+    <View
+      style={[styles.uploadBox, { backgroundColor: colors.card, borderColor: colors.border }]}
+    >
+      <TouchableOpacity style={styles.uploadInner} onPress={() => pickDocument(setter)} activeOpacity={0.85}>
+        <Icon name={file ? "checkmark-circle" : "document-text-outline"} size={22} color={colors.primary} />
+        <View style={styles.uploadContent}>
+          <Text style={[styles.uploadTitle, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.uploadText, { color: colors.mutedText }]} numberOfLines={1}>
+            {file?.name || "Tap to upload"}
+          </Text>
+        </View>
+        <Icon name="chevron-forward" size={18} color={colors.mutedText} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderDropdownField = (
+    label: string,
+    field: DropdownField,
+    value: string,
+    placeholder: string,
+  ) => (
+    <>
+      <Text style={[styles.label, { color: colors.text }]}>{label}</Text>
+      <TouchableOpacity
+        style={[styles.dropdownField, { backgroundColor: colors.card, borderColor: colors.border }]}
+        onPress={() => setActiveDropdown(field)}
+        activeOpacity={0.85}
+      >
+        <Text style={[styles.dropdownText, { color: value ? colors.text : colors.placeholder }]} numberOfLines={1}>
+          {value || placeholder}
+        </Text>
+        <Icon name="chevron-down" size={18} color={colors.mutedText} />
+      </TouchableOpacity>
+    </>
+  );
+
+  const renderStepPills = () => (
+    <View style={styles.progressRow}>
+      {Array.from({ length: TOTAL_STEPS }).map((_, index) => {
+        const itemStep = index + 1;
+        const isActive = itemStep === step;
+        const isDone = itemStep < step;
+
+        return (
+          <View
+            key={itemStep}
+            style={[
+              styles.progressPill,
+              { backgroundColor: isActive || isDone ? colors.primary : colors.border },
+            ]}
+          />
+        );
+      })}
+    </View>
+  );
+
+  const renderStepContent = () => {
+    if (step === 1) {
+      return (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Create your seller identity</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
+            Yeh details buyers sabse pehle dekhenge. Clear photo, clean name, aur focused specialization trust build karte hain.
+          </Text>
+
+          <View style={[styles.stepIntroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.stepIntroHeader}>
+              <View style={[styles.stepIntroIcon, { backgroundColor: `${colors.primary}18` }]}>
+                <Icon name="sparkles-outline" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.stepIntroCopy}>
+                <Text style={[styles.stepIntroTitle, { color: colors.text }]}>A strong first impression</Text>
+                <Text style={[styles.stepIntroBody, { color: colors.mutedText }]}>
+                  Apni profile ko simple aur professional rakho so buyers quickly samajh saken aap kya offer karte ho.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.stepTipList}>
+              <View style={styles.stepTipRow}>
+                <Icon name="checkmark-circle" size={16} color={colors.primary} />
+                <Text style={[styles.stepTipText, { color: colors.text }]}>Clear face photo use karo</Text>
+              </View>
+              <View style={styles.stepTipRow}>
+                <Icon name="checkmark-circle" size={16} color={colors.primary} />
+                <Text style={[styles.stepTipText, { color: colors.text }]}>Name wahi rakho jo buyers ko dikhana hai</Text>
+              </View>
+              <View style={styles.stepTipRow}>
+                <Icon name="checkmark-circle" size={16} color={colors.primary} />
+                <Text style={[styles.stepTipText, { color: colors.text }]}>Ek focused specialization select karo</Text>
+              </View>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.mediaSectionCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.mediaSectionHeader}>
+              <Text style={[styles.mediaSectionTitle, { color: colors.text }]}>Profile visuals</Text>
+              <Text style={[styles.mediaSectionBody, { color: colors.mutedText }]}>
+                Profile photo aur cover image se account zyada complete lagta hai.
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.mediaCard,
+                isCompact && styles.mediaCardCompact,
+              ]}
+            >
+              <View style={[styles.mediaItem, isCompact && styles.mediaItemCompact]}>
+                <Text style={[styles.mediaLabel, { color: colors.text }]}>Profile photo</Text>
+                <TouchableOpacity
+                  style={styles.avatarPicker}
+                  onPress={() => pickImage(setAvatar, setAvatarFile)}
+                  activeOpacity={0.85}
+                >
+                  <Image source={{ uri: avatar || DEFAULT_AVATAR }} style={styles.avatar} />
+                  <View style={styles.avatarBadge}>
+                    <Icon name="camera" size={14} color="#fff" />
+                  </View>
+                </TouchableOpacity>
+                <Text style={[styles.mediaHint, { color: colors.mutedText }]}>Square photo works best</Text>
+              </View>
+
+              <View style={[styles.coverBlock, isCompact && styles.coverBlockCompact]}>
+                <Text style={[styles.mediaLabel, { color: colors.text }]}>Cover photo</Text>
+                <TouchableOpacity
+                  style={[styles.coverPicker, isCompact && styles.coverPickerCompact]}
+                  onPress={() => pickImage(setCover, setCoverFile)}
+                  activeOpacity={0.85}
+                >
+                  <Image source={{ uri: cover || DEFAULT_COVER }} style={styles.cover} />
+                </TouchableOpacity>
+                <Text style={[styles.mediaHint, { color: colors.mutedText }]}>Use a clean, brand-friendly image</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={[styles.formSectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.formSectionTitle, { color: colors.text }]}>Basic details</Text>
+            <Text style={[styles.formSectionBody, { color: colors.mutedText }]}>
+              Yeh info aapki profile title aur category ko define karti hai.
+            </Text>
+
+            <Text style={[styles.label, { color: colors.text }]}>Seller name</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.text }]}
+              value={name}
+              onChangeText={setName}
+              placeholder="Enter seller name"
+              placeholderTextColor={colors.placeholder}
+            />
+            <Text style={[styles.fieldHint, { color: colors.mutedText }]}>Example: Dr. Riya Sharma, Legal Expert, Fit Coach</Text>
+
+            {renderDropdownField("Specialization", "specialization", specialization, "Select specialization")}
+
+            {specialization === "Other" ? (
+              <>
+                <Text style={[styles.label, { color: colors.text }]}>Other specialization</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.text }]}
+                  value={customSpecialization}
+                  onChangeText={setCustomSpecialization}
+                  placeholder="Enter specialization"
+                  placeholderTextColor={colors.placeholder}
+                />
+              </>
+            ) : null}
+          </View>
+        </>
+      );
+    }
+
+    if (step === 2) {
+      return (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Payments</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Select a premium plan and add seller description.</Text>
+
+          <Text style={[styles.label, { color: colors.text }]}>Description</Text>
+          <TextInput
+            style={[styles.input, styles.textArea, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            multiline
+            value={bio}
+            onChangeText={setBio}
+            placeholder="Describe your profile, audience, and service style."
+            placeholderTextColor={colors.placeholder}
+          />
+
+          <View style={styles.planGrid}>
+            {PLAN_OPTIONS.map((plan) => {
+              const selected = premiumPlan === plan.key;
+
+              return (
+                <TouchableOpacity
+                  key={plan.key}
+                  style={[
+                    styles.planCard,
+                    { backgroundColor: colors.card, borderColor: selected ? colors.primary : colors.border },
+                  ]}
+                  onPress={() => setPremiumPlan(plan.key)}
+                  activeOpacity={0.9}
+                >
+                  <View style={styles.planTop}>
+                    <Text style={[styles.planName, { color: colors.text }]}>{plan.title}</Text>
+                    <Text style={[styles.planPrice, { color: colors.primary }]}>INR {plan.amount}</Text>
+                  </View>
+                  <Text style={[styles.planBody, { color: colors.mutedText }]}>{plan.description}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </>
+      );
+    }
+
+    if (step === 3) {
+      return (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Professional details</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Use dropdowns for experience, degree, and certificate type.</Text>
+
+          {renderDropdownField("Experience", "experience", experience, "Select experience")}
+          {renderDropdownField("Degree", "degree", degree, "Select degree")}
+          {renderDropdownField("Certificate type", "certificate", certificateType, "Select certificate type")}
+
+          <Text style={[styles.label, { color: colors.text }]}>Registration number</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={registrationNumber}
+            onChangeText={(text) => {
+              setRegistrationNumber(text);
+              setDegreeChecked(false);
+            }}
+            placeholder="Enter registration number"
+            placeholderTextColor={colors.placeholder}
+          />
+
+          {renderUpload("Degree upload", degreeDoc, (file) => {
+            setDegreeDoc(file);
+            setDegreeChecked(false);
+          })}
+          {renderUpload("Certificate upload", licenseDoc, (file) => {
+            setLicenseDoc(file);
+            setDegreeChecked(false);
+          })}
+
+          <TouchableOpacity style={[styles.checkButton, degreeChecked && styles.checkButtonDone]} onPress={handleDegreeCheck}>
+            <Icon name={degreeChecked ? "checkmark-circle" : "shield-checkmark-outline"} size={18} color="#fff" />
+            <Text style={styles.checkButtonText}>{degreeChecked ? "Checked" : "Check details"}</Text>
+          </TouchableOpacity>
+        </>
+      );
+    }
+
+    if (step === 4) {
+      return (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Aadhaar, PAN, bank details</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Complete KYC and payout details.</Text>
+
+          <Text style={[styles.label, { color: colors.text }]}>Aadhaar number</Text>
+          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={aadhaar} onChangeText={(text) => { setAadhaar(text); setKycChecked(false); }} placeholder="XXXX XXXX XXXX" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
+
+          <Text style={[styles.label, { color: colors.text }]}>PAN number</Text>
+          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={pan} onChangeText={(text) => { setPan(text.toUpperCase()); setKycChecked(false); }} placeholder="ABCDE1234F" placeholderTextColor={colors.placeholder} autoCapitalize="characters" />
+
+          <Text style={[styles.label, { color: colors.text }]}>Account holder</Text>
+          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={bankAccountName} onChangeText={(text) => { setBankAccountName(text); setKycChecked(false); }} placeholder="Account holder name" placeholderTextColor={colors.placeholder} />
+
+          <Text style={[styles.label, { color: colors.text }]}>Account number</Text>
+          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={bankAccountNumber} onChangeText={(text) => { setBankAccountNumber(text); setKycChecked(false); }} placeholder="Bank account number" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
+
+          <Text style={[styles.label, { color: colors.text }]}>IFSC</Text>
+          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={bankIfsc} onChangeText={(text) => { setBankIfsc(text.toUpperCase()); setKycChecked(false); }} placeholder="IFSC code" placeholderTextColor={colors.placeholder} autoCapitalize="characters" />
+
+          <Text style={[styles.label, { color: colors.text }]}>Bank name</Text>
+          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={bankName} onChangeText={setBankName} placeholder="Bank name" placeholderTextColor={colors.placeholder} />
+
+          {renderUpload("Aadhaar upload", aadhaarDoc, (file) => { setAadhaarDoc(file); setKycChecked(false); })}
+          {renderUpload("PAN upload", panDoc, (file) => { setPanDoc(file); setKycChecked(false); })}
+          {renderUpload("Bank proof", idProof, (file) => { setIdProof(file); setKycChecked(false); })}
+
+          <TouchableOpacity style={[styles.checkButton, kycChecked && styles.checkButtonDone]} onPress={handleKycCheck}>
+            <Icon name={kycChecked ? "checkmark-circle" : "card-outline"} size={18} color="#fff" />
+            <Text style={styles.checkButtonText}>{kycChecked ? "Checked" : "Check KYC"}</Text>
+          </TouchableOpacity>
+        </>
+      );
+    }
+
+    if (step === 5) {
+      return (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Face check</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Take a clear selfie for verification.</Text>
+
+          <TouchableOpacity style={[styles.faceCard, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={captureFaceCheck} activeOpacity={0.9}>
+            {faceCheckPreview ? (
+              <Image source={{ uri: faceCheckPreview }} style={styles.facePreview} />
+            ) : (
+              <View style={styles.facePlaceholder}>
+                <Icon name="scan-outline" size={44} color={colors.primary} />
+                <Text style={[styles.faceTitle, { color: colors.text }]}>Take selfie</Text>
+                <Text style={[styles.faceBody, { color: colors.mutedText }]}>Front camera, clean light, clear face.</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Service pricing</Text>
+        <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Rate limit depends on your selected plan.</Text>
+
+        <View style={[styles.rateCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.rateLabel, { color: colors.mutedText }]}>Max allowed for this duration</Text>
+          <Text style={[styles.rateValue, { color: colors.primary }]}>INR {rateLimit || 0}</Text>
+          <Text style={[styles.rateBody, { color: colors.mutedText }]}>
+            {selectedPlan.title}: INR {selectedPlan.maxHourlyRate}/hour. Example: 15 min max INR {Math.floor((selectedPlan.maxHourlyRate * 15) / 60)}.
+          </Text>
+        </View>
+
+        <Text style={[styles.label, { color: colors.text }]}>Service name</Text>
+        <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={serviceName} onChangeText={setServiceName} placeholder="Consultation, legal call, brand review" placeholderTextColor={colors.placeholder} />
+
+        {renderDropdownField("Duration", "duration", serviceDurationMinutes ? `${serviceDurationMinutes} min` : "", "Select duration")}
+
+        <Text style={[styles.label, { color: colors.text }]}>Your rate</Text>
+        <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={serviceRate} onChangeText={setServiceRate} placeholder={`Max INR ${rateLimit || 0}`} placeholderTextColor={colors.placeholder} keyboardType="numeric" />
+      </>
+    );
+  };
+
+  const dropdownMeta = getDropdownMeta();
+
   if (initializing) {
     return (
-      <SafeAreaView style={[styles.loaderContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color="#7B4DFF" />
-        <Text style={[styles.loaderText, { color: colors.mutedText }]}>
-          Loading seller profile...
-        </Text>
+      <SafeAreaView style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
-      <KeyboardAvoidingView style={styles.screen} behavior="padding">
-      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backBtn}
-        >
-          <Icon name="arrow-back" size={22} color={colors.text} />
-        </TouchableOpacity>
-
-        <Text style={[styles.headerTitle, { color: colors.text }]}>
-          {mode === "edit" ? "Update Seller Profile" : "Seller Registration"}
-        </Text>
-
-        <View style={styles.headerSpacer} />
-      </View>
-
-      <ScrollView
-        style={[styles.container, { backgroundColor: colors.background }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {errorMessage ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerTitle}>Seller profile issue</Text>
-            <Text style={styles.errorBannerText}>{errorMessage}</Text>
-          </View>
-        ) : null}
-        <View style={styles.coverContainer}>
-          <Image
-            source={{ uri: cover || DEFAULT_COVER }}
-            style={styles.cover}
-          />
-
-          <TouchableOpacity
-            style={styles.coverCamera}
-            onPress={() => pickImage(setCover, setCoverFile)}
-          >
-            <Icon name="camera" size={20} color="#fff" />
+      <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <View style={[styles.header, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+          <TouchableOpacity style={styles.headerIconButton} onPress={() => navigation.goBack()}>
+            <Icon name="arrow-back" size={22} color={colors.text} />
           </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+            {mode === "edit" ? "Update Seller Profile" : "Become a Seller"}
+          </Text>
+          <View style={styles.headerIconButton} />
         </View>
 
-        <View style={styles.avatarContainer}>
-          <Image
-            source={{ uri: avatar || DEFAULT_AVATAR }}
-            style={styles.avatar}
-          />
-
-          <TouchableOpacity
-            style={styles.avatarCamera}
-            onPress={() => pickImage(setAvatar, setAvatarFile)}
-          >
-            <Icon name="camera" size={16} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.form}>
-          <Text style={styles.stepText}>Step {step} of 4</Text>
-
-          {step === 1 && (
-            <View>
-              <Text style={styles.title}>Basic Information</Text>
-
-              <Text style={styles.label}>Seller Name</Text>
-              <TextInput
-                style={styles.input}
-                value={name}
-                onChangeText={setName}
-                placeholder="Enter seller name"
-                placeholderTextColor="#999"
-              />
-
-              <Text style={styles.label}>Specialization</Text>
-              <TextInput
-                style={styles.input}
-                value={specialization}
-                onChangeText={setSpecialization}
-                placeholder="Cardiology Specialist"
-                placeholderTextColor="#999"
-              />
-
-              <Text style={styles.label}>Bio</Text>
-              <TextInput
-                style={[styles.input, styles.bioInput]}
-                multiline
-                value={bio}
-                onChangeText={setBio}
-                placeholder="About you"
-                placeholderTextColor="#999"
-              />
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {errorMessage ? (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerTitle}>Seller profile issue</Text>
+              <Text style={styles.errorBannerText}>{errorMessage}</Text>
             </View>
-          )}
+          ) : null}
 
-          {step === 2 && (
-            <View>
-              <Text style={styles.title}>Professional Details</Text>
+          <Text style={[styles.stepLabel, { color: colors.mutedText }]}>Step {step} of {TOTAL_STEPS}</Text>
+          {renderStepPills()}
+          {renderStepContent()}
 
-              <Text style={styles.label}>Years of Experience</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                value={experience}
-                onChangeText={setExperience}
-                placeholder="5"
-                placeholderTextColor="#999"
-              />
-
-              <Text style={styles.label}>Clinic Link</Text>
-              <TextInput
-                style={styles.input}
-                value={clinicLink}
-                onChangeText={setClinicLink}
-                placeholder="clinic.link/dr"
-                placeholderTextColor="#999"
-              />
-
-              <View style={styles.statusRow}>
-                <Text style={styles.label}>Status</Text>
-
-                <View style={styles.switchRow}>
-                  <Text style={styles.switchText}>Out</Text>
-                  <Switch value={status} onValueChange={setStatus} />
-                  <Text style={styles.switchText}>In</Text>
-                </View>
-              </View>
-
-              <Text style={styles.sectionTitle}>Professional Verification</Text>
-
-              <Text style={styles.label}>Degree</Text>
-              <TextInput
-                style={styles.input}
-                value={degree}
-                onChangeText={setDegree}
-                placeholder="MBBS / MD"
-                placeholderTextColor="#999"
-              />
-
-              <Text style={styles.label}>License Number</Text>
-              <TextInput
-                style={styles.input}
-                value={license}
-                onChangeText={setLicense}
-                placeholder="Medical License"
-                placeholderTextColor="#999"
-              />
-
-              <Text style={styles.label}>GST (Optional)</Text>
-              <TextInput
-                style={styles.input}
-                value={gst}
-                onChangeText={setGst}
-                placeholder="GST"
-                placeholderTextColor="#999"
-              />
-            </View>
-          )}
-
-          {step === 3 && (
-            <View>
-              <Text style={styles.title}>Government Verification</Text>
-
-              <Text style={styles.label}>Aadhaar Number</Text>
-              <TextInput
-                style={styles.input}
-                value={aadhaar}
-                onChangeText={setAadhaar}
-                placeholder="XXXX XXXX XXXX"
-                placeholderTextColor="#999"
-                keyboardType="numeric"
-              />
-
-              <Text style={styles.label}>PAN Number</Text>
-              <TextInput
-                style={styles.input}
-                value={pan}
-                onChangeText={text => setPan(text.toUpperCase())}
-                placeholder="ABCDE1234F"
-                placeholderTextColor="#999"
-                autoCapitalize="characters"
-              />
-
-              <TouchableOpacity
-                style={[
-                  styles.digilockerBtn,
-                  digilockerVerified && styles.digilockerBtnVerified
-                ]}
-                onPress={handleDigiLockerVerify}
-              >
-                <Icon name="shield-checkmark" size={18} color="#fff" />
-                <Text style={styles.digilockerText}>
-                  {digilockerVerified
-                    ? "Verified with DigiLocker ✓"
-                    : "Verify with DigiLocker"}
-                </Text>
-              </TouchableOpacity>
-
-              <Text style={styles.noteText}>
-                DigiLocker status is controlled after document review. You can submit your
-                documents here, but verification is no longer self-marked from the app.
-              </Text>
-            </View>
-          )}
-
-          {step === 4 && (
-            <View>
-              <Text style={styles.title}>Upload Documents</Text>
-
-              {renderUpload("Degree Certificate", degreeDoc, setDegreeDoc)}
-              {renderUpload("License Document", licenseDoc, setLicenseDoc)}
-              {renderUpload("Aadhaar Card", aadhaarDoc, setAadhaarDoc)}
-              {renderUpload("PAN Card", panDoc, setPanDoc)}
-              {renderUpload("Government ID", idProof, setIdProof)}
-            </View>
-          )}
-
-          <View style={styles.stepButtons}>
-            {step > 1 && (
-              <TouchableOpacity
-                style={styles.backStep}
-                onPress={() => setStep(step - 1)}
-                disabled={loading}
-              >
-                <Text style={styles.stepBtnText}>Back</Text>
-              </TouchableOpacity>
-            )}
-
-            {step < 4 ? (
-              <TouchableOpacity
-                style={styles.nextStep}
-                onPress={handleNext}
-                disabled={loading}
-              >
-                <Text style={styles.stepBtnText}>Next</Text>
+          <View style={styles.footerRow}>
+            {step > 1 ? (
+              <TouchableOpacity style={styles.secondaryButton} onPress={() => setStep((prev) => Math.max(1, prev - 1))}>
+                <Text style={styles.secondaryButtonText}>Back</Text>
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity
-                style={styles.button}
-                onPress={submitSellerRegistration}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.buttonText}>
-                    {mode === "edit" ? "Save Changes" : "Submit for Verification"}
-                  </Text>
-                )}
+              <View style={styles.buttonSpacer} />
+            )}
+
+            {step < TOTAL_STEPS ? (
+              <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
+                <Text style={styles.primaryButtonText}>Continue</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={[styles.primaryButton, loading && styles.buttonDisabled]} onPress={submitSellerRegistration} disabled={loading}>
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Finish</Text>}
               </TouchableOpacity>
             )}
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+
+        <Modal visible={Boolean(activeDropdown)} transparent animationType="fade" onRequestClose={() => setActiveDropdown(null)}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>{dropdownMeta.title}</Text>
+              <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
+                {dropdownMeta.options.map((option) => (
+                  <TouchableOpacity key={option} style={[styles.modalOption, { borderBottomColor: colors.border }]} onPress={() => applyDropdownValue(option)}>
+                    <Text style={[styles.modalOptionText, { color: colors.text }]}>{option}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity style={styles.modalCloseButton} onPress={() => setActiveDropdown(null)}>
+                <Text style={styles.modalCloseText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -735,241 +1103,202 @@ const SellerRegistration = ({ navigation, route }: any) => {
 export default SellerRegistration;
 
 const styles = StyleSheet.create({
-  loaderContainer: {
-    flex: 1,
+  screen: { flex: 1 },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center" },
+  scroll: { flex: 1 },
+  content: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 28 },
+  header: {
+    height: 82,
+    paddingTop: 26,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerIconButton: {
+    width: 36,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F6F7FB"
   },
-  screen: {
-    flex: 1,
-  },
-  loaderText: {
-    marginTop: 12,
-    color: "#666"
-  },
-  container: {
-    flex: 1,
-    backgroundColor: "#F6F7FB"
-  },
+  headerTitle: { flex: 1, fontSize: 18, fontWeight: "800", textAlign: "center" },
   errorBanner: {
-    marginHorizontal: 16,
-    marginTop: 16,
+    marginBottom: 14,
     backgroundColor: "#FEF2F2",
-    borderWidth: 1,
     borderColor: "#FECACA",
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+  },
+  errorBannerTitle: { color: "#991B1B", fontWeight: "800", marginBottom: 4 },
+  errorBannerText: { color: "#B91C1C", lineHeight: 19 },
+  stepLabel: { fontSize: 13, fontWeight: "800" },
+  progressRow: { flexDirection: "row", marginTop: 10, marginBottom: 18 },
+  progressPill: { flex: 1, height: 5, borderRadius: 999, marginRight: 6 },
+  sectionTitle: { fontSize: 24, fontWeight: "900" },
+  sectionBody: { marginTop: 6, marginBottom: 16, fontSize: 14, lineHeight: 20 },
+  stepIntroCard: {
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+    marginBottom: 14,
+  },
+  stepIntroHeader: { flexDirection: "row", alignItems: "flex-start" },
+  stepIntroIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  stepIntroCopy: { flex: 1 },
+  stepIntroTitle: { fontSize: 16, fontWeight: "900" },
+  stepIntroBody: { marginTop: 4, fontSize: 13, lineHeight: 19 },
+  stepTipList: { marginTop: 14 },
+  stepTipRow: { flexDirection: "row", alignItems: "center", marginTop: 10 },
+  stepTipText: { marginLeft: 10, flex: 1, fontSize: 13, fontWeight: "700" },
+  mediaSectionCard: {
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+    marginBottom: 14,
+  },
+  mediaSectionHeader: { marginBottom: 14 },
+  mediaSectionTitle: { fontSize: 16, fontWeight: "900" },
+  mediaSectionBody: { marginTop: 4, fontSize: 13, lineHeight: 19 },
+  mediaCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  mediaCardCompact: { flexDirection: "column", alignItems: "stretch" },
+  mediaItem: { width: 104, marginRight: 16, alignItems: "center" },
+  mediaItemCompact: { width: "100%", marginRight: 0, marginBottom: 14, alignItems: "flex-start" },
+  mediaLabel: { fontSize: 13, fontWeight: "800", marginBottom: 10, alignSelf: "flex-start" },
+  mediaHint: { marginTop: 8, fontSize: 12, lineHeight: 17, textAlign: "center" },
+  avatarPicker: { width: 92, height: 92, alignSelf: "center" },
+  avatar: { width: 88, height: 88, borderRadius: 44, backgroundColor: "#E5E7EB" },
+  avatarBadge: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#7B4DFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  coverBlock: { flex: 1 },
+  coverBlockCompact: { marginTop: 0 },
+  coverPicker: { width: "100%", height: 110, borderRadius: 16, overflow: "hidden", backgroundColor: "#E5E7EB" },
+  coverPickerCompact: { width: "100%", marginTop: 0 },
+  cover: { width: "100%", height: "100%" },
+  formSectionCard: {
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+  },
+  formSectionTitle: { fontSize: 16, fontWeight: "900" },
+  formSectionBody: { marginTop: 4, fontSize: 13, lineHeight: 19 },
+  label: { marginTop: 14, marginBottom: 6, fontSize: 13, fontWeight: "800" },
+  fieldHint: { marginTop: 6, fontSize: 12, lineHeight: 17 },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12
-  },
-  errorBannerTitle: {
-    color: "#991B1B",
-    fontWeight: "800",
-    marginBottom: 4
-  },
-  errorBannerText: {
-    color: "#B91C1C",
-    lineHeight: 19
-  },
-  header: {
-    height: 90,
-    backgroundColor: "#fff",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
-    paddingTop: 40
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    marginLeft: 10,
-    color: "#111"
-  },
-  headerSpacer: {
-    width: 30,
-  },
-  backBtn: {
-    padding: 5
-  },
-  coverContainer: {
-    position: "relative"
-  },
-  cover: {
-    height: 200,
-    width: "100%"
-  },
-  coverCamera: {
-    position: "absolute",
-    right: 15,
-    bottom: 15,
-    backgroundColor: "#00000080",
-    padding: 10,
-    borderRadius: 30
-  },
-  avatarContainer: {
-    alignItems: "center",
-    marginTop: -50
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 4,
-    borderColor: "#fff",
-    backgroundColor: "#eee"
-  },
-  avatarCamera: {
-    position: "absolute",
-    bottom: 0,
-    right: 140,
-    backgroundColor: "#7B4DFF",
-    padding: 8,
-    borderRadius: 20
-  },
-  form: {
-    padding: 20,
-    paddingBottom: 40
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: "700",
-    textAlign: "center",
-    marginBottom: 25,
-    color: "#111"
-  },
-  stepText: {
-    textAlign: "center",
-    fontWeight: "600",
-    marginBottom: 10,
-    color: "#666"
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginTop: 30,
-    marginBottom: 15,
-    color: "#111"
-  },
-  label: {
-    marginTop: 12,
-    marginBottom: 6,
-    fontWeight: "600",
-    color: "#444"
-  },
-  input: {
-    backgroundColor: "#fff",
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
+    paddingVertical: 13,
     fontSize: 15,
-    color: "#111"
   },
-  bioInput: {
-    height: 90,
-    textAlignVertical: "top",
-  },
-  statusRow: {
-    marginTop: 20,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center"
-  },
-  switchRow: {
-    flexDirection: "row",
-    alignItems: "center"
-  },
-  switchText: {
-    color: "#444",
-    marginHorizontal: 8,
-    fontWeight: "500"
-  },
-  uploadBox: {
+  textArea: { minHeight: 110, textAlignVertical: "top" },
+  dropdownField: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fff",
-    padding: 18,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    marginTop: 12
+    justifyContent: "space-between",
   },
-  uploadContent: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  uploadText: {
-    fontWeight: "600",
-    color: "#444"
-  },
-  fileName: {
-    marginTop: 4,
-    color: "#777",
-    fontSize: 12
-  },
-  digilockerBtn: {
-    flexDirection: "row",
+  dropdownText: { flex: 1, fontSize: 15, paddingRight: 12 },
+  planGrid: { marginTop: 4 },
+  planCard: { borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 10 },
+  planTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  planName: { fontSize: 15, fontWeight: "900" },
+  planPrice: { fontSize: 15, fontWeight: "900" },
+  planBody: { marginTop: 6, fontSize: 13, lineHeight: 18 },
+  uploadBox: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, marginTop: 12 },
+  uploadInner: { padding: 14, flexDirection: "row", alignItems: "center" },
+  uploadContent: { flex: 1, marginLeft: 12, marginRight: 8 },
+  uploadTitle: { fontSize: 14, fontWeight: "800" },
+  uploadText: { marginTop: 2, fontSize: 12 },
+  checkButton: {
+    marginTop: 16,
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: "#7B4DFF",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#0A66C2",
-    padding: 16,
-    borderRadius: 12,
-    marginTop: 20
-  },
-  digilockerBtnVerified: {
-    backgroundColor: "#118B50",
-  },
-  digilockerText: {
-    color: "#fff",
-    fontWeight: "700",
-    marginLeft: 10
-  },
-  noteText: {
-    marginTop: 12,
-    color: "#666",
-    fontSize: 13,
-    lineHeight: 20
-  },
-  stepButtons: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 30,
-    alignItems: "center"
   },
-  nextStep: {
-    backgroundColor: "#7B4DFF",
-    paddingVertical: 12,
-    paddingHorizontal: 22,
-    borderRadius: 10,
-    minWidth: 90,
-    alignItems: "center"
+  checkButtonDone: { backgroundColor: "#118B50" },
+  checkButtonText: { color: "#fff", fontWeight: "800", marginLeft: 8 },
+  faceCard: {
+    minHeight: 280,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    overflow: "hidden",
   },
-  backStep: {
-    backgroundColor: "#999",
-    paddingVertical: 12,
-    paddingHorizontal: 22,
-    borderRadius: 10,
-    minWidth: 90,
-    alignItems: "center"
-  },
-  stepBtnText: {
-    color: "#fff",
-    fontWeight: "700"
-  },
-  button: {
-    backgroundColor: "#7B4DFF",
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 10,
+  facePreview: { width: "100%", height: 320 },
+  facePlaceholder: { minHeight: 280, alignItems: "center", justifyContent: "center", padding: 20 },
+  faceTitle: { marginTop: 10, fontSize: 18, fontWeight: "900" },
+  faceBody: { marginTop: 4, fontSize: 13, textAlign: "center", lineHeight: 18 },
+  rateCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 14, marginBottom: 2 },
+  rateLabel: { fontSize: 12, fontWeight: "800" },
+  rateValue: { marginTop: 4, fontSize: 30, fontWeight: "900" },
+  rateBody: { marginTop: 4, fontSize: 13, lineHeight: 19 },
+  footerRow: { marginTop: 24, flexDirection: "row", alignItems: "center" },
+  secondaryButton: {
+    minHeight: 48,
+    minWidth: 96,
+    borderRadius: 14,
+    backgroundColor: "#6B7280",
     alignItems: "center",
-    flex: 1,
-    marginLeft: 12
+    justifyContent: "center",
+    paddingHorizontal: 18,
   },
-  buttonText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 16
-  }
+  secondaryButtonText: { color: "#fff", fontWeight: "800" },
+  buttonSpacer: { width: 96 },
+  primaryButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    marginLeft: 12,
+    backgroundColor: "#7B4DFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryButtonText: { color: "#fff", fontWeight: "800", fontSize: 15 },
+  buttonDisabled: { opacity: 0.7 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: { width: "100%", maxWidth: 420, borderRadius: 18, paddingTop: 16, overflow: "hidden" },
+  modalTitle: { fontSize: 17, fontWeight: "900", paddingHorizontal: 16, marginBottom: 8 },
+  modalList: { maxHeight: 320 },
+  modalOption: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  modalOptionText: { fontSize: 15, fontWeight: "700" },
+  modalCloseButton: {
+    margin: 16,
+    minHeight: 46,
+    borderRadius: 14,
+    backgroundColor: "#7B4DFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCloseText: { color: "#fff", fontWeight: "800" },
 });

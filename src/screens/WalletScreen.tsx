@@ -2,15 +2,15 @@ import React, { useCallback, useState } from "react";
 import Clipboard from "@react-native-clipboard/clipboard";
 import { TextInput as RNTextInput } from "react-native";
 import {
-    View,
-    Text,
-    StyleSheet,
-    TouchableOpacity,
-    ScrollView,
-    StatusBar,
-    ActivityIndicator,
-    Alert,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  StatusBar,
+  ActivityIndicator
 } from "react-native";
+import { Alert } from "../utils/appAlert";
 
 import Icon from "react-native-vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";

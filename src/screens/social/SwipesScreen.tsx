@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   LayoutChangeEvent,
   FlatList,
@@ -14,9 +13,11 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
+import { Alert } from "../../utils/appAlert";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
 import { createSound } from "react-native-nitro-sound";
 
@@ -78,17 +79,24 @@ function SwipesScreen({ navigation }: any) {
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetSubmitting, setSheetSubmitting] = useState(false);
   const [sheetBusyIds, setSheetBusyIds] = useState<Record<string, boolean>>({});
+  const [selectedShareTargetIds, setSelectedShareTargetIds] = useState<string[]>([]);
   const [selectedReason, setSelectedReason] = useState<ReportReason>("spam");
   const [reportNote, setReportNote] = useState("");
   const [threadComment, setThreadComment] = useState<SwipeComment | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [isSwipeSoundEnabled, setIsSwipeSoundEnabled] = useState(true);
   const [activeSwipeIndex, setActiveSwipeIndex] = useState(0);
+  const [likeBurstSwipeId, setLikeBurstSwipeId] = useState("");
   const isScreenFocused = useIsFocused();
 
   const swipeMusicPlayerRef = useRef(createSound());
   const swipeMusicTrackKeyRef = useRef("");
   const swipeMusicEndMsRef = useRef(0);
+  const swipeTapRef = useRef<{ id: string; time: number; timeout: ReturnType<typeof setTimeout> | null }>({
+    id: "",
+    time: 0,
+    timeout: null,
+  });
 
   const activeSwipe = swipes[activeSwipeIndex] || null;
   const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipe?.music?.previewUrl || "");
@@ -136,6 +144,9 @@ function SwipesScreen({ navigation }: any) {
       return () => {
         const player = swipeMusicPlayerRef.current;
 
+        if (swipeTapRef.current.timeout) {
+          clearTimeout(swipeTapRef.current.timeout);
+        }
         swipeMusicTrackKeyRef.current = "";
         swipeMusicEndMsRef.current = 0;
         player.stopPlayer().catch(() => undefined);
@@ -233,6 +244,7 @@ function SwipesScreen({ navigation }: any) {
   const closeSheet = () => {
     setActiveSheet(null);
     setSelectedSwipe(null);
+    setSelectedShareTargetIds([]);
     setSheetComments([]);
     setSheetLoading(false);
     setSheetBusyIds({});
@@ -400,6 +412,39 @@ function SwipesScreen({ navigation }: any) {
     }
   };
 
+  const triggerSwipeLikeBurst = useCallback((swipeId: string) => {
+    setLikeBurstSwipeId(swipeId);
+    setTimeout(() => {
+      setLikeBurstSwipeId((current) => (current === swipeId ? "" : current));
+    }, 720);
+  }, []);
+
+  const handleSwipeMediaTap = (swipe: Swipe) => {
+    const now = Date.now();
+    const lastTap = swipeTapRef.current;
+
+    if (lastTap.id === swipe.id && now - lastTap.time < 260) {
+      if (lastTap.timeout) {
+        clearTimeout(lastTap.timeout);
+      }
+      swipeTapRef.current = { id: "", time: 0, timeout: null };
+      triggerSwipeLikeBurst(swipe.id);
+      handleLike(swipe.id).catch(() => undefined);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setIsSwipeSoundEnabled((current) => !current);
+      swipeTapRef.current = { id: "", time: 0, timeout: null };
+    }, 260);
+
+    swipeTapRef.current = {
+      id: swipe.id,
+      time: now,
+      timeout,
+    };
+  };
+
   useEffect(() => {
     if (!swipes.length) {
       setActiveSwipeIndex(0);
@@ -511,20 +556,42 @@ function SwipesScreen({ navigation }: any) {
 
     return (
       <View style={[styles.swipeItem, { height: viewportHeight }]}>
-        <SocialVideo
-          uri={normalizeMediaUrl(item.media.url)}
-          posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
-          style={styles.swipeMedia}
-          paused={!isActive || !!activeSheet || !isScreenFocused}
-          muted={!isSwipePlaybackEnabled || hasAttachedMusic}
-          repeat
-        />
+        <Pressable style={StyleSheet.absoluteFill} onPress={() => handleSwipeMediaTap(item)}>
+          <SocialVideo
+            uri={normalizeMediaUrl(item.media.url)}
+            posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
+            style={styles.swipeMedia}
+            paused={!isActive || !!activeSheet || !isScreenFocused}
+            muted={!isSwipePlaybackEnabled || hasAttachedMusic}
+            repeat
+          />
+          {likeBurstSwipeId === item.id ? (
+            <View pointerEvents="none" style={styles.likeBurstOverlay}>
+              <Icon name="heart" size={92} color="rgba(255,255,255,0.92)" />
+            </View>
+          ) : null}
+          <View style={styles.mediaSoundHint}>
+            <Icon
+              name={isSwipePlaybackEnabled ? "volume-high-outline" : "volume-mute-outline"}
+              size={16}
+              color="#fff"
+            />
+            <Text style={styles.mediaSoundHintText}>{isSwipePlaybackEnabled ? "Sound on" : "Muted"}</Text>
+          </View>
+        </Pressable>
+        <LinearGradient colors={["rgba(0,0,0,0.74)", "rgba(0,0,0,0.12)", "transparent"]} style={styles.topGradient} />
+        <LinearGradient colors={["transparent", "rgba(0,0,0,0.42)", "rgba(0,0,0,0.88)"]} style={styles.bottomGradient} />
         <View style={styles.overlay}>
           <View style={styles.topBar}>
-            <Text style={styles.screenTitle}>Swipes</Text>
+            <View>
+              <Text style={styles.screenKicker}>Short-form studio</Text>
+              <Text style={styles.screenTitle}>Swipes</Text>
+            </View>
             <TouchableOpacity style={styles.createButton} onPress={() => navigation.navigate("Create", { initialTab: "swipe" })}>
-              <Icon name="add" size={18} color="#111" />
-              <Text style={styles.createButtonText}>Create</Text>
+              <LinearGradient colors={["#00c6ff", "#7f00ff", "#ff4ecd"]} style={styles.createButtonGradient}>
+                <Icon name="add" size={18} color="#fff" />
+                <Text style={styles.createButtonText}>Create Reel</Text>
+              </LinearGradient>
             </TouchableOpacity>
           </View>
           <View style={styles.bottomRow}>
@@ -540,12 +607,30 @@ function SwipesScreen({ navigation }: any) {
                 <Text style={styles.hashTags}>{item.hashtags.map((tag) => `#${tag}`).join(" ")}</Text>
               ) : null}
 
+              {item.location ? (
+                <View style={styles.locationRow}>
+                  <Icon name="location-outline" size={13} color="#fff" />
+                  <Text style={styles.locationText}>{item.location}</Text>
+                </View>
+              ) : null}
+
               {musicLabel ? (
                 <View style={styles.musicRow}>
                   <Icon name="musical-notes" size={13} color="#fff" />
                   <Text style={styles.musicText}>{musicLabel}</Text>
                 </View>
               ) : null}
+
+              <View style={styles.reelMetaRail}>
+                <View style={styles.reelMetaChip}>
+                  <Icon name="sparkles-outline" size={13} color="#fff" />
+                  <Text style={styles.reelMetaText}>Effects ready</Text>
+                </View>
+                <View style={styles.reelMetaChip}>
+                  <Icon name="cut-outline" size={13} color="#fff" />
+                  <Text style={styles.reelMetaText}>Trimmed video</Text>
+                </View>
+              </View>
             </View>
 
             <View style={styles.actionRail}>
@@ -745,11 +830,33 @@ function SwipesScreen({ navigation }: any) {
                 <Text style={styles.shareActionText}>{selectedSwipe.saved ? "Remove from saved" : "Save"}</Text>
               </TouchableOpacity>
               <ShareTargetsList
-                onSend={(target) => {
-                  Alert.alert("Sent", `Swipe sent to @${target.username}.`);
-                  closeSheet();
+                selectedTargetIds={selectedShareTargetIds}
+                onToggleTarget={(target) => {
+                  setSelectedShareTargetIds((current) =>
+                    current.includes(target.id)
+                      ? current.filter((item) => item !== target.id)
+                      : [...current, target.id],
+                  );
                 }}
               />
+              <TouchableOpacity
+                style={[
+                  styles.commentsButton,
+                  !selectedShareTargetIds.length && styles.commentsButtonDisabled,
+                ]}
+                disabled={!selectedShareTargetIds.length}
+                onPress={() => {
+                  Alert.alert(
+                    "Sent",
+                    `Swipe sent to ${selectedShareTargetIds.length} ${selectedShareTargetIds.length === 1 ? "person" : "people"}.`,
+                  );
+                  closeSheet();
+                }}
+              >
+                <Text style={styles.commentsButtonText}>
+                  {selectedShareTargetIds.length ? `Send to ${selectedShareTargetIds.length}` : "Select people"}
+                </Text>
+              </TouchableOpacity>
             </View>
           ) : null}
 
@@ -828,36 +935,112 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#000" },
   swipeItem: { justifyContent: "flex-end", backgroundColor: "#121212" },
   swipeMedia: { ...StyleSheet.absoluteFillObject },
+  likeBurstOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mediaSoundHint: {
+    position: "absolute",
+    top: 58,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: "rgba(0,0,0,0.56)",
+  },
+  mediaSoundHintText: {
+    color: "#fff",
+    fontSize: 11.5,
+    fontWeight: "800",
+  },
+  topGradient: { ...StyleSheet.absoluteFillObject, bottom: undefined, height: 240 },
+  bottomGradient: { ...StyleSheet.absoluteFillObject, top: undefined, height: 360 },
   overlay: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingBottom: 24,
     paddingTop: 35,
-    backgroundColor: "rgba(0,0,0,0.24)",
     flex: 1,
     justifyContent: "space-between",
   },
   topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 16 },
-  screenTitle: { color: "#fff", fontSize: 26, fontWeight: "800" },
+  screenKicker: { color: "rgba(255,255,255,0.72)", fontSize: 11, fontWeight: "900", letterSpacing: 1.2, textTransform: "uppercase" },
+  screenTitle: { color: "#fff", fontSize: 30, fontWeight: "900", letterSpacing: -0.8 },
   createButton: {
+    overflow: "hidden",
+    borderRadius: 999,
+    shadowColor: "#7f00ff",
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  createButtonGradient: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
-  createButtonText: { color: "#111", fontWeight: "700", marginLeft: 4 },
+  createButtonText: { color: "#fff", fontWeight: "900", marginLeft: 5, fontSize: 12 },
   bottomRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" },
   bottomTextBlock: { flex: 1, paddingRight: 10 },
   userRow: { flexDirection: "row", alignItems: "center" },
-  userName: { color: "#fff", fontWeight: "800", fontSize: 15, marginRight: 5 },
-  caption: { color: "#fff", marginTop: 8, fontSize: 14 },
-  hashTags: { color: "#9db3ff", marginTop: 4, fontSize: 12.5 },
-  musicRow: { flexDirection: "row", alignItems: "center", marginTop: 8 },
-  musicText: { color: "#fff", marginLeft: 6, fontSize: 12.5 },
+  userName: { color: "#fff", fontWeight: "900", fontSize: 15, marginRight: 5 },
+  caption: { color: "#fff", marginTop: 8, fontSize: 14.5, lineHeight: 20, fontWeight: "600" },
+  hashTags: { color: "#a9c4ff", marginTop: 5, fontSize: 12.5, fontWeight: "800" },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 5,
+    marginTop: 8,
+  },
+  locationText: {
+    color: "#fff",
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+  musicRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    marginTop: 10,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  musicText: { color: "#fff", marginLeft: 6, fontSize: 12.5, fontWeight: "700" },
+  reelMetaRail: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  reelMetaChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.32)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  reelMetaText: { color: "#fff", marginLeft: 5, fontSize: 11.5, fontWeight: "800" },
   actionRail: { alignItems: "center", marginBottom: 6 },
-  actionButton: { alignItems: "center", marginBottom: 16 },
-  actionText: { color: "#fff", fontSize: 12, marginTop: 4 },
+  actionButton: {
+    alignItems: "center",
+    marginBottom: 14,
+    minWidth: 48,
+    minHeight: 48,
+    borderRadius: 24,
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.28)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
+  actionText: { color: "#fff", fontSize: 11.5, marginTop: 3, fontWeight: "800" },
   sheetBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -932,6 +1115,22 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
   },
   shareActionText: { marginLeft: 12, color: "#111827", fontWeight: "600", fontSize: 14 },
+  commentsButton: {
+    marginTop: 14,
+    minHeight: 48,
+    borderRadius: 16,
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  commentsButtonDisabled: {
+    opacity: 0.4,
+  },
+  commentsButtonText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 14,
+  },
   actionsSheetContent: { paddingBottom: 24 },
   dangerText: { color: "#b91c1c" },
   reportTitle: { marginTop: 16, marginBottom: 10, color: "#111827", fontWeight: "800" },

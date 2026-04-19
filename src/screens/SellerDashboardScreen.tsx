@@ -6,9 +6,9 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
-  Alert
+  ActivityIndicator
 } from "react-native";
+import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 

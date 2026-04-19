@@ -12,11 +12,11 @@ import {
   Modal,
   ScrollView,
   ActivityIndicator,
-  Alert,
   Linking,
   KeyboardAvoidingView,
-  Platform,
+  Platform
 } from "react-native";
+import { Alert } from "../utils/appAlert";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
@@ -32,6 +32,7 @@ import {
 import { API } from "../api/api";
 import { connectSocket, socket } from "../socket";
 import {
+  buildCallEventMessage,
   getAttachmentDisplayName,
   getMessageAttachment,
   getMessageSenderId,
@@ -39,6 +40,8 @@ import {
   isAudioMessage,
   isDocumentMessage,
   isImageMessage,
+  parseCallEventMessage,
+  parseSharedContentMessage,
   isVideoMessage,
 } from "../utils/chatPresentation";
 import {
@@ -65,6 +68,8 @@ import { callingDisabledMessage, productFlags } from "../config/productFlags";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
+import VoiceMessageBubble from "../components/chat/VoiceMessageBubble";
+import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 
@@ -125,6 +130,7 @@ type ChatMessage = {
   text?: string;
   messageType?: string;
   attachment?: AttachmentShape;
+  duration?: number;
   sender?: string | { _id?: string };
   seenBy?: Array<{ userId?: string; seenAt?: string }>;
   reactions?: Array<{ emoji?: string; users?: string[] }>;
@@ -162,6 +168,18 @@ type PickedDocument = {
   uri: string;
   name?: string | null;
   type?: string | null;
+};
+
+type PendingVoiceNote = {
+  uri: string;
+  name: string;
+  type: string;
+  duration: number;
+};
+
+type CallEventPreview = {
+  label: string;
+  icon: string;
 };
 
 const FALLBACK_TIME_ZONE = "Asia/Kolkata";
@@ -209,6 +227,22 @@ const formatAppointmentSlotLabel = (isoValue: string) =>
     hour: "numeric",
     minute: "2-digit",
   });
+
+const buildCallEventPreview = (message: ChatMessage, currentUserId: string): CallEventPreview | null => {
+  const callEvent = parseCallEventMessage(message);
+  if (callEvent?.kind !== "call") {
+    return null;
+  }
+
+  const direction = String(callEvent.callerId || "") === String(currentUserId || "") ? "outgoing" : "incoming";
+  const isVideo = callEvent.callType === "video";
+  const callLabel = isVideo ? "video call" : "voice call";
+
+  return {
+    label: `${direction === "outgoing" ? "Outgoing" : "Incoming"} ${callLabel}`,
+    icon: isVideo ? "videocam-outline" : "call-outline",
+  };
+};
 
 const getDocumentPickerMessage = (error: unknown): string => {
   if (!isErrorWithCode(error)) {
@@ -321,9 +355,12 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagination, setPagination] = useState({ nextCursor: null, hasMore: false, limit: 30 });
   const [typingUserId, setTypingUserId] = useState("");
+  const [isSellerOnline, setIsSellerOnline] = useState(false);
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const quickOptions = useMemo(
@@ -335,6 +372,21 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     ],
     []
   );
+
+  const sellerPresenceText = useMemo(() => {
+    if (typingUserId) {
+      return "Online now";
+    }
+
+    if (seller?.availabilityStatus === false && !isSellerOnline) {
+      return "Away";
+    }
+
+    return isSellerOnline || seller?.availabilityStatus !== false ? "Online" : "Away";
+  }, [isSellerOnline, seller?.availabilityStatus, typingUserId]);
+
+  const sellerHeaderTint = colors.primary;
+  const sellerStatusColor = "rgba(255,255,255,0.78)";
 
   const sellerUserId = useMemo(() => {
     if (initialSellerUserId) {
@@ -351,6 +403,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const fetchSeller = useCallback(async () => {
     const res = await API.get(`/seller/${sellerId}`);
     setSeller(res.data.seller);
+    setIsSellerOnline(Boolean(res.data?.seller?.availabilityStatus));
     return res.data.seller as SellerProfile;
   }, [sellerId]);
 
@@ -400,23 +453,6 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     setErrorMessage("");
   }, []);
 
-  const mergeMessage = useCallback((nextMessage: any) => {
-    const normalizedMessage = normalizeMediaFieldsDeep(nextMessage) as ChatMessage;
-
-    setMessages((prev) => {
-      const nextIdentity = getMessageIdentity(normalizedMessage);
-      const exists = nextIdentity
-        ? prev.some((item) => getMessageIdentity(item) === nextIdentity)
-        : false;
-
-      if (exists) {
-        return prev;
-      }
-
-      return [...prev, normalizedMessage];
-    });
-  }, []);
-
   const resolveConversation = useCallback(async (targetServiceId?: string | null, options: { force?: boolean } = {}) => {
     if (!sellerUserId) {
       return null;
@@ -452,6 +488,21 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     });
   }, [conversationServiceId, resolveConversation, selectedService?._id, serviceId]);
 
+  const joinConversationRealtime = useCallback(async (targetConversationId: string | null) => {
+    if (!targetConversationId) {
+      return false;
+    }
+
+    try {
+      await connectSocket();
+      socket.emit("joinConversation", targetConversationId);
+      return true;
+    } catch (error) {
+      console.log("seller chat realtime join error:", error);
+      return false;
+    }
+  }, []);
+
   const appendMessage = useCallback((nextMessage: ChatMessage) => {
     const normalizedMessage = normalizeMediaFieldsDeep(nextMessage) as ChatMessage;
 
@@ -472,7 +523,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     setMessages((prev) => mergeMessageReaction(prev, payload) as ChatMessage[]);
   }, []);
 
-  const submitMessage = useCallback(async ({ text: nextText, file }: { text?: string; file?: { uri: string; name?: string | null; type?: string | null } }) => {
+  const submitMessage = useCallback(async ({ text: nextText, file, messageType, duration }: { text?: string; file?: { uri: string; name?: string | null; type?: string | null }; messageType?: string; duration?: number }) => {
     const resolvedConversationId = await ensureConversation();
 
     if (!resolvedConversationId) {
@@ -483,16 +534,12 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       conversationId: resolvedConversationId,
       text: nextText,
       file,
+      messageType,
+      duration,
     });
 
     const nextMessage = res.message as ChatMessage;
     appendMessage(nextMessage);
-
-    await connectSocket();
-    socket.emit("sendMessage", {
-      conversationId: resolvedConversationId,
-      message: nextMessage
-    });
   }, [appendMessage, ensureConversation]);
 
   const sendMessage = useCallback(async (msgText = text) => {
@@ -511,6 +558,35 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       setSending(false);
     }
   }, [sending, submitMessage, text]);
+
+  const sendCallEventLog = useCallback(async ({
+    conversationId: targetConversationId,
+    callSessionId,
+    callType,
+    event = "started",
+  }: {
+    conversationId: string;
+    callSessionId: string;
+    callType: "audio" | "video";
+    event?: string;
+  }) => {
+    const payload = buildCallEventMessage({
+      callSessionId,
+      callType,
+      event,
+      callerId: currentUserId,
+    });
+
+    const response = await sendChatMessage({
+      conversationId: targetConversationId,
+      text: payload,
+      messageType: "system",
+    });
+
+    if (response?.message) {
+      appendMessage(response.message as ChatMessage);
+    }
+  }, [appendMessage, currentUserId]);
 
   const sendBookingRequest = useCallback(async () => {
     const targetService = selectedService;
@@ -555,13 +631,6 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       if (verifyRes?.data?.systemMessage) {
         appendMessage(verifyRes.data.systemMessage as ChatMessage);
-        if (resolvedConversationId) {
-          await connectSocket();
-          socket.emit("sendMessage", {
-            conversationId: resolvedConversationId,
-            message: verifyRes.data.systemMessage
-          });
-        }
       }
 
       setShowPaymentModal(false);
@@ -901,8 +970,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         }
 
         await fetchMessages(nextConversationId);
-        await connectSocket();
-        socket.emit("joinConversation", nextConversationId);
+        void joinConversationRealtime(nextConversationId);
         setErrorMessage("");
       } catch (error) {
         console.log("seller chat conversation sync error:", error);
@@ -926,6 +994,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     conversationServiceId,
     currentConversationId,
     fetchMessages,
+    joinConversationRealtime,
     resolveConversation,
     selectedService?._id,
     sellerUserId,
@@ -934,19 +1003,41 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
   useEffect(() => {
     const handleReceiveMessage = (msg: ChatMessage) => {
+      const messageConversationId = String(
+        (msg as any)?.conversation?._id || (msg as any)?.conversation || (msg as any)?.conversationId || "",
+      );
+
+      if (
+        currentConversationId
+        && messageConversationId
+        && messageConversationId !== String(currentConversationId)
+      ) {
+        return;
+      }
+
       appendMessage(msg);
+
+      const senderId = String(getMessageSenderId(msg) || "");
+      if (senderId && senderId !== String(currentUserId || "")) {
+        setIsSellerOnline(true);
+      }
     };
 
     const handleTyping = (data: { userId?: string }) => {
       const nextUserId = String(data?.userId || "");
       if (nextUserId && nextUserId !== String(currentUserId || "")) {
         setTypingUserId(nextUserId);
+        setIsSellerOnline(true);
       }
     };
 
     const handleStopTyping = (data: { userId?: string }) => {
       const nextUserId = String(data?.userId || "");
       setTypingUserId((prev) => (prev === nextUserId ? "" : prev));
+
+      if (seller?.availabilityStatus === false) {
+        setIsSellerOnline(false);
+      }
     };
 
     const handleMessageSeen = (data: { messageId?: string; userId?: string; seenAt?: string }) => {
@@ -970,22 +1061,22 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       socket.off("messageSeen", handleMessageSeen);
       socket.off("messageReaction", handleMessageReaction);
     };
-  }, [appendMessage, applyMessageReaction, applyMessageSeen, currentUserId]);
+  }, [
+    appendMessage,
+    applyMessageReaction,
+    applyMessageSeen,
+    currentConversationId,
+    currentUserId,
+    seller?.availabilityStatus,
+  ]);
 
   useEffect(() => {
     if (!currentConversationId) {
       return;
     }
 
-    const joinConversation = async () => {
-      await connectSocket();
-      socket.emit("joinConversation", currentConversationId);
-    };
-
-    joinConversation().catch((error) => {
-      console.log("seller chat join error:", error);
-    });
-  }, [currentConversationId]);
+    void joinConversationRealtime(currentConversationId);
+  }, [currentConversationId, joinConversationRealtime]);
 
   const loadMoreMessages = useCallback(async () => {
     if (!currentConversationId || !pagination?.hasMore || !pagination?.nextCursor || loadingMore) {
@@ -1080,6 +1171,40 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       });
   }, [applyMessageReaction, currentUserId]);
 
+  const sendVoiceMessage = useCallback((voiceFile: { uri: string; name: string; type: string; duration: number }) => {
+    setPendingVoiceNote({
+      uri: voiceFile.uri,
+      name: voiceFile.name,
+      type: voiceFile.type,
+      duration: voiceFile.duration,
+    });
+  }, []);
+
+  const sendPendingVoiceMessage = useCallback(async () => {
+    if (!pendingVoiceNote) {
+      return;
+    }
+
+    try {
+      setUploading(true);
+      await submitMessage({
+        file: {
+          uri: pendingVoiceNote.uri,
+          name: pendingVoiceNote.name,
+          type: pendingVoiceNote.type,
+        },
+        duration: pendingVoiceNote.duration,
+        messageType: "voice",
+      });
+      setPendingVoiceNote(null);
+    } catch (error) {
+      console.log("seller voice send error:", error);
+      Alert.alert("Voice message failed", getReadableApiErrorMessage(error, "Unable to send voice message right now."));
+    } finally {
+      setUploading(false);
+    }
+  }, [pendingVoiceNote, submitMessage]);
+
   const openAttachmentUrl = useCallback(async (rawUrl: string | undefined | null, fallbackMessage: string) => {
     const targetUrl = normalizeMediaUrl(rawUrl);
     if (!targetUrl) {
@@ -1121,8 +1246,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       return;
     }
 
-    if (isAudioMessage(message)) {
-      openAttachmentUrl(attachment.url, "This audio file could not be opened right now.");
+    if (isAudioMessage(message) || String(message?.messageType || "") === "voice") {
       return;
     }
 
@@ -1136,6 +1260,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     const isSystemMessage = String(item?.messageType || "") === "system";
     const attachment = getMessageAttachment(item);
     const textValue = getMessageText(item);
+    const sharedContent = parseSharedContentMessage(item);
+    const callEvent = buildCallEventPreview(item, currentUserId);
+    const sharedMedia = Array.isArray(sharedContent?.media) ? sharedContent.media[0] : null;
     const locationPayload = parseLocationMessage(textValue);
     const seenCount = Array.isArray(item?.seenBy) ? item.seenBy.length : 0;
     const reactions = Array.isArray(item?.reactions) ? item.reactions : [];
@@ -1153,9 +1280,71 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           onLongPress={isSystemMessage ? undefined : () => reactToMessage(item._id!)}
           style={[
             styles.msgBubble,
+            sharedContent?.kind === "post" || callEvent ? styles.messageBubbleWide : null,
             isMine ? styles.myMsg : styles.otherMsg
           ]}
         >
+          {sharedContent?.kind === "post" ? (
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => {
+                if (sharedContent?.postId) {
+                  navigation.navigate("PostDetail", { postId: sharedContent.postId });
+                }
+              }}
+              style={[styles.sharedPostCard, isMine ? styles.sharedPostCardMine : null]}
+            >
+              <View style={styles.sharedPostHeader}>
+                <Image
+                  source={{ uri: normalizeMediaUrl(sharedContent?.user?.avatarUrl || DEFAULT_AVATAR_URL) }}
+                  style={styles.sharedPostAvatar}
+                />
+                <View style={styles.sharedPostMeta}>
+                  <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : null]} numberOfLines={1}>
+                    {sharedContent?.user?.username ? `@${sharedContent.user.username}` : sharedContent?.user?.name || "Aline2 post"}
+                  </Text>
+                  <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : null]} numberOfLines={1}>
+                    Shared post
+                  </Text>
+                </View>
+              </View>
+
+              {sharedMedia?.url || sharedMedia?.thumbnailUrl ? (
+                <Image
+                  source={{ uri: normalizeMediaUrl(sharedMedia?.thumbnailUrl || sharedMedia?.url || "") }}
+                  style={styles.sharedPostImage}
+                  resizeMode="cover"
+                />
+              ) : null}
+
+              {sharedContent?.caption ? (
+                <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null]} numberOfLines={3}>
+                  {sharedContent.caption}
+                </Text>
+              ) : null}
+            </TouchableOpacity>
+          ) : null}
+
+          {callEvent ? (
+            <View style={[styles.callEventCard, isMine ? styles.callEventCardMine : null]}>
+              <View style={[styles.callEventIcon, isMine ? styles.callEventIconMine : null]}>
+                <Icon
+                  name={callEvent.icon}
+                  size={16}
+                  color={isMine ? "#fff" : PRIMARY}
+                />
+              </View>
+              <View style={styles.callEventBody}>
+                <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null]}>
+                  {callEvent.label}
+                </Text>
+                <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null]}>
+                  Call activity is saved in chat
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
           {isImageMessage(item) && attachment?.url ? (
             <Image source={{ uri: normalizeMediaUrl(attachment.url) }} style={styles.messageImage} />
           ) : null}
@@ -1175,20 +1364,14 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             </View>
           ) : null}
 
-          {isAudioMessage(item) && attachment?.url ? (
-            <View style={styles.attachmentRow}>
-              <Icon
-                name="musical-notes-outline"
-                size={20}
-                color={isMine ? "#fff" : PRIMARY}
-              />
-              <Text
-                style={[styles.attachmentName, isMine ? styles.myText : styles.otherText]}
-                numberOfLines={1}
-              >
-                {getAttachmentDisplayName(item)}
-              </Text>
-            </View>
+          {(isAudioMessage(item) || item?.messageType === "voice") && attachment?.url ? (
+            <VoiceMessageBubble
+              audioUrl={attachment.url}
+              durationSeconds={Number(item?.duration || 0)}
+              isMine={isMine}
+              accentColor={PRIMARY}
+              label={item?.messageType === "voice" ? "Voice message" : getAttachmentDisplayName(item)}
+            />
           ) : null}
 
           {isDocumentMessage(item) && attachment?.url ? (
@@ -1207,7 +1390,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             </View>
           ) : null}
 
-          {!locationPayload && !!textValue && (
+          {!locationPayload && !sharedContent && !callEvent && !!textValue && (
             <Text style={isMine ? styles.myText : styles.otherText}>
               {textValue}
             </Text>
@@ -1289,8 +1472,6 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         throw new Error("Unable to open this seller conversation for calling.");
       }
 
-      await connectSocket();
-
       const response = await startCallSession({
         conversationId: resolvedConversationId,
         callType,
@@ -1302,6 +1483,16 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       if (!nextCallSessionId) {
         throw new Error("Call session could not be created.");
       }
+
+      void joinConversationRealtime(resolvedConversationId);
+
+      sendCallEventLog({
+        conversationId: resolvedConversationId,
+        callSessionId: nextCallSessionId,
+        callType,
+      }).catch((error) => {
+        console.log("seller call event log error:", error);
+      });
 
       navigation.navigate("CallScreen", {
         callSessionId: nextCallSessionId,
@@ -1319,15 +1510,15 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         getReadableApiErrorMessage(error, "Unable to start the call right now."),
       );
     }
-  }, [ensureConversation, navigation, selectedServiceLabel, seller?.profilePic, seller?.sellerName]);
+  }, [ensureConversation, joinConversationRealtime, navigation, selectedServiceLabel, sendCallEventLog, seller?.profilePic, seller?.sellerName]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
-      <StatusBar barStyle="light-content" backgroundColor={PRIMARY} />
+      <StatusBar barStyle="light-content" backgroundColor={sellerHeaderTint} />
 
-      <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color="#fff" />
+      <View style={[styles.header, { backgroundColor: sellerHeaderTint, borderBottomColor: `${colors.border}66`, paddingTop: 8 }]}>
+        <TouchableOpacity style={styles.headerActionButton} onPress={() => navigation.goBack()}>
+          <Icon name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -1344,30 +1535,36 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             style={styles.avatar}
           />
 
-          <View style={{ marginLeft: 8 }}>
-            <Text style={styles.name}>
+          <View style={styles.headerTextBlock}>
+            <Text style={styles.name} numberOfLines={1} ellipsizeMode="tail">
               {seller?.sellerName || "Loading..."}
             </Text>
-            <Text style={styles.status}>{typingUserId ? "Typing..." : `Chat for ${selectedServiceLabel}`}</Text>
+            <View style={styles.statusRow}>
+              <View style={[styles.presenceDot, { backgroundColor: sellerPresenceText === "Away" ? "#F59E0B" : "#22C55E" }]} />
+              <Text style={[styles.status, { color: sellerStatusColor }]} numberOfLines={1} ellipsizeMode="tail">
+                {typingUserId ? "Online now" : sellerPresenceText === "Away" ? "Away" : `Online • ${selectedServiceLabel}`}
+              </Text>
+            </View>
           </View>
         </TouchableOpacity>
 
         <View style={styles.rightIcons}>
           <TouchableOpacity
-            style={styles.headerIconButton}
+            style={styles.headerActionButton}
             onPress={() => startCallFlow("audio")}
             disabled={!seller?.user}
           >
             <Icon name="call-outline" size={20} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.headerIconButton}
+            style={styles.headerActionButton}
             onPress={() => startCallFlow("video")}
             disabled={!seller?.user}
           >
             <Icon name="videocam-outline" size={22} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
+            style={styles.headerActionButton}
             onPress={() =>
               navigation.navigate("SellerDetailsScreen", { sellerId })
             }
@@ -1554,7 +1751,36 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           </View>
         </View>
 
-        <View style={[styles.inputWrap, { backgroundColor: colors.card, paddingBottom: Math.max(6, insets.bottom), borderTopColor: colors.border }]}>
+        <View style={[styles.inputWrap, { backgroundColor: colors.card, paddingBottom: Math.max(8, insets.bottom), borderTopColor: colors.border }]}>
+          {pendingVoiceNote ? (
+            <View style={[styles.attachmentPreviewCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+              <View style={styles.pendingVoicePreview}>
+                <VoiceMessageBubble
+                  audioUrl={pendingVoiceNote.uri}
+                  durationSeconds={pendingVoiceNote.duration}
+                  accentColor={PRIMARY}
+                  backgroundColor={`${PRIMARY}10`}
+                  textColor={colors.text}
+                  metaColor={colors.placeholder}
+                  label="Voice note preview"
+                />
+                <View style={styles.pendingVoiceActions}>
+                  <TouchableOpacity
+                    onPress={() => setPendingVoiceNote(null)}
+                    disabled={uploading}
+                    style={styles.pendingVoiceActionButton}
+                  >
+                    <Icon name="trash-outline" size={18} color={colors.placeholder} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          ) : null}
+
+          <TouchableOpacity style={styles.attachButton} onPress={() => setShowStickerPicker(true)} disabled={uploading || loading}>
+            <Icon name="happy-outline" size={22} color={colors.primary} />
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.attachButton} onPress={sendCameraAttachment} disabled={uploading || loading}>
             <Icon name="camera-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
@@ -1576,7 +1802,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           </TouchableOpacity>
 
           <TextInput
-            placeholder={uploading ? "Uploading attachment..." : "Message..."}
+            placeholder={uploading ? "Uploading attachment..." : pendingVoiceNote ? "Voice note ready to send" : "Message..."}
             value={text}
             onChangeText={handleTextChange}
             style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
@@ -1586,10 +1812,17 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
           {uploading ? (
             <ActivityIndicator color={PRIMARY} />
-          ) : text.trim() ? (
+          ) : pendingVoiceNote || text.trim() ? (
             <TouchableOpacity
               style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
               onPress={() => {
+                if (pendingVoiceNote) {
+                  sendPendingVoiceMessage().catch((error) => {
+                    console.log("seller voice preview send error:", error);
+                  });
+                  return;
+                }
+
                 sendMessage().catch((error) => {
                   console.log("seller chat send error:", error);
                 });
@@ -1602,33 +1835,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             <VoiceRecorderButton
               color={colors.primary}
               disabled={uploading || loading}
-              onSend={async (voiceFile) => {
-                try {
-                  setUploading(true);
-                  const resolvedConversationId = await ensureConversation();
-                  const formData = new FormData();
-                  formData.append("conversationId", resolvedConversationId as string);
-                  formData.append("messageType", "voice");
-                  formData.append("file", {
-                    uri: voiceFile.uri,
-                    name: voiceFile.name,
-                    type: voiceFile.type,
-                  } as any);
-
-                  const res = await API.post("/message/send", formData, {
-                    headers: { "Content-Type": "multipart/form-data" },
-                  });
-
-                  if (res.data?.message) {
-                    mergeMessage(res.data.message);
-                  }
-                } catch (error) {
-                  console.log("seller voice send error:", error);
-                  Alert.alert("Voice message failed", getReadableApiErrorMessage(error, "Unable to send voice message right now."));
-                } finally {
-                  setUploading(false);
-                }
-              }}
+              onSend={sendVoiceMessage}
             />
           )}
         </View>
@@ -1659,6 +1866,46 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           ) : null}
         </View>
       </Modal>
+
+      <StickerPickerSheet
+        visible={showStickerPicker}
+        onClose={() => setShowStickerPicker(false)}
+        onSend={async (sticker) => {
+          try {
+            if (sticker.emoji && !sticker.imageUrl) {
+              await submitMessage({
+                text: sticker.emoji,
+              });
+              return;
+            }
+
+            const resolvedConversationId = await ensureConversation();
+            if (!resolvedConversationId) {
+              return;
+            }
+
+            const stickerText =
+              sticker.type === "emoji"
+                ? ""
+                : sticker.type === "gif"
+                  ? ""
+                  : sticker.name || "Sticker";
+
+            const res = await sendChatMessage({
+              conversationId: resolvedConversationId,
+              text: stickerText,
+              mediaUrl: normalizeMediaUrl(sticker.imageUrl),
+              messageType: sticker.type === "gif" ? "gif" : "image",
+            });
+
+            if (res?.message) {
+              appendMessage(res.message as ChatMessage);
+            }
+          } catch (error) {
+            console.log("seller sticker send error:", error);
+          }
+        }}
+      />
 
       <Modal visible={showLocationComposer} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -1791,12 +2038,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F4F5FA" },
   flexFill: { flex: 1 },
   header: {
-    backgroundColor: PRIMARY,
     paddingBottom: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between"
+    justifyContent: "space-between",
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   centerHeader: {
     flexDirection: "row",
@@ -1804,26 +2051,47 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 10
   },
+  headerTextBlock: {
+    marginLeft: 10,
+    flexShrink: 1,
+  },
   avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19
+    width: 44,
+    height: 44,
+    borderRadius: 22
   },
   name: {
     color: "#fff",
     fontWeight: "700",
-    fontSize: 15
+    fontSize: 16
+  },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  presenceDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 7,
   },
   status: {
-    color: "#E5D9FF",
-    fontSize: 11
+    fontSize: 12,
+    fontWeight: "600"
   },
   rightIcons: {
     flexDirection: "row",
     alignItems: "center"
   },
-  headerIconButton: {
-    marginRight: 14,
+  headerActionButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 8,
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   premiumServiceWrap: {
     backgroundColor: "#fff",
@@ -1959,6 +2227,112 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     flexShrink: 1,
   },
+  messageBubbleWide: {
+    maxWidth: "92%",
+    minWidth: 260,
+  },
+  sharedPostCard: {
+    width: "100%",
+    minWidth: 260,
+    borderRadius: 14,
+    padding: 10,
+    marginBottom: 8,
+    backgroundColor: "rgba(123, 77, 255, 0.08)",
+  },
+  sharedPostCardMine: {
+    backgroundColor: "rgba(255,255,255,0.14)",
+  },
+  sharedPostHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  sharedPostAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+  },
+  sharedPostMeta: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  sharedPostAuthor: {
+    color: "#111827",
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+  sharedPostAuthorMine: {
+    color: "#fff",
+  },
+  sharedPostLabel: {
+    marginTop: 1,
+    color: "#667085",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  sharedPostLabelMine: {
+    color: "rgba(255,255,255,0.78)",
+  },
+  sharedPostImage: {
+    width: "100%",
+    height: 160,
+    borderRadius: 12,
+    marginTop: 10,
+  },
+  sharedPostCaption: {
+    marginTop: 10,
+    color: "#344054",
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  sharedPostCaptionMine: {
+    color: "rgba(255,255,255,0.92)",
+  },
+  callEventCard: {
+    width: "100%",
+    minWidth: 220,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(123, 77, 255, 0.08)",
+  },
+  callEventCardMine: {
+    backgroundColor: "rgba(255,255,255,0.14)",
+  },
+  callEventIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(123, 77, 255, 0.16)",
+  },
+  callEventIconMine: {
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  callEventBody: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  callEventTitle: {
+    color: "#111827",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  callEventTitleMine: {
+    color: "#fff",
+  },
+  callEventMeta: {
+    marginTop: 2,
+    color: "#667085",
+    fontSize: 11.5,
+    fontWeight: "600",
+  },
+  callEventMetaMine: {
+    color: "rgba(255,255,255,0.78)",
+  },
   myMsg: { backgroundColor: PRIMARY },
   otherMsg: { backgroundColor: "#fff" },
   myText: { color: "#fff" },
@@ -2082,21 +2456,43 @@ const styles = StyleSheet.create({
   quickText: { color: PRIMARY, fontWeight: "600" },
   inputWrap: {
     flexDirection: "row",
+    flexWrap: "wrap",
     padding: 10,
     backgroundColor: "#fff",
     alignItems: "center",
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  attachmentPreviewCard: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 10,
+    marginBottom: 10,
+  },
+  pendingVoicePreview: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  pendingVoiceActions: {
+    marginLeft: 10,
+  },
+  pendingVoiceActionButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
   },
   attachButton: {
-    marginLeft: 10,
     marginRight: 10
   },
   input: {
     flex: 1,
     backgroundColor: "#F1F1F4",
-    borderRadius: 25,
+    borderRadius: 22,
     paddingHorizontal: 15,
-    minHeight: 44
+    minHeight: 44,
+    fontSize: 13,
   },
   sendBtn: {
     backgroundColor: PRIMARY,

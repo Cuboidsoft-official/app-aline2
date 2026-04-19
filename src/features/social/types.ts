@@ -62,13 +62,14 @@ export interface Post {
   caption: string;
   media: MediaAsset[];
   location?: string;
-  music?: string;
+  music?: StoryMusic;
   hashtags: string[];
   mentions: string[];
   collaboratorIds: string[];
   settings: PostSettings;
   createdAt: number;
   filterPreset?: string;
+  stickers: StorySticker[];
   editedAt?: number;
   likesCount: number;
   commentsCount: number;
@@ -194,6 +195,8 @@ export interface Comment {
   parentCommentId?: string | null;
   user: SocialUser;
   text: string;
+  audioUrl?: string;
+  audioDuration?: number;
   createdAt: number;
   liked: boolean;
   likesCount: number;
@@ -208,6 +211,8 @@ export interface ReelComment {
   parentCommentId?: string | null;
   user: SocialUser;
   text: string;
+  audioUrl?: string;
+  audioDuration?: number;
   createdAt: number;
   liked: boolean;
   likesCount: number;
@@ -216,6 +221,13 @@ export interface ReelComment {
 }
 
 export type SwipeComment = ReelComment;
+
+export interface CommentAudioFile {
+  uri: string;
+  name: string;
+  type: string;
+  duration?: number;
+}
 
 export interface StoryReply {
   id: string;
@@ -252,6 +264,7 @@ export interface CreatePostInput {
   collaboratorIds?: string[];
   settings?: Partial<PostSettings>;
   filterPreset?: string;
+  stickers?: StorySticker[];
 }
 
 export interface CreateStoryInput {
@@ -356,7 +369,7 @@ export interface SocialApi {
   togglePostLike(postId: string): Promise<Post>;
   togglePostSave(postId: string): Promise<Post>;
   sharePost(postId: string): Promise<Post>;
-  addPostComment(postId: string, text: string, parentCommentId?: string): Promise<Comment>;
+  addPostComment(postId: string, text: string, parentCommentId?: string, audioFile?: CommentAudioFile): Promise<Comment>;
   getPostComments(postId: string): Promise<Comment[]>;
   togglePostCommentLike(postId: string, commentId: string): Promise<Comment>;
   deletePostComment(postId: string, commentId: string): Promise<DeleteCommentResult>;
@@ -373,8 +386,8 @@ export interface SocialApi {
   shareSwipe(swipeId: string): Promise<Swipe>;
   getReelComments(reelId: string): Promise<ReelComment[]>;
   getSwipeComments(swipeId: string): Promise<SwipeComment[]>;
-  addReelComment(reelId: string, text: string, parentCommentId?: string): Promise<ReelComment>;
-  addSwipeComment(swipeId: string, text: string, parentCommentId?: string): Promise<SwipeComment>;
+  addReelComment(reelId: string, text: string, parentCommentId?: string, audioFile?: CommentAudioFile): Promise<ReelComment>;
+  addSwipeComment(swipeId: string, text: string, parentCommentId?: string, audioFile?: CommentAudioFile): Promise<SwipeComment>;
   toggleReelCommentLike(reelId: string, commentId: string): Promise<ReelComment>;
   toggleSwipeCommentLike(swipeId: string, commentId: string): Promise<SwipeComment>;
   deleteReelComment(reelId: string, commentId: string): Promise<DeleteCommentResult>;

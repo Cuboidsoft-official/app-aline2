@@ -6,14 +6,14 @@
  */
 import React, { useCallback, useState } from "react";
 import {
-    Alert,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
+import { Alert } from "../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
 // @ts-ignore — clipboard module lacks TS declarations in this project
 import Clipboard from "@react-native-clipboard/clipboard";
@@ -47,6 +47,7 @@ interface MessageContextMenuProps {
     isMine: boolean;
     onClose: () => void;
     onReact?: (messageId: string, emoji: string) => void;
+    onReply?: (message: ChatMessage) => void;
     onForward?: (messageId: string) => void;
     onMessageEdited?: (data: MessageEditedData) => void;
     onMessageDeleted?: (messageId: string) => void;
@@ -58,6 +59,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
     isMine,
     onClose,
     onReact,
+    onReply,
     onForward,
     onMessageEdited,
     onMessageDeleted,
@@ -154,6 +156,13 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
         onClose();
     }, [message?._id, onClose, onForward]);
 
+    const handleReply = useCallback(() => {
+        if (onReply && message) {
+            onReply(message);
+        }
+        onClose();
+    }, [message, onClose, onReply]);
+
     if (!visible || !message) return null;
 
     return (
@@ -212,6 +221,13 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
                                 <TouchableOpacity style={styles.action} onPress={handleEditStart}>
                                     <Icon name="create-outline" size={20} color="#333" />
                                     <Text style={styles.actionText}>Edit</Text>
+                                </TouchableOpacity>
+                            ) : null}
+
+                            {onReply ? (
+                                <TouchableOpacity style={styles.action} onPress={handleReply}>
+                                    <Icon name="return-up-back-outline" size={20} color="#333" />
+                                    <Text style={styles.actionText}>Reply</Text>
                                 </TouchableOpacity>
                             ) : null}
 

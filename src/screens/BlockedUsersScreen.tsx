@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
-import {View,Text,StyleSheet,FlatList,Image,TouchableOpacity,ActivityIndicator,Alert,RefreshControl} from "react-native";
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, RefreshControl } from "react-native";
+import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 import { useAppTheme } from "../theme/AppThemeContext";

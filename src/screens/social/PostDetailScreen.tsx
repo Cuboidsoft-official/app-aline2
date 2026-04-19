@@ -1,18 +1,20 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
+import { Alert } from "../../utils/appAlert";
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { createSound } from "react-native-nitro-sound";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
@@ -22,9 +24,17 @@ import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
+import { PHOTO_FILTER_LIST } from "../../utils/photoFilters";
 import { getStoredUserId } from "../../utils/authSession";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { useAppTheme } from "../../theme/AppThemeContext";
+
+let ColorMatrix: any = null;
+try {
+  ColorMatrix = require("react-native-color-matrix-image-filters").ColorMatrix;
+} catch {
+  ColorMatrix = null;
+}
 
 function PostDetailScreen({ route, navigation }: any) {
   const { colors } = useAppTheme();
@@ -39,10 +49,14 @@ function PostDetailScreen({ route, navigation }: any) {
   const [busyLike, setBusyLike] = useState(false);
   const [busySave, setBusySave] = useState(false);
   const [activeSheet, setActiveSheet] = useState<null | "comments" | "share" | "actions">(null);
+  const [isMediaSoundEnabled, setIsMediaSoundEnabled] = useState(true);
 
   const [caption, setCaption] = useState("");
   const [hideLikeCount, setHideLikeCount] = useState(false);
   const [disableComments, setDisableComments] = useState(false);
+  const musicPlayerRef = useRef(createSound());
+  const musicTrackKeyRef = useRef("");
+  const musicEndMsRef = useRef(0);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -57,12 +71,6 @@ function PostDetailScreen({ route, navigation }: any) {
           const [data, nextUserId] = await Promise.all([socialApi.getPost(postId), getStoredUserId()]);
 
           if (!active) {
-            return;
-          }
-
-          if (data.user.id !== nextUserId) {
-            Alert.alert("Unavailable", "Post details are only available for posts you own.");
-            navigation.goBack();
             return;
           }
 
@@ -90,6 +98,110 @@ function PostDetailScreen({ route, navigation }: any) {
       };
     }, [navigation, postId]),
   );
+
+  const attachedMusicUrl = useMemo(
+    () => normalizeMediaUrl(post?.music?.previewUrl || ""),
+    [post?.music?.previewUrl],
+  );
+  const attachedMusicStartMs = Math.max(0, Number(post?.music?.startTime || 0) * 1000);
+  const attachedMusicDurationMs = Math.max(0, Number(post?.music?.duration || 0) * 1000);
+  const attachedMusicTrackKey = post
+    ? `${post.id}:${attachedMusicUrl}:${attachedMusicStartMs}:${attachedMusicDurationMs}`
+    : "";
+
+  useEffect(() => {
+    const player = musicPlayerRef.current;
+
+    player.setSubscriptionDuration(0.1);
+    player.addPlayBackListener((event: any) => {
+      const playbackEndMs = musicEndMsRef.current;
+      const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
+
+      if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
+        musicEndMsRef.current = 0;
+        player.pausePlayer().catch(() => undefined);
+      }
+    });
+    player.addPlaybackEndListener(() => {
+      musicEndMsRef.current = 0;
+    });
+
+    return () => {
+      try {
+        player.removePlayBackListener();
+      } catch {
+        // noop
+      }
+
+      try {
+        player.removePlaybackEndListener();
+      } catch {
+        // noop
+      }
+
+      player.stopPlayer().catch(() => undefined);
+      player.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    const player = musicPlayerRef.current;
+    const shouldPlayMusic = !!attachedMusicUrl && isMediaSoundEnabled && !activeSheet;
+
+    const stopMusic = async () => {
+      musicTrackKeyRef.current = "";
+      musicEndMsRef.current = 0;
+
+      try {
+        await player.stopPlayer();
+      } catch {
+        // noop
+      }
+    };
+
+    if (!shouldPlayMusic) {
+      stopMusic().catch(() => undefined);
+      return;
+    }
+
+    if (musicTrackKeyRef.current === attachedMusicTrackKey) {
+      player.resumePlayer().catch(() => undefined);
+      return;
+    }
+
+    let cancelled = false;
+
+    const playMusic = async () => {
+      await stopMusic();
+      if (cancelled || !attachedMusicUrl) {
+        return;
+      }
+
+      musicTrackKeyRef.current = attachedMusicTrackKey;
+      musicEndMsRef.current =
+        attachedMusicDurationMs > 0 ? attachedMusicStartMs + attachedMusicDurationMs : 0;
+
+      await player.startPlayer(attachedMusicUrl);
+      await player.seekToPlayer(attachedMusicStartMs);
+      await player.setVolume(1);
+    };
+
+    playMusic().catch((error) => {
+      console.log("post detail music playback error", error);
+      stopMusic().catch(() => undefined);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSheet,
+    attachedMusicDurationMs,
+    attachedMusicStartMs,
+    attachedMusicTrackKey,
+    attachedMusicUrl,
+    isMediaSoundEnabled,
+  ]);
 
   const saveChanges = async () => {
     if (!post || saving || post.user.id !== currentUserId) {
@@ -172,6 +284,100 @@ function PostDetailScreen({ route, navigation }: any) {
 
   const closeSheet = () => setActiveSheet(null);
 
+  const renderMediaAsset = (asset: Post["media"][number], key?: string) => {
+    const assetUrl = normalizeMediaUrl(asset?.url);
+    const posterUrl = normalizeMediaUrl(asset?.thumbnailUrl || asset?.url);
+
+    if (!assetUrl) {
+      return <View key={key} style={styles.image} />;
+    }
+
+    if (asset.mediaType === "video") {
+      return (
+        <SocialVideo
+          key={key || asset.id}
+          uri={assetUrl}
+          posterUri={posterUrl}
+          style={styles.image}
+          muted={!isMediaSoundEnabled || !!post?.music?.previewUrl}
+          repeat
+        />
+      );
+    }
+
+    const rawImage = (
+      <Image
+        key={key || asset.id}
+        source={{ uri: assetUrl }}
+        style={styles.image}
+      />
+    );
+
+    if (post?.filterPreset && ColorMatrix) {
+      const activeFilter = PHOTO_FILTER_LIST.find((filter) => filter.id === post.filterPreset);
+      if (activeFilter?.matrix) {
+        return <ColorMatrix key={key || asset.id} matrix={activeFilter.matrix}>{rawImage}</ColorMatrix>;
+      }
+    }
+
+    return rawImage;
+  };
+
+  const renderStickerOverlay = () => {
+    if (!post?.stickers?.length) {
+      return null;
+    }
+
+    return (
+      <View pointerEvents="none" style={styles.stickerLayer}>
+        {post.stickers.map((sticker) => {
+          const baseStyle = {
+            left: `${Math.max(0, Math.min(1, sticker.position.x)) * 100}%`,
+            top: `${Math.max(0, Math.min(1, sticker.position.y)) * 100}%`,
+            width: `${Math.max(0.12, Math.min(1, sticker.position.width)) * 100}%`,
+            minHeight: `${Math.max(0.08, Math.min(1, sticker.position.height)) * 100}%`,
+            transform: [
+              { rotate: `${sticker.position.rotation || 0}deg` },
+              { scale: sticker.position.scale || 1 },
+            ],
+          } as const;
+
+          if (sticker.type === "emoji") {
+            return (
+              <View key={sticker.id} style={[styles.emojiSticker, baseStyle]}>
+                <Text style={[styles.emojiStickerText, sticker.style?.fontSize ? { fontSize: sticker.style.fontSize } : null]}>
+                  {sticker.text}
+                </Text>
+              </View>
+            );
+          }
+
+          return (
+            <View
+              key={sticker.id}
+              style={[
+                styles.textSticker,
+                baseStyle,
+                sticker.style?.backgroundColor ? { backgroundColor: sticker.style.backgroundColor } : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.textStickerText,
+                  sticker.style?.color ? { color: sticker.style.color } : null,
+                  sticker.style?.fontSize ? { fontSize: sticker.style.fontSize } : null,
+                  sticker.style?.alignment ? { textAlign: sticker.style.alignment } : null,
+                ]}
+              >
+                {sticker.text}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
   if (loading || !post) {
     return (
       <SafeAreaView style={[styles.centered, { backgroundColor: colors.background }]}>
@@ -205,41 +411,29 @@ function PostDetailScreen({ route, navigation }: any) {
         </View>
 
         <ScrollView>
-          {post.type === "carousel" ? (
-            <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
-              {post.media.map((asset) => (
-                asset.mediaType === "video" ? (
-                  <SocialVideo
-                    key={asset.id}
-                    uri={normalizeMediaUrl(asset.url)}
-                    posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
-                    style={styles.image}
-                    controls
-                  />
-                ) : (
-                  <Image
-                    key={asset.id}
-                    source={{ uri: normalizeMediaUrl(asset.url) }}
-                    style={styles.image}
-                  />
-                )
-              ))}
-            </ScrollView>
-          ) : (
-            post.media[0]?.mediaType === "video" ? (
-              <SocialVideo
-                uri={normalizeMediaUrl(post.media[0]?.url)}
-                posterUri={normalizeMediaUrl(post.media[0]?.thumbnailUrl || post.media[0]?.url)}
-                style={styles.image}
-                controls
-              />
+          <Pressable style={styles.mediaSurface} onPress={() => setIsMediaSoundEnabled((current) => !current)}>
+            {post.type === "carousel" ? (
+              <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+                {post.media.map((asset) => renderMediaAsset(asset, asset.id))}
+              </ScrollView>
             ) : (
-              <Image
-                source={{ uri: normalizeMediaUrl(post.media[0]?.url) }}
-                style={styles.image}
-              />
-            )
-          )}
+              post.media[0] ? renderMediaAsset(post.media[0], post.media[0].id) : <View style={styles.image} />
+            )}
+            {renderStickerOverlay()}
+
+            {(post.music?.previewUrl || post.media.some((asset) => asset.mediaType === "video")) ? (
+              <View style={styles.mediaSoundBadge}>
+                <Icon
+                  name={isMediaSoundEnabled ? "volume-high-outline" : "volume-mute-outline"}
+                  size={16}
+                  color="#fff"
+                />
+                <Text style={styles.mediaSoundBadgeText}>
+                  {isMediaSoundEnabled ? "Tap to mute" : "Tap for sound"}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
 
           <View style={styles.body}>
             <Text style={[styles.meta, { color: colors.mutedText }]}>Type: {post.type}</Text>
@@ -286,7 +480,11 @@ function PostDetailScreen({ route, navigation }: any) {
 
             <Text style={[styles.label, { color: colors.text }]}>Music</Text>
             <View style={[styles.readOnlyField, { borderColor: colors.border, backgroundColor: colors.card }]}>
-              <Text style={[styles.readOnlyText, { color: colors.text }]}>{post.music || "Not set"}</Text>
+              <Text style={[styles.readOnlyText, { color: colors.text }]}>
+                {post.music?.trackName
+                  ? `${post.music.trackName}${post.music.artistName ? ` • ${post.music.artistName}` : ""}`
+                  : "Not set"}
+              </Text>
             </View>
 
             {post.hashtags.length ? (
@@ -392,7 +590,45 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: "row", alignItems: "center" },
   headerActionGap: { marginRight: 10, padding: 2 },
   editButton: { fontSize: 15, color: "#3345d1", fontWeight: "700" },
+  mediaSurface: { position: "relative" },
   image: { width: "100%", height: 320, backgroundColor: "#f4f4f4" },
+  stickerLayer: { ...StyleSheet.absoluteFillObject },
+  emojiSticker: {
+    position: "absolute",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  emojiStickerText: { fontSize: 30 },
+  textSticker: {
+    position: "absolute",
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: "rgba(15,23,42,0.56)",
+  },
+  textStickerText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  mediaSoundBadge: {
+    position: "absolute",
+    right: 14,
+    bottom: 14,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "rgba(15,23,42,0.72)",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  mediaSoundBadgeText: {
+    marginLeft: 6,
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
   body: { padding: 14 },
   meta: { color: "#666", fontSize: 12, marginBottom: 4 },
   actionRow: { flexDirection: "row", alignItems: "center", marginTop: 8, marginBottom: 10 },
