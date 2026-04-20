@@ -61,6 +61,11 @@ type SlotOption = {
   label?: string;
 };
 
+type MockPaymentState = {
+  request: ServiceRequestRecord;
+  amountLabel: string;
+};
+
 const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
 
 const statusColorMap: Record<string, string> = {
@@ -99,6 +104,7 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
   const [slotOptions, setSlotOptions] = useState<SlotOption[]>([]);
   const [selectedSlot, setSelectedSlot] = useState("");
   const [slotSubmitMode, setSlotSubmitMode] = useState<"accept" | "reschedule">("accept");
+  const [mockPaymentState, setMockPaymentState] = useState<MockPaymentState | null>(null);
 
   const fetchData = useCallback(async ({ refresh = false } = {}) => {
     try {
@@ -250,6 +256,16 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
         throw new Error("Payment payload is missing");
       }
 
+      if (payment?.isMock) {
+        setMockPaymentState({
+          request: item,
+          amountLabel: item.pricing?.amount
+            ? formatCurrencyAmount(item.pricing.amount, item.pricing.currency || "INR")
+            : "Quoted later",
+        });
+        return;
+      }
+
       const checkoutResult = await openRazorpayCheckout(payment);
       await API.post(`/service-requests/${item._id}/payment/verify`, checkoutResult);
       await fetchData();
@@ -268,6 +284,27 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
       setUpdatingId("");
     }
   }, [fetchData]);
+
+  const completeMockPayment = useCallback(async () => {
+    if (!mockPaymentState?.request?._id) {
+      return;
+    }
+
+    try {
+      setUpdatingId(mockPaymentState.request._id);
+      await API.post(`/service-requests/${mockPaymentState.request._id}/payment/verify`, {
+        testMode: true,
+        testPaymentId: `manual_test_pay_${Date.now()}`,
+      });
+      setMockPaymentState(null);
+      await fetchData();
+      Alert.alert("Payment Complete", "Test booking payment is marked complete and the seller has been notified.");
+    } catch (error: any) {
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to complete test payment"));
+    } finally {
+      setUpdatingId("");
+    }
+  }, [fetchData, mockPaymentState]);
 
   const renderActions = (item: ServiceRequestRecord) => {
     if (mode === "seller") {
@@ -521,6 +558,35 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={!!mockPaymentState} transparent animationType="fade" onRequestClose={() => setMockPaymentState(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Payment Required</Text>
+            <Text style={[styles.modalSubtitle, { color: colors.mutedText }]}>
+              Live payment gateway abhi configured nahi hai. Testing ke liye demo payment continue karke booking confirm kar sakte ho.
+            </Text>
+            <View style={styles.mockPaymentCard}>
+              <Text style={styles.mockPaymentLabel}>{mockPaymentState?.request?.service?.serviceName || "Appointment"}</Text>
+              <Text style={styles.mockPaymentAmount}>{mockPaymentState?.amountLabel || "Quoted later"}</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.modalPrimaryButton, updatingId === mockPaymentState?.request?._id && styles.modalPrimaryButtonDisabled]}
+              onPress={() => {
+                completeMockPayment().catch((error) => {
+                  console.log("mock payment error:", error);
+                });
+              }}
+              disabled={updatingId === mockPaymentState?.request?._id}
+            >
+              <Text style={styles.modalPrimaryButtonText}>Pay & Book for Testing</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setMockPaymentState(null)} disabled={updatingId === mockPaymentState?.request?._id}>
+              <Text style={[styles.modalCancelText, { color: colors.mutedText }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -652,5 +718,23 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     textAlign: "center",
     fontWeight: "600",
+  },
+  mockPaymentCard: {
+    marginTop: 8,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: "#F5F3FF",
+  },
+  mockPaymentLabel: {
+    color: "#5B21B6",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  mockPaymentAmount: {
+    marginTop: 4,
+    color: "#111827",
+    fontSize: 16,
+    fontWeight: "800",
   },
 });

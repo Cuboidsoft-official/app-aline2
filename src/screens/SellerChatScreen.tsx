@@ -20,6 +20,7 @@ import {
 import { Alert } from "../utils/appAlert";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
+import { Swipeable } from "react-native-gesture-handler";
 import Icon from "react-native-vector-icons/Ionicons";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import {
@@ -36,6 +37,7 @@ import {
   buildCallEventMessage,
   getAttachmentDisplayName,
   getMessageAttachment,
+  getMessageReply,
   getMessageSenderId,
   getMessageText,
   isAudioMessage,
@@ -176,6 +178,13 @@ type ChatMessage = {
   sender?: string | { _id?: string };
   seenBy?: Array<{ userId?: string; seenAt?: string }>;
   reactions?: Array<{ emoji?: string; users?: string[] }>;
+  createdAt?: string;
+  replyToMessage?: ChatMessage | null;
+  replyTo?: ChatMessage | string | null;
+  parentMessage?: ChatMessage | null;
+  replyToMessageId?: string;
+  replyMessageId?: string;
+  parentMessageId?: string;
 };
 
 type SellerService = {
@@ -222,6 +231,20 @@ type PendingVoiceNote = {
 type CallEventPreview = {
   label: string;
   icon: string;
+};
+
+type ReplyPreviewState = {
+  id: string;
+  author: string;
+  snippet: string;
+  message: ChatMessage;
+};
+
+type ManualPaymentState = {
+  requestId: string;
+  serviceName: string;
+  amountLabel: string;
+  note: string;
 };
 
 const FALLBACK_TIME_ZONE = "Asia/Kolkata";
@@ -284,6 +307,22 @@ const formatAppointmentSlotWindow = (slot?: AppointmentSlot | null) => {
   }
 
   return startLabel;
+};
+
+const formatMessageTime = (value?: string) => {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 };
 
 const formatCalendarDate = (value: string | Date) => {
@@ -451,8 +490,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
+  const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
+  const [mockPaymentState, setMockPaymentState] = useState<ManualPaymentState | null>(null);
   const [showAssistant, setShowAssistant] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messageInputRef = useRef<TextInput | null>(null);
   const selectedServiceLabel = selectedService?.serviceName || serviceName || "service requests";
   const selectedAppointmentSlot = useMemo(
     () => appointmentSlots.find((slot) => slot.start === selectedAppointmentStart) || null,
@@ -480,7 +522,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   }, [isSellerActive, selectedServiceLabel, seller?.lastSeenAt, sellerLastSeenAt, typingUserId]);
 
   const sellerStatusColor = "rgba(255,255,255,0.78)";
-  const canUseComposer = false;
+  const canUseComposer = Boolean(seller) && seller?.availabilityStatus !== false;
   const callingEnabled = false;
   const assistantScope = "Seller chat support";
   const assistantScopeHint = `Get help with booking, payment, appointments, and chat support for ${seller?.sellerName || "this seller"}.`;
@@ -502,6 +544,48 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         return `${senderLabel}: ${rawText}`;
       }),
     [currentUserId, messages, seller?.sellerName],
+  );
+  const messageMap = useMemo(() => {
+    const nextMap = new Map<string, ChatMessage>();
+    messages.forEach((message) => {
+      const identity = getMessageIdentity(message);
+      if (identity) {
+        nextMap.set(identity, message);
+      }
+    });
+    return nextMap;
+  }, [messages]);
+  const replyingToMessageId = useMemo(() => getMessageIdentity(replyingToMessage), [replyingToMessage]);
+
+  const buildReplyPreview = useCallback((message: ChatMessage | null): ReplyPreviewState | null => {
+    if (!message) {
+      return null;
+    }
+
+    const messageId = getMessageIdentity(message);
+    if (!messageId) {
+      return null;
+    }
+
+    const resolvedMessage = messageMap.get(messageId) || message;
+    const senderId = String(getMessageSenderId(resolvedMessage) || "");
+    const senderInfo = typeof resolvedMessage?.sender === "object" ? resolvedMessage.sender : null;
+    const author = senderId && senderId === String(currentUserId || "")
+      ? "You"
+      : String(senderInfo?.username || senderInfo?.name || seller?.sellerName || "Reply");
+    const snippet = getMessageText(resolvedMessage) || String(resolvedMessage?.messageType || "Message");
+
+    return {
+      id: messageId,
+      author,
+      snippet,
+      message: resolvedMessage,
+    };
+  }, [currentUserId, messageMap, seller?.sellerName]);
+
+  const replyingToPreview = useMemo(
+    () => buildReplyPreview(replyingToMessage),
+    [buildReplyPreview, replyingToMessage],
   );
 
   const sellerUserId = useMemo(() => {
@@ -661,7 +745,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     setMessages((prev) => mergeMessageReaction(prev, payload) as ChatMessage[]);
   }, []);
 
-  const submitMessage = useCallback(async ({ text: nextText, file, messageType, duration }: { text?: string; file?: { uri: string; name?: string | null; type?: string | null }; messageType?: string; duration?: number }) => {
+  const submitMessage = useCallback(async ({ text: nextText, file, messageType, duration }: { text?: string; file?: { uri?: string; name?: string | null; type?: string | null }; messageType?: string; duration?: number }) => {
     if (!canUseComposer) {
       throw new Error("Messaging is locked until this seller turns availability on.");
     }
@@ -678,11 +762,19 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       file,
       messageType,
       duration,
+      replyToMessageId: replyingToMessageId || undefined,
     });
 
-    const nextMessage = res.message as ChatMessage;
+    const nextMessage = replyingToMessage
+      ? {
+        ...(res.message as ChatMessage),
+        replyToMessageId: (res.message as ChatMessage)?.replyToMessageId || replyingToMessageId,
+        replyToMessage: (res.message as ChatMessage)?.replyToMessage || replyingToMessage,
+      }
+      : res.message as ChatMessage;
     appendMessage(nextMessage);
-  }, [appendMessage, canUseComposer, ensureConversation]);
+    setReplyingToMessage(null);
+  }, [appendMessage, canUseComposer, ensureConversation, replyingToMessage, replyingToMessageId]);
 
   const sendMessage = useCallback(async (msgText = text) => {
     if (!msgText.trim() || sending) {
@@ -730,6 +822,111 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     }
   }, [appendMessage, currentUserId]);
 
+  const finalizeSuccessfulBooking = useCallback(async ({
+    bookedRequest,
+    systemMessage,
+    targetService,
+    noteText,
+  }: {
+    bookedRequest: any;
+    systemMessage?: ChatMessage | null;
+    targetService: SellerService;
+    noteText: string;
+  }) => {
+    const appointmentStartValue = bookedRequest?.appointmentStart || selectedAppointmentStart;
+    const appointmentDurationMinutes =
+      Number(bookedRequest?.appointmentDurationMinutes)
+      || Number(getPrimaryPricingOption(targetService)?.durationMinutes)
+      || 30;
+    const appointmentEndValue = appointmentStartValue
+      ? new Date(new Date(appointmentStartValue).getTime() + appointmentDurationMinutes * 60 * 1000)
+      : null;
+
+    if (systemMessage) {
+      appendMessage(systemMessage);
+    }
+
+    setMockPaymentState(null);
+    setShowPaymentModal(false);
+    setSelectedAppointmentStart("");
+    setReplyingToMessage(null);
+    setText("");
+
+    Alert.alert(
+      "Appointment Requested",
+      "Your appointment request is booked and the seller has been notified.",
+      appointmentStartValue && appointmentEndValue ? [
+        {
+          text: "Add to Calendar",
+          onPress: async () => {
+            const calendarUrl = buildGoogleCalendarUrl({
+              title: `${targetService.serviceName || serviceName || "Aline2 appointment"} with ${seller?.sellerName || "seller"}`,
+              details: [
+                `Seller: ${seller?.sellerName || "Aline2 seller"}`,
+                `Service: ${targetService.serviceName || serviceName || "Appointment"}`,
+                noteText ? `Note: ${noteText}` : "",
+              ].filter(Boolean).join("\n"),
+              start: appointmentStartValue,
+              end: appointmentEndValue,
+            });
+
+            try {
+              await Linking.openURL(calendarUrl);
+            } catch (calendarError) {
+              console.log("seller booking calendar open error:", calendarError);
+              Alert.alert("Calendar unavailable", "The calendar link could not be opened. Appointment details are still available in notifications.");
+            }
+          },
+        },
+        {
+          text: "Done",
+          style: "cancel",
+        },
+      ] : undefined,
+    );
+  }, [appendMessage, selectedAppointmentStart, seller?.sellerName, serviceName]);
+
+  const completeManualTestPayment = useCallback(async () => {
+    if (!mockPaymentState?.requestId || !selectedService) {
+      return;
+    }
+
+    try {
+      setProcessingBookingPayment(true);
+      const verifyRes = await API.post(`/service-requests/${mockPaymentState.requestId}/payment/verify`, {
+        testMode: true,
+        testPaymentId: `manual_test_pay_${Date.now()}`,
+      });
+
+      await finalizeSuccessfulBooking({
+        bookedRequest: verifyRes?.data?.request,
+        systemMessage: verifyRes?.data?.systemMessage || null,
+        targetService: selectedService,
+        noteText: mockPaymentState.note,
+      });
+    } catch (error: any) {
+      console.log("seller manual payment verify error:", error?.response?.data || error);
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to complete the test payment."));
+    } finally {
+      setProcessingBookingPayment(false);
+    }
+  }, [finalizeSuccessfulBooking, mockPaymentState, selectedService]);
+
+  const closeManualPaymentModal = useCallback(() => {
+    const requestId = String(mockPaymentState?.requestId || "");
+    setMockPaymentState(null);
+
+    if (!requestId) {
+      return;
+    }
+
+    API.put(`/service-requests/${requestId}/status`, {
+      status: "cancelled",
+    }).catch((error) => {
+      console.log("seller manual payment cancel error:", error);
+    });
+  }, [mockPaymentState?.requestId]);
+
   const sendBookingRequest = useCallback(async () => {
     const targetService = selectedService;
 
@@ -740,12 +937,13 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     try {
       const resolvedConversationId = await ensureConversation();
       const pricingModel = getPrimaryPricingOption(targetService)?.model;
+      const noteText = text.trim() || `Request for ${targetService.serviceName || serviceName || "service"}`;
       setProcessingBookingPayment(true);
       const res = await API.post("/service-requests", {
         serviceId: targetService._id,
         conversationId: resolvedConversationId || undefined,
         pricingModel,
-        note: text.trim() || `Request for ${targetService.serviceName || serviceName || "service"}`,
+        note: noteText,
         appointmentStart: selectedAppointmentStart || undefined,
         appointmentTimezone: getLocalTimeZone(),
       });
@@ -755,6 +953,16 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       if (!requestId || !paymentPayload) {
         throw new Error("Payment payload is missing for this booking");
+      }
+
+      if (paymentPayload?.isMock) {
+        setMockPaymentState({
+          requestId,
+          serviceName: targetService.serviceName || serviceName || "Selected service",
+          amountLabel: formatPrimaryServicePrice(targetService),
+          note: noteText,
+        });
+        return;
       }
 
       let checkoutResult;
@@ -777,62 +985,19 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       }
 
       const verifyRes = await API.post(`/service-requests/${requestId}/payment/verify`, checkoutResult);
-      const bookedRequest = verifyRes?.data?.request;
-      const appointmentStartValue = bookedRequest?.appointmentStart || selectedAppointmentStart;
-      const appointmentDurationMinutes =
-        Number(bookedRequest?.appointmentDurationMinutes)
-        || Number(getPrimaryPricingOption(targetService)?.durationMinutes)
-        || 30;
-      const appointmentEndValue = appointmentStartValue
-        ? new Date(new Date(appointmentStartValue).getTime() + appointmentDurationMinutes * 60 * 1000)
-        : null;
-
-      if (verifyRes?.data?.systemMessage) {
-        appendMessage(verifyRes.data.systemMessage as ChatMessage);
-      }
-
-      setShowPaymentModal(false);
-      setSelectedAppointmentStart("");
-      setText("");
-      Alert.alert(
-        "Appointment Requested",
-        "Your appointment request is booked and the seller has been notified.",
-        appointmentStartValue && appointmentEndValue ? [
-          {
-            text: "Add to Calendar",
-            onPress: async () => {
-              const calendarUrl = buildGoogleCalendarUrl({
-                title: `${targetService.serviceName || serviceName || "Aline2 appointment"} with ${seller?.sellerName || "seller"}`,
-                details: [
-                  `Seller: ${seller?.sellerName || "Aline2 seller"}`,
-                  `Service: ${targetService.serviceName || serviceName || "Appointment"}`,
-                  text.trim() ? `Note: ${text.trim()}` : "",
-                ].filter(Boolean).join("\n"),
-                start: appointmentStartValue,
-                end: appointmentEndValue,
-              });
-
-              try {
-                await Linking.openURL(calendarUrl);
-              } catch (calendarError) {
-                console.log("seller booking calendar open error:", calendarError);
-                Alert.alert("Calendar unavailable", "The calendar link could not be opened. Appointment details are still available in notifications.");
-              }
-            },
-          },
-          {
-            text: "Done",
-            style: "cancel",
-          },
-        ] : undefined,
-      );
+      await finalizeSuccessfulBooking({
+        bookedRequest: verifyRes?.data?.request,
+        systemMessage: verifyRes?.data?.systemMessage || null,
+        targetService,
+        noteText,
+      });
     } catch (error: any) {
       console.log("seller booking request error:", error?.response?.data || error);
       Alert.alert("Error", getReadableApiErrorMessage(error, error?.description || "Failed to start booking payment"));
     } finally {
       setProcessingBookingPayment(false);
     }
-  }, [appendMessage, ensureConversation, selectedAppointmentStart, selectedService, seller?.sellerName, serviceName, text]);
+  }, [ensureConversation, finalizeSuccessfulBooking, selectedAppointmentStart, selectedService, serviceName, text]);
 
   const openBookingFlow = useCallback((service: SellerService) => {
     setSelectedService(service);
@@ -1313,6 +1478,13 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     }, 1200);
   }, [currentConversationId]);
 
+  const startReplyToMessage = useCallback((message: ChatMessage) => {
+    setReplyingToMessage(message);
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+    });
+  }, []);
+
   useEffect(() => () => {
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
@@ -1460,183 +1632,237 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     const locationPayload = parseLocationMessage(textValue);
     const seenCount = Array.isArray(item?.seenBy) ? item.seenBy.length : 0;
     const reactions = Array.isArray(item?.reactions) ? item.reactions : [];
+    const repliedMessage = getMessageReply(item) as ChatMessage | null;
+    const replyPreview = buildReplyPreview(repliedMessage);
+    const messageTimeLabel = formatMessageTime(item?.createdAt);
     const messageStatusIcon = seenCount > 0 ? "checkmark-done" : "checkmark";
     const messageStatusIconColor = seenCount > 0 ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.72)";
+    let swipeableRef: Swipeable | null = null;
 
     return (
-      <View
-        style={[
-          styles.msgRow,
-          { justifyContent: isMine ? "flex-end" : "flex-start" }
-        ]}
+      <Swipeable
+        ref={(instance) => {
+          swipeableRef = instance;
+        }}
+        friction={2}
+        overshootLeft={false}
+        overshootRight={false}
+        leftThreshold={30}
+        rightThreshold={30}
+        renderLeftActions={isMine ? undefined : () => (
+          <View style={styles.swipeReplyAction}>
+            <Icon name="return-up-back-outline" size={18} color="#fff" />
+            <Text style={styles.swipeReplyText}>Reply</Text>
+          </View>
+        )}
+        renderRightActions={!isMine ? undefined : () => (
+          <View style={[styles.swipeReplyAction, styles.swipeReplyActionMine]}>
+            <Text style={styles.swipeReplyText}>Reply</Text>
+            <Icon name="return-up-back-outline" size={18} color="#fff" />
+          </View>
+        )}
+        onSwipeableOpen={() => {
+          swipeableRef?.close();
+          if (!isSystemMessage) {
+            startReplyToMessage(item);
+          }
+        }}
       >
-        <TouchableOpacity
-          activeOpacity={isSystemMessage ? 1 : 0.92}
-          onPress={isSystemMessage ? undefined : () => handleMessagePress(item, attachment, locationPayload)}
-          onLongPress={isSystemMessage ? undefined : () => reactToMessage(item._id!)}
+        <View
           style={[
-            styles.msgBubble,
-            sharedContent?.kind === "post" || callEvent ? styles.messageBubbleWide : null,
-            isMine ? styles.myMsg : styles.otherMsg
+            styles.msgRow,
+            { justifyContent: isMine ? "flex-end" : "flex-start" }
           ]}
         >
-          {sharedContent?.kind === "post" ? (
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={() => {
-                if (sharedContent?.postId) {
-                  navigation.navigate("PostDetail", { postId: sharedContent.postId });
-                }
-              }}
-              style={[styles.sharedPostCard, isMine ? styles.sharedPostCardMine : null]}
-            >
-              <View style={styles.sharedPostHeader}>
-                <Image
-                  source={{ uri: normalizeMediaUrl(sharedContent?.user?.avatarUrl || DEFAULT_AVATAR_URL) }}
-                  style={styles.sharedPostAvatar}
-                />
-                <View style={styles.sharedPostMeta}>
-                  <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : null]} numberOfLines={1}>
-                    {sharedContent?.user?.username ? `@${sharedContent.user.username}` : sharedContent?.user?.name || "Aline2 post"}
+          <TouchableOpacity
+            activeOpacity={isSystemMessage ? 1 : 0.92}
+            onPress={isSystemMessage ? undefined : () => handleMessagePress(item, attachment, locationPayload)}
+            onLongPress={isSystemMessage ? undefined : () => reactToMessage(item._id!)}
+            style={[
+              styles.msgBubble,
+              sharedContent?.kind === "post" || callEvent ? styles.messageBubbleWide : null,
+              isMine ? styles.myMsg : styles.otherMsg
+            ]}
+          >
+            {replyPreview ? (
+              <View style={[styles.replyPreviewCard, isMine ? styles.replyPreviewCardMine : null]}>
+                <View style={[styles.replyPreviewBar, isMine ? styles.replyPreviewBarMine : null]} />
+                <View style={styles.replyPreviewBody}>
+                  <Text style={[styles.replyPreviewAuthor, isMine ? styles.replyPreviewAuthorMine : null]} numberOfLines={1}>
+                    {replyPreview.author}
                   </Text>
-                  <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : null]} numberOfLines={1}>
-                    Shared post
+                  <Text style={[styles.replyPreviewSnippet, isMine ? styles.replyPreviewSnippetMine : null]} numberOfLines={1}>
+                    {replyPreview.snippet}
                   </Text>
                 </View>
               </View>
+            ) : null}
 
-              {sharedMedia?.url || sharedMedia?.thumbnailUrl ? (
+            {sharedContent?.kind === "post" ? (
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => {
+                  if (sharedContent?.postId) {
+                    navigation.navigate("PostDetail", { postId: sharedContent.postId });
+                  }
+                }}
+                style={[styles.sharedPostCard, isMine ? styles.sharedPostCardMine : null]}
+              >
+                <View style={styles.sharedPostHeader}>
+                  <Image
+                    source={{ uri: normalizeMediaUrl(sharedContent?.user?.avatarUrl || DEFAULT_AVATAR_URL) }}
+                    style={styles.sharedPostAvatar}
+                  />
+                  <View style={styles.sharedPostMeta}>
+                    <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : null]} numberOfLines={1}>
+                      {sharedContent?.user?.username ? `@${sharedContent.user.username}` : sharedContent?.user?.name || "Aline2 post"}
+                    </Text>
+                    <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : null]} numberOfLines={1}>
+                      Shared post
+                    </Text>
+                  </View>
+                </View>
+
+                {sharedMedia?.url || sharedMedia?.thumbnailUrl ? (
+                  <Image
+                    source={{ uri: normalizeMediaUrl(sharedMedia?.thumbnailUrl || sharedMedia?.url || "") }}
+                    style={styles.sharedPostImage}
+                    resizeMode="cover"
+                  />
+                ) : null}
+
+                {sharedContent?.caption ? (
+                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null]} numberOfLines={3}>
+                    {sharedContent.caption}
+                  </Text>
+                ) : null}
+              </TouchableOpacity>
+            ) : null}
+
+            {callEvent ? (
+              <View style={[styles.callEventCard, isMine ? styles.callEventCardMine : null]}>
+                <View style={[styles.callEventIcon, isMine ? styles.callEventIconMine : null]}>
+                  <Icon
+                    name={callEvent.icon}
+                    size={16}
+                    color={isMine ? "#fff" : PRIMARY}
+                  />
+                </View>
+                <View style={styles.callEventBody}>
+                  <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null]}>
+                    {callEvent.label}
+                  </Text>
+                  <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null]}>
+                    Call activity is saved in chat
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            {isImageMessage(item) && attachment?.url ? (
+              <Image source={{ uri: normalizeMediaUrl(attachment.url) }} style={styles.messageImage} />
+            ) : null}
+
+            {isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url) ? (
+              <View style={styles.attachmentRow}>
                 <Image
-                  source={{ uri: normalizeMediaUrl(sharedMedia?.thumbnailUrl || sharedMedia?.url || "") }}
-                  style={styles.sharedPostImage}
-                  resizeMode="cover"
+                  source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl || attachment.url) }}
+                  style={styles.messageImage}
                 />
-              ) : null}
-
-              {sharedContent?.caption ? (
-                <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null]} numberOfLines={3}>
-                  {sharedContent.caption}
+                <Text
+                  style={[styles.attachmentName, isMine ? styles.myText : styles.otherText]}
+                  numberOfLines={1}
+                >
+                  Video attachment
                 </Text>
-              ) : null}
-            </TouchableOpacity>
-          ) : null}
+              </View>
+            ) : null}
 
-          {callEvent ? (
-            <View style={[styles.callEventCard, isMine ? styles.callEventCardMine : null]}>
-              <View style={[styles.callEventIcon, isMine ? styles.callEventIconMine : null]}>
+            {(isAudioMessage(item) || item?.messageType === "voice") && attachment?.url ? (
+              <VoiceMessageBubble
+                audioUrl={attachment.url}
+                durationSeconds={Number(item?.duration || 0)}
+                isMine={isMine}
+                accentColor={PRIMARY}
+                label={item?.messageType === "voice" ? "Voice message" : getAttachmentDisplayName(item)}
+              />
+            ) : null}
+
+            {isDocumentMessage(item) && attachment?.url ? (
+              <View style={styles.attachmentRow}>
                 <Icon
-                  name={callEvent.icon}
-                  size={16}
+                  name="document-text-outline"
+                  size={20}
                   color={isMine ? "#fff" : PRIMARY}
                 />
-              </View>
-              <View style={styles.callEventBody}>
-                <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null]}>
-                  {callEvent.label}
-                </Text>
-                <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null]}>
-                  Call activity is saved in chat
-                </Text>
-              </View>
-            </View>
-          ) : null}
-
-          {isImageMessage(item) && attachment?.url ? (
-            <Image source={{ uri: normalizeMediaUrl(attachment.url) }} style={styles.messageImage} />
-          ) : null}
-
-          {isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url) ? (
-            <View style={styles.attachmentRow}>
-              <Image
-                source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl || attachment.url) }}
-                style={styles.messageImage}
-              />
-              <Text
-                style={[styles.attachmentName, isMine ? styles.myText : styles.otherText]}
-                numberOfLines={1}
-              >
-                Video attachment
-              </Text>
-            </View>
-          ) : null}
-
-          {(isAudioMessage(item) || item?.messageType === "voice") && attachment?.url ? (
-            <VoiceMessageBubble
-              audioUrl={attachment.url}
-              durationSeconds={Number(item?.duration || 0)}
-              isMine={isMine}
-              accentColor={PRIMARY}
-              label={item?.messageType === "voice" ? "Voice message" : getAttachmentDisplayName(item)}
-            />
-          ) : null}
-
-          {isDocumentMessage(item) && attachment?.url ? (
-            <View style={styles.attachmentRow}>
-              <Icon
-                name="document-text-outline"
-                size={20}
-                color={isMine ? "#fff" : PRIMARY}
-              />
-              <Text
-                style={[styles.attachmentName, isMine ? styles.myText : styles.otherText]}
-                numberOfLines={1}
-              >
-                {getAttachmentDisplayName(item)}
-              </Text>
-            </View>
-          ) : null}
-
-          {!locationPayload && !sharedContent && !callEvent && !!textValue && (
-            <Text style={isMine ? styles.myText : styles.otherText}>
-              {textValue}
-            </Text>
-          )}
-
-          {locationPayload ? (
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => handleMessagePress(item, attachment, locationPayload)}
-              style={[styles.locationCard, isMine ? styles.myLocationCard : null]}
-            >
-              <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
-              <View style={styles.locationBody}>
-                <Text style={isMine ? styles.myLocationTitle : styles.locationTitle}>
-                  {locationPayload.label}
-                </Text>
-                <Text style={isMine ? styles.myLocationLink : styles.locationLink}>
-                  Open in Maps
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ) : null}
-
-          {!!reactions.length && (
-            <View style={styles.reactionRow}>
-              {reactions.map((reaction) => (
-                <View
-                  key={`${item._id}-${reaction?.emoji || "reaction"}`}
-                  style={[styles.reactionChip, isMine ? styles.myReactionChip : null]}
+                <Text
+                  style={[styles.attachmentName, isMine ? styles.myText : styles.otherText]}
+                  numberOfLines={1}
                 >
-                  <Text style={styles.reactionText}>
-                    {reaction?.emoji} {Array.isArray(reaction?.users) ? reaction.users.length : 0}
+                  {getAttachmentDisplayName(item)}
+                </Text>
+              </View>
+            ) : null}
+
+            {!locationPayload && !sharedContent && !callEvent && !!textValue && (
+              <Text style={isMine ? styles.myText : styles.otherText}>
+                {textValue}
+              </Text>
+            )}
+
+            {locationPayload ? (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => handleMessagePress(item, attachment, locationPayload)}
+                style={[styles.locationCard, isMine ? styles.myLocationCard : null]}
+              >
+                <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
+                <View style={styles.locationBody}>
+                  <Text style={isMine ? styles.myLocationTitle : styles.locationTitle}>
+                    {locationPayload.label}
+                  </Text>
+                  <Text style={isMine ? styles.myLocationLink : styles.locationLink}>
+                    Open in Maps
                   </Text>
                 </View>
-              ))}
-            </View>
-          )}
+              </TouchableOpacity>
+            ) : null}
 
-          {isMine && !isSystemMessage ? (
-            <View
-              style={[
-                styles.messageStatusPill,
-                seenCount > 0 ? styles.messageStatusPillSeen : null,
-              ]}
-            >
-              <Icon name={messageStatusIcon} size={13} color={messageStatusIconColor} />
+            {!!reactions.length && (
+              <View style={styles.reactionRow}>
+                {reactions.map((reaction) => (
+                  <View
+                    key={`${item._id}-${reaction?.emoji || "reaction"}`}
+                    style={[styles.reactionChip, isMine ? styles.myReactionChip : null]}
+                  >
+                    <Text style={styles.reactionText}>
+                      {reaction?.emoji} {Array.isArray(reaction?.users) ? reaction.users.length : 0}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={[styles.messageMetaRow, isMine ? styles.messageMetaRowMine : null]}>
+              {!!messageTimeLabel ? (
+                <Text style={[styles.messageMetaText, isMine ? styles.messageMetaTextMine : null]}>
+                  {messageTimeLabel}
+                </Text>
+              ) : null}
+              {isMine && !isSystemMessage ? (
+                <View
+                  style={[
+                    styles.messageStatusPill,
+                    seenCount > 0 ? styles.messageStatusPillSeen : null,
+                  ]}
+                >
+                  <Icon name={messageStatusIcon} size={13} color={messageStatusIconColor} />
+                </View>
+              ) : null}
             </View>
-          ) : null}
-        </TouchableOpacity>
-      </View>
+          </TouchableOpacity>
+        </View>
+      </Swipeable>
     );
   };
   const selectedPricing = getPrimaryPricingOption(selectedService);
@@ -1972,8 +2198,25 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             <View style={[styles.composerLockedCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL_ALT }]}>
               <Icon name="lock-closed-outline" size={18} color={colors.primary} />
               <Text style={[styles.composerLockedText, { color: "#F8FAFF" }]}>
-                Messaging is temporarily disabled here. Request a service slot first and we will unlock the next step after booking.
+                Messaging is unavailable while the seller is away. You can still browse services and book when availability returns.
               </Text>
+            </View>
+          ) : null}
+
+          {canUseComposer && replyingToPreview ? (
+            <View style={[styles.composerReplyCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL_ALT }]}>
+              <View style={[styles.composerReplyAccent, { backgroundColor: PRIMARY }]} />
+              <View style={styles.composerReplyBody}>
+                <Text style={[styles.composerReplyLabel, { color: "#F8F5FF" }]}>
+                  Replying to {replyingToPreview.author}
+                </Text>
+                <Text style={[styles.composerReplySnippet, { color: CHAT_TEXT_MUTED }]} numberOfLines={1}>
+                  {replyingToPreview.snippet}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.composerReplyClose} onPress={() => setReplyingToMessage(null)}>
+                <Icon name="close" size={18} color={CHAT_TEXT_MUTED} />
+              </TouchableOpacity>
             </View>
           ) : null}
 
@@ -2003,7 +2246,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           ) : null}
 
           {canUseComposer ? (
-            <>
+            <View style={styles.composerRow}>
               <TouchableOpacity style={styles.attachButton} onPress={() => setShowStickerPicker(true)} disabled={uploading || loading || !canUseComposer}>
                 <Icon name="happy-outline" size={22} color={colors.primary} />
               </TouchableOpacity>
@@ -2029,6 +2272,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               </TouchableOpacity>
 
               <TextInput
+                ref={messageInputRef}
                 placeholder={
                   uploading
                     ? "Uploading attachment..."
@@ -2071,7 +2315,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   onSend={sendVoiceMessage}
                 />
               )}
-            </>
+            </View>
           ) : null}
         </View>
       </KeyboardAvoidingView>
@@ -2350,10 +2594,51 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => setShowPaymentModal(false)} disabled={processingBookingPayment}>
+            <TouchableOpacity onPress={() => setShowPaymentModal(false)} disabled={processingBookingPayment || !!mockPaymentState}>
               <Text style={styles.modalCancelText}>
                 Cancel
               </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!mockPaymentState}
+        transparent
+        animationType="fade"
+        onRequestClose={closeManualPaymentModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <View style={styles.mockPaymentIconWrap}>
+              <Icon name="card-outline" size={24} color={PRIMARY} />
+            </View>
+            <Text style={styles.mockPaymentTitle}>Payment Gateway Setup Pending</Text>
+            <Text style={styles.mockPaymentText}>
+              Live checkout abhi configured nahi hai. Testing ke liye aap is demo payment modal se booking continue kar sakte ho.
+            </Text>
+            <View style={styles.mockPaymentSummary}>
+              <Text style={styles.mockPaymentSummaryLabel}>{mockPaymentState?.serviceName || "Service"}</Text>
+              <Text style={styles.mockPaymentSummaryValue}>{mockPaymentState?.amountLabel || "Quoted later"}</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.payBtn, processingBookingPayment && styles.payBtnDisabled]}
+              onPress={() => {
+                completeManualTestPayment().catch((error) => {
+                  console.log("seller manual payment error:", error);
+                });
+              }}
+              disabled={processingBookingPayment}
+            >
+              {processingBookingPayment ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.payBtnText}>Pay & Book for Testing</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={closeManualPaymentModal} disabled={processingBookingPayment}>
+              <Text style={styles.modalCancelText}>Cancel test payment</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2644,17 +2929,88 @@ const styles = StyleSheet.create({
     textAlign: "center",
     color: CHAT_TEXT_MUTED,
   },
-  msgRow: { marginVertical: 5 },
+  msgRow: {
+    marginVertical: 6,
+    paddingHorizontal: 2,
+  },
+  swipeReplyAction: {
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: PRIMARY,
+    marginLeft: 12,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  swipeReplyActionMine: {
+    marginLeft: 0,
+    marginRight: 12,
+  },
+  swipeReplyText: {
+    marginHorizontal: 6,
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
   msgBubble: {
-    padding: 12,
-    borderRadius: 16,
+    padding: 13,
+    borderRadius: 22,
     maxWidth: "80%",
     alignSelf: "flex-start",
     flexShrink: 1,
+    shadowColor: "#040814",
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
   messageBubbleWide: {
     maxWidth: "92%",
     minWidth: 260,
+  },
+  replyPreviewCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 9,
+    padding: 9,
+    borderRadius: 14,
+    backgroundColor: "rgba(123, 77, 255, 0.12)",
+    maxWidth: "100%",
+  },
+  replyPreviewCardMine: {
+    backgroundColor: "rgba(255,255,255,0.14)",
+  },
+  replyPreviewBar: {
+    width: 3,
+    alignSelf: "stretch",
+    borderRadius: 999,
+    backgroundColor: PRIMARY,
+    marginRight: 8,
+  },
+  replyPreviewBarMine: {
+    backgroundColor: "#fff",
+  },
+  replyPreviewBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  replyPreviewAuthor: {
+    color: PRIMARY,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  replyPreviewAuthorMine: {
+    color: "#fff",
+  },
+  replyPreviewSnippet: {
+    marginTop: 2,
+    color: "#CAD4EA",
+    fontSize: 12,
+    flexShrink: 1,
+  },
+  replyPreviewSnippetMine: {
+    color: "rgba(255,255,255,0.82)",
   },
   sharedPostCard: {
     width: "100%",
@@ -2871,6 +3227,24 @@ const styles = StyleSheet.create({
   messageStatusPillSeen: {
     backgroundColor: "rgba(15,23,42,0.22)",
   },
+  messageMetaRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  messageMetaRowMine: {
+    justifyContent: "flex-end",
+  },
+  messageMetaText: {
+    color: CHAT_TEXT_MUTED,
+    fontSize: 11.5,
+    fontWeight: "600",
+  },
+  messageMetaTextMine: {
+    color: "rgba(255,255,255,0.78)",
+    marginRight: 8,
+  },
   quickContainer: {
     paddingVertical: 8,
     paddingLeft: 10,
@@ -2890,12 +3264,40 @@ const styles = StyleSheet.create({
   },
   quickText: { color: PRIMARY, fontWeight: "600" },
   inputWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    padding: 10,
+    paddingHorizontal: 12,
+    paddingTop: 10,
     backgroundColor: CHAT_BG,
-    alignItems: "center",
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  composerReplyCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  composerReplyAccent: {
+    width: 3,
+    alignSelf: "stretch",
+    borderRadius: 999,
+    marginRight: 8,
+  },
+  composerReplyBody: {
+    flex: 1,
+  },
+  composerReplyLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  composerReplySnippet: {
+    marginTop: 2,
+    fontSize: 12,
+  },
+  composerReplyClose: {
+    marginLeft: 10,
+    padding: 2,
   },
   composerLockedCard: {
     width: "100%",
@@ -2935,6 +3337,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  composerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   attachButton: {
     marginRight: 10
   },
@@ -2954,6 +3360,47 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: {
     opacity: 0.6
+  },
+  mockPaymentIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(123, 77, 255, 0.1)",
+    marginBottom: 14,
+  },
+  mockPaymentTitle: {
+    color: "#101827",
+    fontSize: 18,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  mockPaymentText: {
+    marginTop: 10,
+    color: "#5B6478",
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  mockPaymentSummary: {
+    width: "100%",
+    marginTop: 16,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: "#F5F3FF",
+  },
+  mockPaymentSummaryLabel: {
+    color: "#5B4B76",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  mockPaymentSummaryValue: {
+    marginTop: 4,
+    color: "#101827",
+    fontSize: 16,
+    fontWeight: "800",
   },
   modalOverlay: {
     flex: 1,
