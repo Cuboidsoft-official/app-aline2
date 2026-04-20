@@ -473,11 +473,11 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
     <View style={styles.quickGrid}>
      <TouchableOpacity
       style={[styles.quickAction, { borderColor: colors.border, backgroundColor: isDarkMode ? colors.surface : colors.card }]}
-      onPress={() => navigation.navigate(hasSellerAccount ? "ServiceRequestsScreen" : "SellerRegistration", hasSellerAccount ? { mode: "user" } : undefined)}
+      onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
      >
-      <Icon name={hasSellerAccount ? "calendar-outline" : "storefront-outline"} size={16} color={colors.text} />
+      <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={16} color={colors.text} />
       <Text style={[styles.quickActionText, { color: colors.text }]}>
-       {hasSellerAccount ? "My Appointment" : "Become a Seller"}
+       {hasSellerAccount ? "Seller Dashboard" : "Become a Seller"}
       </Text>
      </TouchableOpacity>
 

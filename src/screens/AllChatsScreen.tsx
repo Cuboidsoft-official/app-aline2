@@ -809,10 +809,10 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   const assistantScopeHint = headerSubtitle;
   const assistantConversationSummary = `Visible chats in this tab: ${listData.length}. Forward mode: ${isForwardMode ? "on" : "off"}.`;
   const assistantSuggestedPrompts = activeTab === "seller"
-    ? ["Seller chat ka flow samjhao", "Appointment chat kahan milegi?", "Seller inbox issue fix karo"]
+    ? ["Explain the seller chat flow", "Where do appointments appear?", "Fix the seller inbox issue"]
     : activeTab === "group"
-      ? ["Group chat create kaise karun?", "Group message issue fix karo", "Forward mode samjhao"]
-      : ["Direct chat ka issue fix karo", "Message inbox samjhao", "Search ya unread ka help do"];
+      ? ["How do I create a group chat?", "Fix a group message issue", "Explain forward mode"]
+      : ["Fix a direct chat issue", "Explain the message inbox", "Help with search or unread filters"];
   const assistantRecentMessages = useMemo(
     () =>
       listData.slice(0, 5).map((item) => {

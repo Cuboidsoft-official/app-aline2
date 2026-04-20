@@ -301,6 +301,38 @@ const dedupeMessages = (items: any[]): any[] => {
   });
 };
 
+const formatLastSeenStatus = (value?: string): string => {
+  if (!value) {
+    return "Away";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Away";
+  }
+
+  const now = new Date();
+  const diffMinutes = Math.max(0, Math.floor((now.getTime() - date.getTime()) / (1000 * 60)));
+
+  if (diffMinutes <= 1) {
+    return "Last seen just now";
+  }
+
+  if (diffMinutes < 60) {
+    return `Last seen ${diffMinutes}m ago`;
+  }
+
+  const sameDay = date.toDateString() === now.toDateString();
+  const timeLabel = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+  if (sameDay) {
+    return `Last seen ${timeLabel}`;
+  }
+
+  const dateLabel = date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `Last seen ${dateLabel}`;
+};
+
 const getMessageTypeLabel = (message: ChatMessage | null | undefined): string => {
   if (!message) {
     return "Message";
@@ -445,7 +477,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       const res = await API.get(`/auth/user/${userId}`);
       const nextUser = res.data.user;
       setUser(nextUser);
-      setIsPeerOnline(Boolean(nextUser?.isOnline ?? nextUser?.availabilityStatus));
+      setIsPeerOnline(Boolean(nextUser?.isOnline));
     } catch (err: any) {
       console.log("User fetch error:", err?.response?.data || err);
     }
@@ -816,7 +848,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       const nextUserId = String(data?.userId || "");
       setTypingUserId((prev) => (prev === nextUserId ? "" : prev));
 
-      if (!(user?.isOnline === true || user?.availabilityStatus === true)) {
+      if (user?.isOnline !== true) {
         setIsPeerOnline(false);
       }
     };
@@ -960,17 +992,22 @@ const ChatScreen = ({ navigation, route }: any) => {
     return CHAT_THEME_LIST.find(t => t.id === chatTheme)?.sentBubble[0] || PRIMARY;
   }, [chatTheme]);
 
+  const isDirectActive = useMemo(
+    () => Boolean(typingUserId || user?.isOnline === true || isPeerOnline),
+    [isPeerOnline, typingUserId, user?.isOnline],
+  );
+
   const directPresenceText = useMemo(() => {
     if (typingUserId) {
-      return "Online now";
+      return "Typing...";
     }
 
-    if (user?.isOnline === true || user?.availabilityStatus === true || isPeerOnline) {
-      return "Online";
+    if (isDirectActive) {
+      return "Active now";
     }
 
-    return "Away";
-  }, [isPeerOnline, typingUserId, user?.availabilityStatus, user?.isOnline]);
+    return formatLastSeenStatus(user?.lastSeenAt);
+  }, [isDirectActive, typingUserId, user?.lastSeenAt]);
 
   const groupPresenceText = useMemo(() => {
     if (typingUserId) {
@@ -985,14 +1022,14 @@ const ChatScreen = ({ navigation, route }: any) => {
   const headerIconColor = "#FFFFFF";
   const assistantScope = isGroupConversation ? "Group chat support" : "Direct chat support";
   const assistantScopeHint = isGroupConversation
-    ? `${groupMeta.groupName || "Group chat"} me messages, calls, media, aur group controls ke liye help.`
-    : `${user?.username || user?.name || "This chat"} ke conversation flow, messaging, media, aur support help.`;
+    ? `Get help with messages, calls, media, and group controls for ${groupMeta.groupName || "this group chat"}.`
+    : `Get help with messaging, media, and chat support for ${user?.username || user?.name || "this conversation"}.`;
   const assistantConversationSummary = isGroupConversation
     ? `Group members: ${groupMeta.memberCount || 0}. Presence: ${groupPresenceText}.`
     : `Current chat partner: ${user?.username || user?.name || "User"}. Presence: ${directPresenceText}.${conversationListing?.serviceName ? ` Linked service: ${conversationListing.serviceName}.` : ""}`;
   const assistantSuggestedPrompts = isGroupConversation
-    ? ["Group chat issue fix karo", "Media send problem hai", "Unread messages samjhao"]
-    : ["Message kyu nahi ja raha?", "Chat settings samjhao", "Is user chat ka issue fix kaise hoga?"];
+    ? ["Fix a group chat issue", "Troubleshoot media sending", "Explain unread messages"]
+    : ["Why is my message not sending?", "Explain chat settings", "Help fix this conversation"];
   const assistantRecentMessages = useMemo(
     () =>
       messages.slice(-6).map((message) => {
@@ -1645,6 +1682,8 @@ const ChatScreen = ({ navigation, route }: any) => {
     let swipeableRef: Swipeable | null = null;
 
     const bubbleTextColor = isMine ? "#fff" : "#111";
+    const messageStatusIcon = seenCount > 0 ? "checkmark-done" : "checkmark";
+    const messageStatusIconColor = seenCount > 0 ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.72)";
 
     return (
       <Swipeable
@@ -1770,7 +1809,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                     {callEvent.label}
                   </Text>
                   <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null]}>
-                    Tap header buttons to call again
+                    Use the header to call again
                   </Text>
                 </View>
               </View>
@@ -1857,8 +1896,15 @@ const ChatScreen = ({ navigation, route }: any) => {
               </View>
             )}
 
-            {isMine && seenCount > 0 ? (
-              <Text style={styles.seenText}>Seen</Text>
+            {isMine && !isSystemMessage ? (
+              <View
+                style={[
+                  styles.messageStatusPill,
+                  seenCount > 0 ? styles.messageStatusPillSeen : null,
+                ]}
+              >
+                <Icon name={messageStatusIcon} size={13} color={messageStatusIconColor} />
+              </View>
             ) : null}
           </TouchableOpacity>
         </View>
@@ -1926,7 +1972,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                 {user?.username || user?.name || "Loading..."}
               </Text>
               <View style={styles.statusRow}>
-                <View style={[styles.presenceDot, { backgroundColor: directPresenceText === "Away" ? "#F59E0B" : "#22C55E" }]} />
+                <View style={[styles.presenceDot, { backgroundColor: isDirectActive ? "#22C55E" : "#F59E0B" }]} />
                 <Text style={[styles.status, { color: headerStatusColor }]} numberOfLines={1} ellipsizeMode="tail">{directPresenceText}</Text>
               </View>
             </View>
@@ -2404,12 +2450,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   listingBannerText: {
     marginLeft: 8,
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: "600",
     flex: 1,
   },
@@ -2423,7 +2469,7 @@ const styles = StyleSheet.create({
   userInfo: {
     flexDirection: "row",
     alignItems: "center",
-    marginLeft: 12,
+    marginLeft: 10,
     flex: 1
   },
   headerTextBlock: {
@@ -2469,12 +2515,12 @@ const styles = StyleSheet.create({
     alignItems: "center"
   },
   headerActionButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 8,
+    marginLeft: 6,
     backgroundColor: "rgba(255,255,255,0.12)",
   },
   chatBackground: {
@@ -2788,10 +2834,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600"
   },
-  seenText: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: 11,
-    marginTop: 8
+  messageStatusPill: {
+    alignSelf: "flex-end",
+    marginTop: 8,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    backgroundColor: "rgba(15,23,42,0.14)",
+  },
+  messageStatusPillSeen: {
+    backgroundColor: "rgba(15,23,42,0.22)",
   },
   myDocumentName: {
     color: "#fff"
@@ -2815,20 +2867,20 @@ const styles = StyleSheet.create({
   inputBox: {
     flex: 1,
     backgroundColor: "#f2f2f2",
-    borderRadius: 22,
-    marginHorizontal: 10,
+    borderRadius: 18,
+    marginHorizontal: 8,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderWidth: StyleSheet.hairlineWidth,
   },
   composerReplyCard: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 8,
+    borderRadius: 14,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    marginBottom: 6,
   },
   composerReplyAccent: {
     width: 3,

@@ -134,7 +134,7 @@ const composerBlueprints: Record<
   post: {
     label: "Post",
     title: "Feed Post",
-    description: "Square crop, filters, caption, tags, location, and privacy controls.",
+    description: "Clean post with crop, caption, and sharing controls.",
     icon: "grid-outline",
     gradient: ["#667eea", "#764ba2", "#f093fb"],
     meta: "1:1 canvas",
@@ -142,7 +142,7 @@ const composerBlueprints: Record<
   story: {
     label: "Story",
     title: "Story Studio",
-    description: "Vertical canvas with stickers, text, music, polls, links, and close friends.",
+    description: "Quick vertical story with text, stickers, and music.",
     icon: "radio-button-on-outline",
     gradient: ["#ff7a18", "#af002d", "#319197"],
     meta: "9:16 canvas",
@@ -150,7 +150,7 @@ const composerBlueprints: Record<
   swipe: {
     label: "Reel",
     title: "Reel Editor",
-    description: "Short video with trim, timeline audio, speed, effects, hashtags, and sharing.",
+    description: "Short video with trim, sound, and share tools.",
     icon: "play-circle-outline",
     gradient: ["#00c6ff", "#7f00ff", "#ff4ecd"],
     meta: "Short video",
@@ -1486,6 +1486,13 @@ function CreatePostScreen({ navigation, route }: any) {
     }
   };
 
+  const openLiveStreamingStudio = useCallback(() => {
+    navigation.navigate("LiveStreamsScreen", {
+      source: "create-post",
+      focusMode: "host",
+    });
+  }, [navigation]);
+
   const renderCreateModeCards = () => (
     <View style={[styles.bottomModeDock, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]}>
       {tabs.map((tab) => {
@@ -1533,9 +1540,7 @@ function CreatePostScreen({ navigation, route }: any) {
           <View>
             <Text style={styles.instagramEyebrow}>Studio</Text>
             <Text style={styles.instagramTitle}>{blueprint.title}</Text>
-            <Text style={styles.instagramSubtitle}>
-              {blueprint.description}
-            </Text>
+            <Text style={styles.instagramSubtitle}>{blueprint.description}</Text>
           </View>
           <View style={[styles.instagramHeroIcon, { backgroundColor: "rgba(255,255,255,0.08)" }]}>
             <Icon name={blueprint.icon} size={20} color="#fff" />
@@ -1678,7 +1683,7 @@ function CreatePostScreen({ navigation, route }: any) {
         <View style={styles.panelHeaderRow}>
           <View>
             <Text style={[styles.panelEyebrow, { color: composerAccent }]}>Tools</Text>
-            <Text style={[styles.panelTitle, { color: composerText }]}>Trim, filter, crop, music</Text>
+            <Text style={[styles.panelTitle, { color: composerText }]}>Edit tools</Text>
           </View>
           <View style={[styles.pipelineBadge, { backgroundColor: subtleSurfaceColor, borderColor: composerBorderColor }]}>
             <Icon name="sparkles-outline" size={13} color={composerAccent} />
@@ -1725,7 +1730,7 @@ function CreatePostScreen({ navigation, route }: any) {
         <View style={styles.panelHeaderRow}>
           <View>
             <Text style={[styles.panelEyebrow, { color: composerAccent }]}>Media selector</Text>
-            <Text style={[styles.panelTitle, { color: composerText }]}>Gallery, camera, videos</Text>
+            <Text style={[styles.panelTitle, { color: composerText }]}>Pick media</Text>
           </View>
           <View style={styles.mediaActionsRow}>
             <TouchableOpacity
@@ -1744,7 +1749,7 @@ function CreatePostScreen({ navigation, route }: any) {
         </View>
 
         <View style={styles.galleryTabsRow}>
-          {["Gallery", "Camera", "Videos"].map((label, index) => (
+          {["Gallery", "Camera", "Video"].map((label, index) => (
             <View
               key={`gallery-tab-${label}`}
               style={[
@@ -2966,6 +2971,33 @@ function CreatePostScreen({ navigation, route }: any) {
     </View>
   );
 
+  const renderLiveShortcutCard = () => (
+    <LinearGradient
+      colors={["#ff7a18", "#ff3d54", "#7c3aed"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.liveShortcutCard}
+    >
+      <View style={styles.liveShortcutHeader}>
+        <View style={styles.liveShortcutBadge}>
+          <Icon name="radio-outline" size={14} color="#fff" />
+          <Text style={styles.liveShortcutBadgeText}>Live streaming</Text>
+        </View>
+        <View style={styles.liveShortcutIconWrap}>
+          <Icon name="videocam-outline" size={20} color="#fff" />
+        </View>
+      </View>
+      <Text style={styles.liveShortcutTitle}>Start a WebRTC live room</Text>
+      <Text style={styles.liveShortcutDescription}>
+        Open live studio directly for hosting, viewer join flow, and live chat testing.
+      </Text>
+      <TouchableOpacity activeOpacity={0.9} style={styles.liveShortcutButton} onPress={openLiveStreamingStudio}>
+        <Text style={styles.liveShortcutButtonText}>Open Live Studio</Text>
+        <Icon name="arrow-forward-outline" size={16} color="#111827" />
+      </TouchableOpacity>
+    </LinearGradient>
+  );
+
   const renderCanvasPanel = (title: string, eyebrow: string) => (
     <View style={[styles.canvasPanel, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
       <View style={styles.panelHeaderRow}>
@@ -2987,6 +3019,7 @@ function CreatePostScreen({ navigation, route }: any) {
         "Choose media",
         "images-outline",
       )}
+      {renderLiveShortcutCard()}
 
       {activeTab === "post" ? (
         <>
@@ -3266,6 +3299,75 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  liveShortcutCard: {
+    marginBottom: 16,
+    borderRadius: 24,
+    padding: 18,
+    shadowColor: "#111827",
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 5,
+  },
+  liveShortcutHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  liveShortcutBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  liveShortcutBadgeText: {
+    marginLeft: 6,
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  liveShortcutIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  liveShortcutTitle: {
+    marginTop: 14,
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: -0.5,
+  },
+  liveShortcutDescription: {
+    marginTop: 8,
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: "600",
+  },
+  liveShortcutButton: {
+    marginTop: 16,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#fff7ed",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  liveShortcutButtonText: {
+    color: "#111827",
+    fontSize: 12.5,
+    fontWeight: "900",
+  },
   instagramHero: {
     borderRadius: 30,
     padding: 18,
@@ -3298,9 +3400,9 @@ const styles = StyleSheet.create({
     color: "#ffffff",
   },
   instagramSubtitle: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 19,
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 17,
     color: "rgba(255,255,255,0.84)",
   },
   instagramHeroIcon: {
@@ -3320,8 +3422,8 @@ const styles = StyleSheet.create({
     minWidth: "47%",
     flexGrow: 1,
     borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
   },
   instagramMetricValue: {
     color: "#ffffff",
@@ -3378,20 +3480,20 @@ const styles = StyleSheet.create({
     minWidth: "30%",
     flexGrow: 1,
     borderWidth: 1,
-    borderRadius: 18,
-    minHeight: 86,
-    paddingHorizontal: 10,
-    paddingVertical: 12,
+    borderRadius: 16,
+    minHeight: 74,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
   },
   quickToolLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
   },
   quickToolDetail: {
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.4,
@@ -3458,18 +3560,18 @@ const styles = StyleSheet.create({
   },
   bottomModeTab: {
     flex: 1,
-    minHeight: 50,
-    borderRadius: 16,
+    minHeight: 44,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    gap: 8,
+    gap: 6,
   },
   bottomModeText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "900",
     textTransform: "uppercase",
-    letterSpacing: 0.4,
+    letterSpacing: 0.25,
   },
   modeCardsGrid: {
     flexDirection: "row",
@@ -3611,8 +3713,8 @@ const styles = StyleSheet.create({
   galleryTab: {
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 13,
-    paddingVertical: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
   },
   galleryTabText: { fontSize: 12, fontWeight: "900" },
   selectorSkeletonGrid: {
@@ -3687,8 +3789,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#f3f4f6",
     borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderWidth: 1,
     borderColor: "#d1d5db",
   },
@@ -3950,8 +4052,8 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: "#111827",
     borderRadius: 999,
-    paddingHorizontal: 14,
-    height: 38,
+    paddingHorizontal: 12,
+    height: 34,
   },
   pickButtonText: { color: "#fff", fontWeight: "700" },
   assetRow: { paddingTop: 12, paddingBottom: 4 },

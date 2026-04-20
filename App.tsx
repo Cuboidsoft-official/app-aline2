@@ -40,6 +40,8 @@ import SellerPreviewScreen from './src/screens/SellerPreviewScreen';
 import SellerChatScreen from './src/screens/SellerChatScreen';
 import SellerDetailsScreen from './src/screens/SellerDetailsScreen';
 import ServiceRequestsScreen from './src/screens/ServiceRequestsScreen';
+import LiveStreamsScreen from './src/screens/LiveStreamsScreen';
+import LiveStreamScreen from './src/screens/LiveStreamScreen';
 import SwipesScreen from './src/screens/social/SwipesScreen';
 import StoryViewerScreen from './src/screens/social/StoryViewerScreen';
 import PostDetailScreen from './src/screens/social/PostDetailScreen';
@@ -417,6 +419,8 @@ function AppNavigator() {
         <Stack.Screen name="SellerChatScreen" component={SellerChatScreen} />
         <Stack.Screen name="SellerDetailsScreen" component={SellerDetailsScreen} />
         <Stack.Screen name="ServiceRequestsScreen" component={ServiceRequestsScreen} />
+        <Stack.Screen name="LiveStreamsScreen" component={LiveStreamsScreen} />
+        <Stack.Screen name="LiveStreamScreen" component={LiveStreamScreen} />
         <Stack.Screen name="Swipes" component={SwipesScreen} />
         <Stack.Screen name="StoryViewer" component={StoryViewerScreen} />
         <Stack.Screen name="PostDetail" component={PostDetailScreen} />

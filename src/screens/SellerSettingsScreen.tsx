@@ -73,6 +73,15 @@ const buildSellerBankSummary = (seller: {
   return `${bankName} • ${lastFour}`;
 };
 
+const showAvailabilityStatusModal = (nextStatus: boolean) => {
+  Alert.alert(
+    nextStatus ? "You're now able to get appointments" : "You're now marked as I am Out",
+    nextStatus
+      ? "You are visible to users for appointments and chat requests."
+      : "You will not be visible to users for new appointments until you switch back in.",
+  );
+};
+
 const SellerSettingsScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
 
@@ -128,10 +137,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
 
       console.log("SUCCESS:", res.data);
 
-      Alert.alert(
-        "Updated",
-        newStatus ? "You are now Available" : "You are now Unavailable"
-      );
+      showAvailabilityStatusModal(newStatus);
 
     } catch (error) {
       const apiError = error as ApiLikeError;

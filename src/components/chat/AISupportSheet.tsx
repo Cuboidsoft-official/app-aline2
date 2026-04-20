@@ -36,9 +36,9 @@ type AISupportSheetProps = {
 const buildTurnId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const defaultSuggestedPrompts = [
-  "Mujhe next step batao",
-  "Ye issue kaise fix karun?",
-  "Seller flow explain karo",
+  "Show me the next step",
+  "Help fix this issue",
+  "Explain the seller flow",
 ];
 
 const AISupportSheet = ({
@@ -64,7 +64,7 @@ const AISupportSheet = ({
       return scopeHint;
     }
 
-    return "Aline2 support ke liye apna question likho.";
+    return "Ask your question for Aline2 support.";
   }, [scopeHint]);
 
   useEffect(() => {
@@ -86,7 +86,7 @@ const AISupportSheet = ({
     }
 
     hasAutoPromptedRef.current = true;
-    submit(autoPrompt || `Is ${scope} screen me meri help karo aur jo user sabse pehle jaana chahe woh samjhao.`).catch(() => {});
+    submit(autoPrompt || `Help me with the ${scope} screen and explain the most useful next step first.`).catch(() => {});
   }, [autoPrompt, loading, scope, turns.length, visible]);
 
   const submit = async (overrideText?: string) => {
@@ -133,7 +133,7 @@ const AISupportSheet = ({
         },
       ]);
     } catch (error) {
-      setErrorMessage(getReadableApiErrorMessage(error, "AI support abhi available nahi hai. Thodi der me dobara try karo."));
+      setErrorMessage(getReadableApiErrorMessage(error, "AI support is not available right now. Please try again shortly."));
     } finally {
       setLoading(false);
     }
@@ -193,7 +193,7 @@ const AISupportSheet = ({
                 <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                   <Text style={[styles.emptyTitle, { color: colors.text }]}>Ask anything about this flow</Text>
                   <Text style={[styles.emptyText, { color: colors.mutedText }]}>
-                    Chat, payments, seller onboarding, appointments, profile settings, ya support issue yahin se pooch sakte ho.
+                    Ask about chat, payments, seller onboarding, appointments, profile settings, or any support issue here.
                   </Text>
                 </View>
               ) : null}
@@ -244,7 +244,7 @@ const AISupportSheet = ({
               {loading ? (
                 <View style={[styles.loadingBubble, { backgroundColor: colors.card, borderColor: colors.border }]}>
                   <ActivityIndicator size="small" color={colors.primary} />
-                  <Text style={[styles.loadingText, { color: colors.mutedText }]}>Gemini support thinking...</Text>
+                  <Text style={[styles.loadingText, { color: colors.mutedText }]}>Gemini is preparing a reply...</Text>
                 </View>
               ) : null}
 
@@ -260,7 +260,7 @@ const AISupportSheet = ({
                 <TextInput
                   value={draft}
                   onChangeText={setDraft}
-                  placeholder="Apna support question likho..."
+                  placeholder="Type your support question..."
                   placeholderTextColor={colors.placeholder}
                   style={[styles.composerInput, { color: colors.text }]}
                   multiline

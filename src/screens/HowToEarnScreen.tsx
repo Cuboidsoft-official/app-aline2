@@ -48,6 +48,7 @@ function HowToEarnScreen({ navigation }: any) {
   const [guideVisible, setGuideVisible] = useState(false);
   const [adPrice, setAdPrice] = useState("");
   const [referralCode, setReferralCode] = useState("");
+  const [hasSellerAccount, setHasSellerAccount] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -70,6 +71,7 @@ function HowToEarnScreen({ navigation }: any) {
 
           if (active) {
             setReferralCode(nextCode);
+            setHasSellerAccount(String(user?.category || "").toLowerCase() === "seller");
           }
         } catch (error) {
           console.log("how to earn referral load error:", error);
@@ -237,14 +239,16 @@ function HowToEarnScreen({ navigation }: any) {
         <View style={styles.actionList}>
           <TouchableOpacity
             style={[styles.actionRow, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => navigation.navigate("SellerRegistration")}
+            onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
           >
             <View style={[styles.actionIcon, { backgroundColor: `${colors.primary}14` }]}>
-              <Icon name="storefront-outline" size={20} color={colors.primary} />
+              <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={20} color={colors.primary} />
             </View>
             <View style={styles.actionCopy}>
-              <Text style={[styles.actionTitle, { color: colors.text }]}>Become a seller</Text>
-              <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>Create your seller account.</Text>
+              <Text style={[styles.actionTitle, { color: colors.text }]}>{hasSellerAccount ? "Seller dashboard" : "Become a seller"}</Text>
+              <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>
+                {hasSellerAccount ? "Manage your bookings, profile, and services." : "Create your seller account."}
+              </Text>
             </View>
             <Icon name="chevron-forward" size={18} color={colors.mutedText} />
           </TouchableOpacity>

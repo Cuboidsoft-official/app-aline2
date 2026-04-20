@@ -48,6 +48,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const [isPrivate, setIsPrivate] = useState(false);
   const [bankSummary, setBankSummary] = useState("Add your payout account");
+  const [hasSellerAccount, setHasSellerAccount] = useState(false);
   const [loading, setLoading] = useState(false);
   const { colors, isDarkMode, setDarkModePreference } = useAppTheme();
   const itemStyle = { backgroundColor: colors.card, borderBottomColor: colors.border };
@@ -76,6 +77,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
         setIsPrivate(value);
         setBankSummary(buildBankSummary(profileUser));
+        setHasSellerAccount(String(profileUser?.category || "").toLowerCase() === "seller");
 
         await AsyncStorage.setItem(
           "isPrivate",
@@ -274,18 +276,16 @@ const SettingsScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={[styles.item, itemStyle]}
-          onPress={() => navigation.navigate("SellerRegistration")}
+          onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
         >
-          <Text style={[styles.vendorText, { color: colors.primary }]}>Become a Seller</Text>
-          <Icon name="storefront-outline" size={20} color={colors.primary} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.item, itemStyle]}
-          onPress={() => navigation.navigate("SellerDashboardScreen")}
-        >
-          <Text style={[styles.text, { color: colors.text }]}>Seller dashboard</Text>
-          <Icon name="chevron-forward" size={20} color={chevronColor} />
+          <Text style={[hasSellerAccount ? styles.text : styles.vendorText, { color: hasSellerAccount ? colors.text : colors.primary }]}>
+            {hasSellerAccount ? "Seller dashboard" : "Become a Seller"}
+          </Text>
+          <Icon
+            name={hasSellerAccount ? "chevron-forward" : "storefront-outline"}
+            size={20}
+            color={hasSellerAccount ? chevronColor : colors.primary}
+          />
         </TouchableOpacity>
 
         <TouchableOpacity

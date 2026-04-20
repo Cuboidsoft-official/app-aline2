@@ -4,6 +4,7 @@ import {
   Animated,
   FlatList,
   Image,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -54,7 +55,7 @@ const initialFeed: FeedResponse = {
   posts: [],
 };
 
-const FEED_ACCENT = "#0095f6";
+const FEED_ACCENT = "#9b4dff";
 
 const formatCount = (value: number): string => {
   if (value >= 1000000) {
@@ -95,6 +96,15 @@ const getPostTypeTag = (post: Post): string => {
   return post.type === "video" ? "Video" : "Photo";
 };
 
+const showAvailabilityStatusModal = (nextStatus: boolean) => {
+  Alert.alert(
+    nextStatus ? "You're now able to get appointments" : "You're now marked as I am Out",
+    nextStatus
+      ? "You are visible to users for appointments and chat requests."
+      : "You will not be visible to users for new appointments until you switch back in.",
+  );
+};
+
 const formatPostMusicLabel = (music?: Post["music"]): string => {
   const trackName = String(music?.trackName || "").trim();
   const artistName = String(music?.artistName || "").trim();
@@ -131,9 +141,10 @@ type SellerAccountSummary = {
 
 function FeedScreen({ navigation }: any) {
   const { width } = useWindowDimensions();
-  const { colors } = useAppTheme();
-  const feedAccentSoft = `${FEED_ACCENT}12`;
-  const feedAccentBorder = `${FEED_ACCENT}30`;
+  const { colors, isDarkMode } = useAppTheme();
+  const feedAccent = colors.primary || FEED_ACCENT;
+  const feedAccentSoft = `${feedAccent}12`;
+  const feedAccentBorder = `${feedAccent}30`;
   const [feed, setFeed] = useState<FeedResponse>(initialFeed);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -696,6 +707,7 @@ function FeedScreen({ navigation }: any) {
 
     try {
       await API.put("/seller/update-availability", { availabilityStatus: nextStatus });
+      showAvailabilityStatusModal(nextStatus);
     } catch (error) {
       setSellerAccount((current) =>
         current
@@ -1490,7 +1502,7 @@ function FeedScreen({ navigation }: any) {
               styles.topBarPanel,
               isCompactHeader && styles.topBarPanelCompact,
               { minHeight: isTabletLayout ? 70 : undefined },
-              { backgroundColor: colors.card, borderColor: feedAccentBorder },
+              { backgroundColor: isDarkMode ? colors.surface : "#111827", borderColor: isDarkMode ? feedAccentBorder : "#1f2937" },
             ]}
           >
             <View style={styles.topLeft}>
@@ -1499,7 +1511,7 @@ function FeedScreen({ navigation }: any) {
               </TouchableOpacity>
               <View style={styles.brandCopy}>
                 <Text
-                  style={[styles.brand, isCompactHeader && styles.brandCompact, { color: FEED_ACCENT }]}
+                  style={[styles.brand, isCompactHeader && styles.brandCompact, { color: "#FFFFFF" }]}
                   numberOfLines={1}
                 >
                   Aline2
@@ -1508,7 +1520,7 @@ function FeedScreen({ navigation }: any) {
                   style={[
                     styles.brandSubline,
                     isCompactHeader && styles.brandSublineCompact,
-                    { color: colors.mutedText },
+                    { color: "rgba(255,255,255,0.78)" },
                   ]}
                   numberOfLines={1}
                 >
@@ -1541,6 +1553,19 @@ function FeedScreen({ navigation }: any) {
             <View style={styles.topRight}>
               <TouchableOpacity
                 style={[
+                  styles.headerIconButton,
+                  isCompactHeader && styles.headerIconButtonCompact,
+                  { backgroundColor: feedAccentSoft, borderColor: feedAccentBorder },
+                ]}
+                onPress={() => navigation.navigate("LiveStreamsScreen")}
+              >
+                <Icon name="radio-outline" size={isCompactHeader ? 18 : 20} color={FEED_ACCENT} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.headerIconGap,
+                  isCompactHeader && styles.headerIconGapCompact,
                   styles.headerIconButton,
                   isCompactHeader && styles.headerIconButtonCompact,
                   { backgroundColor: feedAccentSoft, borderColor: feedAccentBorder },
@@ -1921,6 +1946,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingHorizontal: 13,
     paddingVertical: 9,
+    shadowColor: "#000",
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
   },
   topBarPanelCompact: {
     paddingHorizontal: 10,
@@ -1934,9 +1964,15 @@ const styles = StyleSheet.create({
     minWidth: 0,
     marginRight: 6,
   },
-  brand: { fontSize: 22, color: FEED_ACCENT, fontWeight: "800", letterSpacing: -0.4 },
+  brand: {
+    fontSize: 24,
+    color: "#FFFFFF",
+    fontWeight: "800",
+    letterSpacing: -0.8,
+    fontFamily: Platform.select({ ios: "Georgia-Bold", android: "serif", default: undefined }),
+  },
   brandCompact: { fontSize: 19 },
-  brandSubline: { marginTop: 2, fontSize: 13, fontWeight: "600" },
+  brandSubline: { marginTop: 2, fontSize: 12.5, fontWeight: "700", letterSpacing: 0.3 },
   brandSublineCompact: { display: "none" },
   promoteButton: {
     minHeight: 36,

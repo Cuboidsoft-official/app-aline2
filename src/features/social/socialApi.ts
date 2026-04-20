@@ -33,6 +33,7 @@ import {
 import {
   normalizeReportNote,
   normalizeCommentText,
+  normalizeOptionalCommentText,
   normalizePostInput,
   normalizeReelInput,
   normalizeStoryInput,
@@ -127,6 +128,27 @@ const normalizeContentKind = (kind: ContentKind): "post" | "swipe" | "story" => 
 };
 
 const buildContentKey = (kind: ContentKind, id: string): string => `${normalizeContentKind(kind)}:${id}`;
+
+const normalizeCommentAudioUpload = (audioFile?: CommentAudioFile) => {
+  if (!audioFile?.uri) {
+    return null;
+  }
+
+  const rawUri = normalizeUploadUri(audioFile.uri);
+  const normalizedUri = String(rawUri || "").trim();
+  const fallbackExtension = /\.m4a$/i.test(normalizedUri) ? "m4a" : "mp4";
+  const fallbackName = `voice_${Date.now()}.${fallbackExtension}`;
+  const normalizedName = String(audioFile.name || "").trim() || fallbackName;
+  const normalizedType = String(audioFile.type || "").trim() || (fallbackExtension === "m4a" ? "audio/m4a" : "audio/mp4");
+  const normalizedDuration = Number(audioFile.duration);
+
+  return {
+    uri: normalizedUri,
+    name: normalizedName,
+    type: normalizedType,
+    duration: Number.isFinite(normalizedDuration) && normalizedDuration > 0 ? Math.round(normalizedDuration) : 1,
+  };
+};
 
 const formatMusicLabel = (music: any): string | undefined => {
   if (!music) {
@@ -1401,8 +1423,9 @@ class RemoteSocialApi implements SocialApi {
   }
 
   async addPostComment(postId: string, text: string, parentCommentId?: string, audioFile?: CommentAudioFile): Promise<Comment> {
-    const cleanText = normalizeCommentText(text);
-    const res = audioFile?.uri
+    const normalizedAudio = normalizeCommentAudioUpload(audioFile);
+    const cleanText = normalizedAudio ? normalizeOptionalCommentText(text) : normalizeCommentText(text);
+    const res = normalizedAudio
       ? await (() => {
           const body = new FormData();
           body.append("postId", postId);
@@ -1412,14 +1435,12 @@ class RemoteSocialApi implements SocialApi {
           if (parentCommentId) {
             body.append("parentCommentId", parentCommentId);
           }
-          if (typeof audioFile.duration === "number") {
-            body.append("duration", String(audioFile.duration));
-          }
+          body.append("duration", String(normalizedAudio.duration));
           body.append("messageType", "voice");
           body.append("file", {
-            uri: normalizeUploadUri(audioFile.uri),
-            name: audioFile.name,
-            type: audioFile.type,
+            uri: normalizedAudio.uri,
+            name: normalizedAudio.name,
+            type: normalizedAudio.type,
           } as any);
           return postMultipart({
             path: "/comments/add",
@@ -1627,8 +1648,9 @@ class RemoteSocialApi implements SocialApi {
   }
 
   async addSwipeComment(swipeId: string, text: string, parentCommentId?: string, audioFile?: CommentAudioFile): Promise<ReelComment> {
-    const cleanText = normalizeCommentText(text);
-    const res = audioFile?.uri
+    const normalizedAudio = normalizeCommentAudioUpload(audioFile);
+    const cleanText = normalizedAudio ? normalizeOptionalCommentText(text) : normalizeCommentText(text);
+    const res = normalizedAudio
       ? await (() => {
           const body = new FormData();
           body.append("postId", swipeId);
@@ -1638,14 +1660,12 @@ class RemoteSocialApi implements SocialApi {
           if (parentCommentId) {
             body.append("parentCommentId", parentCommentId);
           }
-          if (typeof audioFile.duration === "number") {
-            body.append("duration", String(audioFile.duration));
-          }
+          body.append("duration", String(normalizedAudio.duration));
           body.append("messageType", "voice");
           body.append("file", {
-            uri: normalizeUploadUri(audioFile.uri),
-            name: audioFile.name,
-            type: audioFile.type,
+            uri: normalizedAudio.uri,
+            name: normalizedAudio.name,
+            type: normalizedAudio.type,
           } as any);
           return postMultipart({
             path: "/comments/add",

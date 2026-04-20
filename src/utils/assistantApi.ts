@@ -34,8 +34,28 @@ Your job:
 `.trim();
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+const ASSISTANT_ENDPOINT_TIMEOUT_MS = 15000;
+const DIRECT_GEMINI_TIMEOUT_MS = 20000;
 
 const toLimitedString = (value: unknown, maxLength = 1200) => String(value || "").trim().slice(0, maxLength);
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> => {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+};
 
 const buildContextPrompt = ({
   scope,
@@ -129,26 +149,30 @@ const askGeminiDirectly = async ({
     parts: [{ text: toLimitedString(message, 4000) }],
   });
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(DEFAULT_GEMINI_MODEL)}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
+  const response = await withTimeout(
+    fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(DEFAULT_GEMINI_MODEL)}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: SUPPORT_SYSTEM_INSTRUCTION }],
+          },
+          contents,
+          generationConfig: {
+            temperature: 0.4,
+            maxOutputTokens: 700,
+            topP: 0.9,
+          },
+        }),
       },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: SUPPORT_SYSTEM_INSTRUCTION }],
-        },
-        contents,
-        generationConfig: {
-          temperature: 0.4,
-          maxOutputTokens: 700,
-          topP: 0.9,
-        },
-      }),
-    },
+    ),
+    DIRECT_GEMINI_TIMEOUT_MS,
+    "Gemini support request timed out. Please try again.",
   );
 
   const payload = await response.json().catch(() => ({}));
@@ -177,14 +201,24 @@ export const askSupportAssistant = async ({
   recentMessages = [],
 }: AskSupportAssistantParams): Promise<AssistantResponse> => {
   try {
-    const response = await API.post("/assistant/support-chat", {
-      message,
-      history,
-      scope,
-      scopeHint,
-      conversationSummary,
-      recentMessages,
-    });
+    const response = await withTimeout(
+      API.post(
+        "/assistant/support-chat",
+        {
+          message,
+          history,
+          scope,
+          scopeHint,
+          conversationSummary,
+          recentMessages,
+        },
+        {
+          timeout: ASSISTANT_ENDPOINT_TIMEOUT_MS,
+        },
+      ),
+      ASSISTANT_ENDPOINT_TIMEOUT_MS + 1000,
+      "Assistant backend request timed out. Switching to Gemini fallback.",
+    );
 
     return response.data as AssistantResponse;
   } catch (error: any) {

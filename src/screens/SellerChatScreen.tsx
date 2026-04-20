@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Image,
   FlatList,
+  ScrollView,
   RefreshControl,
   TextInput,
   TouchableOpacity,
@@ -13,7 +14,8 @@ import {
   ActivityIndicator,
   Linking,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  useWindowDimensions,
 } from "react-native";
 import { Alert } from "../utils/appAlert";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -74,6 +76,12 @@ import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 
 const PRIMARY = "#7B4DFF";
+const CHAT_BG = "#0A0F1C";
+const CHAT_PANEL = "#101827";
+const CHAT_PANEL_ALT = "#151F34";
+const CHAT_PANEL_SOFT = "#1C2740";
+const CHAT_BORDER = "rgba(255,255,255,0.08)";
+const CHAT_TEXT_MUTED = "#9AA6C1";
 const LOCATION_MESSAGE_LABEL = "Shared location:";
 
 const buildLocationMessage = (query: string): string => {
@@ -98,12 +106,46 @@ const parseLocationMessage = (value: string | undefined): { label: string; url: 
   return { label, url };
 };
 
+const formatLastSeenStatus = (value?: string): string => {
+  if (!value) {
+    return "Away";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Away";
+  }
+
+  const now = new Date();
+  const diffMinutes = Math.max(0, Math.floor((now.getTime() - date.getTime()) / (1000 * 60)));
+
+  if (diffMinutes <= 1) {
+    return "Last seen just now";
+  }
+
+  if (diffMinutes < 60) {
+    return `Last seen ${diffMinutes}m ago`;
+  }
+
+  const sameDay = date.toDateString() === now.toDateString();
+  const timeLabel = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+  if (sameDay) {
+    return `Last seen ${timeLabel}`;
+  }
+
+  const dateLabel = date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `Last seen ${dateLabel}`;
+};
+
 type SellerProfile = {
   _id: string;
   user?: string | { _id?: string };
   sellerName?: string;
   profilePic?: string;
   availabilityStatus?: boolean;
+  isOnline?: boolean;
+  lastSeenAt?: string;
 };
 
 type AttachmentShape = {
@@ -200,6 +242,49 @@ const formatAppointmentSlotLabel = (isoValue: string) =>
     hour: "numeric",
     minute: "2-digit",
   });
+
+const formatAppointmentSlotDateLabel = (isoValue: string) =>
+  new Date(isoValue).toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+
+const formatAppointmentSlotTimeLabel = (isoValue: string) =>
+  new Date(isoValue).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+const formatAppointmentSlotWindow = (slot?: AppointmentSlot | null) => {
+  if (!slot?.start) {
+    return "";
+  }
+
+  const startDate = new Date(slot.start);
+  if (Number.isNaN(startDate.getTime())) {
+    return slot.label || "";
+  }
+
+  const endDate = slot.end ? new Date(slot.end) : null;
+  const startLabel = startDate.toLocaleString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  if (endDate && !Number.isNaN(endDate.getTime())) {
+    const endLabel = endDate.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return `${startLabel} - ${endLabel}`;
+  }
+
+  return startLabel;
+};
 
 const formatCalendarDate = (value: string | Date) => {
   const date = value instanceof Date ? value : new Date(value);
@@ -328,6 +413,7 @@ const dedupeMessages = (items: ChatMessage[]): ChatMessage[] => {
 const SellerChatScreen = ({ route, navigation }: any) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
   const {
     sellerId,
     sellerUserId: initialSellerUserId,
@@ -359,6 +445,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [pagination, setPagination] = useState({ nextCursor: null, hasMore: false, limit: 30 });
   const [typingUserId, setTypingUserId] = useState("");
   const [isSellerOnline, setIsSellerOnline] = useState(false);
+  const [sellerLastSeenAt, setSellerLastSeenAt] = useState("");
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
@@ -366,29 +453,42 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
   const [showAssistant, setShowAssistant] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedServiceLabel = selectedService?.serviceName || serviceName || "service requests";
+  const selectedAppointmentSlot = useMemo(
+    () => appointmentSlots.find((slot) => slot.start === selectedAppointmentStart) || null,
+    [appointmentSlots, selectedAppointmentStart],
+  );
+  const isCompactBookingSheet = width < 380;
+  const bookingSheetWidth = Math.min(width - 16, 430);
+  const bookingSheetMaxHeight = Math.min(height * 0.86, 760);
+  const isSellerActive = useMemo(
+    () => Boolean(typingUserId || isSellerOnline),
+    [isSellerOnline, typingUserId],
+  );
 
   const sellerPresenceText = useMemo(() => {
     if (typingUserId) {
-      return "Online now";
+      return "Typing...";
     }
 
-    if (seller?.availabilityStatus === false && !isSellerOnline) {
-      return "Away";
+    if (isSellerActive) {
+      return `Active now • ${selectedServiceLabel}`;
     }
 
-    return isSellerOnline || seller?.availabilityStatus !== false ? "Online" : "Away";
-  }, [isSellerOnline, seller?.availabilityStatus, typingUserId]);
+    const lastSeenLabel = formatLastSeenStatus(sellerLastSeenAt || seller?.lastSeenAt);
+    return lastSeenLabel === "Away" ? `Away • ${selectedServiceLabel}` : `${lastSeenLabel} • ${selectedServiceLabel}`;
+  }, [isSellerActive, selectedServiceLabel, seller?.lastSeenAt, sellerLastSeenAt, typingUserId]);
 
-  const sellerHeaderTint = colors.primary;
   const sellerStatusColor = "rgba(255,255,255,0.78)";
-  const canUseComposer = seller?.availabilityStatus !== false;
+  const canUseComposer = false;
+  const callingEnabled = false;
   const assistantScope = "Seller chat support";
-  const assistantScopeHint = `${seller?.sellerName || "Seller"} ke booking, payment, appointment, aur chat support ke liye help.`;
+  const assistantScopeHint = `Get help with booking, payment, appointments, and chat support for ${seller?.sellerName || "this seller"}.`;
   const assistantConversationSummary = `Selected service: ${selectedService?.serviceName || serviceName || "service requests"}. Seller status: ${sellerPresenceText}.${seller?.availabilityStatus === false ? " Messaging currently locked until seller turns availability on." : ""}`;
   const assistantSuggestedPrompts = [
-    "Booking flow samjhao",
-    "Payment issue fix karo",
-    "Seller unavailable kyun dikh raha hai?",
+    "Explain the booking flow",
+    "Help fix a payment issue",
+    "Why is the seller unavailable?",
   ];
   const assistantRecentMessages = useMemo(
     () =>
@@ -418,10 +518,32 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
   const fetchSeller = useCallback(async () => {
     const res = await API.get(`/seller/${sellerId}`);
-    setSeller(res.data.seller);
-    setIsSellerOnline(Boolean(res.data?.seller?.availabilityStatus));
-    return res.data.seller as SellerProfile;
-  }, [sellerId]);
+    const nextSeller = res.data.seller as SellerProfile;
+    setSeller(nextSeller);
+
+    const resolvedSellerUserId =
+      (typeof nextSeller?.user === "string" ? nextSeller.user : nextSeller?.user?._id)
+      || initialSellerUserId
+      || "";
+
+    let nextIsOnline = Boolean(nextSeller?.isOnline);
+    let nextLastSeenAt = String(nextSeller?.lastSeenAt || "");
+
+    if (resolvedSellerUserId) {
+      try {
+        const presenceRes = await API.get(`/auth/user/${resolvedSellerUserId}`);
+        const presenceUser = presenceRes?.data?.user || {};
+        nextIsOnline = Boolean(presenceUser?.isOnline ?? nextIsOnline);
+        nextLastSeenAt = String(presenceUser?.lastSeenAt || nextLastSeenAt || "");
+      } catch (error) {
+        console.log("seller presence fetch error:", error);
+      }
+    }
+
+    setIsSellerOnline(nextIsOnline);
+    setSellerLastSeenAt(nextLastSeenAt);
+    return nextSeller;
+  }, [initialSellerUserId, sellerId]);
 
   const fetchServices = useCallback(async () => {
     const res = await API.get(`/service/seller/${sellerId}`);
@@ -648,7 +770,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               console.log("seller booking cancel after payment abort error:", statusError);
             });
           }
-          Alert.alert("Payment Cancelled", "Payment complete hone ke baad hi appointment book hogi. Abhi koi booking confirm nahi hui.");
+          Alert.alert("Payment Cancelled", "An appointment is only booked after payment is completed. No booking was confirmed.");
           return;
         }
         throw checkoutError;
@@ -673,8 +795,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       setSelectedAppointmentStart("");
       setText("");
       Alert.alert(
-        "Payment Complete",
-        "Payment successful. Appointment request booked and sent to the seller.",
+        "Appointment Requested",
+        "Your appointment request is booked and the seller has been notified.",
         appointmentStartValue && appointmentEndValue ? [
           {
             text: "Add to Calendar",
@@ -694,7 +816,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 await Linking.openURL(calendarUrl);
               } catch (calendarError) {
                 console.log("seller booking calendar open error:", calendarError);
-                Alert.alert("Calendar unavailable", "Calendar link open nahi ho saka. Appointment details notifications me mil jayengi.");
+                Alert.alert("Calendar unavailable", "The calendar link could not be opened. Appointment details are still available in notifications.");
               }
             },
           },
@@ -711,6 +833,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       setProcessingBookingPayment(false);
     }
   }, [appendMessage, ensureConversation, selectedAppointmentStart, selectedService, seller?.sellerName, serviceName, text]);
+
+  const openBookingFlow = useCallback((service: SellerService) => {
+    setSelectedService(service);
+    setShowPaymentModal(true);
+  }, []);
 
   const sendImageAttachment = useCallback(async () => {
     launchImageLibrary(
@@ -1102,7 +1229,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       const nextUserId = String(data?.userId || "");
       setTypingUserId((prev) => (prev === nextUserId ? "" : prev));
 
-      if (seller?.availabilityStatus === false) {
+      if (seller?.isOnline !== true) {
         setIsSellerOnline(false);
       }
     };
@@ -1134,7 +1261,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     applyMessageSeen,
     currentConversationId,
     currentUserId,
-    seller?.availabilityStatus,
+    seller?.isOnline,
   ]);
 
   useEffect(() => {
@@ -1333,6 +1460,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     const locationPayload = parseLocationMessage(textValue);
     const seenCount = Array.isArray(item?.seenBy) ? item.seenBy.length : 0;
     const reactions = Array.isArray(item?.reactions) ? item.reactions : [];
+    const messageStatusIcon = seenCount > 0 ? "checkmark-done" : "checkmark";
+    const messageStatusIconColor = seenCount > 0 ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.72)";
 
     return (
       <View
@@ -1496,16 +1625,21 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             </View>
           )}
 
-          {isMine && seenCount > 0 ? (
-            <Text style={styles.seenText}>Seen</Text>
+          {isMine && !isSystemMessage ? (
+            <View
+              style={[
+                styles.messageStatusPill,
+                seenCount > 0 ? styles.messageStatusPillSeen : null,
+              ]}
+            >
+              <Icon name={messageStatusIcon} size={13} color={messageStatusIconColor} />
+            </View>
           ) : null}
         </TouchableOpacity>
       </View>
     );
   };
-
   const selectedPricing = getPrimaryPricingOption(selectedService);
-  const selectedServiceLabel = selectedService?.serviceName || serviceName || "service requests";
   useEffect(() => {
     if (showPaymentModal) {
       fetchBookingSlots().catch((error) => {
@@ -1580,10 +1714,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   }, [ensureConversation, joinConversationRealtime, navigation, selectedServiceLabel, sendCallEventLog, seller?.profilePic, seller?.sellerName]);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
-      <StatusBar barStyle="light-content" backgroundColor={sellerHeaderTint} />
+    <SafeAreaView style={[styles.container, { backgroundColor: CHAT_BG }]} edges={["top", "bottom"]}>
+      <StatusBar barStyle="light-content" backgroundColor={CHAT_BG} />
 
-      <View style={[styles.header, { backgroundColor: sellerHeaderTint, borderBottomColor: `${colors.border}66`, paddingTop: 8 }]}>
+      <View style={[styles.header, { backgroundColor: CHAT_BG, borderBottomColor: CHAT_BORDER, paddingTop: 8 }]}>
         <TouchableOpacity style={styles.headerActionButton} onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
@@ -1607,9 +1741,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               {seller?.sellerName || "Loading..."}
             </Text>
             <View style={styles.statusRow}>
-              <View style={[styles.presenceDot, { backgroundColor: sellerPresenceText === "Away" ? "#F59E0B" : "#22C55E" }]} />
+              <View style={[styles.presenceDot, { backgroundColor: isSellerActive ? "#22C55E" : "#F59E0B" }]} />
               <Text style={[styles.status, { color: sellerStatusColor }]} numberOfLines={1} ellipsizeMode="tail">
-                {typingUserId ? "Online now" : sellerPresenceText === "Away" ? "Away" : `Online • ${selectedServiceLabel}`}
+                {sellerPresenceText}
               </Text>
             </View>
           </View>
@@ -1617,18 +1751,18 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
         <View style={styles.rightIcons}>
           <TouchableOpacity
-            style={styles.headerActionButton}
-            onPress={() => startCallFlow("audio")}
-            disabled={!seller?.user}
+            style={[styles.headerActionButton, styles.headerActionButtonDisabled]}
+            onPress={() => {}}
+            disabled={!callingEnabled}
           >
-            <Icon name="call-outline" size={20} color="#fff" />
+            <Icon name="call-outline" size={20} color={CHAT_TEXT_MUTED} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.headerActionButton}
-            onPress={() => startCallFlow("video")}
-            disabled={!seller?.user}
+            style={[styles.headerActionButton, styles.headerActionButtonDisabled]}
+            onPress={() => {}}
+            disabled={!callingEnabled}
           >
-            <Icon name="videocam-outline" size={22} color="#fff" />
+            <Icon name="videocam-outline" size={22} color={CHAT_TEXT_MUTED} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerActionButton}
@@ -1644,6 +1778,20 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           >
             <Icon name="ellipsis-vertical" size={20} color="#fff" />
           </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.chatHeroPanel}>
+        <View style={styles.chatHeroContent}>
+          <Text style={styles.chatHeroEyebrow}>Seller booking room</Text>
+          <Text style={styles.chatHeroTitle}>Choose a service and request a slot</Text>
+          <Text style={styles.chatHeroText}>
+            Booking stays active, but chat and calling are locked on this screen until the next phase is enabled.
+          </Text>
+        </View>
+        <View style={styles.chatHeroBadge}>
+          <Icon name="calendar-outline" size={16} color="#E9DEFF" />
+          <Text style={styles.chatHeroBadgeText}>Appointments only</Text>
         </View>
       </View>
 
@@ -1704,7 +1852,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                       isSelected ? styles.serviceSelectionTextActive : null,
                     ]}
                   >
-                    {isSelected ? "Selected conversation" : "Tap card to switch"}
+                    {isSelected ? "Ready for booking" : "Tap card to switch"}
                   </Text>
 
                   <TouchableOpacity
@@ -1714,8 +1862,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                       seller?.availabilityStatus === false ? styles.bookNowBtnDisabled : null,
                     ]}
                     onPress={() => {
-                      setSelectedService(item);
-                      setShowPaymentModal(true);
+                      openBookingFlow(item);
                     }}
                     disabled={seller?.availabilityStatus === false}
                   >
@@ -1723,7 +1870,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                       {seller?.availabilityStatus === false
                         ? "Unavailable"
                         : isSelected
-                          ? "Request in Chat"
+                          ? "Request a Service"
                           : "Select & Request"}
                     </Text>
                   </TouchableOpacity>
@@ -1735,11 +1882,24 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       </View>
 
       <View style={styles.selectedServiceBanner}>
-        <Icon name="briefcase-outline" size={16} color={PRIMARY} />
-        <Text style={styles.selectedServiceBannerText}>
-          Active service: {selectedServiceLabel}
-        </Text>
+        <View style={styles.selectedServiceIconWrap}>
+          <Icon name="briefcase-outline" size={15} color="#EDE7FF" />
+        </View>
+        <View style={styles.selectedServiceCopy}>
+          <Text style={styles.selectedServiceBannerLabel}>Currently selected</Text>
+          <Text style={styles.selectedServiceBannerText}>
+            {selectedServiceLabel}
+          </Text>
+        </View>
       </View>
+
+      {!callingEnabled ? (
+        <View style={styles.unavailableBanner}>
+          <Text style={styles.unavailableBannerText}>
+            Calling is disabled on this screen right now. Use booking to request a service time first.
+          </Text>
+        </View>
+      ) : null}
 
       {seller?.availabilityStatus === false ? (
         <View style={styles.unavailableBanner}>
@@ -1807,17 +1967,17 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
         </View>
 
-        <View style={[styles.inputWrap, { backgroundColor: colors.card, paddingBottom: Math.max(8, insets.bottom), borderTopColor: colors.border }]}>
+        <View style={[styles.inputWrap, { backgroundColor: CHAT_BG, paddingBottom: Math.max(8, insets.bottom), borderTopColor: CHAT_BORDER }]}>
           {!canUseComposer ? (
-            <View style={[styles.composerLockedCard, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <View style={[styles.composerLockedCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL_ALT }]}>
               <Icon name="lock-closed-outline" size={18} color={colors.primary} />
-              <Text style={[styles.composerLockedText, { color: colors.text }]}>
-                Seller availability off hai. Chat tabhi unlock hoga jab seller toggle on karega.
+              <Text style={[styles.composerLockedText, { color: "#F8FAFF" }]}>
+                Messaging is temporarily disabled here. Request a service slot first and we will unlock the next step after booking.
               </Text>
             </View>
           ) : null}
 
-          {pendingVoiceNote ? (
+          {canUseComposer && pendingVoiceNote ? (
             <View style={[styles.attachmentPreviewCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
               <View style={styles.pendingVoicePreview}>
                 <VoiceMessageBubble
@@ -1842,75 +2002,77 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             </View>
           ) : null}
 
-          <TouchableOpacity style={styles.attachButton} onPress={() => setShowStickerPicker(true)} disabled={uploading || loading || !canUseComposer}>
-            <Icon name="happy-outline" size={22} color={colors.primary} />
-          </TouchableOpacity>
+          {canUseComposer ? (
+            <>
+              <TouchableOpacity style={styles.attachButton} onPress={() => setShowStickerPicker(true)} disabled={uploading || loading || !canUseComposer}>
+                <Icon name="happy-outline" size={22} color={colors.primary} />
+              </TouchableOpacity>
 
-          <TouchableOpacity style={styles.attachButton} onPress={sendCameraAttachment} disabled={uploading || loading || !canUseComposer}>
-            <Icon name="camera-outline" size={22} color={colors.primary} />
-          </TouchableOpacity>
+              <TouchableOpacity style={styles.attachButton} onPress={sendCameraAttachment} disabled={uploading || loading || !canUseComposer}>
+                <Icon name="camera-outline" size={22} color={colors.primary} />
+              </TouchableOpacity>
 
-          <TouchableOpacity onPress={sendImageAttachment} disabled={uploading || loading || !canUseComposer}>
-            <Icon name="image-outline" size={22} color={colors.primary} />
-          </TouchableOpacity>
+              <TouchableOpacity onPress={sendImageAttachment} disabled={uploading || loading || !canUseComposer}>
+                <Icon name="image-outline" size={22} color={colors.primary} />
+              </TouchableOpacity>
 
-          <TouchableOpacity style={styles.attachButton} onPress={sendDocumentAttachment} disabled={uploading || loading || !canUseComposer}>
-            <Icon name="document-outline" size={22} color={colors.primary} />
-          </TouchableOpacity>
+              <TouchableOpacity style={styles.attachButton} onPress={sendDocumentAttachment} disabled={uploading || loading || !canUseComposer}>
+                <Icon name="document-outline" size={22} color={colors.primary} />
+              </TouchableOpacity>
 
-          <TouchableOpacity style={styles.attachButton} onPress={sendAudioAttachment} disabled={uploading || loading || !canUseComposer}>
-            <Icon name="musical-notes-outline" size={22} color={colors.primary} />
-          </TouchableOpacity>
+              <TouchableOpacity style={styles.attachButton} onPress={sendAudioAttachment} disabled={uploading || loading || !canUseComposer}>
+                <Icon name="musical-notes-outline" size={22} color={colors.primary} />
+              </TouchableOpacity>
 
-          <TouchableOpacity style={styles.attachButton} onPress={() => setShowLocationComposer(true)} disabled={uploading || loading || !canUseComposer}>
-            <Icon name="location-outline" size={22} color={colors.primary} />
-          </TouchableOpacity>
+              <TouchableOpacity style={styles.attachButton} onPress={() => setShowLocationComposer(true)} disabled={uploading || loading || !canUseComposer}>
+                <Icon name="location-outline" size={22} color={colors.primary} />
+              </TouchableOpacity>
 
-          <TextInput
-            placeholder={
-              !canUseComposer
-                ? "Seller availability on hote hi chat unlock hoga"
-                : uploading
-                  ? "Uploading attachment..."
-                  : pendingVoiceNote
-                    ? "Voice note ready to send"
-                    : "Message..."
-            }
-            value={text}
-            onChangeText={handleTextChange}
-            style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
-            editable={!loading && !sending && !uploading && canUseComposer}
-            placeholderTextColor={colors.placeholder}
-          />
-
-          {uploading ? (
-            <ActivityIndicator color={PRIMARY} />
-          ) : pendingVoiceNote || text.trim() ? (
-            <TouchableOpacity
-              style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
-              onPress={() => {
-                if (pendingVoiceNote) {
-                  sendPendingVoiceMessage().catch((error) => {
-                    console.log("seller voice preview send error:", error);
-                  });
-                  return;
+              <TextInput
+                placeholder={
+                  uploading
+                    ? "Uploading attachment..."
+                    : pendingVoiceNote
+                      ? "Voice note ready to send"
+                      : "Message..."
                 }
+                value={text}
+                onChangeText={handleTextChange}
+                style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
+                editable={!loading && !sending && !uploading && canUseComposer}
+                placeholderTextColor={colors.placeholder}
+              />
 
-                sendMessage().catch((error) => {
-                  console.log("seller chat send error:", error);
-                });
-              }}
-              disabled={sending || loading || !canUseComposer}
-            >
-              <Icon name="send" size={18} color="#fff" />
-            </TouchableOpacity>
-          ) : (
-            <VoiceRecorderButton
-              color={colors.primary}
-              disabled={uploading || loading || !canUseComposer}
-              onSend={sendVoiceMessage}
-            />
-          )}
+              {uploading ? (
+                <ActivityIndicator color={PRIMARY} />
+              ) : pendingVoiceNote || text.trim() ? (
+                <TouchableOpacity
+                  style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
+                  onPress={() => {
+                    if (pendingVoiceNote) {
+                      sendPendingVoiceMessage().catch((error) => {
+                        console.log("seller voice preview send error:", error);
+                      });
+                      return;
+                    }
+
+                    sendMessage().catch((error) => {
+                      console.log("seller chat send error:", error);
+                    });
+                  }}
+                  disabled={sending || loading || !canUseComposer}
+                >
+                  <Icon name="send" size={18} color="#fff" />
+                </TouchableOpacity>
+              ) : (
+                <VoiceRecorderButton
+                  color={colors.primary}
+                  disabled={uploading || loading || !canUseComposer}
+                  onSend={sendVoiceMessage}
+                />
+              )}
+            </>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
 
@@ -2023,81 +2185,173 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       </Modal>
 
       <Modal visible={showPaymentModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Book & Pay</Text>
+        <View style={styles.bookingOverlay}>
+          <View style={[styles.bookingSheet, { width: bookingSheetWidth, maxHeight: bookingSheetMaxHeight }]}>
+            <View style={styles.bookingHandle} />
 
-            <Text style={styles.modalService}>
-              {selectedService?.serviceName || serviceName || "Selected service"}
-            </Text>
-
-            <Text style={styles.modalPrice}>
-              {selectedPricing ? formatPrimaryServicePrice(selectedService) : "Pricing unavailable"}
-            </Text>
-
-            {!!selectedPricing?.durationMinutes && (
-              <Text style={styles.modalDuration}>
-                Duration: {selectedPricing.durationMinutes} min
-              </Text>
-            )}
-
-            <View style={styles.slotSection}>
-              <Text style={styles.slotHeading}>Choose a slot before payment</Text>
-              <Text style={styles.slotSubheading}>
-                Only seller-set available timings are shown here.
-              </Text>
-              <View style={styles.slotList}>
-                {appointmentSlots.map((slot) => {
-                  const isSelected = selectedAppointmentStart === slot.start;
-
-                  return (
-                    <TouchableOpacity
-                      key={slot.start}
-                      style={[styles.slotChip, isSelected ? styles.slotChipActive : null]}
-                      onPress={() => setSelectedAppointmentStart(slot.start)}
-                    >
-                      <Text style={[styles.slotChipText, isSelected ? styles.slotChipTextActive : null]}>
-                        {slot.label || formatAppointmentSlotLabel(slot.start)}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+            <View style={styles.bookingHeaderRow}>
+              <View style={styles.bookingHeaderCopy}>
+                <Text style={styles.modalTitle}>Request a Service</Text>
+                <Text style={styles.bookingSubtitle}>
+                  Pick seller availability first, then confirm your appointment request.
+                </Text>
               </View>
+              <TouchableOpacity
+                style={styles.bookingCloseButton}
+                onPress={() => setShowPaymentModal(false)}
+                disabled={processingBookingPayment}
+              >
+                <Icon name="close" size={18} color="#5B4B76" />
+              </TouchableOpacity>
             </View>
 
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.bookingScrollContent}
+            >
+              <View style={styles.bookingSummaryCard}>
+                <View style={styles.bookingSummaryHeader}>
+                  <View style={styles.bookingSummaryTextWrap}>
+                    <Text style={styles.bookingSummaryEyebrow}>Selected service</Text>
+                    <Text style={styles.modalService}>
+                      {selectedService?.serviceName || serviceName || "Selected service"}
+                    </Text>
+                  </View>
+                  <View style={styles.bookingStatusBadge}>
+                    <Text style={styles.bookingStatusBadgeText}>
+                      {seller?.availabilityStatus === false ? "Seller away" : "Seller available"}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.bookingMetaRow}>
+                  <View style={styles.bookingMetaCard}>
+                    <Text style={styles.bookingMetaLabel}>Price</Text>
+                    <Text style={styles.bookingMetaValue}>
+                      {selectedPricing ? formatPrimaryServicePrice(selectedService) : "Pricing unavailable"}
+                    </Text>
+                  </View>
+                  <View style={styles.bookingMetaCard}>
+                    <Text style={styles.bookingMetaLabel}>Duration</Text>
+                    <Text style={styles.bookingMetaValue}>
+                      {selectedPricing?.durationMinutes ? `${selectedPricing.durationMinutes} min` : "Flexible"}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.bookingSellerLine}>
+                  {seller?.sellerName || "Seller"} will receive this request after booking is confirmed.
+                </Text>
+
+                {selectedAppointmentSlot ? (
+                  <View style={styles.bookingDateTimeRow}>
+                    <View style={styles.bookingDateTimeCard}>
+                      <Text style={styles.bookingMetaLabel}>Date</Text>
+                      <Text style={styles.bookingDateTimeValue}>
+                        {formatAppointmentSlotDateLabel(selectedAppointmentSlot.start)}
+                      </Text>
+                    </View>
+                    <View style={styles.bookingDateTimeCard}>
+                      <Text style={styles.bookingMetaLabel}>Time</Text>
+                      <Text style={styles.bookingDateTimeValue}>
+                        {formatAppointmentSlotTimeLabel(selectedAppointmentSlot.start)}
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+
+              <View style={styles.slotSection}>
+                <Text style={styles.slotHeading}>Seller availability</Text>
+                <Text style={styles.slotSubheading}>
+                  Choose the time that works for you from the seller's live schedule.
+                </Text>
+
+                {loadingAppointmentSlots ? (
+                  <View style={styles.bookingStateCard}>
+                    <ActivityIndicator size="small" color={PRIMARY} />
+                    <Text style={styles.bookingStateText}>Loading seller availability...</Text>
+                  </View>
+                ) : !appointmentSlots.length ? (
+                  <View style={styles.bookingStateCard}>
+                    <Icon name="calendar-clear-outline" size={18} color="#8A6BCF" />
+                    <Text style={styles.bookingStateText}>
+                      {appointmentSlotFallback
+                        ? "Seller availability could not be loaded right now. Please try again shortly."
+                        : "This seller has not shared any bookable slots right now."}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.slotList}>
+                    {appointmentSlots.map((slot) => {
+                      const isSelected = selectedAppointmentStart === slot.start;
+
+                      return (
+                        <TouchableOpacity
+                          key={slot.start}
+                          style={[
+                            styles.slotChip,
+                            isCompactBookingSheet ? styles.slotChipCompact : styles.slotChipRegular,
+                            isSelected ? styles.slotChipActive : null,
+                          ]}
+                          onPress={() => setSelectedAppointmentStart(slot.start)}
+                        >
+                          <Text style={[styles.slotChipDay, isSelected ? styles.slotChipDayActive : null]}>
+                            {formatAppointmentSlotDateLabel(slot.start)}
+                          </Text>
+                          <Text style={[styles.slotChipTime, isSelected ? styles.slotChipTimeActive : null]}>
+                            {formatAppointmentSlotTimeLabel(slot.start)}
+                          </Text>
+                          <Text style={[styles.slotChipMeta, isSelected ? styles.slotChipMetaActive : null]}>
+                            {slot.end ? `${formatAppointmentSlotTimeLabel(slot.end)} end` : slot.timeZone || "Local time"}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+
+              {selectedAppointmentSlot ? (
+                <View style={styles.selectedSlotCard}>
+                  <Text style={styles.selectedSlotLabel}>Appointment request</Text>
+                  <Text style={styles.selectedSlotValue}>
+                    {formatAppointmentSlotWindow(selectedAppointmentSlot)}
+                  </Text>
+                  <Text style={styles.selectedSlotNote}>
+                    {`Seller gets a notification for your new service request.${selectedAppointmentSlot?.timeZone ? ` Slots shown in ${selectedAppointmentSlot.timeZone}.` : ""}`}
+                  </Text>
+                </View>
+              ) : null}
+            </ScrollView>
+
             <Text style={styles.modalNote}>
-              {loadingAppointmentSlots
-                ? "Loading seller availability..."
-                : appointmentSlots.length
-                  ? appointmentSlotFallback
-                    ? "Seller availability abhi load nahi ho saki. Thodi der baad dobara try karo."
-                    : `Payment pehle collect hoga. Successful payment ke baad hi appointment request book hogi aur seller ko bheji jayegi.${appointmentSlots[0]?.timeZone ? ` Slots shown in ${appointmentSlots[0].timeZone}.` : ""}`
-                  : "This seller has not shared any bookable slots right now."}
+              Select a slot first. Payment is collected in the final step so the seller receives a confirmed service request.
             </Text>
 
             <TouchableOpacity
               style={[
                 styles.payBtn,
-                (loadingAppointmentSlots || !appointmentSlots.length || processingBookingPayment) && styles.payBtnDisabled,
+                (!selectedAppointmentStart || loadingAppointmentSlots || !appointmentSlots.length || processingBookingPayment) && styles.payBtnDisabled,
               ]}
               onPress={() => {
                 sendBookingRequest().catch((error) => {
                   console.log("seller booking request error:", error);
                 });
               }}
-              disabled={loadingAppointmentSlots || !appointmentSlots.length || processingBookingPayment}
+              disabled={!selectedAppointmentStart || loadingAppointmentSlots || !appointmentSlots.length || processingBookingPayment}
             >
               {processingBookingPayment ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={{ color: "#fff", fontWeight: "700" }}>
-                  Pay & Book Appointment
+                <Text style={styles.payBtnText}>
+                  Confirm Time & Continue
                 </Text>
               )}
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => setShowPaymentModal(false)} disabled={processingBookingPayment}>
-              <Text style={{ marginTop: 10, color: "#777" }}>
+              <Text style={styles.modalCancelText}>
                 Cancel
               </Text>
             </TouchableOpacity>
@@ -2121,7 +2375,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 export default SellerChatScreen;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F4F5FA" },
+  container: { flex: 1, backgroundColor: CHAT_BG },
   flexFill: { flex: 1 },
   header: {
     paddingBottom: 10,
@@ -2178,29 +2432,86 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginLeft: 8,
     backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: CHAT_BORDER,
+  },
+  headerActionButtonDisabled: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  chatHeroPanel: {
+    marginHorizontal: 12,
+    marginTop: 12,
+    marginBottom: 10,
+    borderRadius: 26,
+    padding: 18,
+    backgroundColor: CHAT_PANEL,
+    borderWidth: 1,
+    borderColor: CHAT_BORDER,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+  },
+  chatHeroContent: {
+    flex: 1,
+    paddingRight: 14,
+  },
+  chatHeroEyebrow: {
+    color: "#BFA7FF",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+  },
+  chatHeroTitle: {
+    marginTop: 8,
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "800",
+    lineHeight: 26,
+  },
+  chatHeroText: {
+    marginTop: 8,
+    color: CHAT_TEXT_MUTED,
+    fontSize: 12.5,
+    lineHeight: 19,
+  },
+  chatHeroBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    backgroundColor: "rgba(123, 77, 255, 0.18)",
+  },
+  chatHeroBadgeText: {
+    marginLeft: 6,
+    color: "#F8F5FF",
+    fontSize: 11.5,
+    fontWeight: "700",
   },
   premiumServiceWrap: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: CHAT_PANEL,
     paddingTop: 12,
     paddingBottom: 14,
+    borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: "#ECE7F8"
+    borderColor: CHAT_BORDER,
   },
   premiumTitle: {
     fontSize: 14,
     fontWeight: "700",
     marginLeft: 12,
     marginBottom: 8,
-    color: "#24173F",
+    color: "#F7F9FF",
   },
   premiumCard: {
     width: 188,
-    backgroundColor: "#FCFAFF",
+    backgroundColor: CHAT_PANEL_ALT,
     padding: 13,
     borderRadius: 18,
     marginRight: 10,
     borderWidth: 1,
-    borderColor: "#E7DCF8"
+    borderColor: CHAT_BORDER,
   },
   selectedCard: {
     backgroundColor: "#6F49E8",
@@ -2221,14 +2532,14 @@ const styles = StyleSheet.create({
   serviceSubMeta: {
     marginTop: 6,
     fontSize: 11.5,
-    color: "#666"
+    color: CHAT_TEXT_MUTED,
   },
   serviceFooter: {
     marginTop: 12,
   },
   serviceSelectionText: {
     fontSize: 12,
-    color: "#6B7280",
+    color: CHAT_TEXT_MUTED,
     marginBottom: 8,
   },
   serviceSelectionTextActive: {
@@ -2236,7 +2547,7 @@ const styles = StyleSheet.create({
   },
   bookNowBtn: {
     marginTop: 10,
-    backgroundColor: "#fff",
+    backgroundColor: "#F5F2FF",
     paddingVertical: 6,
     borderRadius: 10,
     alignItems: "center"
@@ -2256,26 +2567,45 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: "#E8E0F5",
-    backgroundColor: "#F8F4FF",
+    borderColor: CHAT_BORDER,
+    backgroundColor: CHAT_PANEL_ALT,
+  },
+  selectedServiceIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(123, 77, 255, 0.18)",
+  },
+  selectedServiceCopy: {
+    marginLeft: 10,
+    flex: 1,
+  },
+  selectedServiceBannerLabel: {
+    color: "#A598C7",
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
   selectedServiceBannerText: {
-    marginLeft: 8,
-    color: "#47356B",
-    fontWeight: "600",
+    marginTop: 3,
+    color: "#FFFFFF",
+    fontWeight: "700",
   },
   unavailableBanner: {
-    backgroundColor: "#FFF7D6",
+    backgroundColor: CHAT_PANEL_SOFT,
     borderBottomWidth: 1,
-    borderBottomColor: "#F9D66A",
+    borderBottomColor: CHAT_BORDER,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
   unavailableBannerText: {
-    color: "#92400E",
+    color: "#F5D995",
     fontSize: 12,
     fontWeight: "600",
   },
@@ -2286,11 +2616,13 @@ const styles = StyleSheet.create({
   },
   loadEarlierButton: {
     alignSelf: "center",
-    backgroundColor: "#fff",
+    backgroundColor: CHAT_PANEL_ALT,
     borderRadius: 999,
     marginBottom: 12,
     paddingHorizontal: 14,
-    paddingVertical: 8
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: CHAT_BORDER,
   },
   loadEarlierText: {
     color: PRIMARY,
@@ -2305,12 +2637,12 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#111"
+    color: "#F8FAFF",
   },
   emptyText: {
     marginTop: 8,
     textAlign: "center",
-    color: "#666"
+    color: CHAT_TEXT_MUTED,
   },
   msgRow: { marginVertical: 5 },
   msgBubble: {
@@ -2349,7 +2681,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   sharedPostAuthor: {
-    color: "#111827",
+    color: "#F8FAFF",
     fontSize: 12.5,
     fontWeight: "700",
   },
@@ -2358,7 +2690,7 @@ const styles = StyleSheet.create({
   },
   sharedPostLabel: {
     marginTop: 1,
-    color: "#667085",
+    color: CHAT_TEXT_MUTED,
     fontSize: 11,
     fontWeight: "600",
   },
@@ -2373,7 +2705,7 @@ const styles = StyleSheet.create({
   },
   sharedPostCaption: {
     marginTop: 10,
-    color: "#344054",
+    color: "#D5DCF0",
     fontSize: 12.5,
     lineHeight: 18,
   },
@@ -2410,7 +2742,7 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   callEventTitle: {
-    color: "#111827",
+    color: "#F8FAFF",
     fontSize: 13,
     fontWeight: "700",
   },
@@ -2419,7 +2751,7 @@ const styles = StyleSheet.create({
   },
   callEventMeta: {
     marginTop: 2,
-    color: "#667085",
+    color: CHAT_TEXT_MUTED,
     fontSize: 11.5,
     fontWeight: "600",
   },
@@ -2427,9 +2759,9 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.78)",
   },
   myMsg: { backgroundColor: PRIMARY },
-  otherMsg: { backgroundColor: "#fff" },
+  otherMsg: { backgroundColor: CHAT_PANEL_ALT, borderWidth: 1, borderColor: CHAT_BORDER },
   myText: { color: "#fff" },
-  otherText: { color: "#111" },
+  otherText: { color: "#F5F7FF" },
   messageImage: {
     width: 220,
     height: 220,
@@ -2444,7 +2776,8 @@ const styles = StyleSheet.create({
   attachmentName: {
     marginLeft: 8,
     fontWeight: "600",
-    maxWidth: 180
+    maxWidth: 180,
+    color: "#F5F7FF",
   },
   previewOverlay: {
     flex: 1,
@@ -2487,7 +2820,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   locationTitle: {
-    color: "#111",
+    color: "#F5F7FF",
     fontWeight: "700",
   },
   myLocationTitle: {
@@ -2523,14 +2856,20 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.22)"
   },
   reactionText: {
-    color: "#1f1f1f",
+    color: "#F8FAFF",
     fontSize: 12,
     fontWeight: "600"
   },
-  seenText: {
-    color: "rgba(255,255,255,0.86)",
-    fontSize: 11,
-    marginTop: 8
+  messageStatusPill: {
+    alignSelf: "flex-end",
+    marginTop: 8,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    backgroundColor: "rgba(15,23,42,0.14)",
+  },
+  messageStatusPillSeen: {
+    backgroundColor: "rgba(15,23,42,0.22)",
   },
   quickContainer: {
     paddingVertical: 8,
@@ -2554,7 +2893,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     padding: 10,
-    backgroundColor: "#fff",
+    backgroundColor: CHAT_BG,
     alignItems: "center",
     borderTopWidth: StyleSheet.hairlineWidth,
   },
@@ -2622,6 +2961,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center"
   },
+  bookingOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(10,12,22,0.48)",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    paddingTop: 24,
+  },
   modalBox: {
     width: "85%",
     backgroundColor: "#fff",
@@ -2629,15 +2977,158 @@ const styles = StyleSheet.create({
     padding: 22,
     alignItems: "center"
   },
+  bookingSheet: {
+    backgroundColor: CHAT_PANEL,
+    borderRadius: 28,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 18,
+    shadowColor: "#0B1020",
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: -8 },
+    elevation: 10,
+  },
+  bookingHandle: {
+    alignSelf: "center",
+    width: 52,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.24)",
+    marginBottom: 12,
+  },
+  bookingHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 10,
+  },
+  bookingHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  bookingCloseButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  bookingScrollContent: {
+    paddingBottom: 6,
+  },
   locationModalBox: {
     width: "85%",
     backgroundColor: "#fff",
     borderRadius: 20,
     padding: 22,
   },
-  modalTitle: { fontSize: 16, fontWeight: "700" },
-  modalService: { marginTop: 10, fontWeight: "600" },
-  modalPrice: { marginTop: 6, color: PRIMARY, fontWeight: "700" },
+  modalTitle: { fontSize: 16, fontWeight: "700", color: "#FFFFFF" },
+  bookingSubtitle: {
+    marginTop: 8,
+    color: CHAT_TEXT_MUTED,
+    lineHeight: 20,
+  },
+  bookingSummaryCard: {
+    borderRadius: 20,
+    backgroundColor: CHAT_PANEL_ALT,
+    borderWidth: 1,
+    borderColor: CHAT_BORDER,
+    padding: 16,
+  },
+  bookingSummaryHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  bookingSummaryTextWrap: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  bookingSummaryEyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#BFA7FF",
+    marginBottom: 6,
+  },
+  bookingStatusBadge: {
+    backgroundColor: "rgba(123, 77, 255, 0.18)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  bookingStatusBadgeText: {
+    color: PRIMARY,
+    fontSize: 11.5,
+    fontWeight: "700",
+  },
+  modalService: {
+    marginTop: 2,
+    fontWeight: "700",
+    fontSize: 16,
+    color: "#FFFFFF",
+  },
+  modalPrice: {
+    marginTop: 6,
+    color: PRIMARY,
+    fontWeight: "800",
+    fontSize: 15,
+  },
+  bookingMetaRow: {
+    flexDirection: "row",
+    marginTop: 14,
+  },
+  bookingMetaCard: {
+    flex: 1,
+    borderRadius: 16,
+    backgroundColor: CHAT_PANEL_SOFT,
+    borderWidth: 1,
+    borderColor: CHAT_BORDER,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginRight: 8,
+  },
+  bookingMetaLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    color: "#BFA7FF",
+  },
+  bookingMetaValue: {
+    marginTop: 6,
+    fontSize: 13.5,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  bookingSellerLine: {
+    marginTop: 10,
+    color: CHAT_TEXT_MUTED,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  bookingDateTimeRow: {
+    flexDirection: "row",
+    marginTop: 12,
+  },
+  bookingDateTimeCard: {
+    flex: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: CHAT_BORDER,
+    marginRight: 8,
+  },
+  bookingDateTimeValue: {
+    marginTop: 6,
+    color: "#F8FAFF",
+    fontSize: 13.5,
+    fontWeight: "700",
+  },
   locationModalText: {
     marginTop: 8,
     color: "#666",
@@ -2658,60 +3149,134 @@ const styles = StyleSheet.create({
     fontSize: 12
   },
   modalNote: {
-    marginTop: 10,
+    marginTop: 12,
     fontSize: 12,
-    color: "#777",
-    textAlign: "center"
+    color: CHAT_TEXT_MUTED,
+    textAlign: "center",
+    lineHeight: 18,
   },
   slotSection: {
     width: "100%",
     marginTop: 16,
   },
   slotHeading: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#111",
-    marginBottom: 10,
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginBottom: 6,
   },
   slotSubheading: {
     fontSize: 12,
     lineHeight: 18,
-    color: "#6B5A8E",
-    textAlign: "center",
+    color: CHAT_TEXT_MUTED,
     marginBottom: 10,
   },
   slotList: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "center",
+    justifyContent: "space-between",
   },
   slotChip: {
     borderWidth: 1,
-    borderColor: "#DED8F7",
-    backgroundColor: "#F7F4FF",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    margin: 4,
+    borderColor: CHAT_BORDER,
+    backgroundColor: CHAT_PANEL_SOFT,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  slotChipRegular: {
+    width: "48.5%",
+  },
+  slotChipCompact: {
+    width: "100%",
   },
   slotChipActive: {
     backgroundColor: PRIMARY,
     borderColor: PRIMARY,
+    shadowColor: PRIMARY,
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
-  slotChipText: {
-    color: "#47356B",
-    fontSize: 12,
+  slotChipDay: {
+    color: "#DCD3F7",
+    fontSize: 11.5,
+    fontWeight: "700",
+  },
+  slotChipDayActive: {
+    color: "#fff",
+  },
+  slotChipTime: {
+    marginTop: 6,
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  slotChipTimeActive: {
+    color: "#fff",
+  },
+  slotChipMeta: {
+    marginTop: 4,
+    color: CHAT_TEXT_MUTED,
+    fontSize: 11.5,
     fontWeight: "600",
   },
-  slotChipTextActive: {
-    color: "#fff",
+  slotChipMetaActive: {
+    color: "rgba(255,255,255,0.82)",
+  },
+  bookingStateCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: CHAT_BORDER,
+    backgroundColor: CHAT_PANEL_ALT,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  bookingStateText: {
+    marginLeft: 10,
+    color: CHAT_TEXT_MUTED,
+    flex: 1,
+    lineHeight: 19,
+    fontSize: 12.5,
+  },
+  selectedSlotCard: {
+    marginTop: 16,
+    borderRadius: 18,
+    padding: 14,
+    backgroundColor: "rgba(123, 77, 255, 0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(123, 77, 255, 0.32)",
+  },
+  selectedSlotLabel: {
+    color: "#BFA7FF",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  selectedSlotValue: {
+    marginTop: 6,
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  selectedSlotNote: {
+    marginTop: 6,
+    color: "#D3DBF0",
+    fontSize: 12.5,
+    lineHeight: 18,
   },
   payBtn: {
     marginTop: 14,
     backgroundColor: PRIMARY,
-    paddingVertical: 10,
+    paddingVertical: 13,
     paddingHorizontal: 28,
-    borderRadius: 12
+    borderRadius: 16
   },
   payBtnDisabled: {
     opacity: 0.5
@@ -2722,8 +3287,9 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   modalCancelText: {
-    marginTop: 10,
-    color: "#777",
+    marginTop: 12,
+    color: CHAT_TEXT_MUTED,
     textAlign: "center",
+    fontWeight: "600",
   }
 });

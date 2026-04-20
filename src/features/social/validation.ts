@@ -482,6 +482,17 @@ export const normalizeCommentText = (text: string): string => {
   return clean;
 };
 
+export const normalizeOptionalCommentText = (text: string | undefined): string => {
+  const clean = cleanText(text);
+
+  if (!clean) {
+    return "";
+  }
+
+  assertLength(clean, MAX_COMMENT_LENGTH, "Comment");
+  return clean;
+};
+
 export const normalizeReportNote = (text: string | undefined): string | undefined => {
   if (text === undefined) {
     return undefined;

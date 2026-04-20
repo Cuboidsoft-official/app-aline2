@@ -566,11 +566,6 @@ const SellerRegistration = ({ navigation, route }: any) => {
       }
     }
 
-    if (step === 5 && !faceChecked) {
-      Alert.alert("Validation", "Please complete face check.");
-      return false;
-    }
-
     if (step === 6) {
       const rate = Number(serviceRate) || 0;
 
@@ -604,7 +599,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
     setPaymentPreviewSeen(true);
     Alert.alert(
       "Sample payment flow",
-      `Default plan: ${selectedPlan.title}\nAmount: INR ${selectedPlan.amount}\n\nNext phase me yahin Razorpay checkout open hoga. Abhi ye placeholder alert sirf flow samajhne ke liye hai.`,
+        `Default plan: ${selectedPlan.title}\nAmount: INR ${selectedPlan.amount}\n\nIn the next phase, Razorpay checkout will open here. This placeholder alert is only for flow review right now.`,
     );
   }, [selectedPlan.amount, selectedPlan.title]);
 
@@ -781,7 +776,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
             <View style={styles.stepTipList}>
               <View style={styles.stepTipRow}>
                 <Icon name="checkmark-circle" size={16} color={colors.primary} />
-                <Text style={[styles.stepTipText, { color: colors.text }]}>Clear face photo use karo</Text>
+              <Text style={[styles.stepTipText, { color: colors.text }]}>Use a clear face photo</Text>
               </View>
               <View style={styles.stepTipRow}>
                 <Icon name="checkmark-circle" size={16} color={colors.primary} />
@@ -789,7 +784,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
               </View>
               <View style={styles.stepTipRow}>
                 <Icon name="checkmark-circle" size={16} color={colors.primary} />
-                <Text style={[styles.stepTipText, { color: colors.text }]}>Ek focused specialization select karo</Text>
+              <Text style={[styles.stepTipText, { color: colors.text }]}>Choose one focused specialization</Text>
               </View>
             </View>
           </View>
@@ -803,7 +798,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
             <View style={styles.mediaSectionHeader}>
               <Text style={[styles.mediaSectionTitle, { color: colors.text }]}>Profile visuals</Text>
               <Text style={[styles.mediaSectionBody, { color: colors.mutedText }]}>
-                Profile photo aur cover image se account zyada complete lagta hai.
+              A profile photo and cover image make the account feel more complete.
               </Text>
             </View>
 
@@ -845,7 +840,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
           <View style={[styles.formSectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[styles.formSectionTitle, { color: colors.text }]}>Basic details</Text>
             <Text style={[styles.formSectionBody, { color: colors.mutedText }]}>
-              Yeh info aapki profile title aur category ko define karti hai.
+              This information defines your profile title and category.
             </Text>
 
             <Text style={[styles.label, { color: colors.text }]}>Seller name</Text>
@@ -925,7 +920,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
               <View style={styles.paymentPreviewCopy}>
                 <Text style={[styles.paymentPreviewTitle, { color: colors.text }]}>Default payment placeholder</Text>
                 <Text style={[styles.paymentPreviewBody, { color: colors.mutedText }]}>
-                  Flow samajhne ke liye abhi sample alert dikhega. Next build me is button par Razorpay checkout use hoga.
+            A sample alert appears here for flow review. In the next build, this button will open Razorpay checkout.
                 </Text>
               </View>
             </View>
@@ -1023,7 +1018,9 @@ const SellerRegistration = ({ navigation, route }: any) => {
       return (
         <>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Face check</Text>
-          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Take a clear selfie for verification.</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
+            Take a clear selfie for verification. This step is optional for now, and you can continue without a selfie while testing later screens.
+          </Text>
 
           <TouchableOpacity style={[styles.faceCard, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={captureFaceCheck} activeOpacity={0.9}>
             {faceCheckPreview ? (
@@ -1110,7 +1107,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
             {step < TOTAL_STEPS ? (
               <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
-                <Text style={styles.primaryButtonText}>Continue</Text>
+                <Text style={styles.primaryButtonText}>{step === 5 && !faceChecked ? "Skip for now" : "Continue"}</Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity style={[styles.primaryButton, loading && styles.buttonDisabled]} onPress={submitSellerRegistration} disabled={loading}>

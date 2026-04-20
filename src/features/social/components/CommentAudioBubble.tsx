@@ -18,7 +18,7 @@ const formatAudioTime = (milliseconds: number) => {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
 
-const getPlaybackSources = (value: string) => {
+const buildPlaybackCandidates = (value: string) => {
   const normalizedValue = String(value || "").trim();
   if (!normalizedValue) {
     return [];
@@ -26,12 +26,19 @@ const getPlaybackSources = (value: string) => {
 
   const candidates = [
     normalizedValue,
+    encodeURI(normalizedValue),
     decodeURI(normalizedValue),
     normalizedValue.startsWith("file://") ? normalizedValue.replace(/^file:\/\//i, "") : "",
   ];
 
-  return Array.from(new Set(candidates.filter(Boolean)));
+  return candidates.filter(Boolean);
 };
+
+const getPlaybackSources = (rawValue: string, normalizedValue: string) =>
+  Array.from(new Set([
+    ...buildPlaybackCandidates(rawValue),
+    ...buildPlaybackCandidates(normalizedValue),
+  ]));
 
 function CommentAudioBubble({
   audioDuration,
@@ -44,7 +51,8 @@ function CommentAudioBubble({
   const [currentPosition, setCurrentPosition] = useState(0);
   const [duration, setDuration] = useState(Math.max(0, Number(audioDuration || 0) * 1000));
 
-  const resolvedAudioUrl = useMemo(() => normalizeMediaUrl(audioUrl || ""), [audioUrl]);
+  const rawAudioUrl = useMemo(() => String(audioUrl || "").trim(), [audioUrl]);
+  const resolvedAudioUrl = useMemo(() => normalizeMediaUrl(rawAudioUrl), [rawAudioUrl]);
 
   useEffect(() => {
     const sound = soundRef.current;
@@ -97,7 +105,7 @@ function CommentAudioBubble({
         let lastError: unknown = null;
         let started = false;
 
-        for (const source of getPlaybackSources(resolvedAudioUrl)) {
+        for (const source of getPlaybackSources(rawAudioUrl, resolvedAudioUrl)) {
           try {
             await soundRef.current.startPlayer(source);
             started = true;

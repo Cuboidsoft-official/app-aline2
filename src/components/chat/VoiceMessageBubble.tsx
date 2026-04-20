@@ -36,7 +36,7 @@ const buildWaveformBars = (progress: number) =>
     active: index < Math.max(1, Math.round(progress * 10)),
   }));
 
-const getPlaybackSources = (value: string) => {
+const buildPlaybackCandidates = (value: string) => {
   const normalizedValue = String(value || "").trim();
   if (!normalizedValue) {
     return [];
@@ -44,12 +44,19 @@ const getPlaybackSources = (value: string) => {
 
   const candidates = [
     normalizedValue,
+    encodeURI(normalizedValue),
     decodeURI(normalizedValue),
     normalizedValue.startsWith("file://") ? normalizedValue.replace(/^file:\/\//i, "") : "",
   ];
 
-  return Array.from(new Set(candidates.filter(Boolean)));
+  return candidates.filter(Boolean);
 };
+
+const getPlaybackSources = (rawValue: string, normalizedValue: string) =>
+  Array.from(new Set([
+    ...buildPlaybackCandidates(rawValue),
+    ...buildPlaybackCandidates(normalizedValue),
+  ]));
 
 const VoiceMessageBubble = ({
   audioUrl,
@@ -67,7 +74,8 @@ const VoiceMessageBubble = ({
   const [currentPosition, setCurrentPosition] = useState(0);
   const [duration, setDuration] = useState(Math.max(0, Number(durationSeconds || 0) * 1000));
 
-  const resolvedAudioUrl = useMemo(() => normalizeMediaUrl(audioUrl || ""), [audioUrl]);
+  const rawAudioUrl = useMemo(() => String(audioUrl || "").trim(), [audioUrl]);
+  const resolvedAudioUrl = useMemo(() => normalizeMediaUrl(rawAudioUrl), [rawAudioUrl]);
   const resolvedBackgroundColor = backgroundColor || (isMine ? "rgba(255,255,255,0.18)" : `${accentColor}12`);
   const resolvedTextColor = textColor || (isMine ? "#fff" : "#111827");
   const resolvedMetaColor = metaColor || (isMine ? "rgba(255,255,255,0.8)" : "#667085");
@@ -127,7 +135,7 @@ const VoiceMessageBubble = ({
         let lastError: unknown = null;
         let started = false;
 
-        for (const source of getPlaybackSources(resolvedAudioUrl)) {
+        for (const source of getPlaybackSources(rawAudioUrl, resolvedAudioUrl)) {
           try {
             await soundRef.current.startPlayer(source);
             started = true;

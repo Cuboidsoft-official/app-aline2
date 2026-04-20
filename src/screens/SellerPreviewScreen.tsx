@@ -218,7 +218,7 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
       </Text>
      ) : seller?.availabilityStatus === false ? (
       <Text style={[styles.inlineNotice, { color: colors.mutedText }]}>
-       Seller availability off hai, isliye chat aur booking request abhi locked hain.
+      Seller availability is off, so chat and booking requests are currently locked.
       </Text>
      ) : null}
     </View>

@@ -6,7 +6,9 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator
+  ActivityIndicator,
+  Switch,
+  useWindowDimensions,
 } from "react-native";
 import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -23,6 +25,7 @@ import { formatPrimaryServicePrice, formatSummaryAmount } from "../utils/service
 import { shareContentLink } from "../utils/shareLinks";
 import { DEFAULT_AVATAR_URL, DEFAULT_COVER_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 
 const DEFAULT_COVER = DEFAULT_COVER_URL;
 const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
@@ -87,8 +90,18 @@ const buildAvailabilityPreview = (seller: any) => {
   };
 };
 
+const showAvailabilityStatusModal = (nextStatus: boolean) => {
+  Alert.alert(
+    nextStatus ? "You're now able to get appointments" : "You're now marked as I am Out",
+    nextStatus
+      ? "You are visible to users for appointments and chat requests."
+      : "You will not be visible to users for new appointments until you switch back in.",
+  );
+};
+
 const SellerDashboardScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
+  const { width } = useWindowDimensions();
   const [expanded, setExpanded] = useState(false);
   const [step, setStep] = useState(0);
   const [services, setServices] = useState([]);
@@ -102,6 +115,7 @@ const SellerDashboardScreen = ({ navigation }: any) => {
   const [loading, setLoading] = useState(true);
   const [seller, setSeller] = useState<any>(null);
   const [sellerError, setSellerError] = useState("");
+  const [availabilityUpdating, setAvailabilityUpdating] = useState(false);
 
   const next = () => setStep(step + 1);
   const close = async () => {
@@ -269,83 +283,146 @@ const fetchRequestData = useCallback(async () => {
   };
 
   const availabilityPreview = buildAvailabilityPreview(seller);
+  const isCompactLayout = width < 380;
+  const heroStatusColor = seller?.availabilityStatus ? "#22C55E" : "#F59E0B";
+  const heroStatusLabel = seller?.availabilityStatus ? "I am In" : "I am Out";
+  const heroStatusCopy = seller?.availabilityStatus
+    ? "Users can discover you and start chats right now."
+    : "Your profile stays visible, but buyer messaging stays paused.";
+  const sellerHandle = String(seller?.user?.username || "").trim()
+    ? `@${String(seller?.user?.username || "").trim()}`
+    : "Aline2 seller";
+  const sellerMetricCards = [
+    {
+      label: "Experience",
+      value: seller?.experience ? `${seller.experience}` : "0",
+      detail: "Years",
+    },
+    {
+      label: "Services",
+      value: `${services.length || 0}`,
+      detail: "Live",
+    },
+    {
+      label: "Appointments",
+      value: `${recentRequests.length || 0}`,
+      detail: "Recent",
+    },
+  ];
+
+  const toggleSellerAvailability = useCallback(async (nextStatus: boolean) => {
+    if (!seller || availabilityUpdating) {
+      return;
+    }
+
+    const previousStatus = Boolean(seller?.availabilityStatus);
+    setAvailabilityUpdating(true);
+    setSeller((current: any) => (current ? { ...current, availabilityStatus: nextStatus } : current));
+
+    try {
+      await API.put("/seller/update-availability", { availabilityStatus: nextStatus });
+      showAvailabilityStatusModal(nextStatus);
+    } catch (error) {
+      setSeller((current: any) => (current ? { ...current, availabilityStatus: previousStatus } : current));
+      Alert.alert("Unable to update status", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setAvailabilityUpdating(false);
+    }
+  }, [availabilityUpdating, seller]);
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.loaderContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loaderText, { color: colors.mutedText }]}>Loading seller profile...</Text>
-      </SafeAreaView>
+      <View style={styles.screen}>
+        <SafeAreaView style={[styles.loaderContainer, { backgroundColor: colors.background }]}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loaderText, { color: colors.mutedText }]}>Loading seller profile...</Text>
+        </SafeAreaView>
+        <AppBottomDock navigation={navigation} activeRouteName="ProfileView" />
+      </View>
     );
   }
 
   if (!seller) {
     return (
-      <SafeAreaView style={[styles.loaderContainer, { backgroundColor: colors.background }]}>
-        <Icon name="storefront-outline" size={42} color={colors.mutedText} />
-        <Text style={[styles.loaderText, { color: colors.text, marginTop: 16 }]}>Seller profile unavailable</Text>
-        <Text style={[styles.errorBody, { color: colors.mutedText }]}>
-          {sellerError || "We couldn't load your seller profile right now."}
-        </Text>
-        <TouchableOpacity
-          style={[styles.primaryBtn, { marginTop: 18, backgroundColor: colors.primary }]}
-          onPress={() => fetchSellerProfile().catch(() => {})}
-        >
-          <Text style={styles.btnText}>Try Again</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
+      <View style={styles.screen}>
+        <SafeAreaView style={[styles.loaderContainer, { backgroundColor: colors.background }]}>
+          <Icon name="storefront-outline" size={42} color={colors.mutedText} />
+          <Text style={[styles.loaderText, { color: colors.text, marginTop: 16 }]}>Seller profile unavailable</Text>
+          <Text style={[styles.errorBody, { color: colors.mutedText }]}>
+            {sellerError || "We couldn't load your seller profile right now."}
+          </Text>
+          <TouchableOpacity
+            style={[styles.primaryBtn, { marginTop: 18, backgroundColor: colors.primary }]}
+            onPress={() => fetchSellerProfile().catch(() => {})}
+          >
+            <Text style={styles.btnText}>Try Again</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+        <AppBottomDock navigation={navigation} activeRouteName="ProfileView" />
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
-      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.headerBtn}
-        >
-          <Icon name="arrow-back" size={22} color={colors.text} />
-        </TouchableOpacity>
-
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Seller Profile</Text>
-
-        <Tooltip
-          isVisible={step === 1}
-          placement="bottom"
-          content={
-            <View>
-              <Text>Open seller settings here</Text>
-              <TouchableOpacity onPress={next}>
-                <Text style={styles.guideBtn}>Next</Text>
-              </TouchableOpacity>
-            </View>
-            }
+    <View style={styles.screen}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
+        <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={[styles.headerBtn, { backgroundColor: colors.surface }]}
           >
-            <TouchableOpacity
-              style={styles.headerBtn}
-            onPress={() =>
-              navigation.navigate("SellerSettingsScreen", {
-                seller
-              })
-            }
-          >
-            <Icon name="settings-outline" size={22} color={colors.text} />
+            <Icon name="arrow-back" size={22} color={colors.text} />
           </TouchableOpacity>
-        </Tooltip>
-        <TouchableOpacity style={styles.headerBtn} onPress={startGuide}>
-          <Icon name="help-circle-outline" size={22} color={colors.primary} />
-        </TouchableOpacity>
-      </View>
 
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.bannerContainer}>
+          <View style={styles.headerTitleGroup}>
+            <Text style={[styles.headerEyebrow, { color: colors.primary }]}>Workspace</Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>Seller Dashboard</Text>
+          </View>
+
+          <View style={styles.headerActions}>
+            <Tooltip
+              isVisible={step === 1}
+              placement="bottom"
+              content={
+                <View>
+                  <Text>Open seller settings here</Text>
+                  <TouchableOpacity onPress={next}>
+                    <Text style={styles.guideBtn}>Next</Text>
+                  </TouchableOpacity>
+                </View>
+              }
+            >
+              <TouchableOpacity
+                style={[styles.headerBtn, { backgroundColor: colors.surface }]}
+                onPress={() =>
+                  navigation.navigate("SellerSettingsScreen", {
+                    seller
+                  })
+                }
+              >
+                <Icon name="settings-outline" size={22} color={colors.text} />
+              </TouchableOpacity>
+            </Tooltip>
+            <TouchableOpacity style={[styles.headerBtn, { backgroundColor: `${colors.primary}16` }]} onPress={startGuide}>
+              <Icon name="help-circle-outline" size={22} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <ScrollView
+          style={[styles.container, { backgroundColor: colors.background }]}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.contentContainer, { paddingBottom: APP_BOTTOM_DOCK_BASE_HEIGHT + 40 }]}
+        >
+        <View style={[styles.bannerContainer, { marginHorizontal: isCompactLayout ? 12 : 18 }]}>
           <Image
             source={{ uri: seller?.coverPic || DEFAULT_COVER }}
-            style={styles.banner}
+            style={[styles.banner, { height: isCompactLayout ? 210 : 244 }]}
           />
+          <View style={styles.bannerOverlay} />
 
           <TouchableOpacity
-            style={styles.editBanner}
+            style={[styles.editBanner, { backgroundColor: "rgba(10,15,28,0.68)" }]}
             onPress={() =>
               navigation.navigate("SellerSettingsScreen", {
                 seller
@@ -356,14 +433,26 @@ const fetchRequestData = useCallback(async () => {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.profileSection}>
+        <View
+          style={[
+            styles.profileSection,
+            {
+              marginHorizontal: isCompactLayout ? 12 : 18,
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <Image
             source={{ uri: seller?.profilePic || DEFAULT_AVATAR }}
-            style={styles.profile}
+            style={[styles.profile, { borderColor: colors.card }]}
           />
 
-          <Text style={styles.name}>
+          <Text style={[styles.name, { color: colors.text }]}>
             {seller?.sellerName || "Seller Profile"}
+          </Text>
+          <Text style={[styles.profileHandle, { color: colors.mutedText }]}>
+            {sellerHandle}
           </Text>
 
           <Tooltip
@@ -396,8 +485,50 @@ const fetchRequestData = useCallback(async () => {
           </Tooltip>
 
           {!!seller?.specialization && (
-            <Text style={styles.tagline}>{seller.specialization}</Text>
+            <Text style={[styles.tagline, { color: colors.mutedText }]}>{seller.specialization}</Text>
           )}
+
+          <View style={[styles.heroStatusCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.heroStatusCopy}>
+              <View style={styles.heroStatusRow}>
+                <View style={[styles.heroStatusDot, { backgroundColor: heroStatusColor }]} />
+                <Text style={[styles.heroStatusLabel, { color: colors.text }]}>{heroStatusLabel}</Text>
+              </View>
+              <Text style={[styles.heroStatusText, { color: colors.mutedText }]}>
+                {heroStatusCopy}
+              </Text>
+            </View>
+
+            <Switch
+              value={Boolean(seller?.availabilityStatus)}
+              onValueChange={toggleSellerAvailability}
+              disabled={availabilityUpdating}
+              thumbColor="#FFFFFF"
+              trackColor={{ false: `${colors.border}`, true: `${colors.primary}` }}
+              ios_backgroundColor={colors.border}
+            />
+          </View>
+
+          <View style={styles.statusChipRow}>
+            <View style={[styles.statusChip, { backgroundColor: `${colors.primary}14` }]}>
+              <Text style={[styles.statusChipText, { color: colors.primary }]}>Buyer visibility</Text>
+            </View>
+            <View style={[styles.statusChip, { backgroundColor: seller?.availabilityStatus ? "rgba(34,197,94,0.14)" : "rgba(245,158,11,0.14)" }]}>
+              <Text style={[styles.statusChipText, { color: heroStatusColor }]}>
+                {seller?.availabilityStatus ? "Chat unlocked" : "Chat paused"}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={[styles.metricGrid, { marginHorizontal: isCompactLayout ? 12 : 18 }]}>
+          {sellerMetricCards.map((metric) => (
+            <View key={metric.label} style={[styles.metricCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.metricValue, { color: colors.text }]}>{metric.value}</Text>
+              <Text style={[styles.metricLabel, { color: colors.mutedText }]}>{metric.label}</Text>
+              <Text style={[styles.metricDetail, { color: colors.primary }]}>{metric.detail}</Text>
+            </View>
+          ))}
         </View>
 
         <Tooltip
@@ -412,12 +543,17 @@ const fetchRequestData = useCallback(async () => {
             </View>
           }
         >
-          <View style={[styles.walletCard, { backgroundColor: colors.card }]}>
+          <View style={[styles.walletCard, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: isCompactLayout ? 12 : 18 }]}>
             <View style={styles.walletLeft}>
-              <Icon name="wallet-outline" size={22} color={colors.primary} />
-              <Text style={[styles.walletTitle, { color: colors.text }]}>
-                {productFlags.sellerMonetizationInConsumerApp ? "Seller Wallet" : "Completed Request Value"}
-              </Text>
+              <View style={[styles.walletIconWrap, { backgroundColor: `${colors.primary}14` }]}>
+                <Icon name="wallet-outline" size={22} color={colors.primary} />
+              </View>
+              <View>
+                <Text style={[styles.walletEyebrow, { color: colors.mutedText }]}>Revenue snapshot</Text>
+                <Text style={[styles.walletTitle, { color: colors.text }]}>
+                  {productFlags.sellerMonetizationInConsumerApp ? "Seller Wallet" : "Completed Request Value"}
+                </Text>
+              </View>
             </View>
 
             <Text style={[styles.walletAmount, { color: colors.text }]}>{formatSummaryAmount(requestSummary, "completed")}</Text>
@@ -425,32 +561,13 @@ const fetchRequestData = useCallback(async () => {
         </Tooltip>
 
         {!productFlags.sellerMonetizationInConsumerApp ? (
-          <View style={styles.readOnlyInfoCard}>
+          <View style={[styles.readOnlyInfoCard, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: isCompactLayout ? 12 : 18 }]}>
             <Icon name="information-circle-outline" size={18} color="#6b7280" />
-            <Text style={styles.readOnlyInfoText}>{monetizationDisabledMessage}</Text>
+            <Text style={[styles.readOnlyInfoText, { color: colors.mutedText }]}>{monetizationDisabledMessage}</Text>
           </View>
         ) : null}
 
-        <View style={styles.stats}>
-          <View style={styles.statBox}>
-            <Text style={styles.statNumber}>
-              {seller?.experience ? seller.experience : "0"}
-            </Text>
-            <Text style={styles.statLabel}>Years Exp.</Text>
-          </View>
-
-          <View style={styles.statBox}>
-            <Text style={styles.statNumber}>0.0</Text>
-            <Text style={styles.statLabel}>Rating</Text>
-          </View>
-
-          <View style={styles.statBox}>
-            <Text style={styles.statNumber}>0+</Text>
-            <Text style={styles.statLabel}>Clients</Text>
-          </View>
-        </View>
-
-        <View style={styles.actionRow}>
+        <View style={[styles.actionRow, { marginHorizontal: isCompactLayout ? 12 : 18 }]}>
           <Tooltip
             isVisible={step === 4}
             placement="top"
@@ -464,7 +581,7 @@ const fetchRequestData = useCallback(async () => {
             }
           >
             <TouchableOpacity
-              style={styles.primaryBtn}
+              style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
               onPress={() =>
                 navigation.navigate("AddServiceScreen", {
                   seller
@@ -489,16 +606,16 @@ const fetchRequestData = useCallback(async () => {
             }
           >
             <TouchableOpacity
-              style={styles.secondaryBtn}
+              style={[styles.secondaryBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "seller" })}
             >
-              <Icon name="calendar-outline" size={18} color="#333" />
-              <Text style={styles.btnText2}> View Appointments</Text>
+              <Icon name="calendar-outline" size={18} color={colors.text} />
+              <Text style={[styles.btnText2, { color: colors.text }]}> View Appointments</Text>
             </TouchableOpacity>
           </Tooltip>
         </View>
 
-        <View style={[styles.availabilityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[styles.availabilityCard, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: isCompactLayout ? 12 : 18 }]}>
           <View style={styles.availabilityCardHeader}>
             <View>
               <Text style={[styles.availabilityCardTitle, { color: colors.text }]}>Booking Availability</Text>
@@ -526,7 +643,7 @@ const fetchRequestData = useCallback(async () => {
           </Text>
         </View>
 
-        <View style={styles.section}>
+        <View style={[styles.section, { paddingHorizontal: isCompactLayout ? 12 : 18 }]}>
           <View style={styles.sectionHeaderRow}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>My Appointments</Text>
             <TouchableOpacity onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "seller" })}>
@@ -542,14 +659,14 @@ const fetchRequestData = useCallback(async () => {
             <Text style={[styles.emptyRequestText, { color: colors.mutedText }]}>No appointments right now.</Text>
           ) : (
             recentRequests.map((item: any) => (
-              <View key={item._id} style={styles.requestCard}>
+              <View key={item._id} style={[styles.requestCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.requestTitle}>{item.service?.serviceName || "Service request"}</Text>
-                  <Text style={styles.requestSubtitle}>{item.user?.name || item.user?.username || "Client"}</Text>
-                  <Text style={styles.requestMeta}>{formatAppointmentSummary(item)}</Text>
-                  <Text style={styles.requestStatus}>{formatRequestStatus(item?.status)}</Text>
+                  <Text style={[styles.requestTitle, { color: colors.text }]}>{item.service?.serviceName || "Service request"}</Text>
+                  <Text style={[styles.requestSubtitle, { color: colors.mutedText }]}>{item.user?.name || item.user?.username || "Client"}</Text>
+                  <Text style={[styles.requestMeta, { color: colors.mutedText }]}>{formatAppointmentSummary(item)}</Text>
+                  <Text style={[styles.requestStatus, { color: colors.primary }]}>{formatRequestStatus(item?.status)}</Text>
                 </View>
-                <Text style={styles.requestPrice}>
+                <Text style={[styles.requestPrice, { color: colors.text }]}>
                   {formatPrimaryServicePrice({ pricingOptions: [item.pricing], currency: item.pricing?.currency })}
                 </Text>
               </View>
@@ -557,12 +674,12 @@ const fetchRequestData = useCallback(async () => {
           )}
         </View>
 
-        <View style={styles.section}>
+        <View style={[styles.section, { paddingHorizontal: isCompactLayout ? 12 : 18 }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>About Seller</Text>
 
           <Text
             numberOfLines={expanded ? undefined : 3}
-            style={styles.desc}
+            style={[styles.desc, { color: colors.mutedText }]}
           >
             {seller?.bio?.trim()
               ? seller.bio
@@ -571,64 +688,65 @@ const fetchRequestData = useCallback(async () => {
 
           {!!seller?.bio && seller.bio.length > 120 && (
             <TouchableOpacity onPress={() => setExpanded(!expanded)}>
-              <Text style={styles.readMore}>
+              <Text style={[styles.readMore, { color: colors.primary }]}>
                 {expanded ? "Show Less" : "Read More"}
               </Text>
             </TouchableOpacity>
           )}
         </View>
 
-        <View style={styles.section}>
+        <View style={[styles.section, { paddingHorizontal: isCompactLayout ? 12 : 18 }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Professional Details</Text>
 
-          <View style={styles.infoCard}>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Specialization</Text>
-              <Text style={styles.infoValue}>
+          <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.infoLabel, { color: colors.mutedText }]}>Specialization</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>
                 {seller?.specialization || "N/A"}
               </Text>
             </View>
 
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Experience</Text>
-              <Text style={styles.infoValue}>
+            <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.infoLabel, { color: colors.mutedText }]}>Experience</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>
                 {seller?.experience ? `${seller.experience} Years` : "N/A"}
               </Text>
             </View>
 
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Clinic Link</Text>
-              <Text style={styles.infoValue}>
+            <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.infoLabel, { color: colors.mutedText }]}>Clinic Link</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>
                 {seller?.clinicLink || "N/A"}
               </Text>
             </View>
 
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Degree</Text>
-              <Text style={styles.infoValue}>
+            <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.infoLabel, { color: colors.mutedText }]}>Degree</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>
                 {seller?.degree || "N/A"}
               </Text>
             </View>
 
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>License</Text>
-              <Text style={styles.infoValue}>
+            <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.infoLabel, { color: colors.mutedText }]}>License</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>
                 {seller?.license || "N/A"}
               </Text>
             </View>
 
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Status</Text>
-              <Text style={styles.infoValue}>
+            <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.infoLabel, { color: colors.mutedText }]}>Status</Text>
+              <Text style={[styles.infoValue, { color: heroStatusColor }]}>
                 {seller?.availabilityStatus ? "In" : "Out"}
               </Text>
             </View>
 
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>DigiLocker</Text>
+            <View style={[styles.infoRow, { borderBottomColor: "transparent" }]}>
+              <Text style={[styles.infoLabel, { color: colors.mutedText }]}>DigiLocker</Text>
               <Text
                 style={[
                   styles.infoValue,
+                  { textAlign: "right" },
                   { color: seller?.digilockerVerified ? "#16A34A" : "#DC2626" }
                 ]}
               >
@@ -638,7 +756,7 @@ const fetchRequestData = useCallback(async () => {
           </View>
         </View>
 
-       <View style={styles.section}>
+       <View style={[styles.section, { paddingHorizontal: isCompactLayout ? 12 : 18 }]}>
          <View style={styles.serviceHeader}>
            <Text style={[styles.sectionTitle, { color: colors.text }]}>All Services</Text>
 
@@ -649,7 +767,7 @@ const fetchRequestData = useCallback(async () => {
                })
              }
            >
-             <Text style={styles.addService}>+ Add New</Text>
+             <Text style={[styles.addService, { color: colors.primary }]}>+ Add New</Text>
            </TouchableOpacity>
          </View>
 
@@ -659,16 +777,16 @@ const fetchRequestData = useCallback(async () => {
          ) : serviceError ? (
            <Text style={[styles.noServiceSub, { color: colors.mutedText }]}>{serviceError}</Text>
          ) : services.length === 0 ? (
-           <View style={styles.emptyService}>
-             <Icon name="briefcase-outline" size={40} color="#bbb" />
-             <Text style={styles.noService}>No services added yet</Text>
-             <Text style={styles.noServiceSub}>
+           <View style={[styles.emptyService, { backgroundColor: colors.card, borderColor: colors.border }]}>
+             <Icon name="briefcase-outline" size={40} color={colors.mutedText} />
+             <Text style={[styles.noService, { color: colors.text }]}>No services added yet</Text>
+             <Text style={[styles.noServiceSub, { color: colors.mutedText }]}>
                Add your first service to start receiving bookings.
              </Text>
            </View>
          ) : (
            services.map((item: any) => (
-             <View key={item._id} style={styles.serviceCard}>
+             <View key={item._id} style={[styles.serviceCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
 
                {!!item.image && (
                  <Image
@@ -677,15 +795,15 @@ const fetchRequestData = useCallback(async () => {
                  />
                )}
 
-               <Text style={styles.serviceName}>{item.serviceName}</Text>
+               <Text style={[styles.serviceName, { color: colors.text }]}>{item.serviceName}</Text>
 
-               <Text numberOfLines={2} style={styles.serviceDesc}>
+               <Text numberOfLines={2} style={[styles.serviceDesc, { color: colors.mutedText }]}>
                  {item.description}
                </Text>
 
                {/* PRICE */}
                <View style={{ flexDirection: "row", marginTop: 6 }}>
-                 <Text style={styles.priceTag}>{formatPrimaryServicePrice(item)}</Text>
+                 <Text style={[styles.priceTag, { backgroundColor: colors.surface, color: colors.primary }]}>{formatPrimaryServicePrice(item)}</Text>
                </View>
 
                {/* ACTIONS */}
@@ -696,7 +814,7 @@ const fetchRequestData = useCallback(async () => {
                      navigation.navigate("EditServiceScreen", { service: item })
                    }
                  >
-                   <Icon name="create-outline" size={20} color="#333" />
+                   <Icon name="create-outline" size={20} color={colors.text} />
                  </TouchableOpacity>
 
                  <TouchableOpacity
@@ -708,7 +826,7 @@ const fetchRequestData = useCallback(async () => {
                  <TouchableOpacity
                    onPress={() => handleShareService(item)}
                  >
-                   <Icon name="share-social-outline" size={20} color="#333" />
+                   <Icon name="share-social-outline" size={20} color={colors.text} />
                  </TouchableOpacity>
 
                </View>
@@ -717,14 +835,19 @@ const fetchRequestData = useCallback(async () => {
            ))
          )}
        </View>
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </SafeAreaView>
+      <AppBottomDock navigation={navigation} activeRouteName="ProfileView" />
+    </View>
   );
 };
 
 export default SellerDashboardScreen;
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   loaderContainer: {
     flex: 1,
     backgroundColor: "#fff",
@@ -747,7 +870,6 @@ const styles = StyleSheet.create({
 
   header: {
     height: 90,
-    backgroundColor: "#fff",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -758,27 +880,56 @@ const styles = StyleSheet.create({
   },
 
   headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 19,
+    fontWeight: "800",
     color: "#111"
+  },
+  headerTitleGroup: {
+    flex: 1,
+    paddingHorizontal: 14,
+  },
+  headerEyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
 
   headerBtn: {
-    padding: 6
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   container: {
     flex: 1,
     backgroundColor: "#fff"
   },
+  contentContainer: {
+    paddingTop: 12,
+  },
 
   bannerContainer: {
-    position: "relative"
+    position: "relative",
+    borderRadius: 28,
+    overflow: "hidden",
   },
 
   banner: {
     width: "100%",
     height: 220
+  },
+  bannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(6,10,18,0.28)",
   },
 
   editBanner: {
@@ -792,7 +943,13 @@ const styles = StyleSheet.create({
 
   profileSection: {
     alignItems: "center",
-    marginTop: -50
+    marginTop: -58,
+    marginBottom: 6,
+    paddingHorizontal: 18,
+    paddingTop: 0,
+    paddingBottom: 18,
+    borderRadius: 28,
+    borderWidth: 1,
   },
 
   profile: {
@@ -808,6 +965,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 8,
     color: "#111"
+  },
+  profileHandle: {
+    marginTop: 6,
+    fontSize: 13,
+    fontWeight: "600",
   },
 
   verifyRow: {
@@ -829,26 +991,118 @@ const styles = StyleSheet.create({
     color: "#666",
     marginTop: 6,
     textAlign: "center",
-    paddingHorizontal: 20
+    paddingHorizontal: 20,
+    lineHeight: 20,
+  },
+  heroStatusCard: {
+    width: "100%",
+    marginTop: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  heroStatusCopy: {
+    flex: 1,
+    paddingRight: 14,
+  },
+  heroStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  heroStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  heroStatusLabel: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  heroStatusText: {
+    marginTop: 6,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  statusChipRow: {
+    width: "100%",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 14,
+  },
+  statusChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  statusChipText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  metricGrid: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+  },
+  metricCard: {
+    flex: 1,
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+  },
+  metricValue: {
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: -0.5,
+  },
+  metricLabel: {
+    marginTop: 8,
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+  metricDetail: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: "800",
   },
 
   walletCard: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#F5F3FF",
-    margin: 20,
+    marginTop: 18,
     padding: 16,
-    borderRadius: 12
+    borderRadius: 20,
+    borderWidth: 1,
   },
 
   walletLeft: {
     flexDirection: "row",
-    alignItems: "center"
+    alignItems: "center",
+    flex: 1,
+    paddingRight: 12,
+  },
+  walletIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  walletEyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
 
   walletTitle: {
-    marginLeft: 8,
     fontWeight: "600",
     color: "#111"
   },
@@ -901,8 +1155,7 @@ const styles = StyleSheet.create({
 
   actionRow: {
     flexDirection: "row",
-    paddingHorizontal: 20,
-    marginTop: 15
+    marginTop: 16
   },
   availabilityCard: {
     marginHorizontal: 20,
@@ -955,7 +1208,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#7B4DFF",
     padding: 14,
-    borderRadius: 10,
+    borderRadius: 16,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
@@ -967,7 +1220,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#f1f1f1",
     padding: 14,
-    borderRadius: 10,
+    borderRadius: 16,
+    borderWidth: 1,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center"
@@ -1012,10 +1266,11 @@ const styles = StyleSheet.create({
   requestCard: {
     marginTop: 12,
     backgroundColor: "#FAFAFA",
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 14,
     flexDirection: "row",
-    alignItems: "center"
+    alignItems: "center",
+    borderWidth: 1,
   },
   requestTitle: {
     fontWeight: "700",
@@ -1055,7 +1310,7 @@ const styles = StyleSheet.create({
 
   infoCard: {
     backgroundColor: "#FAFAFA",
-    borderRadius: 12,
+    borderRadius: 18,
     padding: 14,
     marginTop: 12,
     borderWidth: 1,
@@ -1097,7 +1352,10 @@ const styles = StyleSheet.create({
 
   emptyService: {
     alignItems: "center",
-    paddingVertical: 30
+    paddingVertical: 30,
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 18,
   },
 
   noService: {
@@ -1120,7 +1378,7 @@ const styles = StyleSheet.create({
   },
 serviceCard: {
   backgroundColor: "#FAFAFA",
-  borderRadius: 12,
+  borderRadius: 18,
   padding: 12,
   marginTop: 12,
   borderWidth: 1,

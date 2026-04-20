@@ -145,7 +145,7 @@ const HelpSupportScreen = ({ navigation }: any) => {
         visible={showAssistant}
         onClose={() => setShowAssistant(false)}
         scope="Help and support"
-        scopeHint="Support form, login issue, payment issue, account issue, ya seller/user workflow help ke liye AI assistant."
+        scopeHint="AI assistant for the support form, login issues, payment issues, account issues, and seller or user workflow help."
         conversationSummary={`Support email: ${supportEmail || "not shared yet"}.${subject ? ` Current subject draft: ${subject}.` : ""}${message ? ` Current details draft available.` : ""}`}
         recentMessages={[
           email ? `Account email: ${email}` : "",
@@ -153,9 +153,9 @@ const HelpSupportScreen = ({ navigation }: any) => {
           message ? `Support draft: ${message}` : "",
         ].filter(Boolean)}
         suggestedPrompts={[
-          "Mera support message improve karo",
-          "Login issue ka next step batao",
-          "Payment problem ke liye kya likhun?",
+          "Improve my support message",
+          "What is the next step for this login issue?",
+          "What should I write for a payment issue?",
         ]}
       />
     </SafeAreaView>
