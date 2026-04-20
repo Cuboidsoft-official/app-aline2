@@ -50,6 +50,29 @@ const formatMinutes = (minutes: number) => {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+const buildSellerBankSummary = (seller: {
+  bankName?: string;
+  bankAccountNumber?: string;
+}) => {
+  const bankName = String(seller?.bankName || "").trim();
+  const accountNumber = String(seller?.bankAccountNumber || "").trim();
+  const lastFour = accountNumber.slice(-4);
+
+  if (!bankName && !lastFour) {
+    return "Add your seller payout account";
+  }
+
+  if (!bankName) {
+    return `Ending in ${lastFour}`;
+  }
+
+  if (!lastFour) {
+    return bankName;
+  }
+
+  return `${bankName} • ${lastFour}`;
+};
+
 const SellerSettingsScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
 
@@ -58,6 +81,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [availabilityTimezone, setAvailabilityTimezone] = useState("Asia/Kolkata");
   const [weeklyAvailability, setWeeklyAvailability] = useState<WeeklyAvailabilityEntry[]>(buildDefaultWeeklyAvailability());
+  const [bankSummary, setBankSummary] = useState("Add your seller payout account");
 
   // ✅ FETCH SELLER
   const fetchSeller = async () => {
@@ -73,6 +97,7 @@ const SellerSettingsScreen = ({ navigation }: any) => {
           ? (res.data.seller.weeklyAvailability as WeeklyAvailabilityEntry[])
           : buildDefaultWeeklyAvailability()
       );
+      setBankSummary(buildSellerBankSummary(res.data.seller || {}));
 
     } catch (error) {
       const apiError = error as ApiLikeError;
@@ -220,6 +245,17 @@ const SellerSettingsScreen = ({ navigation }: any) => {
         >
           <Text style={[styles.text, { color: colors.text }]}>Switch to User Profile</Text>
           <Icon name="person-outline" size={20} color={colors.mutedText} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.item, { borderColor: colors.border }]}
+          onPress={() => navigation.navigate("SellerRegistration", { mode: "edit", initialStep: 4 })}
+        >
+          <View style={styles.itemCopy}>
+            <Text style={[styles.text, { color: colors.text }]}>Bank account setup</Text>
+            <Text style={[styles.itemHint, { color: colors.mutedText }]}>{bankSummary}</Text>
+          </View>
+          <Icon name="card-outline" size={20} color={colors.mutedText} />
         </TouchableOpacity>
 
         {/* AVAILABILITY */}
@@ -372,6 +408,15 @@ const styles = StyleSheet.create({
   },
 
   text: { fontSize: 16 },
+  itemCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  itemHint: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 16,
+  },
 
   deleteText: {
     fontSize: 16,

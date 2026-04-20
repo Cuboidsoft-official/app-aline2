@@ -53,6 +53,7 @@ interface AppNotification {
   type: NotificationKind;
   createdAt: string;
   read?: boolean;
+  text?: string;
   sender?: NotificationUser | null;
   post?: NotificationTarget | string | null;
   story?: NotificationTarget | string | null;
@@ -451,6 +452,12 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
               {!item.read ? <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} /> : null}
             </View>
 
+            {item.text ? (
+              <Text style={[styles.notificationPreview, { color: colors.mutedText }]} numberOfLines={2}>
+                {item.text}
+              </Text>
+            ) : null}
+
             <View style={styles.notificationMetaRow}>
               <Text style={[styles.notificationTime, { color: colors.mutedText }]}>{formatRelativeTime(item.createdAt)}</Text>
               <Text style={[styles.metaBullet, { color: colors.border }]}>•</Text>
@@ -796,6 +803,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginTop: 6,
+  },
+  notificationPreview: {
+    marginTop: 6,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
   notificationTime: {
     fontSize: 12,

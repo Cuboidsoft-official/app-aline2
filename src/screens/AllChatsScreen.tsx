@@ -24,6 +24,7 @@ import { getConversationPreview } from "../utils/chatPresentation";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { connectSocket, socket } from "../socket";
+import AISupportSheet from "../components/chat/AISupportSheet";
 
 interface ChatUser {
   _id: string;
@@ -114,6 +115,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   const [eligibleGroupMemberIds, setEligibleGroupMemberIds] = useState<string[]>([]);
   const [selectedForwardTargets, setSelectedForwardTargets] = useState<Record<string, ForwardTarget>>({});
   const [forwarding, setForwarding] = useState(false);
+  const [showAssistant, setShowAssistant] = useState(false);
   const forwardMessageId = String(route?.params?.forwardMessageId || "");
   const isForwardMode = Boolean(forwardMessageId);
   const headerSubtitle = isForwardMode
@@ -799,6 +801,31 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         ? renderChat
         : renderRegularConversation;
   const keyExtractor = (item: ChatUser | Conversation) => item._id;
+  const assistantScope = activeTab === "seller"
+    ? "Seller chats inbox support"
+    : activeTab === "group"
+      ? "Group chats inbox support"
+      : "Direct chats inbox support";
+  const assistantScopeHint = headerSubtitle;
+  const assistantConversationSummary = `Visible chats in this tab: ${listData.length}. Forward mode: ${isForwardMode ? "on" : "off"}.`;
+  const assistantSuggestedPrompts = activeTab === "seller"
+    ? ["Seller chat ka flow samjhao", "Appointment chat kahan milegi?", "Seller inbox issue fix karo"]
+    : activeTab === "group"
+      ? ["Group chat create kaise karun?", "Group message issue fix karo", "Forward mode samjhao"]
+      : ["Direct chat ka issue fix karo", "Message inbox samjhao", "Search ya unread ka help do"];
+  const assistantRecentMessages = useMemo(
+    () =>
+      listData.slice(0, 5).map((item) => {
+        if ("conversationType" in item) {
+          const label = item?.groupName || item?.otherUser?.username || item?.otherUser?.name || item?.sellerUser?.username || "Chat";
+          return `${label}: ${getConversationPreview(item) || "No recent preview"}`;
+        }
+
+        const chatUser = item as ChatUser;
+        return `${chatUser?.username || chatUser?.name || "User"}: chat ready to open`;
+      }),
+    [listData],
+  );
 
   if (loading) {
     return (
@@ -826,6 +853,12 @@ const AllChatsScreen = ({ navigation, route }: any) => {
               onPress={() => navigation.navigate("Search")}
             >
               <Icon name="search-outline" size={20} color={accentColor} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.headerIconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
+              onPress={() => setShowAssistant(true)}
+            >
+              <Icon name="sparkles-outline" size={20} color={accentColor} />
             </TouchableOpacity>
           {activeTab === "group" ? (
             <TouchableOpacity
@@ -1035,6 +1068,16 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           </View>
         </View>
       </Modal>
+
+      <AISupportSheet
+        visible={showAssistant}
+        onClose={() => setShowAssistant(false)}
+        scope={assistantScope}
+        scopeHint={assistantScopeHint}
+        conversationSummary={assistantConversationSummary}
+        recentMessages={assistantRecentMessages}
+        suggestedPrompts={assistantSuggestedPrompts}
+      />
     </SafeAreaView>
   );
 };

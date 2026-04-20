@@ -66,6 +66,7 @@ import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
 import VoiceMessageBubble from "../components/chat/VoiceMessageBubble";
 import MessageContextMenu from "../components/chat/MessageContextMenu";
 import StickerPickerSheet from "../components/chat/StickerPickerSheet";
+import AISupportSheet from "../components/chat/AISupportSheet";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
@@ -418,6 +419,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
+  const [showAssistant, setShowAssistant] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState("");
   const [conversationListing, setConversationListing] = useState<ConversationListingState | null>(null);
   const messageListRef = useRef<FlatList<ChatMessage> | null>(null);
@@ -981,6 +983,31 @@ const ChatScreen = ({ navigation, route }: any) => {
   const chatHeaderTint = primaryThemeColor;
   const headerStatusColor = "rgba(255,255,255,0.78)";
   const headerIconColor = "#FFFFFF";
+  const assistantScope = isGroupConversation ? "Group chat support" : "Direct chat support";
+  const assistantScopeHint = isGroupConversation
+    ? `${groupMeta.groupName || "Group chat"} me messages, calls, media, aur group controls ke liye help.`
+    : `${user?.username || user?.name || "This chat"} ke conversation flow, messaging, media, aur support help.`;
+  const assistantConversationSummary = isGroupConversation
+    ? `Group members: ${groupMeta.memberCount || 0}. Presence: ${groupPresenceText}.`
+    : `Current chat partner: ${user?.username || user?.name || "User"}. Presence: ${directPresenceText}.${conversationListing?.serviceName ? ` Linked service: ${conversationListing.serviceName}.` : ""}`;
+  const assistantSuggestedPrompts = isGroupConversation
+    ? ["Group chat issue fix karo", "Media send problem hai", "Unread messages samjhao"]
+    : ["Message kyu nahi ja raha?", "Chat settings samjhao", "Is user chat ka issue fix kaise hoga?"];
+  const assistantRecentMessages = useMemo(
+    () =>
+      messages.slice(-6).map((message) => {
+        const rawText = String(getMessageText(message) || "").trim() || `[${getMessageTypeLabel(message)}]`;
+        const senderId = getMessageSenderId(message);
+        const senderLabel = String(senderId) === String(currentUserId)
+          ? "Current user"
+          : isGroupConversation
+            ? (typeof message?.sender === "object" ? message.sender?.username || message.sender?.name || "Other member" : "Other member")
+            : user?.username || user?.name || "Other participant";
+
+        return `${senderLabel}: ${rawText}`;
+      }),
+    [currentUserId, isGroupConversation, messages, user?.name, user?.username],
+  );
   const messageMap = useMemo(() => {
     const nextMap = new Map<string, ChatMessage>();
     messages.forEach((message) => {
@@ -1923,6 +1950,12 @@ const ChatScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.headerActionButton}
+                onPress={() => setShowAssistant(true)}
+              >
+                <Icon name="sparkles-outline" size={19} color={headerIconColor} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerActionButton}
                 onPress={() => navigation.navigate("GroupDetailsScreen", { conversationId: currentConversationId })}
               >
                 <Icon name="ellipsis-horizontal" size={20} color={headerIconColor} />
@@ -1941,6 +1974,12 @@ const ChatScreen = ({ navigation, route }: any) => {
                 onPress={() => startCallFlow("video")}
               >
                 <Icon name="videocam-outline" size={20} color={headerIconColor} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={() => setShowAssistant(true)}
+              >
+                <Icon name="sparkles-outline" size={19} color={headerIconColor} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.headerActionButton}
@@ -2190,6 +2229,16 @@ const ChatScreen = ({ navigation, route }: any) => {
             ) : null}
           </View>
         </Modal>
+
+        <AISupportSheet
+          visible={showAssistant}
+          onClose={() => setShowAssistant(false)}
+          scope={assistantScope}
+          scopeHint={assistantScopeHint}
+          conversationSummary={assistantConversationSummary}
+          recentMessages={assistantRecentMessages}
+          suggestedPrompts={assistantSuggestedPrompts}
+        />
 
         <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: Math.max(10, insets.bottom) }]}>
           <TouchableOpacity

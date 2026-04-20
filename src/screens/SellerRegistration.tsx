@@ -157,12 +157,14 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const { width } = useWindowDimensions();
   const isCompact = width < 380;
   const mode: SellerRegistrationMode = route?.params?.mode === "edit" ? "edit" : "create";
+  const requestedInitialStep = Math.min(TOTAL_STEPS, Math.max(1, Number(route?.params?.initialStep) || 1));
 
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(requestedInitialStep);
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(mode === "edit");
   const [errorMessage, setErrorMessage] = useState("");
   const [activeDropdown, setActiveDropdown] = useState<DropdownField | null>(null);
+  const [paymentPreviewSeen, setPaymentPreviewSeen] = useState(false);
 
   const [name, setName] = useState("");
   const [specialization, setSpecialization] = useState("");
@@ -253,6 +255,10 @@ const SellerRegistration = ({ navigation, route }: any) => {
     setServiceDurationMinutes(String(seller?.onboardingServiceDurationMinutes || "15"));
     setServiceRate(String(seller?.onboardingServiceRate || ""));
   }, []);
+
+  useEffect(() => {
+    setStep(requestedInitialStep);
+  }, [requestedInitialStep]);
 
   useEffect(() => {
     if (mode !== "edit") {
@@ -524,6 +530,10 @@ const SellerRegistration = ({ navigation, route }: any) => {
         Alert.alert("Validation", "Please add description.");
         return false;
       }
+      if (!paymentPreviewSeen) {
+        Alert.alert("Payment", "Tap the sample payment button once to review the default Razorpay flow.");
+        return false;
+      }
     }
 
     if (step === 3) {
@@ -589,6 +599,14 @@ const SellerRegistration = ({ navigation, route }: any) => {
     if (!validateCurrentStep()) return;
     setStep((prev) => Math.min(TOTAL_STEPS, prev + 1));
   };
+
+  const openSamplePaymentAlert = useCallback(() => {
+    setPaymentPreviewSeen(true);
+    Alert.alert(
+      "Sample payment flow",
+      `Default plan: ${selectedPlan.title}\nAmount: INR ${selectedPlan.amount}\n\nNext phase me yahin Razorpay checkout open hoga. Abhi ye placeholder alert sirf flow samajhne ke liye hai.`,
+    );
+  }, [selectedPlan.amount, selectedPlan.title]);
 
   const submitSellerRegistration = async () => {
     try {
@@ -898,6 +916,30 @@ const SellerRegistration = ({ navigation, route }: any) => {
               );
             })}
           </View>
+
+          <View style={[styles.paymentPreviewCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.paymentPreviewHeader}>
+              <View style={[styles.paymentPreviewIcon, { backgroundColor: `${colors.primary}18` }]}>
+                <Icon name="card-outline" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.paymentPreviewCopy}>
+                <Text style={[styles.paymentPreviewTitle, { color: colors.text }]}>Default payment placeholder</Text>
+                <Text style={[styles.paymentPreviewBody, { color: colors.mutedText }]}>
+                  Flow samajhne ke liye abhi sample alert dikhega. Next build me is button par Razorpay checkout use hoga.
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.paymentPreviewButton, { backgroundColor: colors.primary }]}
+              onPress={openSamplePaymentAlert}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.paymentPreviewButtonText}>
+                {paymentPreviewSeen ? "Review payment flow again" : "Open sample payment alert"}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </>
       );
     }
@@ -1203,6 +1245,47 @@ const styles = StyleSheet.create({
   formSectionBody: { marginTop: 4, fontSize: 13, lineHeight: 19 },
   label: { marginTop: 14, marginBottom: 6, fontSize: 13, fontWeight: "800" },
   fieldHint: { marginTop: 6, fontSize: 12, lineHeight: 17 },
+  paymentPreviewCard: {
+    marginTop: 18,
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 16,
+  },
+  paymentPreviewHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  paymentPreviewIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  paymentPreviewCopy: {
+    flex: 1,
+  },
+  paymentPreviewTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  paymentPreviewBody: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  paymentPreviewButton: {
+    marginTop: 16,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  paymentPreviewButtonText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
+  },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 14,

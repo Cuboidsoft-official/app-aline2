@@ -10,7 +10,6 @@ import {
   TouchableOpacity,
   StatusBar,
   Modal,
-  ScrollView,
   ActivityIndicator,
   Linking,
   KeyboardAvoidingView,
@@ -70,6 +69,7 @@ import { getReadableApiErrorMessage } from "../api/networkErrors";
 import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
 import VoiceMessageBubble from "../components/chat/VoiceMessageBubble";
 import StickerPickerSheet from "../components/chat/StickerPickerSheet";
+import AISupportSheet from "../components/chat/AISupportSheet";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 
@@ -192,33 +192,6 @@ const getLocalTimeZone = () => {
   }
 };
 
-const buildSuggestedAppointmentSlots = (): AppointmentSlot[] => {
-  const slots: AppointmentSlot[] = [];
-  const cursor = new Date();
-  cursor.setMinutes(0, 0, 0);
-  cursor.setHours(cursor.getHours() + 2);
-
-  while (slots.length < 6) {
-    const hour = cursor.getHours();
-
-    if (hour >= 10 && hour <= 19) {
-      const start = new Date(cursor);
-      slots.push({
-        start: start.toISOString(),
-        label: formatAppointmentSlotLabel(start.toISOString()),
-        timeZone: getLocalTimeZone(),
-      });
-      cursor.setHours(cursor.getHours() + 3);
-      continue;
-    }
-
-    cursor.setDate(cursor.getDate() + 1);
-    cursor.setHours(10, 0, 0, 0);
-  }
-
-  return slots;
-};
-
 const formatAppointmentSlotLabel = (isoValue: string) =>
   new Date(isoValue).toLocaleString([], {
     weekday: "short",
@@ -227,6 +200,36 @@ const formatAppointmentSlotLabel = (isoValue: string) =>
     hour: "numeric",
     minute: "2-digit",
   });
+
+const formatCalendarDate = (value: string | Date) => {
+  const date = value instanceof Date ? value : new Date(value);
+
+  return date
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+};
+
+const buildGoogleCalendarUrl = ({
+  title,
+  details,
+  start,
+  end,
+}: {
+  title: string;
+  details?: string;
+  start: string | Date;
+  end: string | Date;
+}) => {
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: title,
+    details: details || "",
+    dates: `${formatCalendarDate(start)}/${formatCalendarDate(end)}`,
+  });
+
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+};
 
 const buildCallEventPreview = (message: ChatMessage, currentUserId: string): CallEventPreview | null => {
   const callEvent = parseCallEventMessage(message);
@@ -361,17 +364,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
+  const [showAssistant, setShowAssistant] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const quickOptions = useMemo(
-    () => [
-      "I want to book",
-      "What are your charges?",
-      "Are you available?",
-      "Please share the next steps"
-    ],
-    []
-  );
 
   const sellerPresenceText = useMemo(() => {
     if (typingUserId) {
@@ -387,6 +381,28 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
   const sellerHeaderTint = colors.primary;
   const sellerStatusColor = "rgba(255,255,255,0.78)";
+  const canUseComposer = seller?.availabilityStatus !== false;
+  const assistantScope = "Seller chat support";
+  const assistantScopeHint = `${seller?.sellerName || "Seller"} ke booking, payment, appointment, aur chat support ke liye help.`;
+  const assistantConversationSummary = `Selected service: ${selectedService?.serviceName || serviceName || "service requests"}. Seller status: ${sellerPresenceText}.${seller?.availabilityStatus === false ? " Messaging currently locked until seller turns availability on." : ""}`;
+  const assistantSuggestedPrompts = [
+    "Booking flow samjhao",
+    "Payment issue fix karo",
+    "Seller unavailable kyun dikh raha hai?",
+  ];
+  const assistantRecentMessages = useMemo(
+    () =>
+      messages.slice(-6).map((message) => {
+        const rawText = String(getMessageText(message) || "").trim() || `[${String(message?.messageType || "message")}]`;
+        const senderId = getMessageSenderId(message);
+        const senderLabel = String(senderId) === String(currentUserId)
+          ? "Current user"
+          : seller?.sellerName || "Seller";
+
+        return `${senderLabel}: ${rawText}`;
+      }),
+    [currentUserId, messages, seller?.sellerName],
+  );
 
   const sellerUserId = useMemo(() => {
     if (initialSellerUserId) {
@@ -436,7 +452,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     } catch (error) {
       console.log("seller slot fetch error:", error);
       setAppointmentSlotFallback(true);
-      setAppointmentSlots(buildSuggestedAppointmentSlots());
+      setAppointmentSlots([]);
     } finally {
       setLoadingAppointmentSlots(false);
     }
@@ -524,6 +540,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   }, []);
 
   const submitMessage = useCallback(async ({ text: nextText, file, messageType, duration }: { text?: string; file?: { uri: string; name?: string | null; type?: string | null }; messageType?: string; duration?: number }) => {
+    if (!canUseComposer) {
+      throw new Error("Messaging is locked until this seller turns availability on.");
+    }
+
     const resolvedConversationId = await ensureConversation();
 
     if (!resolvedConversationId) {
@@ -540,7 +560,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
     const nextMessage = res.message as ChatMessage;
     appendMessage(nextMessage);
-  }, [appendMessage, ensureConversation]);
+  }, [appendMessage, canUseComposer, ensureConversation]);
 
   const sendMessage = useCallback(async (msgText = text) => {
     if (!msgText.trim() || sending) {
@@ -621,13 +641,29 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       } catch (checkoutError: any) {
         const cancellationCode = Number(checkoutError?.code);
         if (cancellationCode === 0 || /cancel/i.test(String(checkoutError?.description || checkoutError?.message || ""))) {
-          Alert.alert("Payment Pending", "Your booking was saved. You can complete payment later from My Appointments.");
+          if (requestId) {
+            await API.put(`/service-requests/${requestId}/status`, {
+              status: "cancelled",
+            }).catch((statusError) => {
+              console.log("seller booking cancel after payment abort error:", statusError);
+            });
+          }
+          Alert.alert("Payment Cancelled", "Payment complete hone ke baad hi appointment book hogi. Abhi koi booking confirm nahi hui.");
           return;
         }
         throw checkoutError;
       }
 
       const verifyRes = await API.post(`/service-requests/${requestId}/payment/verify`, checkoutResult);
+      const bookedRequest = verifyRes?.data?.request;
+      const appointmentStartValue = bookedRequest?.appointmentStart || selectedAppointmentStart;
+      const appointmentDurationMinutes =
+        Number(bookedRequest?.appointmentDurationMinutes)
+        || Number(getPrimaryPricingOption(targetService)?.durationMinutes)
+        || 30;
+      const appointmentEndValue = appointmentStartValue
+        ? new Date(new Date(appointmentStartValue).getTime() + appointmentDurationMinutes * 60 * 1000)
+        : null;
 
       if (verifyRes?.data?.systemMessage) {
         appendMessage(verifyRes.data.systemMessage as ChatMessage);
@@ -636,14 +672,45 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       setShowPaymentModal(false);
       setSelectedAppointmentStart("");
       setText("");
-      Alert.alert("Payment Complete", "Your booking has been paid and sent to the seller for confirmation.");
+      Alert.alert(
+        "Payment Complete",
+        "Payment successful. Appointment request booked and sent to the seller.",
+        appointmentStartValue && appointmentEndValue ? [
+          {
+            text: "Add to Calendar",
+            onPress: async () => {
+              const calendarUrl = buildGoogleCalendarUrl({
+                title: `${targetService.serviceName || serviceName || "Aline2 appointment"} with ${seller?.sellerName || "seller"}`,
+                details: [
+                  `Seller: ${seller?.sellerName || "Aline2 seller"}`,
+                  `Service: ${targetService.serviceName || serviceName || "Appointment"}`,
+                  text.trim() ? `Note: ${text.trim()}` : "",
+                ].filter(Boolean).join("\n"),
+                start: appointmentStartValue,
+                end: appointmentEndValue,
+              });
+
+              try {
+                await Linking.openURL(calendarUrl);
+              } catch (calendarError) {
+                console.log("seller booking calendar open error:", calendarError);
+                Alert.alert("Calendar unavailable", "Calendar link open nahi ho saka. Appointment details notifications me mil jayengi.");
+              }
+            },
+          },
+          {
+            text: "Done",
+            style: "cancel",
+          },
+        ] : undefined,
+      );
     } catch (error: any) {
       console.log("seller booking request error:", error?.response?.data || error);
       Alert.alert("Error", getReadableApiErrorMessage(error, error?.description || "Failed to start booking payment"));
     } finally {
       setProcessingBookingPayment(false);
     }
-  }, [appendMessage, ensureConversation, selectedAppointmentStart, selectedService, serviceName, text]);
+  }, [appendMessage, ensureConversation, selectedAppointmentStart, selectedService, seller?.sellerName, serviceName, text]);
 
   const sendImageAttachment = useCallback(async () => {
     launchImageLibrary(
@@ -1565,6 +1632,12 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerActionButton}
+            onPress={() => setShowAssistant(true)}
+          >
+            <Icon name="sparkles-outline" size={20} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.headerActionButton}
             onPress={() =>
               navigation.navigate("SellerDetailsScreen", { sellerId })
             }
@@ -1671,7 +1744,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       {seller?.availabilityStatus === false ? (
         <View style={styles.unavailableBanner}>
           <Text style={styles.unavailableBannerText}>
-            This seller is not accepting appointment requests right now. You can still continue the chat.
+            This seller is offline right now. Messaging and new appointments unlock after the seller turns availability on.
           </Text>
         </View>
       ) : null}
@@ -1732,26 +1805,18 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             />
           )}
 
-          <View style={styles.quickContainer}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {quickOptions.map((item, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={styles.quickChip}
-                  onPress={() => {
-                    sendMessage(item).catch((error) => {
-                      console.log("seller quick reply error:", error);
-                    });
-                  }}
-                >
-                  <Text style={styles.quickText}>{item}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
         </View>
 
         <View style={[styles.inputWrap, { backgroundColor: colors.card, paddingBottom: Math.max(8, insets.bottom), borderTopColor: colors.border }]}>
+          {!canUseComposer ? (
+            <View style={[styles.composerLockedCard, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+              <Icon name="lock-closed-outline" size={18} color={colors.primary} />
+              <Text style={[styles.composerLockedText, { color: colors.text }]}>
+                Seller availability off hai. Chat tabhi unlock hoga jab seller toggle on karega.
+              </Text>
+            </View>
+          ) : null}
+
           {pendingVoiceNote ? (
             <View style={[styles.attachmentPreviewCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
               <View style={styles.pendingVoicePreview}>
@@ -1777,36 +1842,44 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             </View>
           ) : null}
 
-          <TouchableOpacity style={styles.attachButton} onPress={() => setShowStickerPicker(true)} disabled={uploading || loading}>
+          <TouchableOpacity style={styles.attachButton} onPress={() => setShowStickerPicker(true)} disabled={uploading || loading || !canUseComposer}>
             <Icon name="happy-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.attachButton} onPress={sendCameraAttachment} disabled={uploading || loading}>
+          <TouchableOpacity style={styles.attachButton} onPress={sendCameraAttachment} disabled={uploading || loading || !canUseComposer}>
             <Icon name="camera-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={sendImageAttachment} disabled={uploading || loading}>
+          <TouchableOpacity onPress={sendImageAttachment} disabled={uploading || loading || !canUseComposer}>
             <Icon name="image-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.attachButton} onPress={sendDocumentAttachment} disabled={uploading || loading}>
+          <TouchableOpacity style={styles.attachButton} onPress={sendDocumentAttachment} disabled={uploading || loading || !canUseComposer}>
             <Icon name="document-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.attachButton} onPress={sendAudioAttachment} disabled={uploading || loading}>
+          <TouchableOpacity style={styles.attachButton} onPress={sendAudioAttachment} disabled={uploading || loading || !canUseComposer}>
             <Icon name="musical-notes-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.attachButton} onPress={() => setShowLocationComposer(true)} disabled={uploading || loading}>
+          <TouchableOpacity style={styles.attachButton} onPress={() => setShowLocationComposer(true)} disabled={uploading || loading || !canUseComposer}>
             <Icon name="location-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
 
           <TextInput
-            placeholder={uploading ? "Uploading attachment..." : pendingVoiceNote ? "Voice note ready to send" : "Message..."}
+            placeholder={
+              !canUseComposer
+                ? "Seller availability on hote hi chat unlock hoga"
+                : uploading
+                  ? "Uploading attachment..."
+                  : pendingVoiceNote
+                    ? "Voice note ready to send"
+                    : "Message..."
+            }
             value={text}
             onChangeText={handleTextChange}
             style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
-            editable={!loading && !sending && !uploading}
+            editable={!loading && !sending && !uploading && canUseComposer}
             placeholderTextColor={colors.placeholder}
           />
 
@@ -1827,14 +1900,14 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   console.log("seller chat send error:", error);
                 });
               }}
-              disabled={sending || loading}
+              disabled={sending || loading || !canUseComposer}
             >
               <Icon name="send" size={18} color="#fff" />
             </TouchableOpacity>
           ) : (
             <VoiceRecorderButton
               color={colors.primary}
-              disabled={uploading || loading}
+              disabled={uploading || loading || !canUseComposer}
               onSend={sendVoiceMessage}
             />
           )}
@@ -1969,7 +2042,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             )}
 
             <View style={styles.slotSection}>
-              <Text style={styles.slotHeading}>Choose a preferred slot</Text>
+              <Text style={styles.slotHeading}>Choose a slot before payment</Text>
+              <Text style={styles.slotSubheading}>
+                Only seller-set available timings are shown here.
+              </Text>
               <View style={styles.slotList}>
                 {appointmentSlots.map((slot) => {
                   const isSelected = selectedAppointmentStart === slot.start;
@@ -1994,9 +2070,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 ? "Loading seller availability..."
                 : appointmentSlots.length
                   ? appointmentSlotFallback
-                    ? "Seller slots could not be loaded right now, so suggested fallback times are shown."
-                    : "Payment is collected now. After payment, the seller can confirm, reschedule, or move the booking into refund review if needed."
-                  : "This seller does not have any bookable slots available right now."}
+                    ? "Seller availability abhi load nahi ho saki. Thodi der baad dobara try karo."
+                    : `Payment pehle collect hoga. Successful payment ke baad hi appointment request book hogi aur seller ko bheji jayegi.${appointmentSlots[0]?.timeZone ? ` Slots shown in ${appointmentSlots[0].timeZone}.` : ""}`
+                  : "This seller has not shared any bookable slots right now."}
             </Text>
 
             <TouchableOpacity
@@ -2015,7 +2091,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <Text style={{ color: "#fff", fontWeight: "700" }}>
-                  Pay & Send Booking
+                  Pay & Book Appointment
                 </Text>
               )}
             </TouchableOpacity>
@@ -2028,6 +2104,16 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           </View>
         </View>
       </Modal>
+
+      <AISupportSheet
+        visible={showAssistant}
+        onClose={() => setShowAssistant(false)}
+        scope={assistantScope}
+        scopeHint={assistantScopeHint}
+        conversationSummary={assistantConversationSummary}
+        recentMessages={assistantRecentMessages}
+        suggestedPrompts={assistantSuggestedPrompts}
+      />
     </SafeAreaView>
   );
 };
@@ -2094,29 +2180,36 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.12)",
   },
   premiumServiceWrap: {
-    backgroundColor: "#fff",
-    paddingVertical: 10,
+    backgroundColor: "#FFFFFF",
+    paddingTop: 12,
+    paddingBottom: 14,
     borderBottomWidth: 1,
-    borderColor: "#eee"
+    borderColor: "#ECE7F8"
   },
   premiumTitle: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
     marginLeft: 12,
-    marginBottom: 6
+    marginBottom: 8,
+    color: "#24173F",
   },
   premiumCard: {
     width: 188,
-    backgroundColor: "#fafafa",
-    padding: 12,
-    borderRadius: 16,
+    backgroundColor: "#FCFAFF",
+    padding: 13,
+    borderRadius: 18,
     marginRight: 10,
     borderWidth: 1,
-    borderColor: "#eee"
+    borderColor: "#E7DCF8"
   },
   selectedCard: {
-    backgroundColor: PRIMARY,
-    borderColor: PRIMARY
+    backgroundColor: "#6F49E8",
+    borderColor: "#6F49E8",
+    shadowColor: "#6F49E8",
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
   serviceName: { fontWeight: "700", fontSize: 13 },
   servicePrice: {
@@ -2163,11 +2256,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: "#E7E9F2",
-    backgroundColor: "#FAF8FF",
+    borderColor: "#E8E0F5",
+    backgroundColor: "#F8F4FF",
   },
   selectedServiceBannerText: {
     marginLeft: 8,
@@ -2175,11 +2268,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   unavailableBanner: {
-    backgroundColor: "#FEF3C7",
+    backgroundColor: "#FFF7D6",
     borderBottomWidth: 1,
-    borderBottomColor: "#FDE68A",
+    borderBottomColor: "#F9D66A",
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
   },
   unavailableBannerText: {
     color: "#92400E",
@@ -2440,18 +2533,21 @@ const styles = StyleSheet.create({
     marginTop: 8
   },
   quickContainer: {
-    paddingVertical: 6,
+    paddingVertical: 8,
     paddingLeft: 10,
-    backgroundColor: "#F4F5FA",
+    backgroundColor: "#F8F6FD",
     borderTopWidth: 1,
-    borderTopColor: "#E7E9F2"
+    borderTopColor: "#E7E0F2"
   },
   quickChip: {
-    backgroundColor: "#EDE9FF",
+    backgroundColor: "#EEE7FF",
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
     marginRight: 10
+  },
+  quickChipDisabled: {
+    opacity: 0.45,
   },
   quickText: { color: PRIMARY, fontWeight: "600" },
   inputWrap: {
@@ -2461,6 +2557,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     alignItems: "center",
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  composerLockedCard: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  composerLockedText: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontWeight: "600",
   },
   attachmentPreviewCard: {
     width: "100%",
@@ -2488,7 +2601,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    backgroundColor: "#F1F1F4",
+    backgroundColor: "#F4F1FA",
     borderRadius: 22,
     paddingHorizontal: 15,
     minHeight: 44,
@@ -2558,6 +2671,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: "#111",
+    marginBottom: 10,
+  },
+  slotSubheading: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#6B5A8E",
+    textAlign: "center",
     marginBottom: 10,
   },
   slotList: {

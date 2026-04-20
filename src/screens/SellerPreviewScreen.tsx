@@ -74,9 +74,10 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
  };
 
  const sellerUserId = resolveSellerUserId();
+ const canOpenSellerChat = Boolean(sellerUserId) && seller?.availabilityStatus !== false;
 
  const openSellerChat = (service?: any) => {
-  if (!sellerUserId) {
+  if (!canOpenSellerChat || !sellerUserId) {
    return;
   }
 
@@ -204,16 +205,20 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
 
     <View style={styles.chatSection}>
      <TouchableOpacity
-      style={[styles.chatBtn, { backgroundColor: colors.primary }, !sellerUserId ? styles.chatBtnDisabled : null]}
+      style={[styles.chatBtn, { backgroundColor: colors.primary }, !canOpenSellerChat ? styles.chatBtnDisabled : null]}
       onPress={() => openSellerChat()}
-      disabled={!sellerUserId}
+      disabled={!canOpenSellerChat}
      >
       <Icon name="chatbubble-ellipses-outline" size={18} color="#fff" />
-      <Text style={styles.chatBtnText}>{sellerUserId ? " Chat / Request Booking" : " Chat unavailable"}</Text>
+      <Text style={styles.chatBtnText}>{canOpenSellerChat ? " Chat / Request Booking" : " Chat unavailable"}</Text>
      </TouchableOpacity>
      {!sellerUserId ? (
       <Text style={[styles.inlineNotice, { color: colors.mutedText }]}>
        This seller profile is missing its linked account, so chat is temporarily unavailable.
+      </Text>
+     ) : seller?.availabilityStatus === false ? (
+      <Text style={[styles.inlineNotice, { color: colors.mutedText }]}>
+       Seller availability off hai, isliye chat aur booking request abhi locked hain.
       </Text>
      ) : null}
     </View>
@@ -284,7 +289,7 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
 
          <Text style={[styles.serviceDesc, { color: colors.mutedText }]}>{item.description}</Text>
 
-         <TouchableOpacity style={[styles.bookBtn, { backgroundColor: colors.primary }]} onPress={() => openSellerChat(item)}>
+         <TouchableOpacity style={[styles.bookBtn, { backgroundColor: colors.primary }, !canOpenSellerChat ? styles.bookBtnDisabled : null]} onPress={() => openSellerChat(item)} disabled={!canOpenSellerChat}>
           <Icon name="calendar-outline" size={17} color="#fff" />
           <Text style={styles.bookText}> Request in Chat</Text>
          </TouchableOpacity>
@@ -580,6 +585,9 @@ const styles = StyleSheet.create({
   flexDirection: "row",
   alignItems: "center",
   justifyContent: "center",
+ },
+ bookBtnDisabled: {
+  opacity: 0.45,
  },
  bookText: {
   color: "#fff",

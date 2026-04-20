@@ -26,6 +26,66 @@ import { useAppTheme } from "../theme/AppThemeContext";
 
 const DEFAULT_COVER = DEFAULT_COVER_URL;
 const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
+const ACTIVE_APPOINTMENT_STATUSES = new Set(["paid", "accepted", "confirmed", "rescheduled", "completed"]);
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const formatRequestStatus = (value = "") =>
+  String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+
+const formatAppointmentSummary = (item: any) => {
+  if (!item?.appointmentStart) {
+    return "Waiting for appointment time";
+  }
+
+  const startDate = new Date(item.appointmentStart);
+  if (Number.isNaN(startDate.getTime())) {
+    return "Appointment time unavailable";
+  }
+
+  const baseLabel = startDate.toLocaleString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  const durationMinutes = Number(item?.appointmentDurationMinutes) || 0;
+  return durationMinutes > 0 ? `${baseLabel} • ${durationMinutes} min` : baseLabel;
+};
+
+const formatMinutesLabel = (minutes = 0) => {
+  const date = new Date();
+  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
+const buildAvailabilityPreview = (seller: any) => {
+  const weeklyAvailability = Array.isArray(seller?.weeklyAvailability) ? seller.weeklyAvailability : [];
+  const enabledDays = weeklyAvailability
+    .filter((entry: any) => entry?.enabled)
+    .sort((a: any, b: any) => Number(a?.dayOfWeek) - Number(b?.dayOfWeek));
+
+  if (!enabledDays.length) {
+    return {
+      title: "No booking hours shared yet",
+      detail: "Turn on the days and timings you want buyers to book.",
+    };
+  }
+
+  const firstWindow = enabledDays[0];
+  const lastWindow = enabledDays[enabledDays.length - 1];
+
+  return {
+    title: `${DAY_LABELS[firstWindow.dayOfWeek]} - ${DAY_LABELS[lastWindow.dayOfWeek]}`,
+    detail: `${formatMinutesLabel(firstWindow.startMinutes)} - ${formatMinutesLabel(firstWindow.endMinutes)}${seller?.availabilityTimezone ? ` • ${seller.availabilityTimezone}` : ""}`,
+  };
+};
 
 const SellerDashboardScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
@@ -104,11 +164,16 @@ const fetchRequestData = useCallback(async () => {
     setRequestLoading(true);
     const [summaryRes, requestsRes] = await Promise.all([
       API.get("/service-requests/summary", { params: { role: "seller" } }),
-      API.get("/service-requests", { params: { role: "seller", status: "pending" } })
+      API.get("/service-requests", { params: { role: "seller" } })
     ]);
 
+    const nextRequests = Array.isArray(requestsRes.data?.requests) ? requestsRes.data.requests : [];
+    const prioritizedRequests = nextRequests
+      .filter((item: any) => ACTIVE_APPOINTMENT_STATUSES.has(String(item?.status || "")))
+      .concat(nextRequests.filter((item: any) => !ACTIVE_APPOINTMENT_STATUSES.has(String(item?.status || ""))));
+
     setRequestSummary(summaryRes.data?.summary || null);
-    setRecentRequests((requestsRes.data?.requests || []).slice(0, 3));
+    setRecentRequests(prioritizedRequests.slice(0, 4));
     setRequestError("");
   } catch (error) {
     console.log("request data error:", error);
@@ -202,6 +267,8 @@ const fetchRequestData = useCallback(async () => {
     if (seller.verificationStatus === "rejected") return "#FEE2E2";
     return "#FEF3C7";
   };
+
+  const availabilityPreview = buildAvailabilityPreview(seller);
 
   if (loading) {
     return (
@@ -431,21 +498,56 @@ const fetchRequestData = useCallback(async () => {
           </Tooltip>
         </View>
 
+        <View style={[styles.availabilityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.availabilityCardHeader}>
+            <View>
+              <Text style={[styles.availabilityCardTitle, { color: colors.text }]}>Booking Availability</Text>
+              <Text style={[styles.availabilityCardState, { color: seller?.availabilityStatus ? "#16A34A" : "#B45309" }]}>
+                {seller?.availabilityStatus ? "Visible to buyers" : "Hidden from buyers"}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.availabilityEditButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => navigation.navigate("SellerSettingsScreen", { seller })}
+            >
+              <Text style={[styles.availabilityEditText, { color: colors.primary }]}>Edit</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={[styles.availabilityCardBody, { color: colors.text }]}>
+            {availabilityPreview.title}
+          </Text>
+          <Text style={[styles.availabilityCardHint, { color: colors.mutedText }]}>
+            {availabilityPreview.detail}
+          </Text>
+          <Text style={[styles.availabilityCardFootnote, { color: colors.mutedText }]}>
+            User ko appointment book karte time yahi seller-set slots dikhte hain.
+          </Text>
+        </View>
+
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Requests</Text>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>My Appointments</Text>
+            <TouchableOpacity onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "seller" })}>
+              <Text style={styles.sectionLink}>View All</Text>
+            </TouchableOpacity>
+          </View>
 
           {requestLoading ? (
             <ActivityIndicator style={{ marginTop: 16 }} />
           ) : requestError ? (
             <Text style={[styles.emptyRequestText, { color: colors.mutedText }]}>{requestError}</Text>
           ) : recentRequests.length === 0 ? (
-            <Text style={[styles.emptyRequestText, { color: colors.mutedText }]}>No pending requests right now.</Text>
+            <Text style={[styles.emptyRequestText, { color: colors.mutedText }]}>No appointments right now.</Text>
           ) : (
             recentRequests.map((item: any) => (
               <View key={item._id} style={styles.requestCard}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.requestTitle}>{item.service?.serviceName || "Service request"}</Text>
                   <Text style={styles.requestSubtitle}>{item.user?.name || item.user?.username || "Client"}</Text>
+                  <Text style={styles.requestMeta}>{formatAppointmentSummary(item)}</Text>
+                  <Text style={styles.requestStatus}>{formatRequestStatus(item?.status)}</Text>
                 </View>
                 <Text style={styles.requestPrice}>
                   {formatPrimaryServicePrice({ pricingOptions: [item.pricing], currency: item.pricing?.currency })}
@@ -802,6 +904,52 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginTop: 15
   },
+  availabilityCard: {
+    marginHorizontal: 20,
+    marginTop: 18,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+  },
+  availabilityCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  availabilityCardTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  availabilityCardState: {
+    marginTop: 4,
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+  availabilityEditButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  availabilityEditText: {
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+  availabilityCardBody: {
+    marginTop: 14,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  availabilityCardHint: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  availabilityCardFootnote: {
+    marginTop: 10,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
 
   primaryBtn: {
     flex: 1,
@@ -845,6 +993,16 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111"
   },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sectionLink: {
+    color: "#7B4DFF",
+    fontWeight: "700",
+    fontSize: 13,
+  },
 
   desc: {
     marginTop: 8,
@@ -866,6 +1024,18 @@ const styles = StyleSheet.create({
   requestSubtitle: {
     marginTop: 4,
     color: "#666"
+  },
+  requestMeta: {
+    marginTop: 6,
+    color: "#5B4B76",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  requestStatus: {
+    marginTop: 4,
+    color: "#7B4DFF",
+    fontSize: 12,
+    fontWeight: "700",
   },
   requestPrice: {
     color: "#7B4DFF",

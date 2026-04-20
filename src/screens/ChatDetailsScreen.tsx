@@ -61,9 +61,37 @@ interface MediaItem {
 interface SearchResult {
     _id: string;
     text?: string;
+    fileName?: string;
     createdAt?: string;
     sender?: { username?: string; name?: string };
 }
+
+const escapeSearchText = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const renderHighlightedText = (value: string, query: string, textColor: string) => {
+    const safeValue = String(value || "");
+    const trimmedQuery = String(query || "").trim();
+
+    if (!trimmedQuery) {
+        return safeValue;
+    }
+
+    return safeValue
+        .split(new RegExp(`(${escapeSearchText(trimmedQuery)})`, "ig"))
+        .filter(Boolean)
+        .map((part, index) => {
+            const isMatch = part.toLowerCase() === trimmedQuery.toLowerCase();
+
+            return (
+                <Text
+                    key={`${part}-${index}`}
+                    style={isMatch ? styles.searchHighlight : { color: textColor }}
+                >
+                    {part}
+                </Text>
+            );
+        });
+};
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
@@ -183,11 +211,17 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
         }
     }, [showSearch]);
 
-    const handleSearch = useCallback(async () => {
-        if (!resolvedConversationId || !searchQuery.trim()) return;
+    const handleSearch = useCallback(async (queryOverride?: string) => {
+        const trimmedQuery = String(queryOverride ?? searchQuery).trim();
+
+        if (!resolvedConversationId || !trimmedQuery) {
+            setSearchResults([]);
+            return;
+        }
+
         setSearching(true);
         try {
-            const data = await searchConversationMessages(resolvedConversationId, { q: searchQuery.trim() });
+            const data = await searchConversationMessages(resolvedConversationId, { q: trimmedQuery });
             setSearchResults(data?.messages || []);
         } catch (err: any) {
             console.log("ChatDetails search error:", err?.response?.data || err);
@@ -195,6 +229,25 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
             setSearching(false);
         }
     }, [resolvedConversationId, searchQuery]);
+
+    useEffect(() => {
+        if (!showSearch) {
+            return;
+        }
+
+        const trimmedQuery = searchQuery.trim();
+        if (!trimmedQuery) {
+            setSearchResults([]);
+            setSearching(false);
+            return;
+        }
+
+        const timeoutId = setTimeout(() => {
+            handleSearch(trimmedQuery).catch(() => {});
+        }, 220);
+
+        return () => clearTimeout(timeoutId);
+    }, [handleSearch, searchQuery, showSearch]);
 
     // ─── Block user ─────────────────────────────────────────────────────────
 
@@ -366,7 +419,7 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                                 onChangeText={setSearchQuery}
                                 placeholder="Search in conversation..."
                                 placeholderTextColor={colors.placeholder}
-                                onSubmitEditing={handleSearch}
+                                onSubmitEditing={() => handleSearch()}
                                 returnKeyType="search"
                             />
                         </View>
@@ -376,7 +429,7 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                                 {searchResults.slice(0, 10).map((result) => (
                                     <View key={result._id} style={[styles.searchResultItem, { borderColor: colors.border }]}>
                                         <Text style={[styles.searchResultText, { color: colors.text }]} numberOfLines={2}>
-                                            {result.text || "(media)"}
+                                            {renderHighlightedText(result.text || result.fileName || "(media)", searchQuery, colors.text)}
                                         </Text>
                                         <Text style={[styles.searchResultMeta, { color: colors.placeholder }]}>
                                             {result.sender?.username || result.sender?.name || ""}{" "}
@@ -386,6 +439,9 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                                 ))}
                             </View>
                         )}
+                        {!searching && searchQuery.trim().length > 0 && searchResults.length === 0 ? (
+                            <Text style={[styles.searchEmptyText, { color: colors.placeholder }]}>No matching messages found.</Text>
+                        ) : null}
                     </View>
                 )}
 
@@ -530,6 +586,17 @@ const styles = StyleSheet.create({
     searchResultMeta: {
         fontSize: 11,
         marginTop: 3,
+    },
+    searchEmptyText: {
+        marginTop: 12,
+        fontSize: 13,
+        textAlign: "center",
+    },
+    searchHighlight: {
+        backgroundColor: "#FACC15",
+        color: "#1F2937",
+        borderRadius: 4,
+        overflow: "hidden",
     },
     mediaSection: {
         marginTop: 10,

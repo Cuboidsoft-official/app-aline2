@@ -30,6 +30,7 @@ type SellerProfile = {
   bio?: string;
   clinicLink?: string;
   media?: string[];
+  availabilityStatus?: boolean;
 };
 
 type SellerService = {
@@ -131,9 +132,10 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
   };
 
   const sellerUserId = resolveSellerUserId();
+  const canOpenSellerChat = Boolean(sellerUserId) && seller?.availabilityStatus !== false;
 
   const openSellerChat = (service?: SellerService) => {
-    if (!sellerUserId) {
+    if (!canOpenSellerChat || !sellerUserId) {
       return;
     }
 
@@ -271,14 +273,14 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
             icon="calendar-outline"
             title="Request"
             onPress={() => openSellerChat()}
-            disabled={!sellerUserId}
+            disabled={!canOpenSellerChat}
             colors={colors}
           />
           <Action
             icon="chatbubble-outline"
             title="Chat"
             onPress={() => openSellerChat()}
-            disabled={!sellerUserId}
+            disabled={!canOpenSellerChat}
             colors={colors}
           />
           <Action
@@ -298,6 +300,8 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
         </View>
         {!sellerUserId ? (
           <Text style={[styles.inlineNotice, { color: colors.mutedText }]}>This seller profile is missing its linked account, so chat and block actions are temporarily unavailable.</Text>
+        ) : seller?.availabilityStatus === false ? (
+          <Text style={[styles.inlineNotice, { color: colors.mutedText }]}>Seller availability off hai, isliye chat aur request temporarily locked hain.</Text>
         ) : null}
 
         {/* SERVICES */}
@@ -333,7 +337,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
                   )}
                 </View>
 
-                <TouchableOpacity style={styles.bookBtn} onPress={() => openSellerChat(item)}>
+                <TouchableOpacity style={[styles.bookBtn, !canOpenSellerChat ? styles.bookBtnDisabled : null]} onPress={() => openSellerChat(item)} disabled={!canOpenSellerChat}>
                   <Text style={{ color: "#fff" }}>Request</Text>
                 </TouchableOpacity>
 
@@ -369,7 +373,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
         {/* SETTINGS */}
         <View style={[styles.optionBox, { backgroundColor: colors.card }]}>
           <Option icon="notifications-outline" title="Notifications" onPress={() => navigation.navigate("NotificationSettingsScreen")} colors={colors} />
-          <Option icon="calendar-outline" title="Open booking chat" onPress={() => openSellerChat()} colors={colors} />
+          <Option icon="calendar-outline" title={canOpenSellerChat ? "Open booking chat" : "Booking chat locked"} onPress={() => openSellerChat()} colors={colors} />
           <Option icon="share-social-outline" title="Share seller profile" onPress={shareSellerProfile} colors={colors} />
         </View>
 
@@ -573,6 +577,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 10
+  },
+  bookBtnDisabled: {
+    opacity: 0.45,
   },
 
   mediaRow: {

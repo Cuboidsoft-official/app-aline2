@@ -18,6 +18,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { useAppTheme } from "../theme/AppThemeContext";
+import AISupportSheet from "../components/chat/AISupportSheet";
 
 const HelpSupportScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
@@ -26,6 +27,7 @@ const HelpSupportScreen = ({ navigation }: any) => {
   const [message, setMessage] = useState("");
   const [supportEmail, setSupportEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showAssistant, setShowAssistant] = useState(false);
 
   const loadAccount = useCallback(async () => {
     try {
@@ -78,7 +80,12 @@ const HelpSupportScreen = ({ navigation }: any) => {
           <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Help & Support</Text>
-        <View style={styles.headerSpacer} />
+        <TouchableOpacity
+          style={[styles.headerAssistantButton, { backgroundColor: `${colors.primary}14`, borderColor: colors.border }]}
+          onPress={() => setShowAssistant(true)}
+        >
+          <Icon name="sparkles-outline" size={18} color={colors.primary} />
+        </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView style={styles.flexFill} behavior={Platform.OS === "ios" ? "padding" : undefined}>
@@ -133,6 +140,24 @@ const HelpSupportScreen = ({ navigation }: any) => {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <AISupportSheet
+        visible={showAssistant}
+        onClose={() => setShowAssistant(false)}
+        scope="Help and support"
+        scopeHint="Support form, login issue, payment issue, account issue, ya seller/user workflow help ke liye AI assistant."
+        conversationSummary={`Support email: ${supportEmail || "not shared yet"}.${subject ? ` Current subject draft: ${subject}.` : ""}${message ? ` Current details draft available.` : ""}`}
+        recentMessages={[
+          email ? `Account email: ${email}` : "",
+          subject ? `Subject draft: ${subject}` : "",
+          message ? `Support draft: ${message}` : "",
+        ].filter(Boolean)}
+        suggestedPrompts={[
+          "Mera support message improve karo",
+          "Login issue ka next step batao",
+          "Payment problem ke liye kya likhun?",
+        ]}
+      />
     </SafeAreaView>
   );
 };
@@ -151,6 +176,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: "700" },
   headerSpacer: { width: 24 },
+  headerAssistantButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   content: { padding: 20 },
   card: {
     borderWidth: 1,

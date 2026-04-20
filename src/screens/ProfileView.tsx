@@ -49,6 +49,7 @@ interface ProfileUser {
  followers?: string[];
  following?: string[];
  isPrivate?: boolean;
+ category?: string;
 }
 
 type ProfileTab = "posts" | "swipes" | "tagged";
@@ -179,6 +180,7 @@ const ProfileScreen = ({navigation}: any) => {
   () => allPosts.filter((post) => !isReelPost(post)).length,
   [allPosts],
  );
+ const hasSellerAccount = user?.category === "Seller";
  const profileName = user?.name || "User Name";
  const profileHandle = user?.username ? `@${user.username}` : "Complete your profile";
  const profileMeta = [user?.pronouns].filter(Boolean).join(" | ");
@@ -471,10 +473,12 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
     <View style={styles.quickGrid}>
      <TouchableOpacity
       style={[styles.quickAction, { borderColor: colors.border, backgroundColor: isDarkMode ? colors.surface : colors.card }]}
-      onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "user" })}
+      onPress={() => navigation.navigate(hasSellerAccount ? "ServiceRequestsScreen" : "SellerRegistration", hasSellerAccount ? { mode: "user" } : undefined)}
      >
-      <Icon name="briefcase-outline" size={18} color={colors.text} />
-      <Text style={[styles.quickActionText, { color: colors.text }]}>My Requests</Text>
+      <Icon name={hasSellerAccount ? "calendar-outline" : "storefront-outline"} size={16} color={colors.text} />
+      <Text style={[styles.quickActionText, { color: colors.text }]}>
+       {hasSellerAccount ? "My Appointment" : "Become a Seller"}
+      </Text>
      </TouchableOpacity>
 
      <TouchableOpacity
@@ -841,13 +845,13 @@ bioSection: {
 
  buttons:{
   flexDirection:"row",
-  paddingTop:18,
-  gap:10
+  paddingTop:16,
+  gap:8
  },
 
  primaryAction:{
-  minHeight:48,
-  borderRadius:14,
+  minHeight:42,
+  borderRadius:12,
   flex:1.2,
   alignItems:"center",
   justifyContent:"center",
@@ -856,13 +860,14 @@ bioSection: {
  primaryActionText:{
   color:"#fff",
   fontWeight:"700",
-  marginLeft:8
+  marginLeft:6,
+  fontSize:13
  },
 
  secondaryAction:{
-  minHeight:48,
+  minHeight:42,
   borderWidth:1,
-  borderRadius:14,
+  borderRadius:12,
   flex:1,
   alignItems:"center",
   justifyContent:"center",
@@ -873,7 +878,8 @@ bioSection: {
  },
  secondaryActionText:{
   fontWeight:"700",
-  marginLeft:6
+  marginLeft:5,
+  fontSize:12
  },
 
  quickGrid:{
@@ -885,17 +891,18 @@ bioSection: {
  quickAction:{
   width:"48.5%",
   borderWidth:1,
-  borderRadius:16,
-  paddingVertical:16,
-  paddingHorizontal:12,
+  borderRadius:14,
+  paddingVertical:12,
+  paddingHorizontal:10,
   marginBottom:12,
   alignItems:"center",
   justifyContent:"center",
   flexDirection:"row"
  },
  quickActionText:{
-  marginLeft:8,
-  fontWeight:"600"
+  marginLeft:6,
+  fontWeight:"600",
+  fontSize:12
  },
 
  tabs:{

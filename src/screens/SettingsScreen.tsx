@@ -18,12 +18,36 @@ import { clearPushToken } from "../utils/pushRegistration";
 import { useAppTheme } from "../theme/AppThemeContext";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 
+const buildBankSummary = (account: {
+  bankName?: string;
+  bankAccountNumber?: string;
+}) => {
+  const bankName = String(account?.bankName || "").trim();
+  const accountNumber = String(account?.bankAccountNumber || "").trim();
+  const lastFour = accountNumber.slice(-4);
+
+  if (!bankName && !lastFour) {
+    return "Add your payout account";
+  }
+
+  if (!bankName) {
+    return `Ending in ${lastFour}`;
+  }
+
+  if (!lastFour) {
+    return bankName;
+  }
+
+  return `${bankName} • ${lastFour}`;
+};
+
 const SettingsScreen = ({ navigation }: any) => {
 
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
 
   const [isPrivate, setIsPrivate] = useState(false);
+  const [bankSummary, setBankSummary] = useState("Add your payout account");
   const [loading, setLoading] = useState(false);
   const { colors, isDarkMode, setDarkModePreference } = useAppTheme();
   const itemStyle = { backgroundColor: colors.card, borderBottomColor: colors.border };
@@ -48,8 +72,10 @@ const SettingsScreen = ({ navigation }: any) => {
         );
 
         const value = res?.data?.user?.isPrivate ?? false;
+        const profileUser = res?.data?.user || {};
 
         setIsPrivate(value);
+        setBankSummary(buildBankSummary(profileUser));
 
         await AsyncStorage.setItem(
           "isPrivate",
@@ -170,6 +196,17 @@ const SettingsScreen = ({ navigation }: any) => {
           onPress={() => navigation.navigate("AccountCenterScreen")}
         >
           <Text style={[styles.text, { color: colors.text }]}>Account Center</Text>
+          <Icon name="chevron-forward" size={20} color={chevronColor} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.item, itemStyle]}
+          onPress={() => navigation.navigate("Profile")}
+        >
+          <View style={styles.itemCopy}>
+            <Text style={[styles.text, { color: colors.text }]}>Bank account setup</Text>
+            <Text style={[styles.itemHint, { color: colors.mutedText }]}>{bankSummary}</Text>
+          </View>
           <Icon name="chevron-forward" size={20} color={chevronColor} />
         </TouchableOpacity>
 
@@ -412,6 +449,15 @@ const styles = StyleSheet.create({
 
   text: {
     fontSize: 16
+  },
+  itemCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  itemHint: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 16,
   },
   textDark: {
     color: "#fff"

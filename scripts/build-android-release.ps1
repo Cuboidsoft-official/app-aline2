@@ -19,7 +19,8 @@ try {
     "--no-daemon",
     "--console=plain",
     "--max-workers=1",
-    "-PreactNativeArchitectures=armeabi-v7a,arm64-v8a"
+    "-PreactNativeArchitectures=arm64-v8a",
+    "-PnewArchEnabled=false"
   )
 
   & .\gradlew.bat @gradleArgs

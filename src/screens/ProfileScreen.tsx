@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TextInput,
+  TextInputProps,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
@@ -58,6 +59,10 @@ const ProfileScreen = ({ navigation }: any) => {
   const [link, setLink] = useState('');
   const [category, setCategory] = useState('');
   const [profilePic, setProfilePic] = useState('');
+  const [bankAccountName, setBankAccountName] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankIfsc, setBankIfsc] = useState('');
+  const [bankName, setBankName] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
@@ -111,6 +116,10 @@ const ProfileScreen = ({ navigation }: any) => {
       setLink(user.link || "");
       setCategory(user.category || "");
       setProfilePic(user.profilePic || "");
+      setBankAccountName(user.bankAccountName || "");
+      setBankAccountNumber(user.bankAccountNumber || "");
+      setBankIfsc(user.bankIfsc || "");
+      setBankName(user.bankName || "");
 
     } catch (err) {
       console.log("Profile load error", err);
@@ -153,6 +162,10 @@ const ProfileScreen = ({ navigation }: any) => {
           pronouns,
           gender,
           link,
+          bankAccountName: bankAccountName.trim(),
+          bankAccountNumber: bankAccountNumber.trim(),
+          bankIfsc: bankIfsc.trim().toUpperCase(),
+          bankName: bankName.trim(),
           profilePic: resolvedProfilePic
         },
         {
@@ -181,6 +194,10 @@ const ProfileScreen = ({ navigation }: any) => {
             pronouns,
             gender,
             link,
+            bankAccountName: bankAccountName.trim(),
+            bankAccountNumber: bankAccountNumber.trim(),
+            bankIfsc: bankIfsc.trim().toUpperCase(),
+            bankName: bankName.trim(),
             category,
             profilePic: resolvedProfilePic
           }
@@ -270,6 +287,14 @@ const ProfileScreen = ({ navigation }: any) => {
           {renderInput("Pronouns", pronouns, setPronouns, false, colors)}
           {renderInput("Gender", gender, setGender, false, colors)}
           {renderInput("Link", link, setLink, false, colors)}
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Bank account setup</Text>
+          <Text style={[styles.helperText, { color: colors.mutedText }]}>
+            These payout details stay private and are only used for account setup and payments.
+          </Text>
+          {renderInput("Account Holder", bankAccountName, setBankAccountName, false, colors)}
+          {renderInput("Account Number", bankAccountNumber, setBankAccountNumber, false, colors, { keyboardType: "number-pad" })}
+          {renderInput("IFSC Code", bankIfsc, (value) => setBankIfsc(String(value || "").toUpperCase()), false, colors, { autoCapitalize: "characters" })}
+          {renderInput("Bank Name", bankName, setBankName, false, colors)}
           {renderReadonlyField("Account Type", accountTypeLabel, colors)}
           <Text style={[styles.helperText, { color: colors.mutedText }]}>
             Account type is managed server-side, so special account states are assigned outside the app.
@@ -327,7 +352,8 @@ const renderInput = (
   value: string,
   setter: Dispatch<SetStateAction<string>>,
   multiline = false,
-  colors: { text: string; border: string; surface: string; placeholder: string }
+  colors: { text: string; border: string; surface: string; placeholder: string },
+  inputProps: TextInputProps = {}
 ) => (
   <View style={styles.inputGroup}>
 
@@ -348,6 +374,7 @@ const renderInput = (
       placeholder={`Enter ${label}`}
       placeholderTextColor={colors.placeholder}
       multiline={multiline}
+      {...inputProps}
     />
 
   </View>
@@ -441,6 +468,12 @@ const styles = StyleSheet.create({
     color: '#777',
     fontSize: 12,
     lineHeight: 18,
+  },
+  sectionTitle: {
+    paddingHorizontal: 20,
+    marginBottom: 10,
+    fontSize: 15,
+    fontWeight: "700",
   },
 
   input: {
