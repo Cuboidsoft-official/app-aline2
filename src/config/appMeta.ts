@@ -3,8 +3,8 @@ export const APP_RELEASE_DATE = "April 21, 2026";
 export const APP_RELEASE_TITLE = "Communication polish and product clarity";
 
 export const APP_RELEASE_HIGHLIGHTS = [
-  "Boosted voice, video-call, and live-stream audio tuning for clearer and louder sessions.",
-  "Added lightweight live video filter presets for video calls without heavy rendering overhead.",
+  "Calls and live sessions now sound clearer and louder.",
+  "Video calls now include easy filter options for a better on-camera look.",
   "Added in-app version visibility plus a dedicated release notes and feature catalog screen.",
 ];
 
@@ -50,15 +50,15 @@ export const APP_FEATURE_SECTIONS = [
 ];
 
 export const APP_BUG_FIXES = [
-  "Raised WebRTC audio processing quality by enabling auto gain control, echo cancellation, and noise suppression in calls and live streams.",
-  "Improved Android communication audio routing so speaker mode is louder and more consistent during calls and streaming playback.",
+  "Improved voice and live session clarity so conversations sound fuller and easier to hear.",
+  "Made speaker playback stronger and more consistent during calls and live viewing.",
   "Added direct sidebar access to release notes and surfaced the current app version in the feed menu.",
   "Added video-call filter presets so users can quickly switch the look of live video sessions.",
 ];
 
 export const APP_UPCOMING_CHANGES = [
-  "Deeper call diagnostics for packet loss, latency, and reconnect hints inside the call UI.",
+  "More helpful call quality status updates inside the call screen.",
   "Expanded creator tooling for richer live-stream moderation and better seller promo surfaces.",
   "A fuller historical release archive so each version can be reviewed directly inside the app.",
-  "More advanced real-time call effects once native performance-safe video processing is validated.",
+  "More advanced call effects after final quality checks are completed.",
 ];
