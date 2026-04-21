@@ -10,7 +10,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   Modal,
-  TextInput
+  TextInput,
+  useWindowDimensions,
 } from "react-native";
 import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -31,6 +32,8 @@ import {
 import { getConversationPreview } from "../utils/chatPresentation";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { alpha, appFonts, appShadows } from "../theme/designSystem";
+import { getChatLayoutMetrics } from "../theme/chatUi";
 import { connectSocket, socket } from "../socket";
 import AISupportSheet from "../components/chat/AISupportSheet";
 import ChatLockModal from "../components/chat/ChatLockModal";
@@ -131,13 +134,19 @@ const isSellerConversation = (conversation?: Conversation | null) => {
 
 const AllChatsScreen = ({ navigation, route }: any) => {
   const { colors, isDarkMode } = useAppTheme();
+  const { width } = useWindowDimensions();
+  const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
   const accentColor = colors.primary;
-  const accentSoft = `${accentColor}16`;
-  const accentBorder = `${accentColor}36`;
+  const accentSoft = alpha(accentColor, isDarkMode ? "22" : "14");
+  const accentBorder = alpha(accentColor, isDarkMode ? "52" : "32");
   const tabsBackgroundColor = isDarkMode ? colors.surface : colors.card;
   const groupAvatarBackgroundColor = isDarkMode ? colors.surface : colors.card;
   const modalInputBackgroundColor = isDarkMode ? colors.surface : colors.background;
   const disabledCreateGroupColor = isDarkMode ? colors.surface : colors.border;
+  const tabLabelFontSize = Math.max(chatMetrics.metaFontSize, 11);
+  const cardRadius = Math.max(chatMetrics.bubbleRadius, 18);
+  const cardPadding = Math.max(chatMetrics.cardPadding - 1, 14);
+  const inboxHorizontalPadding = chatMetrics.listPadding + 2;
 
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -729,6 +738,8 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           {
             borderColor: isSelectedForForward ? accentColor : colors.border,
             backgroundColor: isSelectedForForward ? accentSoft : colors.card,
+            padding: cardPadding,
+            borderRadius: cardRadius,
           },
           isSelectedForForward ? styles.chatCardSelected : null,
         ]}
@@ -834,7 +845,14 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             source={{
               uri: participant?.profilePic || DEFAULT_AVATAR_URL,
             }}
-            style={styles.avatar}
+            style={[
+              styles.avatar,
+              {
+                width: chatMetrics.headerAvatar + 8,
+                height: chatMetrics.headerAvatar + 8,
+                borderRadius: (chatMetrics.headerAvatar + 8) / 2,
+              },
+            ]}
           />
 
           {participant?.isOnline ? <View style={[styles.onlineDot, { borderColor: colors.card }]} /> : null}
@@ -923,6 +941,8 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           {
             borderColor: isSelectedForForward ? accentColor : colors.border,
             backgroundColor: isSelectedForForward ? accentSoft : colors.card,
+            padding: cardPadding,
+            borderRadius: cardRadius,
           },
           !hasSellerLink ? styles.chatCardDisabled : null,
           isSelectedForForward ? styles.chatCardSelected : null,
@@ -936,7 +956,14 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             source={{
               uri: profilePic
             }}
-            style={styles.avatar}
+            style={[
+              styles.avatar,
+              {
+                width: chatMetrics.headerAvatar + 8,
+                height: chatMetrics.headerAvatar + 8,
+                borderRadius: (chatMetrics.headerAvatar + 8) / 2,
+              },
+            ]}
           />
 
           {(item?.sellerUser?.isOnline || item?.otherUser?.isOnline) ? (
@@ -1013,6 +1040,8 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           {
             borderColor: isSelectedForForward ? accentColor : colors.border,
             backgroundColor: isSelectedForForward ? accentSoft : colors.card,
+            padding: cardPadding,
+            borderRadius: cardRadius,
           },
           isSelectedForForward ? styles.chatCardSelected : null,
         ]}
@@ -1047,10 +1076,30 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       >
         {item?.groupAvatar ? (
           <View style={styles.avatarContainer}>
-            <Image source={{ uri: item.groupAvatar }} style={styles.avatar} />
+            <Image
+              source={{ uri: item.groupAvatar }}
+              style={[
+                styles.avatar,
+                {
+                  width: chatMetrics.headerAvatar + 8,
+                  height: chatMetrics.headerAvatar + 8,
+                  borderRadius: (chatMetrics.headerAvatar + 8) / 2,
+                },
+              ]}
+            />
           </View>
         ) : (
-          <View style={[styles.groupAvatarCard, { backgroundColor: groupAvatarBackgroundColor }]}>
+          <View
+            style={[
+              styles.groupAvatarCard,
+              {
+                backgroundColor: groupAvatarBackgroundColor,
+                width: chatMetrics.headerAvatar + 8,
+                height: chatMetrics.headerAvatar + 8,
+                borderRadius: (chatMetrics.headerAvatar + 8) / 2,
+              },
+            ]}
+          >
             <Icon name="people-outline" size={22} color={colors.primary} />
           </View>
         )}
@@ -1058,8 +1107,8 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         <View style={styles.chatInfo}>
           <View style={styles.groupTitleRow}>
             <Text style={[styles.username, { color: colors.text, flex: 1 }]} numberOfLines={1}>{title}</Text>
-            <View style={[styles.groupVisibilityPill, { backgroundColor: item?.groupVisibility === "public" ? `${colors.primary}16` : colors.background }]}>
-              <Text style={[styles.groupVisibilityText, { color: item?.groupVisibility === "public" ? colors.primary : colors.mutedText }]}>
+            <View style={[styles.groupVisibilityPill, { backgroundColor: item?.groupVisibility === "public" ? accentSoft : colors.background }]}>
+              <Text style={[styles.groupVisibilityText, { color: item?.groupVisibility === "public" ? colors.primary : colors.mutedText }]} numberOfLines={1}>
                 {item?.groupVisibility === "public" ? "Public" : "Private"}
               </Text>
             </View>
@@ -1144,24 +1193,63 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
       <View style={styles.headerShell}>
-        <View style={[styles.header, { backgroundColor: colors.card, borderColor: accentBorder }]}>
+        <View
+          style={[
+            styles.header,
+            {
+              backgroundColor: colors.card,
+              borderColor: accentBorder,
+              borderRadius: cardRadius + 6,
+              paddingHorizontal: cardPadding,
+              paddingVertical: Math.max(chatMetrics.bubblePaddingY + 1, 14),
+            },
+          ]}
+        >
           <View style={styles.headerCopy}>
-            <Text style={[styles.headerEyebrow, { color: accentColor }]}>Messages</Text>
-            <Text style={[styles.headerTitle, { color: colors.text }]}>Chats</Text>
-            <Text style={[styles.headerSubtitle, { color: colors.mutedText }]} numberOfLines={2}>
+            <Text style={[styles.headerEyebrow, { color: accentColor, fontSize: chatMetrics.metaFontSize + 0.5 }]}>Messages</Text>
+            <Text style={[styles.headerTitle, { color: colors.text, fontSize: chatMetrics.titleFontSize + 7 }]}>Chats</Text>
+            <Text
+              style={[
+                styles.headerSubtitle,
+                {
+                  color: colors.mutedText,
+                  fontSize: chatMetrics.metaFontSize + 1,
+                  lineHeight: chatMetrics.metaFontSize + 7,
+                },
+              ]}
+              numberOfLines={2}
+            >
               {headerSubtitle}
             </Text>
           </View>
 
           <View style={styles.headerActions}>
             <TouchableOpacity
-              style={[styles.headerIconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
+              style={[
+                styles.headerIconButton,
+                {
+                  backgroundColor: accentSoft,
+                  borderColor: accentBorder,
+                  width: chatMetrics.headerAction + 2,
+                  height: chatMetrics.headerAction + 2,
+                  borderRadius: Math.round((chatMetrics.headerAction + 2) / 2),
+                },
+              ]}
               onPress={() => navigation.navigate("Search")}
             >
               <Icon name="search-outline" size={20} color={accentColor} />
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.headerIconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
+              style={[
+                styles.headerIconButton,
+                {
+                  backgroundColor: accentSoft,
+                  borderColor: accentBorder,
+                  width: chatMetrics.headerAction + 2,
+                  height: chatMetrics.headerAction + 2,
+                  borderRadius: Math.round((chatMetrics.headerAction + 2) / 2),
+                },
+              ]}
               onPress={() => setShowAssistant(true)}
             >
               <Icon name="sparkles-outline" size={20} color={accentColor} />
@@ -1192,7 +1280,17 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         </View>
       </View>
 
-      <View style={[styles.tabs, { backgroundColor: tabsBackgroundColor, borderColor: colors.border }]}>
+      <View
+        style={[
+          styles.tabs,
+          {
+            backgroundColor: tabsBackgroundColor,
+            borderColor: alpha(colors.border, isDarkMode ? "D0" : "B8"),
+            borderRadius: cardRadius,
+            padding: 5,
+          },
+        ]}
+      >
         <TouchableOpacity
           style={[styles.tab, activeTab === "regular" ? { backgroundColor: accentColor } : null]}
           onPress={() => setActiveTab("regular")}
@@ -1201,10 +1299,11 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             style={[
               styles.tabText,
               activeTab === "regular" && styles.activeTabText,
-              { color: activeTab === "regular" ? "#fff" : colors.mutedText },
+              { color: activeTab === "regular" ? "#fff" : colors.mutedText, fontSize: tabLabelFontSize },
             ]}
+            numberOfLines={1}
           >
-            Regular Chats
+            Direct
           </Text>
         </TouchableOpacity>
 
@@ -1216,10 +1315,11 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             style={[
               styles.tabText,
               activeTab === "seller" && styles.activeTabText,
-              { color: activeTab === "seller" ? "#fff" : colors.mutedText },
+              { color: activeTab === "seller" ? "#fff" : colors.mutedText, fontSize: tabLabelFontSize },
             ]}
+            numberOfLines={1}
           >
-            Seller Chats
+            Seller
           </Text>
         </TouchableOpacity>
 
@@ -1231,10 +1331,11 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             style={[
               styles.tabText,
               activeTab === "group" && styles.activeTabText,
-              { color: activeTab === "group" ? "#fff" : colors.mutedText },
+              { color: activeTab === "group" ? "#fff" : colors.mutedText, fontSize: tabLabelFontSize },
             ]}
+            numberOfLines={1}
           >
-            Group Chats
+            Groups
           </Text>
         </TouchableOpacity>
       </View>
@@ -1271,6 +1372,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.listContent,
+          { paddingHorizontal: inboxHorizontalPadding },
           !listData.length ? styles.listContentEmpty : null,
         ]}
         ListEmptyComponent={
@@ -1610,12 +1712,14 @@ const styles = StyleSheet.create({
   },
   headerEyebrow: {
     fontSize: 12,
+    fontFamily: appFonts.semibold,
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.4,
   },
   headerTitle: {
     fontSize: 24,
+    fontFamily: appFonts.bold,
     fontWeight: "800",
     marginTop: 2,
   },
@@ -1623,6 +1727,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 12.5,
     lineHeight: 18,
+    fontFamily: appFonts.medium,
     fontWeight: "500",
   },
   headerActions: {
@@ -1653,9 +1758,11 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     alignItems: "center",
     borderRadius: 14,
+    minWidth: 0,
   },
   tabText: {
     fontSize: 13.5,
+    fontFamily: appFonts.semibold,
     fontWeight: "600",
   },
   forwardBanner: {
@@ -1679,6 +1786,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 13,
     lineHeight: 18,
+    fontFamily: appFonts.medium,
     fontWeight: "600",
   },
   forwardBannerActions: {
@@ -1691,11 +1799,13 @@ const styles = StyleSheet.create({
     marginLeft: 14,
   },
   activeTabText: {
+    fontFamily: appFonts.bold,
     fontWeight: "700",
   },
   listContent: {
     paddingHorizontal: 14,
     paddingBottom: 28,
+    paddingTop: 2,
   },
   listContentEmpty: {
     flexGrow: 1,
@@ -1707,6 +1817,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 20,
+    ...appShadows.card,
   },
   chatCardSelected: {
     transform: [{ scale: 0.995 }],
@@ -1758,12 +1869,14 @@ const styles = StyleSheet.create({
   },
   groupVisibilityText: {
     fontSize: 11,
+    fontFamily: appFonts.semibold,
     fontWeight: "700",
   },
   chatMeta: {
     alignItems: "flex-end",
     justifyContent: "center",
     marginLeft: 12,
+    minWidth: 42,
   },
   forwardCheck: {
     width: 22,
@@ -1777,6 +1890,7 @@ const styles = StyleSheet.create({
   },
   chatTimestamp: {
     fontSize: 12,
+    fontFamily: appFonts.semibold,
     fontWeight: "600",
     marginBottom: 8,
   },
@@ -1787,6 +1901,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 16,
+    fontFamily: appFonts.bold,
     fontWeight: "700",
   },
   emptyText: {
@@ -1794,15 +1909,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     textAlign: "center",
+    fontFamily: appFonts.regular,
   },
   username: {
     fontSize: 16,
+    fontFamily: appFonts.bold,
     fontWeight: "700",
   },
   lastMessage: {
     marginTop: 4,
     fontSize: 13,
     lineHeight: 18,
+    fontFamily: appFonts.regular,
   },
   unreadBadge: {
     minWidth: 18,
@@ -1820,6 +1938,7 @@ const styles = StyleSheet.create({
   unreadText: {
     color: "#fff",
     fontSize: 11,
+    fontFamily: appFonts.bold,
     fontWeight: "700",
   },
   center: {
@@ -1865,6 +1984,7 @@ const styles = StyleSheet.create({
   groupActionText: {
     marginLeft: 12,
     fontSize: 15,
+    fontFamily: appFonts.semibold,
     fontWeight: "700",
     flex: 1,
   },
@@ -1875,6 +1995,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 18,
+    fontFamily: appFonts.bold,
     fontWeight: "700",
   },
   groupNameInput: {
@@ -1904,6 +2025,7 @@ const styles = StyleSheet.create({
   },
   groupModeText: {
     fontSize: 13,
+    fontFamily: appFonts.semibold,
     fontWeight: "700",
   },
   groupDescriptionInput: {
@@ -1945,6 +2067,7 @@ const styles = StyleSheet.create({
   },
   joinGroupButtonText: {
     fontSize: 13,
+    fontFamily: appFonts.semibold,
     fontWeight: "700",
   },
   groupEligibilityHint: {
@@ -1969,6 +2092,7 @@ const styles = StyleSheet.create({
   },
   memberName: {
     fontSize: 15,
+    fontFamily: appFonts.semibold,
     fontWeight: "600",
   },
   memberSubtitle: {
@@ -1983,6 +2107,7 @@ const styles = StyleSheet.create({
   },
   createGroupButtonText: {
     color: "#fff",
+    fontFamily: appFonts.bold,
     fontWeight: "700",
     fontSize: 15,
   }

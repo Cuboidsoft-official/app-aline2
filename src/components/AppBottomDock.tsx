@@ -3,6 +3,7 @@ import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native
 import Icon from "react-native-vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { alpha, appFonts } from "../theme/designSystem";
 import { useAppTheme } from "../theme/AppThemeContext";
 import ProfileTabAvatar from "./ProfileTabAvatar";
 
@@ -50,6 +51,9 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
   const { colors, isDarkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom, Platform.OS === "ios" ? 14 : 10);
+  const surfaceColor = isDarkMode ? colors.surface : colors.card;
+  const activeTintColor = colors.primary;
+  const labelFontSize = Platform.OS === "ios" ? 11 : 10.5;
 
   return (
     <View pointerEvents="box-none" style={styles.wrap}>
@@ -59,10 +63,10 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
           {
             height: APP_BOTTOM_DOCK_BASE_HEIGHT + bottomPadding,
             paddingBottom: bottomPadding,
-            backgroundColor: colors.card,
-            borderTopColor: colors.border,
+            backgroundColor: surfaceColor,
+            borderTopColor: isDarkMode ? alpha(colors.border, "CC") : colors.border,
             shadowColor: isDarkMode ? "#000" : colors.text,
-            shadowOpacity: isDarkMode ? 0.3 : 0.08,
+            shadowOpacity: isDarkMode ? 0.36 : 0.08,
             shadowRadius: 14,
             shadowOffset: { width: 0, height: -4 },
           },
@@ -70,35 +74,41 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
       >
         {bottomNavItems.map((item) => {
           const isActive = activeRouteName === item.key;
-          const tintColor = isActive ? colors.primary : colors.tabInactive || colors.mutedText;
-          const activeBackgroundColor = `${colors.primary}${isDarkMode ? "24" : "16"}`;
+          const tintColor = isActive ? activeTintColor : colors.tabInactive || colors.mutedText;
+          const activeBackgroundColor = isDarkMode ? alpha(activeTintColor, "22") : alpha(activeTintColor, "14");
 
-        return (
-          <TouchableOpacity
-            key={item.key}
-            activeOpacity={0.85}
-            style={[
-              styles.item,
-              {
-                backgroundColor: isActive ? activeBackgroundColor : "transparent",
-                borderColor: isActive ? `${colors.primary}${isDarkMode ? "40" : "2a"}` : "transparent",
-              },
-            ]}
-            onPress={() => {
-              if (item.screen === "Swipes") {
-                navigation.navigate("Swipes");
-                return;
-              }
+          return (
+            <TouchableOpacity
+              key={item.key}
+              activeOpacity={0.85}
+              style={[
+                styles.item,
+                {
+                  backgroundColor: isActive ? activeBackgroundColor : "transparent",
+                  borderColor: isActive ? alpha(activeTintColor, isDarkMode ? "42" : "24") : "transparent",
+                },
+              ]}
+              onPress={() => {
+                if (item.screen === "Swipes") {
+                  navigation.navigate("Swipes");
+                  return;
+                }
 
-              navigation.navigate("MainApp", { screen: item.screen });
-            }}
-          >
+                navigation.navigate("MainApp", { screen: item.screen });
+              }}
+            >
               {item.key === "ProfileView" ? (
                 <ProfileTabAvatar focused={isActive} color={tintColor} size={24} />
               ) : (
                 <Icon name={isActive ? item.icons.active : item.icons.inactive} size={24} color={tintColor} />
               )}
-              <Text style={[styles.label, { color: tintColor }]}>{item.label}</Text>
+              <Text
+                style={[styles.label, { color: tintColor, fontSize: labelFontSize }]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {item.label}
+              </Text>
             </TouchableOpacity>
           );
         })}
@@ -115,7 +125,7 @@ const styles = StyleSheet.create({
   },
   surface: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     borderTopWidth: StyleSheet.hairlineWidth,
     shadowColor: "transparent",
     shadowOpacity: 0,
@@ -127,15 +137,20 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 8,
-    marginHorizontal: 6,
-    marginTop: 6,
+    minWidth: 0,
+    paddingTop: 7,
+    paddingHorizontal: 4,
+    marginHorizontal: 5,
+    marginTop: 5,
     borderRadius: 16,
     borderWidth: 1,
   },
   label: {
-    marginTop: 2,
-    fontSize: 13,
+    marginTop: 3,
+    width: "100%",
+    textAlign: "center",
+    lineHeight: 14,
+    fontFamily: appFonts.semibold,
     fontWeight: "700",
   },
 });

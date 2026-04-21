@@ -69,6 +69,8 @@ import { getStoredUser } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { callingDisabledMessage, productFlags } from "../config/productFlags";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { alpha, appFonts, appShadows } from "../theme/designSystem";
+import { getChatLayoutMetrics } from "../theme/chatUi";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import VoiceMessageBubble from "../components/chat/VoiceMessageBubble";
 import StickerPickerSheet from "../components/chat/StickerPickerSheet";
@@ -461,6 +463,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
+  const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
   const {
     sellerId,
     sellerUserId: initialSellerUserId,
@@ -1830,7 +1833,16 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             onLongPress={isSystemMessage ? undefined : () => reactToMessage(item._id!)}
             style={[
               styles.msgBubble,
-              sharedContent?.kind === "post" || callEvent ? styles.messageBubbleWide : null,
+              {
+                paddingHorizontal: chatMetrics.bubblePaddingX,
+                paddingVertical: chatMetrics.bubblePaddingY,
+                borderRadius: chatMetrics.bubbleRadius,
+                maxWidth: chatMetrics.bubbleMaxWidth,
+                minWidth: minimumReadableBubbleWidth,
+              },
+              sharedContent?.kind === "post" || callEvent
+                ? [styles.messageBubbleWide, { maxWidth: chatMetrics.wideBubbleMaxWidth, minWidth: minimumWideBubbleWidth }]
+                : null,
               isMine ? styles.myMsg : styles.otherMsg
             ]}
           >
@@ -1838,10 +1850,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               <View style={[styles.replyPreviewCard, isMine ? styles.replyPreviewCardMine : null]}>
                 <View style={[styles.replyPreviewBar, isMine ? styles.replyPreviewBarMine : null]} />
                 <View style={styles.replyPreviewBody}>
-                  <Text style={[styles.replyPreviewAuthor, isMine ? styles.replyPreviewAuthorMine : null]} numberOfLines={1}>
+                  <Text style={[styles.replyPreviewAuthor, isMine ? styles.replyPreviewAuthorMine : null, { fontSize: chatMetrics.metaFontSize + 0.5 }]} numberOfLines={1}>
                     {replyPreview.author}
                   </Text>
-                  <Text style={[styles.replyPreviewSnippet, isMine ? styles.replyPreviewSnippetMine : null]} numberOfLines={1}>
+                  <Text style={[styles.replyPreviewSnippet, isMine ? styles.replyPreviewSnippetMine : null, { fontSize: chatMetrics.metaFontSize, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={1}>
                     {replyPreview.snippet}
                   </Text>
                 </View>
@@ -1864,10 +1876,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                     style={styles.sharedPostAvatar}
                   />
                   <View style={styles.sharedPostMeta}>
-                    <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : null]} numberOfLines={1}>
+                    <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]} numberOfLines={1}>
                       {sharedContent?.user?.username ? `@${sharedContent.user.username}` : sharedContent?.user?.name || "Aline2 post"}
                     </Text>
-                    <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : null]} numberOfLines={1}>
+                    <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : null, { fontSize: chatMetrics.metaFontSize }]} numberOfLines={1}>
                       Shared post
                     </Text>
                   </View>
@@ -1882,7 +1894,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 ) : null}
 
                 {sharedContent?.caption ? (
-                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null]} numberOfLines={3}>
+                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, { fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]} numberOfLines={3}>
                     {sharedContent.caption}
                   </Text>
                 ) : null}
@@ -1899,10 +1911,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   />
                 </View>
                 <View style={styles.callEventBody}>
-                  <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null]}>
+                  <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]}>
                     {callEvent.label}
                   </Text>
-                  <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null]}>
+                  <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null, { fontSize: chatMetrics.metaFontSize }]}>
                     Call activity is saved in chat
                   </Text>
                 </View>
@@ -1955,7 +1967,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             ) : null}
 
             {!locationPayload && !sharedContent && !callEvent && !!textValue && (
-              <Text style={isMine ? styles.myText : styles.otherText}>
+              <Text style={[isMine ? styles.myText : styles.otherText, { fontSize: chatMetrics.bodyFontSize, lineHeight: chatMetrics.bodyLineHeight }]}>
                 {textValue}
               </Text>
             )}
@@ -1980,10 +1992,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               >
                 <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
                 <View style={styles.locationBody}>
-                  <Text style={isMine ? styles.myLocationTitle : styles.locationTitle}>
+                  <Text style={[isMine ? styles.myLocationTitle : styles.locationTitle, { fontSize: chatMetrics.metaFontSize + 1 }]}>
                     {locationPayload.label}
                   </Text>
-                  <Text style={isMine ? styles.myLocationLink : styles.locationLink}>
+                  <Text style={[isMine ? styles.myLocationLink : styles.locationLink, { fontSize: chatMetrics.metaFontSize }]}>
                     Open in Maps
                   </Text>
                 </View>
@@ -1997,7 +2009,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                     key={`${item._id}-${reaction?.emoji || "reaction"}`}
                     style={[styles.reactionChip, isMine ? styles.myReactionChip : null]}
                   >
-                    <Text style={styles.reactionText}>
+                    <Text style={[styles.reactionText, { fontSize: chatMetrics.metaFontSize }]}>
                       {reaction?.emoji} {Array.isArray(reaction?.users) ? reaction.users.length : 0}
                     </Text>
                   </View>
@@ -2007,7 +2019,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
             <View style={[styles.messageMetaRow, isMine ? styles.messageMetaRowMine : null]}>
               {!!messageTimeLabel ? (
-                <Text style={[styles.messageMetaText, isMine ? styles.messageMetaTextMine : null]}>
+                <Text style={[styles.messageMetaText, isMine ? styles.messageMetaTextMine : null, { fontSize: chatMetrics.metaFontSize }]}>
                   {messageTimeLabel}
                 </Text>
               ) : null}
@@ -2101,12 +2113,24 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     }
   }, [ensureConversation, joinConversationRealtime, navigation, selectedServiceLabel, sendCallEventLog, seller?.profilePic, seller?.sellerName]);
 
+  const compactHeaderActionSize = Math.max(chatMetrics.headerAction - 4, 30);
+  const compactHeaderTitleSize = Math.max(chatMetrics.titleFontSize - 3, 13);
+  const compactHeaderStatusSize = Math.max(chatMetrics.statusFontSize - 1, 10.5);
+  const minimumReadableBubbleWidth = Math.min(
+    Math.max(chatMetrics.minBubbleWidth, Math.round(width * 0.44)),
+    Math.round(width * 0.62),
+  );
+  const minimumWideBubbleWidth = Math.min(
+    Math.max(minimumReadableBubbleWidth + 56, Math.round(width * 0.68)),
+    Math.round(width * 0.9),
+  );
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: CHAT_BG }]} edges={["top", "bottom"]}>
       <StatusBar barStyle="light-content" backgroundColor={CHAT_BG} />
 
-      <View style={[styles.header, { backgroundColor: CHAT_BG, borderBottomColor: CHAT_BORDER, paddingTop: 8 }]}>
-        <TouchableOpacity style={styles.headerActionButton} onPress={() => navigation.goBack()}>
+      <View style={[styles.header, { backgroundColor: CHAT_BG, borderBottomColor: CHAT_BORDER, paddingTop: 8, paddingHorizontal: chatMetrics.listPadding + 2, paddingBottom: chatMetrics.listPadding }]}>
+        <TouchableOpacity style={[styles.headerActionButton, { width: compactHeaderActionSize, height: compactHeaderActionSize, borderRadius: compactHeaderActionSize / 2, backgroundColor: alpha("#FFFFFF", "14"), borderColor: alpha("#FFFFFF", "24") }]} onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={20} color="#fff" />
         </TouchableOpacity>
 
@@ -2121,31 +2145,31 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             source={{
               uri: seller?.profilePic || DEFAULT_AVATAR_URL
             }}
-            style={styles.avatar}
+            style={[styles.avatar, { width: chatMetrics.headerAvatar, height: chatMetrics.headerAvatar, borderRadius: chatMetrics.headerAvatar / 2 }]}
           />
 
           <View style={styles.headerTextBlock}>
-            <Text style={styles.name} numberOfLines={1} ellipsizeMode="tail">
+            <Text style={[styles.name, { fontSize: compactHeaderTitleSize }]} numberOfLines={1} ellipsizeMode="tail">
               {seller?.sellerName || "Loading..."}
             </Text>
             <View style={styles.statusRow}>
               <View style={[styles.presenceDot, { backgroundColor: isSellerActive ? "#22C55E" : "#F59E0B" }]} />
-              <Text style={[styles.status, { color: sellerStatusColor }]} numberOfLines={1} ellipsizeMode="tail">
+              <Text style={[styles.status, { color: sellerStatusColor, fontSize: compactHeaderStatusSize }]} numberOfLines={1} ellipsizeMode="tail">
                     {normalizedSellerPresenceText}
               </Text>
             </View>
           </View>
         </TouchableOpacity>
 
-        <View style={styles.rightIcons}>
+        <View style={[styles.rightIcons, { backgroundColor: alpha("#FFFFFF", "10"), borderColor: alpha("#FFFFFF", "16") }]}>
           <TouchableOpacity
-            style={styles.headerActionButton}
+            style={[styles.headerActionButton, styles.headerActionButtonGrouped, { width: compactHeaderActionSize, height: compactHeaderActionSize, borderRadius: compactHeaderActionSize / 2 }]}
             onPress={() => setShowAssistant(true)}
           >
             <Icon name="sparkles-outline" size={20} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.headerActionButton}
+            style={[styles.headerActionButton, styles.headerActionButtonGrouped, { width: compactHeaderActionSize, height: compactHeaderActionSize, borderRadius: compactHeaderActionSize / 2 }]}
             onPress={() => {
               toggleSellerChatLock().catch((error) => {
                 console.log("seller chat lock toggle error:", error);
@@ -2155,7 +2179,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             <Icon name={isConversationLockedState ? "lock-open-outline" : "lock-closed-outline"} size={20} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.headerActionButton}
+            style={[styles.headerActionButton, styles.headerActionButtonGrouped, { width: compactHeaderActionSize, height: compactHeaderActionSize, borderRadius: compactHeaderActionSize / 2 }]}
             onPress={() =>
               navigation.navigate("SellerDetailsScreen", { sellerId })
             }
@@ -2165,8 +2189,30 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         </View>
       </View>
 
+      <View style={styles.chatHeroPanel}>
+        <View style={styles.chatHeroContent}>
+          <Text style={styles.chatHeroEyebrow}>Booking conversation</Text>
+          <Text style={styles.chatHeroTitle} numberOfLines={2}>
+            {seller?.sellerName || "Seller"} bookings and service requests
+          </Text>
+          <Text style={styles.chatHeroText}>
+            Booking updates, service selections, and payment flow all stay organized in one premium thread.
+          </Text>
+        </View>
+        <View style={styles.chatHeroBadge}>
+          <Icon
+            name={seller?.availabilityStatus === false ? "time-outline" : "checkmark-circle-outline"}
+            size={16}
+            color="#F8F5FF"
+          />
+          <Text style={styles.chatHeroBadgeText}>
+            {seller?.availabilityStatus === false ? "Seller away" : "Seller available"}
+          </Text>
+        </View>
+      </View>
+
       <View style={styles.premiumServiceWrap}>
-        <Text style={styles.premiumTitle}>Highlighted Services</Text>
+        <Text style={[styles.premiumTitle, { fontSize: chatMetrics.sectionTitleFontSize }]}>Highlighted Services</Text>
 
         <FlatList
           horizontal
@@ -2182,6 +2228,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               <TouchableOpacity
                 style={[
                   styles.premiumCard,
+                  { width: Math.min(214, width * 0.52), padding: chatMetrics.cardPadding },
                   isSelected && styles.selectedCard
                 ]}
                 onPress={() => setSelectedService(item)}
@@ -2189,6 +2236,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 <Text
                   style={[
                     styles.serviceName,
+                    { fontSize: chatMetrics.metaFontSize + 1 },
                     isSelected && { color: "#fff" }
                   ]}
                 >
@@ -2198,6 +2246,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 <Text
                   style={[
                     styles.servicePrice,
+                    { fontSize: chatMetrics.bodyFontSize - 0.5 },
                     isSelected && { color: "#fff" }
                   ]}
                 >
@@ -2208,6 +2257,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   <Text
                     style={[
                       styles.serviceSubMeta,
+                      { fontSize: chatMetrics.metaFontSize },
                       isSelected && { color: "#E9DEFF" }
                     ]}
                   >
@@ -2219,6 +2269,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   <Text
                     style={[
                       styles.serviceSelectionText,
+                      { fontSize: chatMetrics.metaFontSize + 0.5 },
                       isSelected ? styles.serviceSelectionTextActive : null,
                     ]}
                   >
@@ -2276,7 +2327,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
-        <View style={{ flex: 1 }}>
+        <View style={styles.timelineShell}>
           {loading ? (
             <View style={styles.loaderWrap}>
               <ActivityIndicator size="large" color={PRIMARY} />
@@ -2286,7 +2337,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               data={bookingTimelineMessages}
               renderItem={renderMessage}
               keyExtractor={(item) => getMessageRenderKey(item)}
-              contentContainerStyle={{ padding: 12, paddingBottom: Math.max(20, 12 + insets.bottom) }}
+              contentContainerStyle={{ paddingHorizontal: chatMetrics.listPadding, paddingTop: chatMetrics.listPadding, paddingBottom: Math.max(20, 12 + insets.bottom) }}
               keyboardShouldPersistTaps="handled"
               refreshControl={
                 <RefreshControl
@@ -2309,17 +2360,20 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                     {loadingMore ? (
                       <ActivityIndicator color={PRIMARY} />
                     ) : (
-                      <Text style={styles.loadEarlierText}>Load earlier messages</Text>
+                      <Text style={[styles.loadEarlierText, { fontSize: chatMetrics.metaFontSize + 1 }]}>Load earlier messages</Text>
                     )}
                   </TouchableOpacity>
                 ) : null
               }
               ListEmptyComponent={
                 <View style={styles.emptyWrap}>
-                  <Text style={styles.emptyTitle}>
+                  <View style={styles.emptyIconWrap}>
+                    <Icon name="calendar-clear-outline" size={24} color="#BFA7FF" />
+                  </View>
+                  <Text style={[styles.emptyTitle, { fontSize: chatMetrics.sectionTitleFontSize + 1 }]}>
                     {errorMessage ? "Conversation unavailable" : "No booking updates yet"}
                   </Text>
-                  <Text style={styles.emptyText}>
+                  <Text style={[styles.emptyText, { fontSize: chatMetrics.bodyFontSize - 1, lineHeight: chatMetrics.bodyLineHeight }]}>
                     {errorMessage || "This room only keeps appointment and payment updates. Normal chat and call logs stay hidden here."}
                   </Text>
                 </View>
@@ -2330,9 +2384,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         </View>
 
         <View style={[styles.inputWrap, { backgroundColor: CHAT_BG, paddingBottom: Math.max(8, insets.bottom), borderTopColor: CHAT_BORDER }]}>
-          <View style={[styles.composerLockedCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL_ALT }]}>
-            <Icon name="calendar-clear-outline" size={18} color={colors.primary} />
-            <Text style={[styles.composerLockedText, { color: "#F8FAFF" }]}>
+          <View style={[styles.composerLockedCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL_ALT, borderRadius: chatMetrics.bubbleRadius }]}>
+            <View style={[styles.composerLockedIconWrap, { backgroundColor: alpha(colors.primary, "1A") }]}>
+              <Icon name="calendar-clear-outline" size={18} color={colors.primary} />
+            </View>
+            <Text style={[styles.composerLockedText, { color: "#F8FAFF", fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]}>
               This seller room is booking-only. Choose a highlighted service, confirm a slot, and appointment updates will stay saved here.
             </Text>
           </View>
@@ -2724,11 +2780,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
-    marginLeft: 10
+    marginLeft: 10,
+    minWidth: 0,
   },
   headerTextBlock: {
     marginLeft: 10,
-    flexShrink: 1,
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+    paddingRight: 4,
   },
   avatar: {
     width: 44,
@@ -2737,13 +2797,13 @@ const styles = StyleSheet.create({
   },
   name: {
     color: "#fff",
-    fontWeight: "700",
+    fontFamily: appFonts.bold,
     fontSize: 16
   },
   statusRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 4,
+    marginTop: 3,
   },
   presenceDot: {
     width: 8,
@@ -2753,22 +2813,35 @@ const styles = StyleSheet.create({
   },
   status: {
     fontSize: 12,
-    fontWeight: "600"
+    fontFamily: appFonts.medium,
+    flexShrink: 1,
   },
   rightIcons: {
     flexDirection: "row",
-    alignItems: "center"
+    alignItems: "center",
+    marginLeft: 10,
+    flexShrink: 0,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 5,
+    paddingVertical: 4,
   },
   headerActionButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 8,
+    marginLeft: 5,
     backgroundColor: "rgba(255,255,255,0.12)",
     borderWidth: 1,
     borderColor: CHAT_BORDER,
+  },
+  headerActionButtonGrouped: {
+    marginLeft: 0,
+    marginRight: 2,
+    backgroundColor: "transparent",
+    borderWidth: 0,
   },
   headerActionButtonDisabled: {
     backgroundColor: "rgba(255,255,255,0.06)",
@@ -2793,7 +2866,7 @@ const styles = StyleSheet.create({
   chatHeroEyebrow: {
     color: "#BFA7FF",
     fontSize: 11,
-    fontWeight: "800",
+    fontFamily: appFonts.bold,
     textTransform: "uppercase",
     letterSpacing: 0.7,
   },
@@ -2801,7 +2874,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: "#FFFFFF",
     fontSize: 20,
-    fontWeight: "800",
+    fontFamily: appFonts.bold,
     lineHeight: 26,
   },
   chatHeroText: {
@@ -2822,7 +2895,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     color: "#F8F5FF",
     fontSize: 11.5,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   premiumServiceWrap: {
     backgroundColor: CHAT_PANEL,
@@ -2834,7 +2907,7 @@ const styles = StyleSheet.create({
   },
   premiumTitle: {
     fontSize: 14,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
     marginLeft: 12,
     marginBottom: 8,
     color: "#F7F9FF",
@@ -2857,17 +2930,18 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },
-  serviceName: { fontWeight: "700", fontSize: 13 },
+  serviceName: { fontFamily: appFonts.semibold, fontSize: 13 },
   servicePrice: {
     marginTop: 5,
     fontSize: 14,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
     color: PRIMARY
   },
   serviceSubMeta: {
     marginTop: 6,
     fontSize: 11.5,
     color: CHAT_TEXT_MUTED,
+    fontFamily: appFonts.regular,
   },
   serviceFooter: {
     marginTop: 12,
@@ -2876,6 +2950,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: CHAT_TEXT_MUTED,
     marginBottom: 8,
+    fontFamily: appFonts.medium,
   },
   serviceSelectionTextActive: {
     color: "#E9DEFF",
@@ -2949,6 +3024,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center"
   },
+  timelineShell: {
+    flex: 1,
+    borderTopWidth: 1,
+    borderTopColor: CHAT_BORDER,
+    backgroundColor: CHAT_BG,
+  },
   loadEarlierButton: {
     alignSelf: "center",
     backgroundColor: CHAT_PANEL_ALT,
@@ -2961,7 +3042,7 @@ const styles = StyleSheet.create({
   },
   loadEarlierText: {
     color: PRIMARY,
-    fontWeight: "700"
+    fontFamily: appFonts.semibold,
   },
   emptyWrap: {
     alignItems: "center",
@@ -2969,9 +3050,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 60
   },
+  emptyIconWrap: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+    backgroundColor: "rgba(123, 77, 255, 0.14)",
+  },
   emptyTitle: {
     fontSize: 16,
-    fontWeight: "700",
+    fontFamily: appFonts.bold,
     color: "#F8FAFF",
   },
   emptyText: {
@@ -3001,23 +3091,27 @@ const styles = StyleSheet.create({
     marginHorizontal: 6,
     color: "#fff",
     fontSize: 12,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   msgBubble: {
     padding: 13,
     borderRadius: 22,
     maxWidth: "80%",
+    minWidth: 0,
     alignSelf: "flex-start",
     flexShrink: 1,
+    overflow: "hidden",
     shadowColor: "#040814",
     shadowOpacity: 0.18,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
     elevation: 4,
+    ...appShadows.card,
   },
   messageBubbleWide: {
-    maxWidth: "92%",
-    minWidth: 260,
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
   },
   replyPreviewCard: {
     flexDirection: "row",
@@ -3027,6 +3121,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: "rgba(123, 77, 255, 0.12)",
     maxWidth: "100%",
+    minWidth: 0,
   },
   replyPreviewCardMine: {
     backgroundColor: "rgba(255,255,255,0.14)",
@@ -3048,7 +3143,7 @@ const styles = StyleSheet.create({
   replyPreviewAuthor: {
     color: PRIMARY,
     fontSize: 12,
-    fontWeight: "800",
+    fontFamily: appFonts.bold,
   },
   replyPreviewAuthorMine: {
     color: "#fff",
@@ -3064,7 +3159,7 @@ const styles = StyleSheet.create({
   },
   sharedPostCard: {
     width: "100%",
-    minWidth: 260,
+    minWidth: 0,
     borderRadius: 14,
     padding: 10,
     marginBottom: 8,
@@ -3089,7 +3184,7 @@ const styles = StyleSheet.create({
   sharedPostAuthor: {
     color: "#F8FAFF",
     fontSize: 12.5,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   sharedPostAuthorMine: {
     color: "#fff",
@@ -3098,7 +3193,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
     color: CHAT_TEXT_MUTED,
     fontSize: 11,
-    fontWeight: "600",
+    fontFamily: appFonts.medium,
   },
   sharedPostLabelMine: {
     color: "rgba(255,255,255,0.78)",
@@ -3120,7 +3215,7 @@ const styles = StyleSheet.create({
   },
   callEventCard: {
     width: "100%",
-    minWidth: 220,
+    minWidth: 0,
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -3150,7 +3245,7 @@ const styles = StyleSheet.create({
   callEventTitle: {
     color: "#F8FAFF",
     fontSize: 13,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   callEventTitleMine: {
     color: "#fff",
@@ -3159,18 +3254,19 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: CHAT_TEXT_MUTED,
     fontSize: 11.5,
-    fontWeight: "600",
+    fontFamily: appFonts.medium,
   },
   callEventMetaMine: {
     color: "rgba(255,255,255,0.78)",
   },
   myMsg: { backgroundColor: PRIMARY },
   otherMsg: { backgroundColor: CHAT_PANEL_ALT, borderWidth: 1, borderColor: CHAT_BORDER },
-  myText: { color: "#fff" },
-  otherText: { color: "#F5F7FF" },
+  myText: { color: "#fff", fontFamily: appFonts.regular },
+  otherText: { color: "#F5F7FF", fontFamily: appFonts.regular },
   messageImage: {
     width: 220,
     height: 220,
+    maxWidth: "100%",
     borderRadius: 12,
     marginBottom: 8
   },
@@ -3181,7 +3277,7 @@ const styles = StyleSheet.create({
   },
   attachmentName: {
     marginLeft: 8,
-    fontWeight: "600",
+    fontFamily: appFonts.semibold,
     maxWidth: 180,
     color: "#F5F7FF",
   },
@@ -3227,23 +3323,23 @@ const styles = StyleSheet.create({
   },
   locationTitle: {
     color: "#F5F7FF",
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   myLocationTitle: {
     color: "#fff",
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   locationLink: {
     marginTop: 2,
     color: PRIMARY,
     fontSize: 12,
-    fontWeight: "600",
+    fontFamily: appFonts.medium,
   },
   myLocationLink: {
     marginTop: 2,
     color: "#E9DEFF",
     fontSize: 12,
-    fontWeight: "600",
+    fontFamily: appFonts.medium,
   },
   reactionRow: {
     flexDirection: "row",
@@ -3314,10 +3410,15 @@ const styles = StyleSheet.create({
   },
   quickText: { color: PRIMARY, fontWeight: "600" },
   inputWrap: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
+    paddingHorizontal: 14,
+    paddingTop: 12,
     backgroundColor: CHAT_BG,
     borderTopWidth: StyleSheet.hairlineWidth,
+    shadowColor: "#020617",
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -6 },
+    elevation: 8,
   },
   lockedChatOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -3379,11 +3480,12 @@ const styles = StyleSheet.create({
   },
   composerReplyLabel: {
     fontSize: 12,
-    fontWeight: "800",
+    fontFamily: appFonts.bold,
   },
   composerReplySnippet: {
     marginTop: 2,
     fontSize: 12,
+    fontFamily: appFonts.regular,
   },
   composerReplyClose: {
     marginLeft: 10,
@@ -3394,17 +3496,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     marginBottom: 10,
+  },
+  composerLockedIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
   },
   composerLockedText: {
     flex: 1,
-    marginLeft: 10,
+    marginLeft: 12,
     fontSize: 12.5,
-    lineHeight: 18,
-    fontWeight: "600",
+    lineHeight: 19,
+    fontFamily: appFonts.medium,
   },
   attachmentPreviewCard: {
     width: "100%",

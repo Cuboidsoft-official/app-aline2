@@ -9,7 +9,8 @@ import {
   FlatList,
   ActivityIndicator,
   Modal,
-  TextInput
+  TextInput,
+  useWindowDimensions,
 } from "react-native";
 import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -33,6 +34,8 @@ import {
 import { getStoredUserId } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { appFonts, appShadows } from "../theme/designSystem";
+import { getChatLayoutMetrics } from "../theme/chatUi";
 import { uploadImageAsset } from "../utils/uploadMedia";
 import ChatLockModal from "../components/chat/ChatLockModal";
 import ChatThemePicker from "../components/chat/ChatThemePicker";
@@ -118,6 +121,8 @@ const normalizeChatUsers = (items: any[], directory?: Map<string, ChatUser>) => 
 
 const GroupDetailsScreen = ({ navigation, route }: any) => {
   const { colors, isDarkMode } = useAppTheme();
+  const { width } = useWindowDimensions();
+  const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
   const { conversationId, conversationSnapshot } = route.params || {};
 
   const [conversation, setConversation] = useState<GroupConversation | null>(null);
@@ -701,17 +706,17 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
         <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, { paddingBottom: 28, paddingHorizontal: 0 }]}>
       {errorMessage ? (
         <View style={[styles.errorCard, { backgroundColor: isDarkMode ? "#3b1f24" : "#FEE2E2", borderColor: isDarkMode ? "#7f1d1d" : "#FCA5A5" }]}>
           <Text style={[styles.errorText, { color: isDarkMode ? "#FECACA" : "#991B1B" }]}>{errorMessage}</Text>
         </View>
       ) : null}
 
-      <View style={styles.hero}>
+      <View style={[styles.hero, { paddingHorizontal: chatMetrics.listPadding + 6, paddingTop: chatMetrics.cardPadding + 8 }]}>
         {conversation?.groupAvatar ? (
           <View style={styles.avatarWrap}>
-            <Image source={{ uri: conversation.groupAvatar }} style={styles.heroAvatar} />
+            <Image source={{ uri: conversation.groupAvatar }} style={[styles.heroAvatar, { width: chatMetrics.heroAvatar, height: chatMetrics.heroAvatar, borderRadius: chatMetrics.heroAvatar / 2 }]} />
             {canEditGroup ? (
               <TouchableOpacity
                 style={[styles.avatarEditButton, { backgroundColor: colors.primary }]}
@@ -728,7 +733,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
           </View>
         ) : (
           <View style={styles.avatarWrap}>
-            <View style={[styles.heroFallback, { backgroundColor: isDarkMode ? colors.surface : "#ede9fe" }]}>
+            <View style={[styles.heroFallback, { backgroundColor: isDarkMode ? colors.surface : "#ede9fe", width: chatMetrics.heroAvatar, height: chatMetrics.heroAvatar, borderRadius: chatMetrics.heroAvatar / 2 }]}>
               <Icon name="people-outline" size={30} color={colors.primary} />
             </View>
             {canEditGroup ? (
@@ -749,13 +754,13 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
 
         {editingName ? (
           <View style={styles.editNameWrap}>
-            <View style={[styles.nameInputCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <View style={[styles.nameInputCard, { borderColor: colors.border, backgroundColor: colors.card, borderRadius: chatMetrics.bubbleRadius }]}>
               <TextInput
                 value={groupNameDraft}
                 onChangeText={setGroupNameDraft}
                 placeholder="Group name"
                 placeholderTextColor={colors.placeholder}
-                style={[styles.nameInput, { color: colors.text }]}
+                style={[styles.nameInput, { color: colors.text, fontSize: chatMetrics.bodyFontSize + 1 }]}
               />
             </View>
             <View style={styles.editNameActions}>
@@ -780,7 +785,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
           </View>
         ) : (
           <View style={styles.groupNameRow}>
-            <Text style={[styles.groupName, { color: colors.text }]}>
+            <Text style={[styles.groupName, { color: colors.text, fontSize: chatMetrics.titleFontSize + 6, lineHeight: chatMetrics.titleFontSize + 12 }]}>
               {conversation?.groupName || "Group chat"}
             </Text>
             {canEditGroup ? (
@@ -793,12 +798,12 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
             ) : null}
           </View>
         )}
-        <Text style={[styles.memberCount, { color: colors.mutedText }]}>
+        <Text style={[styles.memberCount, { color: colors.mutedText, fontSize: chatMetrics.metaFontSize + 1 }]}>
           {conversation?.memberCount || members.length} members
         </Text>
       </View>
 
-      <View style={styles.actionsRow}>
+      <View style={[styles.actionsRow, { paddingHorizontal: chatMetrics.listPadding + 6 }]}>
         {canManageMembers ? (
           <TouchableOpacity
             style={[styles.primaryButton, { backgroundColor: colors.primary }]}
@@ -816,8 +821,8 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.metaCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.metaCardTitle, { color: colors.text }]}>Group privacy</Text>
+      <View style={[styles.metaCard, appShadows.card, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: chatMetrics.bubbleRadius + 2, marginHorizontal: chatMetrics.listPadding + 6, padding: chatMetrics.cardPadding }]}>
+        <Text style={[styles.metaCardTitle, { color: colors.text, fontSize: chatMetrics.sectionTitleFontSize } ]}>Group privacy</Text>
         <View style={styles.visibilityRow}>
           {(["private", "public"] as const).map((mode) => {
             const isActive = groupVisibilityDraft === mode;
@@ -850,7 +855,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
           multiline
           maxLength={240}
           editable={canEditGroup}
-          style={[styles.descriptionInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.background }]}
+          style={[styles.descriptionInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.background, fontSize: chatMetrics.bodyFontSize - 1, lineHeight: chatMetrics.bodyLineHeight }]}
         />
 
         <Text style={[styles.metaCardText, { color: colors.mutedText }]}>
@@ -865,7 +870,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
           multiline
           maxLength={720}
           editable={canEditGroup}
-          style={[styles.descriptionInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.background, minHeight: 110 }]}
+          style={[styles.descriptionInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.background, minHeight: 110, fontSize: chatMetrics.bodyFontSize - 1, lineHeight: chatMetrics.bodyLineHeight }]}
         />
 
         {canEditGroup ? (
@@ -879,8 +884,8 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
         ) : null}
       </View>
 
-      <View style={[styles.metaCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.metaCardTitle, { color: colors.text }]}>Chat experience</Text>
+      <View style={[styles.metaCard, appShadows.card, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: chatMetrics.bubbleRadius + 2, marginHorizontal: chatMetrics.listPadding + 6, padding: chatMetrics.cardPadding }]}>
+        <Text style={[styles.metaCardTitle, { color: colors.text, fontSize: chatMetrics.sectionTitleFontSize }]}>Chat experience</Text>
         <Text style={[styles.metaCardText, { color: colors.mutedText }]}>
           Theme and wallpaper update the shared group chat. Mute and lock stay only on this device.
         </Text>
@@ -973,8 +978,8 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
       </View>
 
       {isOwner ? (
-        <View style={[styles.metaCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.metaCardTitle, { color: colors.text }]}>Owner controls</Text>
+        <View style={[styles.metaCard, appShadows.card, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: chatMetrics.bubbleRadius + 2, marginHorizontal: chatMetrics.listPadding + 6, padding: chatMetrics.cardPadding }]}>
+          <Text style={[styles.metaCardTitle, { color: colors.text, fontSize: chatMetrics.sectionTitleFontSize }]}>Owner controls</Text>
           <Text style={[styles.metaCardText, { color: colors.mutedText }]}>
             Transfer ownership if needed, or permanently delete the whole group for everyone.
           </Text>
@@ -995,12 +1000,12 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
         </View>
       ) : null}
 
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>Members</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text, fontSize: chatMetrics.sectionTitleFontSize, paddingHorizontal: chatMetrics.listPadding + 6 }]}>Members</Text>
 
       <FlatList
         data={members}
         keyExtractor={(item) => item._id}
-        contentContainerStyle={styles.memberList}
+        contentContainerStyle={[styles.memberList, { paddingHorizontal: chatMetrics.listPadding + 6, gap: chatMetrics.listPadding }]}
         scrollEnabled={false}
         removeClippedSubviews={false}
         renderItem={({ item }) => {
@@ -1010,19 +1015,19 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
           return (
             <TouchableOpacity
               activeOpacity={0.86}
-              style={[styles.memberCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[styles.memberCard, appShadows.card, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: chatMetrics.bubbleRadius }]}
               onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: item._id })}
             >
               <Image
                 source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }}
-                style={styles.memberAvatar}
+                style={[styles.memberAvatar, { width: chatMetrics.senderAvatar + 10, height: chatMetrics.senderAvatar + 10, borderRadius: (chatMetrics.senderAvatar + 10) / 2 }]}
               />
 
               <View style={styles.memberInfo}>
-                <Text style={[styles.memberName, { color: colors.text }]}>
+                <Text style={[styles.memberName, { color: colors.text, fontSize: chatMetrics.bodyFontSize } ]}>
                   {item.username || item.name || "User"}
                 </Text>
-                <Text style={[styles.memberMeta, { color: colors.mutedText }]}>
+                <Text style={[styles.memberMeta, { color: colors.mutedText, fontSize: chatMetrics.metaFontSize }]}>
                   {isSelf
                     ? conversation?.groupOwner === item._id
                       ? "You • owner"
@@ -1198,7 +1203,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   headerSpacer: {
     width: 24,
@@ -1214,7 +1219,7 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 14,
     lineHeight: 20,
-    fontWeight: "600",
+    fontFamily: appFonts.medium,
   },
   hero: {
     alignItems: "center",
@@ -1254,7 +1259,7 @@ const styles = StyleSheet.create({
   },
   groupName: {
     fontSize: 22,
-    fontWeight: "800",
+    fontFamily: appFonts.bold,
     textAlign: "center",
   },
   editNameButton: {
@@ -1278,7 +1283,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     paddingVertical: 14,
     textAlign: "center",
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   editNameActions: {
     flexDirection: "row",
@@ -1324,7 +1329,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: "#fff",
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
     fontSize: 15,
   },
   secondaryButton: {
@@ -1335,7 +1340,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   secondaryButtonText: {
-    fontWeight: "600",
+    fontFamily: appFonts.medium,
     fontSize: 15,
   },
   metaCard: {
@@ -1347,12 +1352,13 @@ const styles = StyleSheet.create({
   },
   metaCardTitle: {
     fontSize: 15,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   metaCardText: {
     marginTop: 6,
     fontSize: 13,
     lineHeight: 19,
+    fontFamily: appFonts.regular,
   },
   visibilityRow: {
     flexDirection: "row",
@@ -1463,13 +1469,13 @@ const styles = StyleSheet.create({
   dangerButtonText: {
     color: "#dc2626",
     fontSize: 14,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   sectionTitle: {
     paddingHorizontal: 18,
     paddingTop: 24,
     fontSize: 16,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   memberList: {
     padding: 18,
@@ -1502,11 +1508,12 @@ const styles = StyleSheet.create({
   },
   memberName: {
     fontSize: 15,
-    fontWeight: "600",
+    fontFamily: appFonts.semibold,
   },
   memberMeta: {
     marginTop: 3,
     fontSize: 12,
+    fontFamily: appFonts.regular,
   },
   emptyState: {
     paddingVertical: 24,
@@ -1537,7 +1544,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: "700",
+    fontFamily: appFonts.semibold,
   },
   modalList: {
     marginTop: 16,
@@ -1547,5 +1554,6 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     fontSize: 12,
     lineHeight: 18,
+    fontFamily: appFonts.regular,
   },
 });

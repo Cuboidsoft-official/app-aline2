@@ -103,6 +103,13 @@ const extractGeminiReply = (payload: any) => {
   return "";
 };
 
+const getAssistantErrorMessage = (error: any) =>
+  String(
+    error?.response?.data?.message
+    || error?.message
+    || "",
+  ).trim();
+
 const askGeminiDirectly = async ({
   message,
   history = [],
@@ -223,10 +230,21 @@ export const askSupportAssistant = async ({
     return response.data as AssistantResponse;
   } catch (error: any) {
     const statusCode = Number(error?.response?.status || 0);
+    const hasDirectGeminiFallback = Boolean(String(GEMINI_API_KEY || "").trim());
     const shouldFallbackToDirectGemini =
-      !statusCode || statusCode === 404 || statusCode === 405 || statusCode === 501 || statusCode >= 500;
+      hasDirectGeminiFallback
+      && (
+        !statusCode || statusCode === 404 || statusCode === 405 || statusCode === 501 || statusCode >= 500
+      );
 
     if (!shouldFallbackToDirectGemini) {
+      if (!hasDirectGeminiFallback && (!statusCode || statusCode === 404 || statusCode === 405 || statusCode === 501 || statusCode >= 500)) {
+        throw new Error(
+          getAssistantErrorMessage(error)
+          || "Assistant backend is unavailable and this build has no direct Gemini fallback key configured.",
+        );
+      }
+
       throw error;
     }
 
