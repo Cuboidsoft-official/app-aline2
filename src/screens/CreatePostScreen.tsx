@@ -626,7 +626,7 @@ function CreatePostScreen({ navigation, route }: any) {
     return permission === PermissionsAndroid.RESULTS.GRANTED;
   }, []);
 
-  const useCurrentLocation = useCallback(
+  const applyCurrentLocation = useCallback(
     async (target: ComposerTab) => {
       try {
         setLocationFetchTarget(target);
@@ -1430,9 +1430,17 @@ function CreatePostScreen({ navigation, route }: any) {
       }
 
       const publishedType = activeTab === "swipe" ? "swipe" : activeTab;
+      await AsyncStorage.removeItem(CREATE_DRAFT_STORAGE_KEY);
       setPublishError("");
       Alert.alert("Published", `Your ${publishedType} is now live.`);
-      navigation.navigate(activeTab === "swipe" ? "Swipes" : "Feed");
+      startTransition(() => {
+        if (activeTab === "swipe") {
+          navigation.navigate("Swipes");
+          return;
+        }
+
+        navigation.navigate("MainApp", { screen: "Feed" });
+      });
     } catch (error) {
       const nextMessage = getReadableApiErrorMessage(error, toUserSafeMessage(error));
       setPublishError(nextMessage);
@@ -2232,7 +2240,7 @@ function CreatePostScreen({ navigation, route }: any) {
         <TouchableOpacity
           style={[styles.locationActionButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]}
           onPress={() => {
-            useCurrentLocation(target).catch(() => undefined);
+            applyCurrentLocation(target).catch(() => undefined);
           }}
           disabled={locationFetchTarget === target}
         >

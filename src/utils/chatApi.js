@@ -86,10 +86,14 @@ export const createGroupChatConversation = async ({
 
 export const fetchChatConversations = async (params = {}) => {
   const headers = await buildAuthHeaders();
-  const response = await API.get("/chat/my-conversations", {
+  const requestConfig = {
     headers,
     params,
-  });
+  };
+  const response = await requestWithNotFoundFallback(
+    () => API.get("/chat/my-conversations", requestConfig),
+    () => API.get("/chat/conversations", requestConfig)
+  );
   return response.data;
 };
 

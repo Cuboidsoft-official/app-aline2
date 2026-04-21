@@ -13,10 +13,7 @@ import {
 import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
-
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/Ionicons";
-import Tooltip from "react-native-walkthrough-tooltip";
 import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { monetizationDisabledMessage, productFlags } from "../config/productFlags";
@@ -103,7 +100,6 @@ const SellerDashboardScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
   const { width } = useWindowDimensions();
   const [expanded, setExpanded] = useState(false);
-  const [step, setStep] = useState(0);
   const [services, setServices] = useState([]);
   const [serviceLoading, setServiceLoading] = useState(true);
   const [serviceError, setServiceError] = useState("");
@@ -116,13 +112,6 @@ const SellerDashboardScreen = ({ navigation }: any) => {
   const [seller, setSeller] = useState<any>(null);
   const [sellerError, setSellerError] = useState("");
   const [availabilityUpdating, setAvailabilityUpdating] = useState(false);
-
-  const next = () => setStep(step + 1);
-  const close = async () => {
-    setStep(0);
-    await AsyncStorage.setItem("sellerDashboardGuideSeen", "true");
-  };
-  const startGuide = () => setStep(1);
 const fetchServices = useCallback(async () => {
   try {
     setServiceLoading(true);
@@ -238,25 +227,6 @@ const fetchRequestData = useCallback(async () => {
       fetchRequestData().catch(() => {});
     }, [fetchRequestData, fetchSellerProfile, fetchServices])
   );
-
-  useEffect(() => {
-    let active = true;
-
-    const loadGuideState = async () => {
-      const seenGuide = await AsyncStorage.getItem("sellerDashboardGuideSeen");
-      if (active && seenGuide !== "true") {
-        setStep(1);
-      }
-    };
-
-    loadGuideState().catch((error) => {
-      console.log("seller dashboard guide state error:", error);
-    });
-
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const getVerificationLabel = () => {
     if (!seller?.verificationStatus) return "Pending";
@@ -380,31 +350,15 @@ const fetchRequestData = useCallback(async () => {
           </View>
 
           <View style={styles.headerActions}>
-            <Tooltip
-              isVisible={step === 1}
-              placement="bottom"
-              content={
-                <View>
-                  <Text>Open seller settings here</Text>
-                  <TouchableOpacity onPress={next}>
-                    <Text style={styles.guideBtn}>Next</Text>
-                  </TouchableOpacity>
-                </View>
+            <TouchableOpacity
+              style={[styles.headerBtn, { backgroundColor: colors.surface }]}
+              onPress={() =>
+                navigation.navigate("SellerSettingsScreen", {
+                  seller
+                })
               }
             >
-              <TouchableOpacity
-                style={[styles.headerBtn, { backgroundColor: colors.surface }]}
-                onPress={() =>
-                  navigation.navigate("SellerSettingsScreen", {
-                    seller
-                  })
-                }
-              >
-                <Icon name="settings-outline" size={22} color={colors.text} />
-              </TouchableOpacity>
-            </Tooltip>
-            <TouchableOpacity style={[styles.headerBtn, { backgroundColor: `${colors.primary}16` }]} onPress={startGuide}>
-              <Icon name="help-circle-outline" size={22} color={colors.primary} />
+              <Icon name="settings-outline" size={22} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
@@ -455,34 +409,21 @@ const fetchRequestData = useCallback(async () => {
             {sellerHandle}
           </Text>
 
-          <Tooltip
-            isVisible={step === 2}
-            placement="bottom"
-            content={
-              <View>
-                <Text>This badge shows your seller verification status</Text>
-                <TouchableOpacity onPress={next}>
-                  <Text style={styles.guideBtn}>Next</Text>
-                </TouchableOpacity>
-              </View>
-            }
-          >
-            <View style={styles.verifyRow}>
-              <Text
-                style={[
-                  styles.sellerTag,
-                  { backgroundColor: getTagBg(), color: "#333" }
-                ]}
-              >
-                {getVerificationLabel()}
-              </Text>
-              <Icon
-                name="checkmark-circle"
-                size={18}
-                color={getVerificationColor()}
-              />
-            </View>
-          </Tooltip>
+          <View style={styles.verifyRow}>
+            <Text
+              style={[
+                styles.sellerTag,
+                { backgroundColor: getTagBg(), color: "#333" }
+              ]}
+            >
+              {getVerificationLabel()}
+            </Text>
+            <Icon
+              name="checkmark-circle"
+              size={18}
+              color={getVerificationColor()}
+            />
+          </View>
 
           {!!seller?.specialization && (
             <Text style={[styles.tagline, { color: colors.mutedText }]}>{seller.specialization}</Text>
@@ -531,34 +472,21 @@ const fetchRequestData = useCallback(async () => {
           ))}
         </View>
 
-        <Tooltip
-          isVisible={step === 3}
-          placement="top"
-          content={
+        <View style={[styles.walletCard, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: isCompactLayout ? 12 : 18 }]}>
+          <View style={styles.walletLeft}>
+            <View style={[styles.walletIconWrap, { backgroundColor: `${colors.primary}14` }]}>
+              <Icon name="wallet-outline" size={22} color={colors.primary} />
+            </View>
             <View>
-              <Text>This is your seller wallet balance</Text>
-              <TouchableOpacity onPress={next}>
-                <Text style={styles.guideBtn}>Next</Text>
-              </TouchableOpacity>
+              <Text style={[styles.walletEyebrow, { color: colors.mutedText }]}>Revenue snapshot</Text>
+              <Text style={[styles.walletTitle, { color: colors.text }]}>
+                {productFlags.sellerMonetizationInConsumerApp ? "Seller Wallet" : "Completed Request Value"}
+              </Text>
             </View>
-          }
-        >
-          <View style={[styles.walletCard, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: isCompactLayout ? 12 : 18 }]}>
-            <View style={styles.walletLeft}>
-              <View style={[styles.walletIconWrap, { backgroundColor: `${colors.primary}14` }]}>
-                <Icon name="wallet-outline" size={22} color={colors.primary} />
-              </View>
-              <View>
-                <Text style={[styles.walletEyebrow, { color: colors.mutedText }]}>Revenue snapshot</Text>
-                <Text style={[styles.walletTitle, { color: colors.text }]}>
-                  {productFlags.sellerMonetizationInConsumerApp ? "Seller Wallet" : "Completed Request Value"}
-                </Text>
-              </View>
-            </View>
-
-            <Text style={[styles.walletAmount, { color: colors.text }]}>{formatSummaryAmount(requestSummary, "completed")}</Text>
           </View>
-        </Tooltip>
+
+          <Text style={[styles.walletAmount, { color: colors.text }]}>{formatSummaryAmount(requestSummary, "completed")}</Text>
+        </View>
 
         {!productFlags.sellerMonetizationInConsumerApp ? (
           <View style={[styles.readOnlyInfoCard, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: isCompactLayout ? 12 : 18 }]}>
@@ -568,51 +496,25 @@ const fetchRequestData = useCallback(async () => {
         ) : null}
 
         <View style={[styles.actionRow, { marginHorizontal: isCompactLayout ? 12 : 18 }]}>
-          <Tooltip
-            isVisible={step === 4}
-            placement="top"
-            content={
-              <View>
-                <Text>Add services for clients</Text>
-                <TouchableOpacity onPress={next}>
-                  <Text style={styles.guideBtn}>Next</Text>
-                </TouchableOpacity>
-              </View>
+          <TouchableOpacity
+            style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+            onPress={() =>
+              navigation.navigate("AddServiceScreen", {
+                seller
+              })
             }
           >
-            <TouchableOpacity
-              style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
-              onPress={() =>
-                navigation.navigate("AddServiceScreen", {
-                  seller
-                })
-              }
-            >
-              <Icon name="add" size={18} color="#fff" />
-              <Text style={styles.btnText}> Add Service</Text>
-            </TouchableOpacity>
-          </Tooltip>
+            <Icon name="add" size={18} color="#fff" />
+            <Text style={styles.btnText}> Add Service</Text>
+          </TouchableOpacity>
 
-          <Tooltip
-            isVisible={step === 5}
-            placement="top"
-            content={
-              <View>
-                <Text>View all bookings here</Text>
-                <TouchableOpacity onPress={close}>
-                  <Text style={styles.guideBtn}>Done</Text>
-                </TouchableOpacity>
-              </View>
-            }
+          <TouchableOpacity
+            style={[styles.secondaryBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+            onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "seller" })}
           >
-            <TouchableOpacity
-              style={[styles.secondaryBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-              onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "seller" })}
-            >
-              <Icon name="calendar-outline" size={18} color={colors.text} />
-              <Text style={[styles.btnText2, { color: colors.text }]}> View Appointments</Text>
-            </TouchableOpacity>
-          </Tooltip>
+            <Icon name="calendar-outline" size={18} color={colors.text} />
+            <Text style={[styles.btnText2, { color: colors.text }]}> View Appointments</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={[styles.availabilityCard, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: isCompactLayout ? 12 : 18 }]}>

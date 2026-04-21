@@ -1581,27 +1581,6 @@ function FeedScreen({ navigation }: any) {
               </View>
             </View>
 
-            <TouchableOpacity
-              activeOpacity={0.88}
-              style={[
-                styles.promoteButton,
-                isCompactHeader && styles.promoteButtonCompact,
-                { backgroundColor: feedAccentSoft, borderColor: feedAccentBorder },
-              ]}
-              onPress={() => navigation.navigate("HowToEarnScreen")}
-            >
-              <Icon name="megaphone-outline" size={18} color={FEED_ACCENT} />
-              <Text
-                style={[
-                  styles.promoteButtonText,
-                  isCompactHeader && styles.promoteButtonTextCompact,
-                  { color: FEED_ACCENT },
-                ]}
-              >
-                Promote
-              </Text>
-            </TouchableOpacity>
-
             <View style={styles.topRight}>
               <TouchableOpacity
                 style={[
@@ -1870,6 +1849,20 @@ function FeedScreen({ navigation }: any) {
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sidebarContent}>
+            <View style={[styles.sidebarReleaseCard, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+              <View style={styles.sidebarReleaseCopy}>
+                <Text style={[styles.sidebarReleaseLabel, { color: colors.mutedText }]}>App version</Text>
+                <Text style={[styles.sidebarReleaseValue, { color: colors.text }]}>v0.0.1 • April 21, 2026</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.sidebarReleaseButton, { backgroundColor: feedAccentSoft }]}
+                onPress={() => navigateFromMenu("ReleaseNotesScreen")}
+                activeOpacity={0.86}
+              >
+                <Icon name="document-text-outline" size={16} color={FEED_ACCENT} />
+                <Text style={styles.sidebarReleaseButtonText}>Release Notes</Text>
+              </TouchableOpacity>
+            </View>
             <View style={styles.sidebarGuideSection}>
               <Text style={[styles.sidebarSectionTitle, { color: colors.mutedText }]}>Guide</Text>
               <TouchableOpacity
@@ -2028,30 +2021,6 @@ const styles = StyleSheet.create({
   brandCompact: { fontSize: 19 },
   brandSubline: { marginTop: 2, fontSize: 12.5, fontWeight: "700", letterSpacing: 0.3 },
   brandSublineCompact: { display: "none" },
-  promoteButton: {
-    minHeight: 36,
-    borderRadius: 13,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 10,
-    marginHorizontal: 6,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  promoteButtonCompact: {
-    minHeight: 32,
-    paddingHorizontal: 8,
-    marginHorizontal: 4,
-  },
-  promoteButtonText: {
-    marginLeft: 5,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  promoteButtonTextCompact: {
-    marginLeft: 4,
-    fontSize: 11.5,
-  },
   topRight: { flexDirection: "row", alignItems: "center", flexShrink: 0 },
   headerIconGap: { marginLeft: 8 },
   headerIconGapCompact: { marginLeft: 6 },
@@ -2212,6 +2181,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 16,
     paddingBottom: 12,
+  },
+  sidebarReleaseCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 16,
+  },
+  sidebarReleaseCopy: {
+    marginBottom: 12,
+  },
+  sidebarReleaseLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  sidebarReleaseValue: {
+    marginTop: 4,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  sidebarReleaseButton: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  sidebarReleaseButtonText: {
+    marginLeft: 8,
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: FEED_ACCENT,
   },
   sidebarGuideSection: {
     marginBottom: 18,

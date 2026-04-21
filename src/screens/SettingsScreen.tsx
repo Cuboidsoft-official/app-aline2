@@ -17,6 +17,7 @@ import { clearStoredSession, getStoredToken } from "../utils/authSession";
 import { clearPushToken } from "../utils/pushRegistration";
 import { useAppTheme } from "../theme/AppThemeContext";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
+import { APP_VERSION } from "../config/appMeta";
 
 const buildBankSummary = (account: {
   bankName?: string;
@@ -341,6 +342,17 @@ const SettingsScreen = ({ navigation }: any) => {
           onPress={() => navigation.navigate("PrivacyPolicyScreen")}
         >
           <Text style={[styles.text, { color: colors.text }]}>Privacy Policy</Text>
+          <Icon name="chevron-forward" size={20} color={chevronColor} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.item, itemStyle]}
+          onPress={() => navigation.navigate("ReleaseNotesScreen")}
+        >
+          <View style={styles.itemCopy}>
+            <Text style={[styles.text, { color: colors.text }]}>Release notes</Text>
+            <Text style={[styles.itemHint, { color: colors.mutedText }]}>Version {APP_VERSION}</Text>
+          </View>
           <Icon name="chevron-forward" size={20} color={chevronColor} />
         </TouchableOpacity>
 

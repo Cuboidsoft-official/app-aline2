@@ -116,6 +116,19 @@ const formatConversationTime = (value?: string) => {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 };
 
+const isSellerConversation = (conversation?: Conversation | null) => {
+  if (!conversation) {
+    return false;
+  }
+
+  return (
+    conversation?.conversationType === "seller"
+    || Boolean(conversation?.service)
+    || Boolean(conversation?.sellerUser)
+    || Boolean(conversation?.otherUser?.sellerProfile)
+  );
+};
+
 const AllChatsScreen = ({ navigation, route }: any) => {
   const { colors, isDarkMode } = useAppTheme();
   const accentColor = colors.primary;
@@ -179,25 +192,25 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         setLoading(true);
       }
 
-      const currentUserId = await getStoredUserId();
-      const conversationType = activeTab === "seller"
-        ? "seller"
-        : activeTab === "group"
-          ? "group"
-          : "direct";
-      const userQuery = activeTab === "seller"
-        ? { category: "Seller" }
-        : activeTab === "group"
-          ? {}
-          : { excludeCategory: "Seller" };
-
+      const storedUserId = await getStoredUserId();
       const [usersRes, conversationsRes] = await Promise.all([
-        API.get("/auth/users", { params: userQuery }),
-        fetchChatConversations({ conversationType }),
+        API.get("/auth/users"),
+        fetchChatConversations(),
       ]);
 
-      const fetchedUsers = ((usersRes?.data?.users || []) as ChatUser[]).filter(
-        (user: ChatUser) => user?._id !== currentUserId
+      const usersPayload = usersRes?.data;
+      const conversationsPayload = conversationsRes?.data;
+      const fetchedUsersSource =
+        (Array.isArray(usersPayload?.users) ? usersPayload.users : null)
+        || (Array.isArray(usersPayload) ? usersPayload : []);
+      const fetchedConversations =
+        (Array.isArray(conversationsRes?.conversations) ? conversationsRes.conversations : null)
+        || (Array.isArray(conversationsPayload?.conversations) ? conversationsPayload.conversations : null)
+        || (Array.isArray(conversationsPayload) ? conversationsPayload : null)
+        || (Array.isArray(conversationsRes) ? conversationsRes : []);
+
+      const fetchedUsers = (fetchedUsersSource as ChatUser[]).filter(
+        (user: ChatUser) => user?._id !== storedUserId
       );
 
       setUsers(
@@ -205,8 +218,8 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           String(left?.username || left?.name || "").localeCompare(String(right?.username || right?.name || ""))
         )
       );
-      setCurrentUserId(currentUserId || "");
-      setConversations((conversationsRes?.conversations || []) as Conversation[]);
+      setCurrentUserId(storedUserId || "");
+      setConversations((fetchedConversations || []) as Conversation[]);
       setErrorMessage("");
     } catch (error) {
       console.log("Chats Error:", error);
@@ -220,7 +233,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         setLoading(false);
       }
     }
-  }, [activeTab]);
+  }, []);
 
   const loadLockedChats = useCallback(async (userIdOverride?: string) => {
     const resolvedUserId = String(userIdOverride || currentUserId || "").trim();
@@ -357,7 +370,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
 
   const orderedSellerConversations = useMemo(() => {
     return [...conversations]
-      .filter((conversation) => conversation?.service || conversation?.sellerUser || conversation?.otherUser?.sellerProfile)
+      .filter((conversation) => isSellerConversation(conversation))
       .sort((a, b) => {
         const timeA = new Date(a.updatedAt || a.lastMessageTime || 0).getTime();
         const timeB = new Date(b.updatedAt || b.lastMessageTime || 0).getTime();
@@ -372,7 +385,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           return false;
         }
 
-        return !(conversation?.service || conversation?.sellerUser || conversation?.otherUser?.sellerProfile);
+        return !isSellerConversation(conversation);
       })
       .sort((a, b) => {
         const timeA = new Date(a.updatedAt || a.lastMessageTime || 0).getTime();

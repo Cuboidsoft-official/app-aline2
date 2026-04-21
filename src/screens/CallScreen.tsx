@@ -31,6 +31,7 @@ import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getStoredUser } from "../utils/authSession";
 import {
+  activateCommunicationAudio,
   resetCallAudioRoute,
   setCallSpeakerEnabled,
   startCallRingtone,
@@ -133,7 +134,17 @@ const normalizeIceServers = (iceServers: any) => {
 };
 
 const buildMediaConstraints = (callType: "audio" | "video") => ({
-  audio: true,
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    googEchoCancellation: true,
+    googAutoGainControl: true,
+    googNoiseSuppression: true,
+    googHighpassFilter: true,
+    channelCount: 1,
+    sampleRate: 48000,
+  } as any,
   video:
     callType === "video"
       ? {
@@ -152,6 +163,32 @@ type RemoteStreamEntry = {
   userId: string;
   stream: any;
   streamURL: string;
+};
+
+type VideoFilterPreset = "none" | "warm" | "cool" | "mono" | "dream";
+
+const VIDEO_FILTER_PRESET_ORDER: VideoFilterPreset[] = ["none", "warm", "cool", "mono", "dream"];
+const VIDEO_FILTER_LABELS: Record<VideoFilterPreset, string> = {
+  none: "Filter",
+  warm: "Warm",
+  cool: "Cool",
+  mono: "Mono",
+  dream: "Dream",
+};
+
+const getVideoFilterOverlayStyle = (preset: VideoFilterPreset) => {
+  switch (preset) {
+    case "warm":
+      return { backgroundColor: "rgba(245, 158, 11, 0.14)" };
+    case "cool":
+      return { backgroundColor: "rgba(59, 130, 246, 0.15)" };
+    case "mono":
+      return { backgroundColor: "rgba(148, 163, 184, 0.22)" };
+    case "dream":
+      return { backgroundColor: "rgba(236, 72, 153, 0.12)" };
+    default:
+      return null;
+  }
 };
 
 const CallScreen = ({ navigation, route }: any) => {
@@ -180,6 +217,7 @@ const CallScreen = ({ navigation, route }: any) => {
   const [microphoneEnabled, setMicrophoneEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(String(route.params?.callType || "audio") === "video");
   const [speakerEnabled, setSpeakerEnabledState] = useState(String(route.params?.callType || "audio") === "video");
+  const [videoFilterPreset, setVideoFilterPreset] = useState<VideoFilterPreset>("none");
 
   const callSessionRef = useRef<any>(initialCallSession);
   const closingRef = useRef(false);
@@ -203,9 +241,6 @@ const CallScreen = ({ navigation, route }: any) => {
     || currentParticipantState?.user
     || ""
   );
-  const currentUserName =
-    String(currentUser?.name || currentUser?.username || "").trim()
-    || "Aline2 User";
   const otherParticipant = useMemo(() => callSession?.otherParticipant || null, [callSession]);
 
   const normalizedIceServerConfig = useMemo(() => normalizeIceServers(iceServers), [iceServers]);
@@ -850,7 +885,9 @@ const CallScreen = ({ navigation, route }: any) => {
         return;
       }
 
-      const didApply = await setCallSpeakerEnabled(speakerEnabled);
+      const didApply =
+        (await activateCommunicationAudio(speakerEnabled))
+        || (await setCallSpeakerEnabled(speakerEnabled));
       if (active && !didApply) {
         console.log("call speaker route unavailable");
       }
@@ -1092,6 +1129,13 @@ const CallScreen = ({ navigation, route }: any) => {
     setSpeakerEnabledState((prev) => !prev);
   }, []);
 
+  const cycleVideoFilter = useCallback(() => {
+    setVideoFilterPreset((current) => {
+      const currentIndex = VIDEO_FILTER_PRESET_ORDER.indexOf(current);
+      return VIDEO_FILTER_PRESET_ORDER[(currentIndex + 1) % VIDEO_FILTER_PRESET_ORDER.length] || "none";
+    });
+  }, []);
+
   const renderParticipantPlaceholder = useCallback(
     (name: string, avatarSource: string, subtitle: string) => (
       <View style={styles.placeholderStage}>
@@ -1178,7 +1222,16 @@ const CallScreen = ({ navigation, route }: any) => {
             )
           )}
 
+          {effectiveCallType === "video" && videoFilterPreset !== "none" ? (
+            <View pointerEvents="none" style={[styles.videoFilterOverlay, getVideoFilterOverlayStyle(videoFilterPreset)]} />
+          ) : null}
+
           <View style={styles.overlay}>
+            {effectiveCallType === "video" && videoFilterPreset !== "none" ? (
+              <View style={styles.filterPill}>
+                <Text style={styles.filterPillText}>{VIDEO_FILTER_LABELS[videoFilterPreset]} filter</Text>
+              </View>
+            ) : null}
             <Text style={styles.name}>{displayName}</Text>
             <Text style={styles.statusLabel}>
               {String(callSession?.status || "") === "ongoing" ? formatDuration(durationSeconds) : statusLabel}
@@ -1207,6 +1260,15 @@ const CallScreen = ({ navigation, route }: any) => {
                   onPress={toggleCamera}
                 >
                   <Icon name={cameraEnabled ? "videocam" : "videocam-off"} size={22} color="#fff" />
+                </TouchableOpacity>
+              ) : null}
+
+              {effectiveCallType === "video" ? (
+                <TouchableOpacity
+                  style={[styles.callButton, videoFilterPreset === "none" ? styles.disabledButton : styles.secondaryButton]}
+                  onPress={cycleVideoFilter}
+                >
+                  <Icon name="color-filter-outline" size={22} color="#fff" />
                 </TouchableOpacity>
               ) : null}
 
@@ -1356,6 +1418,9 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
+  videoFilterOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
   groupVideoGrid: {
     flex: 1,
     flexDirection: "row",
@@ -1397,6 +1462,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 28,
     alignItems: "center",
+  },
+  filterPill: {
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "rgba(15,23,42,0.72)",
+  },
+  filterPillText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
   },
   name: {
     color: "#fff",

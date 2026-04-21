@@ -28,6 +28,7 @@ import TagsMentionsScreen from './src/screens/TagsMentionsScreen';
 import DeleteAccountScreen from './src/screens/DeleteAccountScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
+import ReleaseNotesScreen from './src/screens/ReleaseNotesScreen';
 import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import SellerRegistration from './src/screens/SellerRegistration';
 import SellerDashboardScreen from './src/screens/SellerDashboardScreen';
@@ -411,6 +412,7 @@ function AppNavigator() {
         <Stack.Screen name="DeleteAccountScreen" component={DeleteAccountScreen} />
         <Stack.Screen name="HelpSupportScreen" component={HelpSupportScreen} />
         <Stack.Screen name="PrivacyPolicyScreen" component={PrivacyPolicyScreen} />
+        <Stack.Screen name="ReleaseNotesScreen" component={ReleaseNotesScreen} />
         <Stack.Screen name="Search" component={SearchScreen} />
         <Stack.Screen name="HashtagResultsScreen" component={HashtagResultsScreen} />
         <Stack.Screen name="SellerRegistration" component={SellerRegistration} />

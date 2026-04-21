@@ -43,6 +43,19 @@ export const setCallSpeakerEnabled = async (enabled: boolean) => {
   }
 };
 
+export const activateCommunicationAudio = async (useSpeaker: boolean) => {
+  if (!isSupported || typeof nativeCallAudioModule.activateCommunicationAudio !== "function") {
+    return false;
+  }
+
+  try {
+    return Boolean(await nativeCallAudioModule.activateCommunicationAudio(Boolean(useSpeaker)));
+  } catch (error) {
+    console.log("call audio activate error", error);
+    return false;
+  }
+};
+
 export const resetCallAudioRoute = async () => {
   if (!isSupported || typeof nativeCallAudioModule.resetAudioRoute !== "function") {
     return false;

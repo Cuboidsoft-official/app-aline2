@@ -27,6 +27,7 @@ import { getStoredUser } from "../utils/authSession";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { ensureCameraPermission, ensureMicrophonePermission } from "../utils/permissions";
+import { activateCommunicationAudio, resetCallAudioRoute } from "../utils/callAudio";
 import { endLiveStream, getLiveStream } from "../utils/liveStreamApi";
 
 const DEFAULT_ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
@@ -90,6 +91,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const [draft, setDraft] = useState("");
   const [microphoneEnabled, setMicrophoneEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [speakerEnabled, setSpeakerEnabled] = useState(true);
   const [iceServers, setIceServers] = useState<any[]>(Array.isArray(initialIceServers) ? initialIceServers : []);
   const [floatingReactions, setFloatingReactions] = useState<any[]>([]);
 
@@ -102,7 +104,6 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const isHost = useMemo(() => Boolean(liveStream?.isHost || mode === "host"), [liveStream?.isHost, mode]);
   const liveStatus = String(liveStream?.status || "").trim() || "live";
   const viewerCount = Number(liveStream?.viewerCount) || 0;
-  const hostUserId = String(liveStream?.hostUser?._id || liveStream?.hostUser?.id || "").trim();
   const normalizedIceServers = useMemo(() => normalizeIceServers(iceServers), [iceServers]);
 
   const cleanupPeerConnection = useCallback((remoteUserId: string) => {
@@ -246,7 +247,17 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     }
 
     const stream = await mediaDevices.getUserMedia({
-      audio: true,
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        googEchoCancellation: true,
+        googAutoGainControl: true,
+        googNoiseSuppression: true,
+        googHighpassFilter: true,
+        channelCount: 1,
+        sampleRate: 48000,
+      } as any,
       video: {
         facingMode: "user",
         frameRate: 24,
@@ -316,6 +327,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     const joinRoom = async () => {
       try {
         await connectSocket();
+        await activateCommunicationAudio(speakerEnabled).catch(() => false);
         if (isHost) {
           await ensureLocalMedia();
         }
@@ -348,7 +360,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     return () => {
       active = false;
     };
-  }, [currentUser, ensureLocalMedia, isHost, liveStreamId]);
+  }, [currentUser, ensureLocalMedia, isHost, liveStreamId, speakerEnabled]);
 
   useEffect(() => {
     const handleJoined = (payload: any) => {
@@ -535,7 +547,18 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     cleanupAllPeers();
     stopMediaStream(localStreamRef.current);
     localStreamRef.current = null;
+    resetCallAudioRoute().catch(() => {});
   }, [cleanupAllPeers, liveStreamId]);
+
+  useEffect(() => {
+    if (liveStatus === "ended") {
+      return;
+    }
+
+    activateCommunicationAudio(speakerEnabled).catch((error) => {
+      console.log("live stream audio activate error:", error);
+    });
+  }, [liveStatus, speakerEnabled]);
 
   const sendChatMessage = useCallback(() => {
     const nextText = String(draft || "").trim();
@@ -586,6 +609,10 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     });
     setCameraEnabled(nextEnabled);
   }, [cameraEnabled]);
+
+  const toggleSpeaker = useCallback(() => {
+    setSpeakerEnabled((current) => !current);
+  }, []);
 
   const handleLeave = useCallback(async () => {
     try {
@@ -655,16 +682,21 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
             </TouchableOpacity>
           </View>
 
-          {isHost ? (
-            <View style={styles.hostControls}>
-              <TouchableOpacity style={[styles.controlButton, !microphoneEnabled && styles.controlButtonMuted]} onPress={toggleMicrophone}>
-                <Icon name={microphoneEnabled ? "mic-outline" : "mic-off-outline"} size={18} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.controlButton, !cameraEnabled && styles.controlButtonMuted]} onPress={toggleCamera}>
-                <Icon name={cameraEnabled ? "videocam-outline" : "videocam-off-outline"} size={18} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          ) : null}
+          <View style={styles.hostControls}>
+            <TouchableOpacity style={[styles.controlButton, !speakerEnabled && styles.controlButtonMuted]} onPress={toggleSpeaker}>
+              <Icon name={speakerEnabled ? "volume-high-outline" : "volume-mute-outline"} size={18} color="#fff" />
+            </TouchableOpacity>
+            {isHost ? (
+              <>
+                <TouchableOpacity style={[styles.controlButton, !microphoneEnabled && styles.controlButtonMuted]} onPress={toggleMicrophone}>
+                  <Icon name={microphoneEnabled ? "mic-outline" : "mic-off-outline"} size={18} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.controlButton, !cameraEnabled && styles.controlButtonMuted]} onPress={toggleCamera}>
+                  <Icon name={cameraEnabled ? "videocam-outline" : "videocam-off-outline"} size={18} color="#fff" />
+                </TouchableOpacity>
+              </>
+            ) : null}
+          </View>
 
           {errorMessage ? (
             <View style={styles.errorBanner}>
