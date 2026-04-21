@@ -29,3 +29,29 @@ export const stopCallRingtone = async () => {
     return false;
   }
 };
+
+export const setCallSpeakerEnabled = async (enabled: boolean) => {
+  if (!isSupported || typeof nativeCallAudioModule.setSpeakerEnabled !== "function") {
+    return false;
+  }
+
+  try {
+    return Boolean(await nativeCallAudioModule.setSpeakerEnabled(Boolean(enabled)));
+  } catch (error) {
+    console.log("call speaker route error", error);
+    return false;
+  }
+};
+
+export const resetCallAudioRoute = async () => {
+  if (!isSupported || typeof nativeCallAudioModule.resetAudioRoute !== "function") {
+    return false;
+  }
+
+  try {
+    return Boolean(await nativeCallAudioModule.resetAudioRoute());
+  } catch (error) {
+    console.log("call audio reset error", error);
+    return false;
+  }
+};

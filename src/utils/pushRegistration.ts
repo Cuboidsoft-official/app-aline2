@@ -1,5 +1,7 @@
 import { PermissionsAndroid, Platform } from "react-native";
 import { API } from "../api/api";
+import { getStoredUserId } from "./authSession";
+import { getMutedConversationIds } from "./chatMute";
 
 let Notifications: any = null;
 let Device: any = null;
@@ -174,9 +176,32 @@ function navigateFromNotificationData(data: any, navigationRef?: any) {
       navigation.navigate("ServiceRequestsScreen", { mode: "seller" });
       break;
 
+    case "live_stream_started":
+      if (data.liveStreamId) {
+        navigation.navigate("LiveStreamScreen", { liveStreamId: data.liveStreamId, mode: "viewer" });
+      } else {
+        navigation.navigate("LiveStreamsScreen");
+      }
+      break;
+
     case "chat_message":
       if (data.conversationId) {
-        navigation.navigate("ChatScreen", { conversationId: data.conversationId });
+        navigation.navigate("ChatScreen", { conversationId: data.conversationId, conversationType: data.conversationType });
+      } else {
+        navigation.navigate("AllChatsScreen");
+      }
+      break;
+
+    case "group_join":
+    case "group_leave":
+    case "group_member_added":
+    case "group_member_removed":
+    case "group_admin_promoted":
+    case "group_admin_demoted":
+    case "group_owner_transferred":
+    case "group_updated":
+      if (data.conversationId) {
+        navigation.navigate("ChatScreen", { conversationId: data.conversationId, conversationType: "group" });
       } else {
         navigation.navigate("AllChatsScreen");
       }
@@ -241,6 +266,21 @@ async function showForegroundNotification(remoteMessage: any) {
   const title = String(remoteMessage?.notification?.title || data.title || "New notification").trim();
   const body = String(remoteMessage?.notification?.body || data.body || "").trim();
   const type = String(data.type || "").trim();
+  const conversationId = String(data.conversationId || "").trim();
+
+  if (conversationId && (type === "chat_message" || type.startsWith("group_"))) {
+    try {
+      const userId = await getStoredUserId();
+      if (userId) {
+        const mutedIds = await getMutedConversationIds(userId);
+        if (mutedIds.includes(conversationId)) {
+          return;
+        }
+      }
+    } catch (error) {
+      console.log("[Push] Mute lookup error:", error);
+    }
+  }
   const channelId =
     type === "incoming_call"
       ? "calls"

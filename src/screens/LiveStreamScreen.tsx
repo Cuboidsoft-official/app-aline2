@@ -30,6 +30,7 @@ import { ensureCameraPermission, ensureMicrophonePermission } from "../utils/per
 import { endLiveStream, getLiveStream } from "../utils/liveStreamApi";
 
 const DEFAULT_ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
+const LIVE_REACTION_OPTIONS = ["❤️", "🔥", "👏", "😂", "😍"];
 
 const stopMediaStream = (stream: any) => {
   const tracks = typeof stream?.getTracks === "function" ? stream.getTracks() : [];
@@ -90,6 +91,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const [microphoneEnabled, setMicrophoneEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [iceServers, setIceServers] = useState<any[]>(Array.isArray(initialIceServers) ? initialIceServers : []);
+  const [floatingReactions, setFloatingReactions] = useState<any[]>([]);
 
   const localStreamRef = useRef<any>(null);
   const peerConnectionsRef = useRef<Map<string, any>>(new Map());
@@ -478,6 +480,27 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       }
     };
 
+    const handleReaction = (payload: any) => {
+      if (String(payload?.liveStreamId || "") !== String(liveStreamId) || !payload?.emoji) {
+        return;
+      }
+
+      const reactionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const horizontalOffset = 24 + Math.floor(Math.random() * 180);
+      setFloatingReactions((current) => [
+        ...current,
+        {
+          id: reactionId,
+          emoji: String(payload.emoji),
+          left: horizontalOffset,
+        },
+      ]);
+
+      setTimeout(() => {
+        setFloatingReactions((current) => current.filter((entry) => entry.id !== reactionId));
+      }, 2100);
+    };
+
     socket.on("live-stream:joined", handleJoined);
     socket.on("live-stream:status", handleStatus);
     socket.on("live-stream:viewer-ready", handleViewerReady);
@@ -486,6 +509,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     socket.on("live-stream:ice-candidate", handleIceCandidate);
     socket.on("live-stream:chat", handleChat);
     socket.on("live-stream:viewer-left", handleViewerLeft);
+    socket.on("live-stream:reaction", handleReaction);
 
     return () => {
       socket.off("live-stream:joined", handleJoined);
@@ -496,6 +520,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       socket.off("live-stream:ice-candidate", handleIceCandidate);
       socket.off("live-stream:chat", handleChat);
       socket.off("live-stream:viewer-left", handleViewerLeft);
+      socket.off("live-stream:reaction", handleReaction);
     };
   }, [cleanupPeerConnection, createOfferForViewer, ensurePeerConnection, flushPendingIceCandidates, isHost, liveStreamId]);
 
@@ -526,6 +551,17 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     setDraft("");
     setTimeout(() => setSendingChat(false), 200);
   }, [draft, liveStatus, liveStreamId, sendingChat]);
+
+  const sendReaction = useCallback((emoji: string) => {
+    if (!emoji || liveStatus !== "live") {
+      return;
+    }
+
+    socket.emit("live-stream:reaction", {
+      liveStreamId,
+      emoji,
+    });
+  }, [liveStatus, liveStreamId]);
 
   const toggleMicrophone = useCallback(() => {
     if (!localStreamRef.current) {
@@ -635,6 +671,23 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
               <Text style={styles.errorText}>{errorMessage}</Text>
             </View>
           ) : null}
+
+          <View pointerEvents="none" style={styles.reactionStage}>
+            {floatingReactions.map((reaction, index) => (
+              <View
+                key={reaction.id}
+                style={[
+                  styles.reactionBubble,
+                  {
+                    left: reaction.left,
+                    bottom: 26 + ((index % 4) * 22),
+                  },
+                ]}
+              >
+                <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
         <View style={[styles.chatPanel, { backgroundColor: colors.background }]}>
@@ -659,6 +712,27 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
               ))
             )}
           </ScrollView>
+
+          <View style={styles.reactionRow}>
+            <TouchableOpacity
+              style={[styles.quickLikeButton, { backgroundColor: `${colors.primary}18`, borderColor: `${colors.primary}40` }]}
+              onPress={() => sendReaction("❤️")}
+              disabled={liveStatus !== "live"}
+            >
+              <Icon name="heart" size={16} color={colors.primary} />
+              <Text style={[styles.quickLikeText, { color: colors.primary }]}>Like</Text>
+            </TouchableOpacity>
+            {LIVE_REACTION_OPTIONS.map((emoji) => (
+              <TouchableOpacity
+                key={emoji}
+                style={[styles.emojiButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => sendReaction(emoji)}
+                disabled={liveStatus !== "live"}
+              >
+                <Text style={styles.emojiButtonText}>{emoji}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
           <View style={[styles.chatComposer, { borderColor: colors.border, backgroundColor: colors.card }]}>
             <TextInput
@@ -701,6 +775,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
     textAlign: "center",
+  },
+  reactionStage: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "flex-end",
+  },
+  reactionBubble: {
+    position: "absolute",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(15,23,42,0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reactionEmoji: {
+    fontSize: 21,
   },
   topOverlay: {
     position: "absolute",
@@ -781,6 +871,40 @@ const styles = StyleSheet.create({
   chatList: { flexGrow: 0 },
   chatListContent: { paddingBottom: 12 },
   emptyChatText: { fontSize: 13, lineHeight: 19 },
+  reactionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    marginBottom: 10,
+  },
+  quickLikeButton: {
+    minHeight: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    marginRight: 8,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  quickLikeText: {
+    marginLeft: 6,
+    fontSize: 12.5,
+    fontWeight: "800",
+  },
+  emojiButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  emojiButtonText: {
+    fontSize: 18,
+  },
   chatBubble: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 14,

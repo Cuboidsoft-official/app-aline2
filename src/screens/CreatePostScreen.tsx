@@ -148,8 +148,8 @@ const composerBlueprints: Record<
     meta: "9:16 canvas",
   },
   swipe: {
-    label: "Reel",
-    title: "Reel Editor",
+    label: "Swipe",
+    title: "Swipe Editor",
     description: "Short video with trim, sound, and share tools.",
     icon: "play-circle-outline",
     gradient: ["#00c6ff", "#7f00ff", "#ff4ecd"],
@@ -473,7 +473,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const activeFramePreset = framePresetByTab[activeTab];
   const activeFrameConfig = composerFramePresets[activeFramePreset];
   const hasSelectedCanvasMedia = selectedAssets.length > 0 || (activeTab === "story" && storyType === "text");
-  const headerTitle = activeTab === "swipe" ? "New Reel" : activeTab === "story" ? "New Story" : "New Post";
+  const headerTitle = activeTab === "swipe" ? "New Swipe" : activeTab === "story" ? "New Story" : "New Post";
   const headerPrimaryLabel = activeStep === "share" ? "Share" : "Next";
 
   const stopMusicPreview = useCallback(async () => {
@@ -617,7 +617,7 @@ function CreatePostScreen({ navigation, route }: any) {
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
       {
         title: "Use your current location",
-        message: "Allow Aline2 to fetch your current location for posts, stories, and reels.",
+      message: "Allow Aline2 to fetch your current location for posts, stories, and swipes.",
         buttonPositive: "Allow",
         buttonNegative: "Not now",
       },
@@ -922,7 +922,7 @@ function CreatePostScreen({ navigation, route }: any) {
         "Add media first",
         activeTab === "story" && storyType === "text"
           ? "Choose a story mode or add media before moving ahead."
-          : `Pick ${activeTab === "swipe" ? "a reel video" : "photo or video"} first so the next screen has something to preview.`,
+        : `Pick ${activeTab === "swipe" ? "a swipe video" : "photo or video"} first so the next screen has something to preview.`,
       );
       return;
     }
@@ -1486,13 +1486,6 @@ function CreatePostScreen({ navigation, route }: any) {
     }
   };
 
-  const openLiveStreamingStudio = useCallback(() => {
-    navigation.navigate("LiveStreamsScreen", {
-      source: "create-post",
-      focusMode: "host",
-    });
-  }, [navigation]);
-
   const renderCreateModeCards = () => (
     <View style={[styles.bottomModeDock, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]}>
       {tabs.map((tab) => {
@@ -1804,7 +1797,7 @@ function CreatePostScreen({ navigation, route }: any) {
         ))}
       </View>
       <Text style={[styles.helperText, helperTextStyle]}>
-        Reels can use the first frame as a thumbnail, stories support close friends, and posts keep comments and privacy controls ready before publishing.
+          Swipes can use the first frame as a thumbnail, stories support close friends, and posts keep comments and privacy controls ready before publishing.
       </Text>
     </View>
   );
@@ -2971,33 +2964,6 @@ function CreatePostScreen({ navigation, route }: any) {
     </View>
   );
 
-  const renderLiveShortcutCard = () => (
-    <LinearGradient
-      colors={["#ff7a18", "#ff3d54", "#7c3aed"]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.liveShortcutCard}
-    >
-      <View style={styles.liveShortcutHeader}>
-        <View style={styles.liveShortcutBadge}>
-          <Icon name="radio-outline" size={14} color="#fff" />
-          <Text style={styles.liveShortcutBadgeText}>Live streaming</Text>
-        </View>
-        <View style={styles.liveShortcutIconWrap}>
-          <Icon name="videocam-outline" size={20} color="#fff" />
-        </View>
-      </View>
-      <Text style={styles.liveShortcutTitle}>Start a WebRTC live room</Text>
-      <Text style={styles.liveShortcutDescription}>
-        Open live studio directly for hosting, viewer join flow, and live chat testing.
-      </Text>
-      <TouchableOpacity activeOpacity={0.9} style={styles.liveShortcutButton} onPress={openLiveStreamingStudio}>
-        <Text style={styles.liveShortcutButtonText}>Open Live Studio</Text>
-        <Icon name="arrow-forward-outline" size={16} color="#111827" />
-      </TouchableOpacity>
-    </LinearGradient>
-  );
-
   const renderCanvasPanel = (title: string, eyebrow: string) => (
     <View style={[styles.canvasPanel, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
       <View style={styles.panelHeaderRow}>
@@ -3019,7 +2985,6 @@ function CreatePostScreen({ navigation, route }: any) {
         "Choose media",
         "images-outline",
       )}
-      {renderLiveShortcutCard()}
 
       {activeTab === "post" ? (
         <>
@@ -3059,7 +3024,7 @@ function CreatePostScreen({ navigation, route }: any) {
       ) : null}
 
       {renderCanvasPanel(
-        activeTab === "story" ? "Story canvas" : activeTab === "swipe" ? "Reel cover preview" : "Post preview",
+      activeTab === "story" ? "Story canvas" : activeTab === "swipe" ? "Swipe cover preview" : "Post preview",
         "Select",
       )}
       {renderFrameSelector()}
@@ -3074,7 +3039,7 @@ function CreatePostScreen({ navigation, route }: any) {
         "sparkles-outline",
       )}
       {renderCanvasPanel(
-        activeTab === "story" ? "Preview your story edits" : activeTab === "swipe" ? "Preview your reel edits" : "Preview your post edits",
+      activeTab === "story" ? "Preview your story edits" : activeTab === "swipe" ? "Preview your swipe edits" : "Preview your post edits",
         "Edit",
       )}
       {renderEditorToolRail()}
@@ -3124,7 +3089,7 @@ function CreatePostScreen({ navigation, route }: any) {
         "paper-plane-outline",
       )}
       {renderCanvasPanel(
-        activeTab === "story" ? "Ready-to-publish story" : activeTab === "swipe" ? "Ready-to-publish reel" : "Ready-to-publish post",
+      activeTab === "story" ? "Ready-to-publish story" : activeTab === "swipe" ? "Ready-to-publish swipe" : "Ready-to-publish post",
         "Share",
       )}
       {activeTab === "post" ? renderPostControls() : null}
@@ -3298,75 +3263,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 13,
     lineHeight: 18,
-  },
-  liveShortcutCard: {
-    marginBottom: 16,
-    borderRadius: 24,
-    padding: 18,
-    shadowColor: "#111827",
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 5,
-  },
-  liveShortcutHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  liveShortcutBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.18)",
-  },
-  liveShortcutBadgeText: {
-    marginLeft: 6,
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
-  },
-  liveShortcutIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.18)",
-  },
-  liveShortcutTitle: {
-    marginTop: 14,
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "900",
-    letterSpacing: -0.5,
-  },
-  liveShortcutDescription: {
-    marginTop: 8,
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 13,
-    lineHeight: 20,
-    fontWeight: "600",
-  },
-  liveShortcutButton: {
-    marginTop: 16,
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#fff7ed",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  liveShortcutButtonText: {
-    color: "#111827",
-    fontSize: 12.5,
-    fontWeight: "900",
   },
   instagramHero: {
     borderRadius: 30,
@@ -4281,28 +4177,30 @@ const styles = StyleSheet.create({
   switchLabel: { color: "#222", fontWeight: "600", flex: 1, paddingRight: 8 },
   helperText: { marginTop: 10, color: "#6b7280", lineHeight: 20 },
   saveDraftButton: {
-    marginTop: 22,
+    marginTop: 18,
     borderWidth: 1,
-    borderRadius: 16,
-    minHeight: 52,
+    borderRadius: 14,
+    minHeight: 46,
     justifyContent: "center",
     alignItems: "center",
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
+    paddingHorizontal: 14,
   },
-  saveDraftText: { fontWeight: "900", fontSize: 15 },
+  saveDraftText: { fontWeight: "900", fontSize: 14 },
   publishButton: {
     marginTop: 10,
-    borderRadius: 16,
+    borderRadius: 14,
     backgroundColor: "#111827",
-    minHeight: 52,
+    minHeight: 46,
     justifyContent: "center",
     alignItems: "center",
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
+    paddingHorizontal: 14,
   },
   publishButtonDisabled: { opacity: 0.7 },
-  publishText: { color: "#fff", fontWeight: "800", fontSize: 15 },
+  publishText: { color: "#fff", fontWeight: "800", fontSize: 14 },
   mediaActionButton: {
     flexDirection: "row",
     alignItems: "center",

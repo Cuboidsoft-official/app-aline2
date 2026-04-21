@@ -33,6 +33,7 @@ type NotificationKind =
   | "tag_story"
   | "service_request"
   | "service_request_update"
+  | "live_stream_started"
   | "swipe"
   | string;
 
@@ -46,6 +47,9 @@ interface NotificationUser {
 interface NotificationTarget {
   _id?: string;
   id?: string;
+  groupName?: string;
+  groupAvatar?: string;
+  conversationType?: string;
 }
 
 interface AppNotification {
@@ -55,6 +59,8 @@ interface AppNotification {
   read?: boolean;
   text?: string;
   sender?: NotificationUser | null;
+  conversation?: NotificationTarget | string | null;
+  liveStream?: NotificationTarget | string | null;
   post?: NotificationTarget | string | null;
   story?: NotificationTarget | string | null;
 }
@@ -152,6 +158,24 @@ const getNotificationText = (item: AppNotification): string => {
       return "sent a new service request";
     case "service_request_update":
       return "updated your service request";
+    case "live_stream_started":
+      return "is live now";
+    case "group_join":
+      return "joined your group";
+    case "group_leave":
+      return "left your group";
+    case "group_member_added":
+      return "added members to a group";
+    case "group_member_removed":
+      return "removed a member from a group";
+    case "group_admin_promoted":
+      return "promoted a group admin";
+    case "group_admin_demoted":
+      return "removed a group admin";
+    case "group_owner_transferred":
+      return "transferred group ownership";
+    case "group_updated":
+      return "updated a group";
     default:
       return "sent you an update";
   }
@@ -177,6 +201,24 @@ const getNotificationIcon = (type: NotificationKind): string => {
       return "briefcase";
     case "service_request_update":
       return "checkmark-done";
+    case "live_stream_started":
+      return "radio";
+    case "group_join":
+      return "person-add";
+    case "group_leave":
+      return "log-out";
+    case "group_member_added":
+      return "people";
+    case "group_member_removed":
+      return "person-remove";
+    case "group_admin_promoted":
+      return "shield-checkmark";
+    case "group_admin_demoted":
+      return "shield";
+    case "group_owner_transferred":
+      return "swap-horizontal";
+    case "group_updated":
+      return "settings";
     default:
       return "notifications";
   }
@@ -198,8 +240,19 @@ const getNotificationHint = (item: AppNotification): string => {
     case "service_request":
     case "service_request_update":
       return "Open requests";
+    case "live_stream_started":
+      return "Watch live";
     case "swipe":
       return "Open swipes";
+    case "group_join":
+    case "group_leave":
+    case "group_member_added":
+    case "group_member_removed":
+    case "group_admin_promoted":
+    case "group_admin_demoted":
+    case "group_owner_transferred":
+    case "group_updated":
+      return "Open group";
     default:
       return "View";
   }
@@ -386,6 +439,25 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
 
     if (item.type === "service_request_update") {
       navigation.navigate("ServiceRequestsScreen", { mode: "user" });
+      return;
+    }
+
+    if (item.type === "live_stream_started") {
+      const liveStreamId = getTargetId(item.liveStream || null);
+      if (liveStreamId) {
+        navigation.navigate("LiveStreamScreen", { liveStreamId, mode: "viewer" });
+      } else {
+        navigation.navigate("LiveStreamsScreen");
+      }
+      return;
+    }
+
+    if (String(item.type || "").startsWith("group_")) {
+      const conversationId = getTargetId(item.conversation || null);
+      if (conversationId) {
+        navigation.navigate("ChatScreen", { conversationId, conversationType: "group" });
+      }
+      return;
     }
   };
 

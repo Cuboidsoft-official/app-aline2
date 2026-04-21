@@ -19,7 +19,7 @@ const bottomNavItems = [
     key: "Swipes",
     label: "Swipes",
     screen: "Swipes",
-    icons: { active: "play-circle", inactive: "play-circle-outline" },
+    icons: { active: "flame", inactive: "flame-outline" },
   },
   {
     key: "Create",
@@ -47,7 +47,7 @@ type AppBottomDockProps = {
 };
 
 function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
-  const { colors } = useAppTheme();
+  const { colors, isDarkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom, Platform.OS === "ios" ? 14 : 10);
 
@@ -60,19 +60,30 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
             height: APP_BOTTOM_DOCK_BASE_HEIGHT + bottomPadding,
             paddingBottom: bottomPadding,
             backgroundColor: colors.card,
-            borderTopColor: `${colors.primary}26`,
+            borderTopColor: colors.border,
+            shadowColor: isDarkMode ? "#000" : colors.text,
+            shadowOpacity: isDarkMode ? 0.3 : 0.08,
+            shadowRadius: 14,
+            shadowOffset: { width: 0, height: -4 },
           },
         ]}
       >
         {bottomNavItems.map((item) => {
           const isActive = activeRouteName === item.key;
           const tintColor = isActive ? colors.primary : colors.tabInactive || colors.mutedText;
+          const activeBackgroundColor = `${colors.primary}${isDarkMode ? "24" : "16"}`;
 
         return (
           <TouchableOpacity
             key={item.key}
             activeOpacity={0.85}
-            style={styles.item}
+            style={[
+              styles.item,
+              {
+                backgroundColor: isActive ? activeBackgroundColor : "transparent",
+                borderColor: isActive ? `${colors.primary}${isDarkMode ? "40" : "2a"}` : "transparent",
+              },
+            ]}
             onPress={() => {
               if (item.screen === "Swipes") {
                 navigation.navigate("Swipes");
@@ -117,6 +128,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingTop: 8,
+    marginHorizontal: 6,
+    marginTop: 6,
+    borderRadius: 16,
+    borderWidth: 1,
   },
   label: {
     marginTop: 2,

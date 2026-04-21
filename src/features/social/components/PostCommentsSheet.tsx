@@ -3,8 +3,6 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
-  Modal,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -20,6 +18,8 @@ import { Comment, CommentAudioFile, Post } from "../types";
 import { toUserSafeMessage } from "../validation";
 import VoiceRecorderButton from "../../../components/chat/VoiceRecorderButton";
 import { normalizeMediaUrl } from "../../../utils/mediaUrls";
+import { useAppTheme } from "../../../theme/AppThemeContext";
+import DraggableBottomSheet from "../../../components/DraggableBottomSheet";
 
 const formatAgo = (timestamp: number): string => {
   const mins = Math.max(1, Math.floor((Date.now() - timestamp) / (1000 * 60)));
@@ -46,6 +46,7 @@ function PostCommentsSheet({
   onOpenFull,
   showOpenFull = true,
 }: PostCommentsSheetProps) {
+  const { colors } = useAppTheme();
   const [comments, setComments] = useState<Comment[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
@@ -166,127 +167,109 @@ function PostCommentsSheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={styles.sheetWrap}>
-        <View style={styles.handle} />
-        <View style={styles.sheetContent}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Comments</Text>
-            {showOpenFull ? (
-              <TouchableOpacity
-                onPress={() => {
-                  if (!post) {
-                    return;
-                  }
-                  onClose();
-                  onOpenFull(post.id);
-                }}
-              >
-                <Text style={styles.headerLink}>Open full</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity onPress={onClose}>
-                <Text style={styles.headerLink}>Close</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {loading ? (
-            <View style={styles.loader}>
-              <ActivityIndicator size="small" color="#3345d1" />
-            </View>
+    <DraggableBottomSheet visible={visible} onClose={onClose} snapPoints={[0.42, 0.66, 0.88]}>
+      <View style={styles.sheetContent}>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.text }]}>Comments</Text>
+          {showOpenFull ? (
+            <TouchableOpacity
+              onPress={() => {
+                if (!post) {
+                  return;
+                }
+                onClose();
+                onOpenFull(post.id);
+              }}
+            >
+              <Text style={[styles.headerLink, { color: colors.primary }]}>Open full</Text>
+            </TouchableOpacity>
           ) : (
-            <FlatList
-              data={comments}
-              keyExtractor={(item) => item.id}
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.listContent}
-              renderItem={({ item }) => (
-                <View style={styles.commentRow}>
-                  <Image source={{ uri: normalizeMediaUrl(item.user.avatarUrl) }} style={styles.avatar} />
-                  <View style={styles.commentBody}>
-                    <View style={styles.commentTop}>
-                      <Text style={styles.username}>@{item.user.username}</Text>
-                      <Text style={styles.time}>{formatAgo(item.createdAt)}</Text>
-                    </View>
-                    {item.text ? <Text style={styles.commentText}>{item.text}</Text> : null}
-                    {item.audioUrl ? (
-                      <CommentAudioBubble audioUrl={item.audioUrl} audioDuration={item.audioDuration} />
-                    ) : null}
-                    <View style={styles.actionRow}>
-                      <TouchableOpacity onPress={() => onToggleLike(item.id)}>
-                        <Text style={styles.actionText}>
-                          {item.liked ? "Unlike" : "Like"}
-                          {item.likesCount ? ` (${item.likesCount})` : ""}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => {
-                          if (!post) {
-                            return;
-                          }
-                          setThreadComment(item);
-                        }}
-                      >
-                        <Text style={styles.actionText}>Reply</Text>
-                      </TouchableOpacity>
-                      {(item.replyCount || 0) > 0 ? (
-                        <TouchableOpacity
-                          onPress={() => {
-                            if (!post) {
-                              return;
-                            }
-                            setThreadComment(item);
-                          }}
-                        >
-                          <Text style={styles.actionText}>View replies ({item.replyCount})</Text>
-                        </TouchableOpacity>
-                      ) : null}
-                      {item.canDelete ? (
-                        <TouchableOpacity onPress={() => onDelete(item)}>
-                          <Text style={[styles.actionText, styles.deleteText]}>Delete</Text>
-                        </TouchableOpacity>
-                      ) : null}
-                      {(item.likesCount || 0) > 0 ? (
-                        <Text style={styles.metaText}>{item.likesCount} likes</Text>
-                      ) : null}
-                    </View>
-                  </View>
-                </View>
-              )}
-              ListEmptyComponent={<Text style={styles.emptyText}>No comments yet.</Text>}
-            />
-          )}
-
-          {commentsDisabled ? (
-            <View style={styles.disabledComposer}>
-              <Text style={styles.disabledComposerText}>Comments are turned off for this post.</Text>
-            </View>
-          ) : (
-            <View style={styles.composer}>
-              <TextInput
-                value={draft}
-                onChangeText={setDraft}
-                placeholder="Add a comment..."
-                placeholderTextColor="#8a8a8a"
-                style={styles.input}
-              />
-              <TouchableOpacity disabled={!draft.trim() || submitting} onPress={onSubmit}>
-                <Text style={[styles.sendText, (!draft.trim() || submitting) && styles.sendTextDisabled]}>Post</Text>
-              </TouchableOpacity>
-              <VoiceRecorderButton
-                color="#2563eb"
-                disabled={submitting}
-                onSend={(voiceFile) => {
-                  submitComment(voiceFile).catch((error) => {
-                    Alert.alert("Could not send voice comment", toUserSafeMessage(error));
-                  });
-                }}
-              />
-            </View>
+            <TouchableOpacity onPress={onClose}>
+              <Text style={[styles.headerLink, { color: colors.primary }]}>Close</Text>
+            </TouchableOpacity>
           )}
         </View>
+
+        {loading ? (
+          <View style={styles.loader}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : (
+          <FlatList
+            data={comments}
+            keyExtractor={(item) => item.id}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.listContent}
+            renderItem={({ item }) => (
+              <View style={styles.commentRow}>
+                <Image source={{ uri: normalizeMediaUrl(item.user.avatarUrl) }} style={styles.avatar} />
+                <View style={styles.commentBody}>
+                  <View style={styles.commentTop}>
+                    <Text style={[styles.username, { color: colors.text }]}>@{item.user.username}</Text>
+                    <Text style={[styles.time, { color: colors.mutedText }]}>{formatAgo(item.createdAt)}</Text>
+                  </View>
+                  {item.text ? <Text style={[styles.commentText, { color: colors.text }]}>{item.text}</Text> : null}
+                  {item.audioUrl ? (
+                    <CommentAudioBubble audioUrl={item.audioUrl} audioDuration={item.audioDuration} />
+                  ) : null}
+                  <View style={styles.actionRow}>
+                    <TouchableOpacity onPress={() => onToggleLike(item.id)}>
+                      <Text style={[styles.actionText, { color: colors.mutedText }]}>
+                        {item.liked ? "Unlike" : "Like"}
+                        {item.likesCount ? ` (${item.likesCount})` : ""}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setThreadComment(item)}>
+                      <Text style={[styles.actionText, { color: colors.mutedText }]}>Reply</Text>
+                    </TouchableOpacity>
+                    {(item.replyCount || 0) > 0 ? (
+                      <TouchableOpacity onPress={() => setThreadComment(item)}>
+                        <Text style={[styles.actionText, { color: colors.mutedText }]}>View replies ({item.replyCount})</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {item.canDelete ? (
+                      <TouchableOpacity onPress={() => onDelete(item)}>
+                        <Text style={[styles.actionText, styles.deleteText]}>Delete</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {(item.likesCount || 0) > 0 ? (
+                      <Text style={[styles.metaText, { color: colors.mutedText }]}>{item.likesCount} likes</Text>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+            )}
+            ListEmptyComponent={<Text style={[styles.emptyText, { color: colors.mutedText }]}>No comments yet.</Text>}
+          />
+        )}
+
+        {commentsDisabled ? (
+          <View style={[styles.disabledComposer, { borderColor: colors.border }]}>
+            <Text style={[styles.disabledComposerText, { color: colors.mutedText }]}>Comments are turned off for this post.</Text>
+          </View>
+        ) : (
+          <View style={[styles.composer, { borderColor: colors.border }]}>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Add a comment..."
+              placeholderTextColor={colors.placeholder}
+              style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+            />
+            <TouchableOpacity disabled={!draft.trim() || submitting} onPress={onSubmit}>
+              <Text style={[styles.sendText, { color: colors.primary }, (!draft.trim() || submitting) && styles.sendTextDisabled]}>Post</Text>
+            </TouchableOpacity>
+            <VoiceRecorderButton
+              color={colors.primary}
+              disabled={submitting}
+              onSend={(voiceFile) => {
+                submitComment(voiceFile).catch((error) => {
+                  Alert.alert("Could not send voice comment", toUserSafeMessage(error));
+                });
+              }}
+            />
+          </View>
+        )}
 
         <CommentThreadSheet
           visible={!!threadComment}
@@ -299,32 +282,11 @@ function PostCommentsSheet({
           }
         />
       </View>
-    </Modal>
+    </DraggableBottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  sheetWrap: {
-    marginTop: "auto",
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    minHeight: 360,
-    maxHeight: "82%",
-    paddingTop: 10,
-  },
-  handle: {
-    alignSelf: "center",
-    width: 44,
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: "#d1d5db",
-    marginBottom: 10,
-  },
   sheetContent: { flex: 1, paddingHorizontal: 16 },
   header: {
     flexDirection: "row",
@@ -332,47 +294,43 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingBottom: 12,
   },
-  title: { fontSize: 18, fontWeight: "800", color: "#111827" },
-  headerLink: { color: "#2563eb", fontWeight: "700" },
+  title: { fontSize: 18, fontWeight: "800" },
+  headerLink: { fontWeight: "700" },
   loader: { paddingVertical: 24, alignItems: "center" },
   listContent: { paddingBottom: 12 },
   commentRow: { flexDirection: "row", marginBottom: 14 },
   avatar: { width: 34, height: 34, borderRadius: 17, marginTop: 2 },
   commentBody: { flex: 1, marginLeft: 10 },
   commentTop: { flexDirection: "row", alignItems: "center" },
-  username: { fontWeight: "700", color: "#111827", fontSize: 13.5 },
-  time: { marginLeft: 8, color: "#6b7280", fontSize: 11.5 },
-  commentText: { marginTop: 2, color: "#111827", lineHeight: 19 },
+  username: { fontWeight: "700", fontSize: 13.5 },
+  time: { marginLeft: 8, fontSize: 11.5 },
+  commentText: { marginTop: 2, lineHeight: 19 },
   actionRow: { flexDirection: "row", alignItems: "center", marginTop: 6, flexWrap: "wrap" },
-  actionText: { color: "#4b5563", fontWeight: "600", marginRight: 14, fontSize: 12.5, marginBottom: 4 },
-  metaText: { color: "#6b7280", fontSize: 12.5, marginBottom: 4 },
+  actionText: { fontWeight: "600", marginRight: 14, fontSize: 12.5, marginBottom: 4 },
+  metaText: { fontSize: 12.5, marginBottom: 4 },
   deleteText: { color: "#b91c1c" },
-  emptyText: { textAlign: "center", color: "#6b7280", paddingVertical: 30 },
+  emptyText: { textAlign: "center", paddingVertical: 30 },
   composer: {
     flexDirection: "row",
     alignItems: "center",
     paddingTop: 10,
     paddingBottom: 18,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
   },
   disabledComposer: {
     paddingTop: 12,
     paddingBottom: 18,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
   },
-  disabledComposerText: { textAlign: "center", color: "#6b7280" },
+  disabledComposerText: { textAlign: "center" },
   input: {
     flex: 1,
     height: 42,
     borderWidth: 1,
-    borderColor: "#d1d5db",
     borderRadius: 21,
     paddingHorizontal: 14,
-    color: "#111827",
   },
-  sendText: { color: "#2563eb", fontWeight: "700", paddingHorizontal: 12 },
+  sendText: { fontWeight: "700", paddingHorizontal: 12 },
   sendTextDisabled: { color: "#9ca3af" },
 });
 

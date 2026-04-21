@@ -1,7 +1,7 @@
 /**
  * ChatThemePicker — Bottom sheet for selecting chat themes
  *
- * Shows theme preview circles. Tapping one calls PUT /chat/:id/theme.
+ * Shows theme preview circles. Tapping one updates the chat theme.
  * Real-time update via chatThemeChanged socket event.
  */
 import React, { useCallback, useState } from "react";
@@ -17,10 +17,10 @@ import {
 import { Alert } from "../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
 import LinearGradient from "react-native-linear-gradient";
-// @ts-ignore
-import { API } from "../../api/api";
 import { CHAT_THEME_LIST } from "../../utils/chatThemes";
 import { getReadableApiErrorMessage } from "../../api/networkErrors";
+import { updateConversationTheme } from "../../utils/chatApi";
+import { useAppTheme } from "../../theme/AppThemeContext";
 
 interface ChatThemePickerProps {
     visible: boolean;
@@ -32,14 +32,19 @@ interface ChatThemePickerProps {
 
 const ChatThemePicker: React.FC<ChatThemePickerProps> = ({ visible, conversationId, currentTheme = "default", onClose, onThemeChanged }) => {
     const [saving, setSaving] = useState(false);
+    const { colors } = useAppTheme();
 
     const handleSelect = useCallback(
         async (theme: any) => {
             if (theme.id === currentTheme || saving) return;
+            if (!conversationId) {
+                Alert.alert("Chat theme", "Conversation is not ready yet. Please try again.");
+                return;
+            }
 
             try {
                 setSaving(true);
-                await API.put(`/chat/${conversationId}/theme`, { theme: theme.id });
+                await updateConversationTheme({ conversationId, theme: theme.id });
                 if (onThemeChanged) {
                     onThemeChanged(theme.id);
                 }
@@ -75,19 +80,34 @@ const ChatThemePicker: React.FC<ChatThemePickerProps> = ({ visible, conversation
 
         return (
             <TouchableOpacity
-                style={[styles.themeItem, isActive && styles.themeItemActive]}
+                style={[
+                    styles.themeItem,
+                    isActive ? { backgroundColor: `${colors.primary}14` } : null,
+                ]}
                 onPress={() => handleSelect(item)}
                 disabled={saving}
             >
-                <View style={[styles.themeCircle, isActive && styles.themeCircleActive]}>
+                <View
+                    style={[
+                        styles.themeCircle,
+                        { borderColor: isActive ? colors.primary : colors.border },
+                    ]}
+                >
                     {gradientContent}
                     {isActive ? (
-                        <View style={styles.checkMark}>
+                        <View style={[styles.checkMark, { backgroundColor: colors.primary }]}>
                             <Icon name="checkmark" size={14} color="#fff" />
                         </View>
                     ) : null}
                 </View>
-                <Text style={[styles.themeName, isActive && styles.themeNameActive]} numberOfLines={1}>
+                <Text
+                    style={[
+                        styles.themeName,
+                        { color: isActive ? colors.primary : colors.mutedText },
+                        isActive && styles.themeNameActive,
+                    ]}
+                    numberOfLines={1}
+                >
                     {item.name}
                 </Text>
             </TouchableOpacity>
@@ -100,15 +120,16 @@ const ChatThemePicker: React.FC<ChatThemePickerProps> = ({ visible, conversation
         <Modal visible transparent animationType="slide" onRequestClose={onClose}>
             <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
                 <View style={styles.sheet} onStartShouldSetResponder={() => true}>
-                    <View style={styles.header}>
-                        <Text style={styles.title}>Chat Theme</Text>
+                    <View style={[styles.sheetCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <View style={[styles.header, { borderBottomColor: colors.border }]}>
+                        <Text style={[styles.title, { color: colors.text }]}>Chat Theme</Text>
                         <TouchableOpacity onPress={onClose}>
-                            <Icon name="close" size={24} color="#333" />
+                            <Icon name="close" size={24} color={colors.text} />
                         </TouchableOpacity>
                     </View>
 
                     {saving ? (
-                        <ActivityIndicator style={styles.loader} color="#7b3fe4" />
+                        <ActivityIndicator style={styles.loader} color={colors.primary} />
                     ) : null}
 
                     <FlatList
@@ -119,6 +140,7 @@ const ChatThemePicker: React.FC<ChatThemePickerProps> = ({ visible, conversation
                         contentContainerStyle={styles.grid}
                         showsVerticalScrollIndicator={false}
                     />
+                    </View>
                 </View>
             </TouchableOpacity>
         </Modal>
@@ -132,10 +154,14 @@ const styles = StyleSheet.create({
         justifyContent: "flex-end",
     },
     sheet: {
-        backgroundColor: "#fff",
+        paddingHorizontal: 12,
+        paddingBottom: 14,
+    },
+    sheetCard: {
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
-        paddingBottom: 40,
+        borderWidth: StyleSheet.hairlineWidth,
+        overflow: "hidden",
     },
     header: {
         flexDirection: "row",
@@ -144,11 +170,11 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         paddingTop: 18,
         paddingBottom: 12,
+        borderBottomWidth: StyleSheet.hairlineWidth,
     },
     title: {
         fontSize: 18,
         fontWeight: "800",
-        color: "#111",
     },
     loader: {
         marginBottom: 8,
@@ -161,6 +187,9 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: "center",
         marginBottom: 20,
+        marginHorizontal: 4,
+        paddingVertical: 10,
+        borderRadius: 16,
     },
     themeItemActive: {},
     themeCircle: {
@@ -172,9 +201,6 @@ const styles = StyleSheet.create({
         borderColor: "transparent",
         alignItems: "center",
         justifyContent: "center",
-    },
-    themeCircleActive: {
-        borderColor: "#7b3fe4",
     },
     themeCircleGradient: {
         position: "absolute",
@@ -188,7 +214,6 @@ const styles = StyleSheet.create({
         width: 22,
         height: 22,
         borderRadius: 11,
-        backgroundColor: "#7b3fe4",
         alignItems: "center",
         justifyContent: "center",
     },
@@ -196,11 +221,9 @@ const styles = StyleSheet.create({
         marginTop: 6,
         fontSize: 11,
         fontWeight: "600",
-        color: "#666",
         textAlign: "center",
     },
     themeNameActive: {
-        color: "#7b3fe4",
         fontWeight: "700",
     },
 });

@@ -410,8 +410,8 @@ function PostDetailScreen({ route, navigation }: any) {
           </View>
         </View>
 
-        <ScrollView>
-          <Pressable style={styles.mediaSurface} onPress={() => setIsMediaSoundEnabled((current) => !current)}>
+        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+          <Pressable style={[styles.mediaSurface, { backgroundColor: colors.card }]} onPress={() => setIsMediaSoundEnabled((current) => !current)}>
             {post.type === "carousel" ? (
               <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
                 {post.media.map((asset) => renderMediaAsset(asset, asset.id))}
@@ -435,7 +435,7 @@ function PostDetailScreen({ route, navigation }: any) {
             ) : null}
           </Pressable>
 
-          <View style={styles.body}>
+          <View style={[styles.body, { backgroundColor: colors.card }]}>
             <Text style={[styles.meta, { color: colors.mutedText }]}>Type: {post.type}</Text>
             {post.editedAt ? <Text style={[styles.meta, { color: colors.mutedText }]}>Edited</Text> : null}
 
@@ -511,13 +511,31 @@ function PostDetailScreen({ route, navigation }: any) {
               <Switch value={disableComments} onValueChange={setDisableComments} disabled={!editing} />
             </View>
 
-            <TouchableOpacity style={[styles.commentsButton, { backgroundColor: colors.primary }]} onPress={() => setActiveSheet("comments")}>
+            <TouchableOpacity
+              style={[
+                styles.commentsButton,
+                {
+                  backgroundColor: colors.primary,
+                  borderColor: `${colors.primary}30`,
+                },
+              ]}
+              onPress={() => setActiveSheet("comments")}
+            >
               <Text style={styles.commentsButtonText}>Open comments ({post.commentsCount})</Text>
             </TouchableOpacity>
 
             {canManagePost ? (
-              <TouchableOpacity style={[styles.deleteButton, { borderColor: colors.danger }]} onPress={deletePost}>
-                <Text style={styles.deleteText}>Delete Post</Text>
+              <TouchableOpacity
+                style={[
+                  styles.deleteButton,
+                  {
+                    borderColor: `${colors.danger}3a`,
+                    backgroundColor: `${colors.danger}14`,
+                  },
+                ]}
+                onPress={deletePost}
+              >
+                <Text style={[styles.deleteText, { color: colors.danger }]}>Delete Post</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -688,22 +706,20 @@ const styles = StyleSheet.create({
     marginTop: 18,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#d9ddff",
-    backgroundColor: "#eef0ff",
     height: 44,
     justifyContent: "center",
     alignItems: "center",
   },
-  commentsButtonText: { color: "#2d3fb7", fontWeight: "700" },
+  commentsButtonText: { color: "#fff", fontWeight: "700" },
   deleteButton: {
     marginTop: 24,
-    backgroundColor: "#fee2e2",
     borderRadius: 10,
+    borderWidth: 1,
     height: 44,
     justifyContent: "center",
     alignItems: "center",
   },
-  deleteText: { color: "#b91c1c", fontWeight: "700" },
+  deleteText: { fontWeight: "700" },
 });
 
 export default PostDetailScreen;

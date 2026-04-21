@@ -72,15 +72,26 @@ export const connectSocket = async () => {
   }
  }
 
- if (!socket.connected) {
-  socket.connect();
- }
+  if (!socket.connected) {
+   socket.connect();
+  }
 
- return waitForSocketConnection();
+  const connectedSocket = await waitForSocketConnection();
+  connectedSocket.emit("userOnline");
+  connectedSocket.emit("presence:update", { status: "active" });
+  return connectedSocket;
 };
 
 export const disconnectSocket = () => {
- if (socket.connected) {
-  socket.disconnect();
- }
+  if (socket.connected) {
+    socket.disconnect();
+  }
+};
+
+export const updateSocketPresence = (status = "active") => {
+  if (!socket.connected) {
+    return;
+  }
+
+  socket.emit("presence:update", { status });
 };

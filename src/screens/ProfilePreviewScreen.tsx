@@ -619,7 +619,7 @@ const renderProfileHeader = () => (
   <View style={[styles.tabs, tabsContainerStyle]}>
    {[
      { key: "posts", icon: "grid-outline", label: "Posts" },
-     { key: "swipes", icon: "play-circle-outline", label: "Swipes" },
+              { key: "swipes", icon: "flame-outline", label: "Swipes" },
     { key: "tagged", icon: "pricetag-outline", label: "Tagged" },
    ].map((tabItem) => {
      const isActive = activeTab === tabItem.key;

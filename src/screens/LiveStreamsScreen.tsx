@@ -33,12 +33,35 @@ const formatStartedAt = (value?: string) => {
   return `Started ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 };
 
+const formatHistoryRange = (startedAt?: string, endedAt?: string) => {
+  const startDate = startedAt ? new Date(startedAt) : null;
+  const endDate = endedAt ? new Date(endedAt) : null;
+
+  if (!startDate || Number.isNaN(startDate.getTime())) {
+    return "Live session";
+  }
+
+  const startLabel = startDate.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  if (!endDate || Number.isNaN(endDate.getTime())) {
+    return `${startLabel} onward`;
+  }
+
+  return `${startLabel} - ${endDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+};
+
 const LiveStreamsScreen = ({ navigation, route }: any) => {
   const { colors } = useAppTheme();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [liveStreams, setLiveStreams] = useState<any[]>([]);
+  const [liveHistory, setLiveHistory] = useState<any[]>([]);
   const [myLiveStream, setMyLiveStream] = useState<any>(null);
   const [iceServers, setIceServers] = useState<any[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
@@ -51,6 +74,7 @@ const LiveStreamsScreen = ({ navigation, route }: any) => {
     ]);
 
     setLiveStreams(Array.isArray(listResponse?.liveStreams) ? listResponse.liveStreams : []);
+    setLiveHistory(Array.isArray(listResponse?.liveHistory) ? listResponse.liveHistory : []);
     setMyLiveStream(mineResponse?.liveStream || null);
     setIceServers(Array.isArray(mineResponse?.iceServers) ? mineResponse.iceServers : Array.isArray(listResponse?.iceServers) ? listResponse.iceServers : []);
     setErrorMessage("");
@@ -66,6 +90,7 @@ const LiveStreamsScreen = ({ navigation, route }: any) => {
         }
 
         setLiveStreams([]);
+        setLiveHistory([]);
         setMyLiveStream(null);
         setErrorMessage(getReadableApiErrorMessage(error, "Unable to load live streams right now."));
       })
@@ -226,6 +251,36 @@ const LiveStreamsScreen = ({ navigation, route }: any) => {
             </TouchableOpacity>
           ))
         )}
+
+        {liveHistory.length ? (
+          <View style={styles.historySection}>
+            <View style={styles.historyHeader}>
+              <Text style={[styles.historyTitle, { color: colors.text }]}>Recent live history</Text>
+              <Text style={[styles.historyMeta, { color: colors.mutedText }]}>{liveHistory.length} sessions</Text>
+            </View>
+            {liveHistory.map((item) => (
+              <View
+                key={`history-${item?._id}`}
+                style={[styles.historyCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
+                <View style={styles.streamRow}>
+                  <View style={[styles.dot, { backgroundColor: colors.mutedText }]} />
+                  <Text style={[styles.historyStatus, { color: colors.mutedText }]}>ENDED</Text>
+                </View>
+                <Text style={[styles.streamTitle, { color: colors.text }]}>{item?.title || "Live Session"}</Text>
+                <Text style={[styles.streamHost, { color: colors.mutedText }]}>
+                  {item?.hostDisplayName || item?.hostSeller?.sellerName || "Aline2 Creator"}
+                </Text>
+                <Text style={[styles.streamDescription, { color: colors.mutedText }]} numberOfLines={2}>
+                  {item?.description || "Previous live session."}
+                </Text>
+                <Text style={[styles.historyRange, { color: colors.mutedText }]}>
+                  {formatHistoryRange(item?.startedAt, item?.endedAt)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -300,6 +355,23 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   streamMeta: { fontSize: 12, fontWeight: "700" },
+  historySection: { marginTop: 18 },
+  historyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  historyTitle: { fontSize: 16, fontWeight: "900" },
+  historyMeta: { fontSize: 12, fontWeight: "700" },
+  historyCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 10,
+  },
+  historyStatus: { marginLeft: 8, fontSize: 12, fontWeight: "900" },
+  historyRange: { marginTop: 8, fontSize: 12.5, lineHeight: 18, fontWeight: "600" },
   emptyText: { marginTop: 48, fontSize: 14, textAlign: "center", lineHeight: 20 },
 });
 

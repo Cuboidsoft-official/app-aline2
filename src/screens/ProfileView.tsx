@@ -510,7 +510,7 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
    <View style={[styles.tabs, { backgroundColor: colors.surface, borderColor: colors.border }]}>
     {[
      { key: "posts", label: "Posts", icon: "grid-outline" },
-     { key: "swipes", label: "Swipes", icon: "play-circle-outline" },
+    { key: "swipes", label: "Swipes", icon: "flame-outline" },
      { key: "tagged", label: "Tagged", icon: "pricetag-outline" },
     ].map((tabItem) => {
      const isActive = activeTab === tabItem.key;

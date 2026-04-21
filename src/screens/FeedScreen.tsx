@@ -42,6 +42,7 @@ import { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
 import { downloadImageAsset } from "../utils/mediaDownload";
 import { connectSocket, socket } from "../socket";
+import { listLiveStreams } from "../utils/liveStreamApi";
 
 let ColorMatrix: any;
 try {
@@ -90,10 +91,10 @@ const formatAgo = (timestamp: number): string => {
 
 const getPostTypeTag = (post: Post): string => {
   if (post.type === "carousel") {
-    return `${post.media.length} items`;
+    return "Carousel Post";
   }
 
-  return post.type === "video" ? "Video" : "Photo";
+  return post.type === "video" ? "Video Post" : "Photo Post";
 };
 
 const showAvailabilityStatusModal = (nextStatus: boolean) => {
@@ -156,6 +157,7 @@ function FeedScreen({ navigation }: any) {
   const [sellerAccount, setSellerAccount] = useState<SellerAccountSummary | null>(null);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [availabilityUpdating, setAvailabilityUpdating] = useState(false);
+  const [liveStories, setLiveStories] = useState<any[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
   const [page, setPage] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -278,13 +280,15 @@ function FeedScreen({ navigation }: any) {
   );
 
   const loadFeed = useCallback(async () => {
-    const [data, storedUser, seller, unreadNotifications] = await Promise.all([
+    const [data, storedUser, seller, unreadNotifications, liveStreamsResponse] = await Promise.all([
       socialApi.getFeed(),
       getStoredUser(),
       readSellerAccount(),
       readUnreadNotificationCount(),
+      listLiveStreams().catch(() => ({ liveStreams: [] })),
     ]);
     setFeed(data);
+    setLiveStories(Array.isArray(liveStreamsResponse?.liveStreams) ? liveStreamsResponse.liveStreams : []);
     setPage(1);
     setHasMore(data.posts.length >= 20);
     setCurrentUser(
@@ -309,14 +313,16 @@ function FeedScreen({ navigation }: any) {
       const run = async () => {
         try {
           setLoading(true);
-          const [data, storedUser, seller, unreadNotifications] = await Promise.all([
+          const [data, storedUser, seller, unreadNotifications, liveStreamsResponse] = await Promise.all([
             socialApi.getFeed(),
             getStoredUser(),
             readSellerAccount(),
             readUnreadNotificationCount(),
+            listLiveStreams().catch(() => ({ liveStreams: [] })),
           ]);
           if (active) {
             setFeed(data);
+            setLiveStories(Array.isArray(liveStreamsResponse?.liveStreams) ? liveStreamsResponse.liveStreams : []);
             setCurrentUser(
               storedUser
                 ? {
@@ -334,6 +340,7 @@ function FeedScreen({ navigation }: any) {
         } catch (error) {
           if (active) {
             setFeed(initialFeed);
+            setLiveStories([]);
             setErrorMessage(getReadableApiErrorMessage(error, "Failed to load your feed."));
           }
         } finally {
@@ -359,6 +366,11 @@ function FeedScreen({ navigation }: any) {
 
     const handleRealtimeNotification = () => {
       setUnreadNotificationCount((current) => current + 1);
+      listLiveStreams()
+        .then((response) => {
+          setLiveStories(Array.isArray(response?.liveStreams) ? response.liveStreams : []);
+        })
+        .catch(() => {});
     };
 
     socket.on("receiveNotification", handleRealtimeNotification);
@@ -876,6 +888,45 @@ function FeedScreen({ navigation }: any) {
           ))}
         </View>
       </View>
+    );
+  };
+
+  const renderLiveStory = (item: any) => {
+    const liveAvatar = normalizeMediaUrl(item?.hostUser?.profilePic || item?.hostSeller?.profilePic || DEFAULT_AVATAR_URL);
+    const liveLabel = String(item?.hostDisplayName || item?.hostUser?.name || item?.hostUser?.username || "Live").trim();
+
+    return (
+      <TouchableOpacity
+        key={`live-${item?._id}`}
+        style={[styles.storyItem, { width: storyItemWidth }]}
+        onPress={() =>
+          navigation.navigate("LiveStreamScreen", {
+            liveStreamId: item?._id,
+            initialLiveStream: item,
+            mode: item?.isHost ? "host" : "viewer",
+          })
+        }
+      >
+        <View
+          style={[
+            styles.storyRing,
+            styles.liveStoryRing,
+            { width: storyRingSize, height: storyRingSize, borderRadius: storyRingSize / 2 },
+          ]}
+        >
+          <Image
+            source={{ uri: liveAvatar }}
+            style={[styles.storyAvatar, { width: storyAvatarSize, height: storyAvatarSize, borderRadius: storyAvatarSize / 2 }]}
+          />
+          <View style={styles.liveStoryBadge}>
+            <Icon name="radio" size={10} color="#fff" />
+            <Text style={styles.liveStoryBadgeText}>LIVE</Text>
+          </View>
+        </View>
+        <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
+          {liveLabel}
+        </Text>
+      </TouchableOpacity>
     );
   };
 
@@ -1493,6 +1544,7 @@ function FeedScreen({ navigation }: any) {
     const ownStory = feed.stories.find((item) => item.isOwner || (currentUser?.id && item.user.id === currentUser.id));
     const ownStoryOwnerId = ownStory?.user.id || currentUser?.id || "";
     const ownStoryAvatar = ownStory?.user.avatarUrl || currentUser?.avatarUrl || DEFAULT_AVATAR_URL;
+    const visibleLiveStories = liveStories.filter((item) => String(item?.hostUser?._id || item?.hostUser?.id || "") !== String(currentUser?.id || ""));
 
     return (
       <>
@@ -1663,6 +1715,7 @@ function FeedScreen({ navigation }: any) {
                 Your story
               </Text>
             </TouchableOpacity>
+            {visibleLiveStories.map((liveStream) => renderLiveStory(liveStream))}
             {feed.stories.filter((story) => story.user.id !== ownStoryOwnerId).map((story) => (
               <View key={story.id}>{renderStory({ item: story })}</View>
             ))}
@@ -1868,6 +1921,7 @@ function FeedScreen({ navigation }: any) {
         onClose={closeSheet}
         onPostUpdate={updatePost}
         onOpenFull={openPostComments}
+        showOpenFull={false}
       />
 
       <PostShareSheet
@@ -2249,6 +2303,14 @@ const styles = StyleSheet.create({
   storyRingUnseen: { borderColor: FEED_ACCENT },
   storyRingSeen: { borderColor: "#d4dde9" },
   storyRingCloseFriends: { borderColor: "#22c55e" },
+  liveStoryRing: {
+    borderColor: "#fb7185",
+    borderWidth: 2.5,
+    shadowColor: "#fb7185",
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
   storyAvatar: { width: 70, height: 70, borderRadius: 35 },
   storyAddBadge: {
     position: "absolute",
@@ -2262,6 +2324,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 2,
     borderColor: "#fff",
+  },
+  liveStoryBadge: {
+    position: "absolute",
+    bottom: -3,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ef4444",
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  liveStoryBadgeText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "900",
+    marginLeft: 3,
   },
   storyName: { marginTop: 7, fontSize: 12.5, color: "#272727", fontWeight: "700" },
   postCard: {

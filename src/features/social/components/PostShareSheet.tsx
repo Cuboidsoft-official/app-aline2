@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,6 +19,8 @@ import { buildSharedPostMessage } from "../../../utils/chatPresentation";
 import { shareContentLink } from "../../../utils/shareLinks";
 import { appConfig } from "../../../config/env";
 import { API } from "../../../api/api";
+import { useAppTheme } from "../../../theme/AppThemeContext";
+import DraggableBottomSheet from "../../../components/DraggableBottomSheet";
 
 interface PostShareSheetProps {
   visible: boolean;
@@ -37,6 +37,7 @@ function PostShareSheet({
   onPostUpdate,
   onOpenStoryComposer,
 }: PostShareSheetProps) {
+  const { colors } = useAppTheme();
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedTargets, setSelectedTargets] = useState<ShareTarget[]>([]);
 
@@ -193,113 +194,89 @@ function PostShareSheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={styles.sheetWrap}>
-        <View style={styles.handle} />
-        <View style={styles.sheetContent}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Share</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Icon name="close" size={20} color="#111" />
-            </TouchableOpacity>
+    <DraggableBottomSheet visible={visible} onClose={onClose} snapPoints={[0.46, 0.72, 0.9]}>
+      <View style={styles.sheetContent}>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.text }]}>Share</Text>
+          <TouchableOpacity onPress={onClose}>
+            <Icon name="close" size={20} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+
+        <Text style={[styles.subtitle, { color: colors.mutedText }]}>Choose people first, then use the other share options below.</Text>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={[styles.peoplePanel, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <View style={styles.peopleHeader}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>People</Text>
+              <Text style={[styles.sectionMeta, { color: colors.mutedText }]}>
+                {selectedTargets.length ? `${selectedTargets.length} selected` : "Tap profiles to select"}
+              </Text>
+            </View>
+
+            <ShareTargetsList
+              title="Send to"
+              selectedTargetIds={selectedTargetIds}
+              onToggleTarget={toggleTarget}
+              scrollEnabled={false}
+            />
           </View>
 
-          <Text style={styles.subtitle}>Choose people first, then use the other share options below.</Text>
+          <TouchableOpacity
+            style={[
+              styles.sendButton,
+              { backgroundColor: colors.primary },
+              (!selectedTargets.length || !!busy) && styles.sendButtonDisabled,
+            ]}
+            disabled={!selectedTargets.length || !!busy}
+            onPress={shareToSelectedUsers}
+          >
+            {busy === "send" ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.sendButtonText}>
+                {selectedTargets.length ? `Send to ${selectedTargets.length}` : "Select people"}
+              </Text>
+            )}
+          </TouchableOpacity>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-            <View style={styles.peoplePanel}>
-              <View style={styles.peopleHeader}>
-                <Text style={styles.sectionTitle}>People</Text>
-                <Text style={styles.sectionMeta}>
-                  {selectedTargets.length ? `${selectedTargets.length} selected` : "Tap profiles to select"}
-                </Text>
-              </View>
+          <View style={[styles.actionsPanel, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Other options</Text>
 
-              <ShareTargetsList
-                title="Send to"
-                selectedTargetIds={selectedTargetIds}
-                onToggleTarget={toggleTarget}
-                scrollEnabled={false}
-              />
-            </View>
-
-            <TouchableOpacity
-              style={[
-                styles.sendButton,
-                (!selectedTargets.length || !!busy) && styles.sendButtonDisabled,
-              ]}
-              disabled={!selectedTargets.length || !!busy}
-              onPress={shareToSelectedUsers}
-            >
-              {busy === "send" ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.sendButtonText}>
-                  {selectedTargets.length ? `Send to ${selectedTargets.length}` : "Select people"}
-                </Text>
-              )}
+            <TouchableOpacity style={[styles.actionRow, { borderColor: colors.border }]} disabled={!!busy} onPress={shareToStory}>
+              <Icon name="sparkles-outline" size={20} color={colors.text} />
+              <Text style={[styles.actionText, { color: colors.text }]}>Add to your story</Text>
+              {busy === "story" ? <ActivityIndicator size="small" color={colors.text} /> : null}
             </TouchableOpacity>
 
-            <View style={styles.actionsPanel}>
-              <Text style={styles.sectionTitle}>Other options</Text>
+            <TouchableOpacity style={[styles.actionRow, { borderColor: colors.border }]} disabled={!!busy} onPress={shareExternally}>
+              <Icon name="share-social-outline" size={20} color={colors.text} />
+              <Text style={[styles.actionText, { color: colors.text }]}>Share externally</Text>
+              {busy === "external" ? <ActivityIndicator size="small" color={colors.text} /> : null}
+            </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={shareToStory}>
-                <Icon name="sparkles-outline" size={20} color="#111" />
-                <Text style={styles.actionText}>Add to your story</Text>
-                {busy === "story" ? <ActivityIndicator size="small" color="#111" /> : null}
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={shareExternally}>
-                <Icon name="share-social-outline" size={20} color="#111" />
-                <Text style={styles.actionText}>Share externally</Text>
-                {busy === "external" ? <ActivityIndicator size="small" color="#111" /> : null}
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionRow} disabled={!!busy} onPress={toggleSave}>
-                <Icon name={post?.saved ? "bookmark" : "bookmark-outline"} size={20} color="#111" />
-                <Text style={styles.actionText}>{post?.saved ? "Remove from saved" : "Save"}</Text>
-                {busy === "save" ? <ActivityIndicator size="small" color="#111" /> : null}
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
+            <TouchableOpacity style={[styles.actionRow, { borderColor: colors.border }]} disabled={!!busy} onPress={toggleSave}>
+              <Icon name={post?.saved ? "bookmark" : "bookmark-outline"} size={20} color={colors.text} />
+              <Text style={[styles.actionText, { color: colors.text }]}>{post?.saved ? "Remove from saved" : "Save"}</Text>
+              {busy === "save" ? <ActivityIndicator size="small" color={colors.text} /> : null}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </View>
-    </Modal>
+    </DraggableBottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  sheetWrap: {
-    marginTop: "auto",
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    minHeight: 220,
-    paddingTop: 10,
-  },
-  handle: {
-    alignSelf: "center",
-    width: 44,
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: "#d1d5db",
-    marginBottom: 10,
-  },
-  sheetContent: { paddingHorizontal: 16, paddingBottom: 24, minHeight: 520, maxHeight: "86%" },
+  sheetContent: { flex: 1, paddingHorizontal: 16, paddingBottom: 24 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingBottom: 12,
   },
-  title: { fontSize: 18, fontWeight: "800", color: "#111827" },
+  title: { fontSize: 18, fontWeight: "800" },
   subtitle: {
-    color: "#6b7280",
     fontSize: 12.5,
     marginBottom: 12,
   },
@@ -308,12 +285,10 @@ const styles = StyleSheet.create({
   },
   peoplePanel: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
     borderRadius: 22,
     paddingHorizontal: 14,
     paddingTop: 14,
     paddingBottom: 8,
-    backgroundColor: "#fafafa",
   },
   peopleHeader: {
     flexDirection: "row",
@@ -324,36 +299,30 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 14,
     fontWeight: "800",
-    color: "#111827",
   },
   sectionMeta: {
-    color: "#6b7280",
     fontSize: 12,
     fontWeight: "600",
   },
   actionsPanel: {
     marginTop: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
     borderRadius: 22,
     paddingHorizontal: 14,
     paddingTop: 14,
     paddingBottom: 4,
-    backgroundColor: "#fff",
   },
   actionRow: {
     minHeight: 52,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
     flexDirection: "row",
     alignItems: "center",
   },
-  actionText: { marginLeft: 12, marginRight: "auto", color: "#111827", fontWeight: "600", fontSize: 14 },
+  actionText: { marginLeft: 12, marginRight: "auto", fontWeight: "600", fontSize: 14 },
   sendButton: {
     marginTop: 14,
     minHeight: 48,
     borderRadius: 18,
-    backgroundColor: "#111827",
     alignItems: "center",
     justifyContent: "center",
   },

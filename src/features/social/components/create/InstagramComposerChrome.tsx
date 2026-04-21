@@ -52,7 +52,7 @@ type StepStripProps = {
 const TYPE_TABS: Array<{ id: ComposerTab | "live"; label: string; disabled?: boolean }> = [
   { id: "post", label: "POST" },
   { id: "story", label: "STORY" },
-  { id: "swipe", label: "REEL" },
+  { id: "swipe", label: "SWIPES" },
   { id: "live", label: "LIVE", disabled: true },
 ];
 

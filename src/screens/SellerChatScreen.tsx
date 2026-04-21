@@ -70,12 +70,20 @@ import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { callingDisabledMessage, productFlags } from "../config/productFlags";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
 import VoiceMessageBubble from "../components/chat/VoiceMessageBubble";
 import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 import AISupportSheet from "../components/chat/AISupportSheet";
+import MessageLinkPreview from "../components/chat/MessageLinkPreview";
+import ChatLockModal from "../components/chat/ChatLockModal";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
+import {
+  hasChatLockPasscode,
+  isConversationLocked,
+  setChatLockPasscode,
+  setConversationLocked,
+  verifyChatLockPasscode,
+} from "../utils/chatSecurity";
 
 const PRIMARY = "#7B4DFF";
 const CHAT_BG = "#0A0F1C";
@@ -485,11 +493,17 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [typingUserId, setTypingUserId] = useState("");
   const [isSellerOnline, setIsSellerOnline] = useState(false);
   const [sellerLastSeenAt, setSellerLastSeenAt] = useState("");
+  const [sellerPresenceStatus, setSellerPresenceStatus] = useState("");
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
+  const [isConversationLockedState, setIsConversationLockedState] = useState(false);
+  const [chatLockModalVisible, setChatLockModalVisible] = useState(false);
+  const [chatLockMode, setChatLockMode] = useState<"unlock" | "setup">("unlock");
+  const [lockingBusy, setLockingBusy] = useState(false);
+  const [pendingLockAction, setPendingLockAction] = useState<"lock" | "unlock">("unlock");
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
   const [mockPaymentState, setMockPaymentState] = useState<ManualPaymentState | null>(null);
   const [showAssistant, setShowAssistant] = useState(false);
@@ -521,12 +535,28 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     return lastSeenLabel === "Away" ? `Away • ${selectedServiceLabel}` : `${lastSeenLabel} • ${selectedServiceLabel}`;
   }, [isSellerActive, selectedServiceLabel, seller?.lastSeenAt, sellerLastSeenAt, typingUserId]);
 
+  const normalizedSellerPresenceText = useMemo(() => {
+    if (typingUserId) {
+      return "Typing...";
+    }
+
+    if (String(sellerPresenceStatus || "").trim().toLowerCase() === "away") {
+      return `Away • ${selectedServiceLabel}`;
+    }
+
+    if (isSellerActive || String(sellerPresenceStatus || "").trim().toLowerCase() === "active") {
+      return `Active now • ${selectedServiceLabel}`;
+    }
+
+    const lastSeenLabel = formatLastSeenStatus(sellerLastSeenAt || seller?.lastSeenAt);
+    return lastSeenLabel === "Away" ? `Away • ${selectedServiceLabel}` : `${lastSeenLabel} • ${selectedServiceLabel}`;
+  }, [isSellerActive, selectedServiceLabel, seller?.lastSeenAt, sellerLastSeenAt, sellerPresenceStatus, typingUserId]);
+
   const sellerStatusColor = "rgba(255,255,255,0.78)";
-  const canUseComposer = Boolean(seller) && seller?.availabilityStatus !== false;
-  const callingEnabled = false;
+  const canUseComposer = false;
   const assistantScope = "Seller chat support";
   const assistantScopeHint = `Get help with booking, payment, appointments, and chat support for ${seller?.sellerName || "this seller"}.`;
-  const assistantConversationSummary = `Selected service: ${selectedService?.serviceName || serviceName || "service requests"}. Seller status: ${sellerPresenceText}.${seller?.availabilityStatus === false ? " Messaging currently locked until seller turns availability on." : ""}`;
+  const assistantConversationSummary = `Selected service: ${selectedService?.serviceName || serviceName || "service requests"}. Seller status: ${normalizedSellerPresenceText}.${seller?.availabilityStatus === false ? " Messaging currently locked until seller turns availability on." : ""}`;
   const assistantSuggestedPrompts = [
     "Explain the booking flow",
     "Help fix a payment issue",
@@ -544,6 +574,17 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         return `${senderLabel}: ${rawText}`;
       }),
     [currentUserId, messages, seller?.sellerName],
+  );
+  const bookingTimelineMessages = useMemo(
+    () =>
+      messages.filter((message) => {
+        if (String(message?.messageType || "") !== "system") {
+          return false;
+        }
+
+        return !parseCallEventMessage(message);
+      }),
+    [messages],
   );
   const messageMap = useMemo(() => {
     const nextMap = new Map<string, ChatMessage>();
@@ -569,7 +610,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
     const resolvedMessage = messageMap.get(messageId) || message;
     const senderId = String(getMessageSenderId(resolvedMessage) || "");
-    const senderInfo = typeof resolvedMessage?.sender === "object" ? resolvedMessage.sender : null;
+    const senderInfo =
+      typeof resolvedMessage?.sender === "object"
+        ? (resolvedMessage.sender as { username?: string; name?: string } | null)
+        : null;
     const author = senderId && senderId === String(currentUserId || "")
       ? "You"
       : String(senderInfo?.username || senderInfo?.name || seller?.sellerName || "Reply");
@@ -619,6 +663,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         const presenceUser = presenceRes?.data?.user || {};
         nextIsOnline = Boolean(presenceUser?.isOnline ?? nextIsOnline);
         nextLastSeenAt = String(presenceUser?.lastSeenAt || nextLastSeenAt || "");
+        setSellerPresenceStatus(String(presenceUser?.availabilityStatus || ""));
       } catch (error) {
         console.log("seller presence fetch error:", error);
       }
@@ -1407,11 +1452,23 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       applyMessageReaction(data);
     };
 
+    const handlePresenceUpdate = (data: { userId?: string; isOnline?: boolean; lastSeenAt?: string; availabilityStatus?: string }) => {
+      const nextUserId = String(data?.userId || "");
+      if (!nextUserId || nextUserId !== String(sellerUserId || "")) {
+        return;
+      }
+
+      setIsSellerOnline(Boolean(data?.isOnline));
+      setSellerLastSeenAt(String(data?.lastSeenAt || ""));
+      setSellerPresenceStatus(String(data?.availabilityStatus || ""));
+    };
+
     socket.on("receiveMessage", handleReceiveMessage);
     socket.on("typing", handleTyping);
     socket.on("stopTyping", handleStopTyping);
     socket.on("messageSeen", handleMessageSeen);
     socket.on("messageReaction", handleMessageReaction);
+    socket.on("presence:update", handlePresenceUpdate);
 
     return () => {
       socket.off("receiveMessage", handleReceiveMessage);
@@ -1419,6 +1476,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       socket.off("stopTyping", handleStopTyping);
       socket.off("messageSeen", handleMessageSeen);
       socket.off("messageReaction", handleMessageReaction);
+      socket.off("presence:update", handlePresenceUpdate);
     };
   }, [
     appendMessage,
@@ -1427,6 +1485,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     currentConversationId,
     currentUserId,
     seller?.isOnline,
+    sellerUserId,
   ]);
 
   useEffect(() => {
@@ -1436,6 +1495,32 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
     void joinConversationRealtime(currentConversationId);
   }, [currentConversationId, joinConversationRealtime]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadConversationLockState = async () => {
+      if (!currentUserId || !currentConversationId) {
+        if (active) {
+          setIsConversationLockedState(false);
+        }
+        return;
+      }
+
+      const locked = await isConversationLocked(currentUserId, currentConversationId);
+      if (active) {
+        setIsConversationLockedState(locked);
+      }
+    };
+
+    loadConversationLockState().catch((error) => {
+      console.log("seller chat lock load error:", error);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [currentConversationId, currentUserId]);
 
   const loadMoreMessages = useCallback(async () => {
     if (!currentConversationId || !pagination?.hasMore || !pagination?.nextCursor || loadingMore) {
@@ -1453,6 +1538,70 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       setLoadingMore(false);
     }
   }, [currentConversationId, fetchMessages, loadingMore, pagination]);
+
+  const submitChatLockPasscode = useCallback(async (passcode: string) => {
+    try {
+      if (!currentUserId || !currentConversationId) {
+        throw new Error("This chat is not ready to lock yet.");
+      }
+
+      setLockingBusy(true);
+      if (chatLockMode === "setup") {
+        await setChatLockPasscode(passcode);
+        await setConversationLocked(currentUserId, currentConversationId, true);
+        setIsConversationLockedState(true);
+      } else {
+        const isValid = await verifyChatLockPasscode(passcode);
+        if (!isValid) {
+          throw new Error("Incorrect passcode.");
+        }
+
+        const shouldLock = pendingLockAction === "lock";
+        await setConversationLocked(currentUserId, currentConversationId, shouldLock);
+        setIsConversationLockedState(shouldLock);
+      }
+
+      setChatLockModalVisible(false);
+    } catch (error) {
+      Alert.alert("Chat lock", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setLockingBusy(false);
+    }
+  }, [chatLockMode, currentConversationId, currentUserId, pendingLockAction]);
+
+  const toggleSellerChatLock = useCallback(async () => {
+    if (!currentUserId) {
+      return;
+    }
+
+    const targetConversationId = currentConversationId || await ensureConversation();
+    if (!targetConversationId) {
+      Alert.alert("Chat lock", "Open this seller chat once before locking it.");
+      return;
+    }
+
+    if (!currentConversationId && targetConversationId) {
+      setCurrentConversationId(targetConversationId);
+    }
+
+    if (!isConversationLockedState) {
+      const hasPasscode = await hasChatLockPasscode();
+      if (!hasPasscode) {
+        setPendingLockAction("lock");
+        setChatLockMode("setup");
+        setChatLockModalVisible(true);
+        return;
+      }
+
+      await setConversationLocked(currentUserId, targetConversationId, true);
+      setIsConversationLockedState(true);
+      return;
+    }
+
+    setPendingLockAction("unlock");
+    setChatLockMode("unlock");
+    setChatLockModalVisible(true);
+  }, [currentConversationId, currentUserId, ensureConversation, isConversationLockedState]);
 
   const handleTextChange = useCallback((value: string) => {
     setText(value);
@@ -1630,6 +1779,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     const callEvent = buildCallEventPreview(item, currentUserId);
     const sharedMedia = Array.isArray(sharedContent?.media) ? sharedContent.media[0] : null;
     const locationPayload = parseLocationMessage(textValue);
+    const linkPreview = (item as any)?.linkPreview || null;
     const seenCount = Array.isArray(item?.seenBy) ? item.seenBy.length : 0;
     const reactions = Array.isArray(item?.reactions) ? item.reactions : [];
     const repliedMessage = getMessageReply(item) as ChatMessage | null;
@@ -1810,6 +1960,18 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               </Text>
             )}
 
+            {!locationPayload && !sharedContent && !callEvent && linkPreview?.url ? (
+              <MessageLinkPreview
+                preview={linkPreview}
+                isMine={isMine}
+                onPress={() => {
+                  Linking.openURL(String(linkPreview.url)).catch((error) => {
+                    console.log("seller link preview open error:", error);
+                  });
+                }}
+              />
+            ) : null}
+
             {locationPayload ? (
               <TouchableOpacity
                 activeOpacity={0.85}
@@ -1969,7 +2131,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             <View style={styles.statusRow}>
               <View style={[styles.presenceDot, { backgroundColor: isSellerActive ? "#22C55E" : "#F59E0B" }]} />
               <Text style={[styles.status, { color: sellerStatusColor }]} numberOfLines={1} ellipsizeMode="tail">
-                {sellerPresenceText}
+                    {normalizedSellerPresenceText}
               </Text>
             </View>
           </View>
@@ -1977,24 +2139,20 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
         <View style={styles.rightIcons}>
           <TouchableOpacity
-            style={[styles.headerActionButton, styles.headerActionButtonDisabled]}
-            onPress={() => {}}
-            disabled={!callingEnabled}
-          >
-            <Icon name="call-outline" size={20} color={CHAT_TEXT_MUTED} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.headerActionButton, styles.headerActionButtonDisabled]}
-            onPress={() => {}}
-            disabled={!callingEnabled}
-          >
-            <Icon name="videocam-outline" size={22} color={CHAT_TEXT_MUTED} />
-          </TouchableOpacity>
-          <TouchableOpacity
             style={styles.headerActionButton}
             onPress={() => setShowAssistant(true)}
           >
             <Icon name="sparkles-outline" size={20} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.headerActionButton}
+            onPress={() => {
+              toggleSellerChatLock().catch((error) => {
+                console.log("seller chat lock toggle error:", error);
+              });
+            }}
+          >
+            <Icon name={isConversationLockedState ? "lock-open-outline" : "lock-closed-outline"} size={20} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerActionButton}
@@ -2007,22 +2165,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         </View>
       </View>
 
-      <View style={styles.chatHeroPanel}>
-        <View style={styles.chatHeroContent}>
-          <Text style={styles.chatHeroEyebrow}>Seller booking room</Text>
-          <Text style={styles.chatHeroTitle}>Choose a service and request a slot</Text>
-          <Text style={styles.chatHeroText}>
-            Booking stays active, but chat and calling are locked on this screen until the next phase is enabled.
-          </Text>
-        </View>
-        <View style={styles.chatHeroBadge}>
-          <Icon name="calendar-outline" size={16} color="#E9DEFF" />
-          <Text style={styles.chatHeroBadgeText}>Appointments only</Text>
-        </View>
-      </View>
-
       <View style={styles.premiumServiceWrap}>
-        <Text style={styles.premiumTitle}>Available Services</Text>
+        <Text style={styles.premiumTitle}>Highlighted Services</Text>
 
         <FlatList
           horizontal
@@ -2112,25 +2256,17 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           <Icon name="briefcase-outline" size={15} color="#EDE7FF" />
         </View>
         <View style={styles.selectedServiceCopy}>
-          <Text style={styles.selectedServiceBannerLabel}>Currently selected</Text>
+          <Text style={styles.selectedServiceBannerLabel}>Booking only</Text>
           <Text style={styles.selectedServiceBannerText}>
-            {selectedServiceLabel}
+            {selectedServiceLabel} selected. Pick a time slot and continue to request an appointment.
           </Text>
         </View>
       </View>
 
-      {!callingEnabled ? (
-        <View style={styles.unavailableBanner}>
-          <Text style={styles.unavailableBannerText}>
-            Calling is disabled on this screen right now. Use booking to request a service time first.
-          </Text>
-        </View>
-      ) : null}
-
       {seller?.availabilityStatus === false ? (
         <View style={styles.unavailableBanner}>
           <Text style={styles.unavailableBannerText}>
-            This seller is offline right now. Messaging and new appointments unlock after the seller turns availability on.
+            Seller is away right now. You can review services here, and fresh booking activity will appear once availability returns.
           </Text>
         </View>
       ) : null}
@@ -2147,7 +2283,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             </View>
           ) : (
             <FlatList
-              data={messages}
+              data={bookingTimelineMessages}
               renderItem={renderMessage}
               keyExtractor={(item) => getMessageRenderKey(item)}
               contentContainerStyle={{ padding: 12, paddingBottom: Math.max(20, 12 + insets.bottom) }}
@@ -2181,10 +2317,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               ListEmptyComponent={
                 <View style={styles.emptyWrap}>
                   <Text style={styles.emptyTitle}>
-                    {errorMessage ? "Conversation unavailable" : "No messages yet"}
+                    {errorMessage ? "Conversation unavailable" : "No booking updates yet"}
                   </Text>
                   <Text style={styles.emptyText}>
-                    {errorMessage || "Start the conversation here. Booking requests are handled through chat."}
+                    {errorMessage || "This room only keeps appointment and payment updates. Normal chat and call logs stay hidden here."}
                   </Text>
                 </View>
               }
@@ -2194,131 +2330,37 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         </View>
 
         <View style={[styles.inputWrap, { backgroundColor: CHAT_BG, paddingBottom: Math.max(8, insets.bottom), borderTopColor: CHAT_BORDER }]}>
-          {!canUseComposer ? (
-            <View style={[styles.composerLockedCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL_ALT }]}>
-              <Icon name="lock-closed-outline" size={18} color={colors.primary} />
-              <Text style={[styles.composerLockedText, { color: "#F8FAFF" }]}>
-                Messaging is unavailable while the seller is away. You can still browse services and book when availability returns.
-              </Text>
-            </View>
-          ) : null}
-
-          {canUseComposer && replyingToPreview ? (
-            <View style={[styles.composerReplyCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL_ALT }]}>
-              <View style={[styles.composerReplyAccent, { backgroundColor: PRIMARY }]} />
-              <View style={styles.composerReplyBody}>
-                <Text style={[styles.composerReplyLabel, { color: "#F8F5FF" }]}>
-                  Replying to {replyingToPreview.author}
-                </Text>
-                <Text style={[styles.composerReplySnippet, { color: CHAT_TEXT_MUTED }]} numberOfLines={1}>
-                  {replyingToPreview.snippet}
-                </Text>
-              </View>
-              <TouchableOpacity style={styles.composerReplyClose} onPress={() => setReplyingToMessage(null)}>
-                <Icon name="close" size={18} color={CHAT_TEXT_MUTED} />
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {canUseComposer && pendingVoiceNote ? (
-            <View style={[styles.attachmentPreviewCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
-              <View style={styles.pendingVoicePreview}>
-                <VoiceMessageBubble
-                  audioUrl={pendingVoiceNote.uri}
-                  durationSeconds={pendingVoiceNote.duration}
-                  accentColor={PRIMARY}
-                  backgroundColor={`${PRIMARY}10`}
-                  textColor={colors.text}
-                  metaColor={colors.placeholder}
-                  label="Voice note preview"
-                />
-                <View style={styles.pendingVoiceActions}>
-                  <TouchableOpacity
-                    onPress={() => setPendingVoiceNote(null)}
-                    disabled={uploading}
-                    style={styles.pendingVoiceActionButton}
-                  >
-                    <Icon name="trash-outline" size={18} color={colors.placeholder} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          ) : null}
-
-          {canUseComposer ? (
-            <View style={styles.composerRow}>
-              <TouchableOpacity style={styles.attachButton} onPress={() => setShowStickerPicker(true)} disabled={uploading || loading || !canUseComposer}>
-                <Icon name="happy-outline" size={22} color={colors.primary} />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.attachButton} onPress={sendCameraAttachment} disabled={uploading || loading || !canUseComposer}>
-                <Icon name="camera-outline" size={22} color={colors.primary} />
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={sendImageAttachment} disabled={uploading || loading || !canUseComposer}>
-                <Icon name="image-outline" size={22} color={colors.primary} />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.attachButton} onPress={sendDocumentAttachment} disabled={uploading || loading || !canUseComposer}>
-                <Icon name="document-outline" size={22} color={colors.primary} />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.attachButton} onPress={sendAudioAttachment} disabled={uploading || loading || !canUseComposer}>
-                <Icon name="musical-notes-outline" size={22} color={colors.primary} />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.attachButton} onPress={() => setShowLocationComposer(true)} disabled={uploading || loading || !canUseComposer}>
-                <Icon name="location-outline" size={22} color={colors.primary} />
-              </TouchableOpacity>
-
-              <TextInput
-                ref={messageInputRef}
-                placeholder={
-                  uploading
-                    ? "Uploading attachment..."
-                    : pendingVoiceNote
-                      ? "Voice note ready to send"
-                      : "Message..."
-                }
-                value={text}
-                onChangeText={handleTextChange}
-                style={[styles.input, { backgroundColor: colors.surface, color: colors.text }]}
-                editable={!loading && !sending && !uploading && canUseComposer}
-                placeholderTextColor={colors.placeholder}
-              />
-
-              {uploading ? (
-                <ActivityIndicator color={PRIMARY} />
-              ) : pendingVoiceNote || text.trim() ? (
-                <TouchableOpacity
-                  style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
-                  onPress={() => {
-                    if (pendingVoiceNote) {
-                      sendPendingVoiceMessage().catch((error) => {
-                        console.log("seller voice preview send error:", error);
-                      });
-                      return;
-                    }
-
-                    sendMessage().catch((error) => {
-                      console.log("seller chat send error:", error);
-                    });
-                  }}
-                  disabled={sending || loading || !canUseComposer}
-                >
-                  <Icon name="send" size={18} color="#fff" />
-                </TouchableOpacity>
-              ) : (
-                <VoiceRecorderButton
-                  color={colors.primary}
-                  disabled={uploading || loading || !canUseComposer}
-                  onSend={sendVoiceMessage}
-                />
-              )}
-            </View>
-          ) : null}
+          <View style={[styles.composerLockedCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL_ALT }]}>
+            <Icon name="calendar-clear-outline" size={18} color={colors.primary} />
+            <Text style={[styles.composerLockedText, { color: "#F8FAFF" }]}>
+              This seller room is booking-only. Choose a highlighted service, confirm a slot, and appointment updates will stay saved here.
+            </Text>
+          </View>
         </View>
       </KeyboardAvoidingView>
+
+      {isConversationLockedState ? (
+        <View style={styles.lockedChatOverlay}>
+          <View style={[styles.lockedChatCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL }]}>
+            <Icon name="lock-closed-outline" size={26} color={colors.primary} />
+            <Text style={styles.lockedChatTitle}>Seller chat locked</Text>
+            <Text style={styles.lockedChatText}>
+              Yeh seller conversation lock hai. Passcode dal kar updates aur booking history dekh sakte ho.
+            </Text>
+            <TouchableOpacity
+              style={[styles.lockedChatButton, { backgroundColor: colors.primary }]}
+              onPress={async () => {
+                const hasPasscode = await hasChatLockPasscode();
+                setPendingLockAction("unlock");
+                setChatLockMode(hasPasscode ? "unlock" : "setup");
+                setChatLockModalVisible(true);
+              }}
+            >
+              <Text style={styles.lockedChatButtonText}>Unlock seller chat</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
 
       <Modal
         visible={!!messagePreview}
@@ -2652,6 +2694,14 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         conversationSummary={assistantConversationSummary}
         recentMessages={assistantRecentMessages}
         suggestedPrompts={assistantSuggestedPrompts}
+      />
+
+      <ChatLockModal
+        visible={chatLockModalVisible}
+        mode={chatLockMode}
+        busy={lockingBusy}
+        onClose={() => setChatLockModalVisible(false)}
+        onSubmit={submitChatLockPasscode}
       />
     </SafeAreaView>
   );
@@ -3268,6 +3318,46 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     backgroundColor: CHAT_BG,
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  lockedChatOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(10,15,28,0.62)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  lockedChatCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 24,
+    borderWidth: 1,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    alignItems: "center",
+  },
+  lockedChatTitle: {
+    marginTop: 12,
+    color: "#F8FAFF",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  lockedChatText: {
+    marginTop: 8,
+    color: "#A9B6D3",
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+  },
+  lockedChatButton: {
+    marginTop: 18,
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+  },
+  lockedChatButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
   },
   composerReplyCard: {
     flexDirection: "row",

@@ -15,8 +15,18 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
+import { useAppTheme } from "../../theme/AppThemeContext";
+
+const getSavedPostTypeLabel = (post: Post) => {
+  if (post.type === "carousel") {
+    return "Carousel Post";
+  }
+
+  return post.type === "video" ? "Video Post" : "Photo Post";
+};
 
 function SavedPostsScreen({ navigation }: any) {
+  const { colors } = useAppTheme();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -73,25 +83,25 @@ function SavedPostsScreen({ navigation }: any) {
 
     return (
       <TouchableOpacity
-        style={styles.card}
+        style={[styles.card, { borderColor: colors.border, backgroundColor: colors.card }]}
         onPress={() => navigation.navigate("PostDetail", { postId: item.id })}
         activeOpacity={0.86}
       >
         {mediaUri ? <Image source={{ uri: mediaUri }} style={styles.thumb} /> : <View style={[styles.thumb, styles.thumbPlaceholder]} />}
 
         <View style={styles.cardBody}>
-          <Text style={styles.type}>{item.type.toUpperCase()}</Text>
-          <Text style={styles.meta}>Saved {new Date(item.createdAt).toLocaleDateString()}</Text>
-          <Text style={styles.statsLine}>
+          <Text style={[styles.type, { color: colors.primary }]}>{getSavedPostTypeLabel(item)}</Text>
+          <Text style={[styles.meta, { color: colors.mutedText }]}>Saved {new Date(item.createdAt).toLocaleDateString()}</Text>
+          <Text style={[styles.statsLine, { color: colors.mutedText }]}>
             {item.likesCount} likes • {item.commentsCount} comments • {item.sharesCount} shares
           </Text>
-          <Text numberOfLines={2} style={styles.captionPreview}>
+          <Text numberOfLines={2} style={[styles.captionPreview, { color: colors.text }]}>
             {item.caption || "Untitled post"}
           </Text>
         </View>
 
         <TouchableOpacity style={styles.actionIcon} onPress={() => removeSavedPost(item.id)}>
-          <Icon name="bookmark" size={21} color="#2563eb" />
+          <Icon name="bookmark" size={21} color={colors.primary} />
         </TouchableOpacity>
       </TouchableOpacity>
     );
@@ -99,19 +109,19 @@ function SavedPostsScreen({ navigation }: any) {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#7b3fe4" />
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { borderColor: colors.border }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color="#111" />
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>Saved Posts</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Saved Posts</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -122,50 +132,48 @@ function SavedPostsScreen({ navigation }: any) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
-          <Text style={styles.helperText}>
+          <Text style={[styles.helperText, { color: colors.mutedText }]}>
             Your saved posts stay private to you. Tap any card to open it, or tap the bookmark to remove it from this list.
           </Text>
         }
-        ListEmptyComponent={<Text style={styles.emptyText}>No saved posts yet.</Text>}
+        ListEmptyComponent={<Text style={[styles.emptyText, { color: colors.mutedText }]}>No saved posts yet.</Text>}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
     paddingTop: 44,
     paddingHorizontal: 14,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#ddd",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  title: { fontSize: 18, fontWeight: "700", color: "#111" },
+  title: { fontSize: 18, fontWeight: "700" },
   headerSpacer: { width: 20 },
   listContent: { padding: 12, paddingBottom: 28, flexGrow: 1 },
-  helperText: { color: "#666", fontSize: 12.5, lineHeight: 18, marginBottom: 12 },
-  emptyText: { textAlign: "center", color: "#666", marginTop: 48, fontSize: 14 },
+  helperText: { fontSize: 12.5, lineHeight: 18, marginBottom: 12 },
+  emptyText: { textAlign: "center", marginTop: 48, fontSize: 14 },
   card: {
     borderWidth: 1,
-    borderColor: "#e7e7e7",
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 10,
     flexDirection: "row",
     marginBottom: 10,
     alignItems: "center",
   },
   thumb: { width: 72, height: 72, borderRadius: 10, backgroundColor: "#e5e7eb" },
-  thumbPlaceholder: { backgroundColor: "#dbeafe" },
+  thumbPlaceholder: { backgroundColor: "#1e293b" },
   cardBody: { flex: 1, marginLeft: 10 },
-  type: { fontSize: 12, color: "#3345d1", fontWeight: "700" },
-  meta: { fontSize: 11.5, color: "#666", marginTop: 2 },
-  statsLine: { fontSize: 11.5, color: "#4b5563", marginTop: 6, fontWeight: "600" },
-  captionPreview: { marginTop: 8, color: "#222", fontSize: 13 },
+  type: { fontSize: 12, fontWeight: "700" },
+  meta: { fontSize: 11.5, marginTop: 2 },
+  statsLine: { fontSize: 11.5, marginTop: 6, fontWeight: "600" },
+  captionPreview: { marginTop: 8, fontSize: 13 },
   actionIcon: { marginLeft: 10, paddingVertical: 6 },
 });
 

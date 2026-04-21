@@ -11,6 +11,20 @@ const buildAuthHeaders = async (extraHeaders = {}) => {
   };
 };
 
+const isNotFoundError = (error) => Number(error?.response?.status) === 404;
+
+const requestWithNotFoundFallback = async (primaryRequest, fallbackRequest) => {
+  try {
+    return await primaryRequest();
+  } catch (error) {
+    if (!fallbackRequest || !isNotFoundError(error)) {
+      throw error;
+    }
+
+    return fallbackRequest();
+  }
+};
+
 const normalizeUploadUri = (value) => {
   const rawValue = String(value || "").trim();
   if (!rawValue) {
@@ -47,17 +61,24 @@ export const createChatConversation = async ({ receiverId, conversationType = "d
 };
 
 /**
- * @param {{ groupName?: string; memberIds?: string[] }} [params]
+ * @param {{ groupName?: string; memberIds?: string[]; groupVisibility?: "private" | "public"; groupDescription?: string }} [params]
  */
-export const createGroupChatConversation = async ({ groupName, memberIds = [] } = {}) => {
+export const createGroupChatConversation = async ({
+  groupName,
+  memberIds = [],
+  groupVisibility,
+  groupDescription,
+} = {}) => {
   const headers = await buildAuthHeaders();
-  const response = await API.post(
-    "/chat/group",
-    {
-      groupName,
-      memberIds,
-    },
-    { headers }
+  const payload = {
+    groupName,
+    memberIds,
+    groupVisibility,
+    groupDescription,
+  };
+  const response = await requestWithNotFoundFallback(
+    () => API.post("/chat/group", payload, { headers }),
+    () => API.post("/chat/groups", payload, { headers })
   );
 
   return response.data;
@@ -78,7 +99,72 @@ export const fetchChatConversationDetails = async (conversationId) => {
   return response.data;
 };
 
-export const updateGroupChatConversation = async ({ conversationId, groupName, groupAvatar } = {}) => {
+export const fetchPublicGroupChatConversations = async (params = {}) => {
+  const headers = await buildAuthHeaders();
+  const requestConfig = {
+    headers,
+    params,
+  };
+  const response = await requestWithNotFoundFallback(
+    () => API.get("/chat/public-groups", requestConfig),
+    () => API.get("/chat/groups/public", requestConfig)
+  );
+  return response.data;
+};
+
+export const joinPublicGroupChatConversation = async (conversationId) => {
+  const headers = await buildAuthHeaders();
+  const response = await requestWithNotFoundFallback(
+    () => API.post(`/chat/${conversationId}/join`, {}, { headers }),
+    () => API.post(`/chat/groups/${conversationId}/join`, {}, { headers })
+  );
+  return response.data;
+};
+
+/**
+ * @param {{ conversationId?: string; theme?: string }} [params]
+ */
+export const updateConversationTheme = async ({ conversationId, theme = "default" } = {}) => {
+  if (!conversationId) {
+    throw new Error("conversationId is required");
+  }
+
+  const headers = await buildAuthHeaders();
+  const payload = { theme };
+  const response = await requestWithNotFoundFallback(
+    () => API.put(`/chat/${conversationId}/theme`, payload, { headers }),
+    () => API.put(`/chat/theme/${conversationId}`, payload, { headers })
+  );
+
+  return response.data;
+};
+
+/**
+ * @param {{ conversationId?: string; wallpaperUrl?: string | null }} [params]
+ */
+export const updateConversationWallpaper = async ({ conversationId, wallpaperUrl = null } = {}) => {
+  if (!conversationId) {
+    throw new Error("conversationId is required");
+  }
+
+  const headers = await buildAuthHeaders();
+  const payload = { wallpaperUrl };
+  const response = await requestWithNotFoundFallback(
+    () => API.put(`/chat/${conversationId}/wallpaper`, payload, { headers }),
+    () => API.put(`/chat/wallpaper/${conversationId}`, payload, { headers })
+  );
+
+  return response.data;
+};
+
+export const updateGroupChatConversation = async ({
+  conversationId,
+  groupName,
+  groupAvatar,
+  groupVisibility,
+  groupDescription,
+  groupLinks,
+} = {}) => {
   const headers = await buildAuthHeaders();
   const payload = {};
 
@@ -88,6 +174,18 @@ export const updateGroupChatConversation = async ({ conversationId, groupName, g
 
   if (typeof groupAvatar !== "undefined") {
     payload.groupAvatar = groupAvatar;
+  }
+
+  if (typeof groupVisibility !== "undefined") {
+    payload.groupVisibility = groupVisibility;
+  }
+
+  if (typeof groupDescription !== "undefined") {
+    payload.groupDescription = groupDescription;
+  }
+
+  if (typeof groupLinks !== "undefined") {
+    payload.groupLinks = groupLinks;
   }
 
   const response = await API.patch(
@@ -132,6 +230,19 @@ export const demoteGroupChatAdmin = async ({ conversationId, memberId } = {}) =>
 export const transferGroupChatOwnership = async ({ conversationId, memberId } = {}) => {
   const headers = await buildAuthHeaders();
   const response = await API.post(`/chat/${conversationId}/owner/${memberId}`, {}, { headers });
+  return response.data;
+};
+
+export const deleteGroupChatConversation = async ({ conversationId } = {}) => {
+  if (!conversationId) {
+    throw new Error("conversationId is required");
+  }
+
+  const headers = await buildAuthHeaders();
+  const response = await requestWithNotFoundFallback(
+    () => API.delete(`/chat/${conversationId}/group`, { headers }),
+    () => API.delete(`/chat/groups/${conversationId}`, { headers })
+  );
   return response.data;
 };
 

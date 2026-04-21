@@ -25,6 +25,7 @@ import {
     fetchConversationMedia,
     fetchChatConversationDetails,
     searchConversationMessages,
+    updateConversationWallpaper,
 } from "../utils/chatApi";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
@@ -32,6 +33,15 @@ import { useAppTheme } from "../theme/AppThemeContext";
 import ChatThemePicker from "../components/chat/ChatThemePicker";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { uploadImageAsset } from "../utils/uploadMedia";
+import ChatLockModal from "../components/chat/ChatLockModal";
+import {
+    hasChatLockPasscode,
+    isConversationLocked,
+    setChatLockPasscode,
+    setConversationLocked,
+    verifyChatLockPasscode,
+} from "../utils/chatSecurity";
+import { getStoredUserId } from "../utils/authSession";
 
 const PRIMARY = "#7b3fe4";
 
@@ -150,6 +160,12 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
     const [currentTheme, setCurrentTheme] = useState("default");
     const [chatWallpaper, setChatWallpaper] = useState("");
     const [savingWallpaper, setSavingWallpaper] = useState(false);
+    const [currentUserId, setCurrentUserId] = useState("");
+    const [isLocked, setIsLocked] = useState(false);
+    const [lockModalVisible, setLockModalVisible] = useState(false);
+    const [lockModalMode, setLockModalMode] = useState<"unlock" | "setup">("unlock");
+    const [lockingBusy, setLockingBusy] = useState(false);
+    const [pendingLockAction, setPendingLockAction] = useState<"lock" | "unlock">("lock");
 
     const resolvedConversationId = useMemo(() => conversationId || null, [conversationId]);
 
@@ -198,6 +214,25 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
         loadMedia();
         loadConversationSettings();
     }, [fetchUser, loadConversationSettings, loadMedia]);
+
+    useEffect(() => {
+        const loadLockState = async () => {
+            const storedUserId = await getStoredUserId();
+            setCurrentUserId(storedUserId || "");
+
+            if (!resolvedConversationId || !storedUserId) {
+                setIsLocked(false);
+                return;
+            }
+
+            const locked = await isConversationLocked(storedUserId, resolvedConversationId);
+            setIsLocked(locked);
+        };
+
+        loadLockState().catch((error) => {
+            console.log("ChatDetails lock load error:", error);
+        });
+    }, [resolvedConversationId]);
 
     // ─── Search ─────────────────────────────────────────────────────────────
 
@@ -282,10 +317,11 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
 
         try {
             setSavingWallpaper(true);
-            const response = await API.put(`/chat/${resolvedConversationId}/wallpaper`, {
+            const response = await updateConversationWallpaper({
+                conversationId: resolvedConversationId,
                 wallpaperUrl,
             });
-            setChatWallpaper(String(response?.data?.wallpaperUrl || ""));
+            setChatWallpaper(String(response?.wallpaperUrl || ""));
             Alert.alert(
                 wallpaperUrl ? "Wallpaper updated" : "Wallpaper removed",
                 wallpaperUrl ? "Your custom chat wallpaper is ready." : "The chat is back to its default background."
@@ -322,10 +358,11 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                 name: asset.fileName,
                 type: asset.type,
             });
-            const response = await API.put(`/chat/${resolvedConversationId}/wallpaper`, {
+            const response = await updateConversationWallpaper({
+                conversationId: resolvedConversationId,
                 wallpaperUrl: uploadedUrl,
             });
-            setChatWallpaper(String(response?.data?.wallpaperUrl || uploadedUrl));
+            setChatWallpaper(String(response?.wallpaperUrl || uploadedUrl));
             Alert.alert("Wallpaper updated", "Your custom chat wallpaper is ready.");
         } catch (error) {
             Alert.alert("Unable to update wallpaper", getReadableApiErrorMessage(error, "Please try again."));
@@ -333,6 +370,56 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
             setSavingWallpaper(false);
         }
     }, [resolvedConversationId]);
+
+    const submitLockPasscode = useCallback(async (passcode: string) => {
+        try {
+            setLockingBusy(true);
+            if (lockModalMode === "setup") {
+                await setChatLockPasscode(passcode);
+                await setConversationLocked(currentUserId, resolvedConversationId, true);
+                setIsLocked(true);
+            } else {
+                const isValid = await verifyChatLockPasscode(passcode);
+                if (!isValid) {
+                    throw new Error("Incorrect passcode.");
+                }
+
+                const shouldLock = pendingLockAction === "lock";
+                await setConversationLocked(currentUserId, resolvedConversationId, shouldLock);
+                setIsLocked(shouldLock);
+            }
+
+            setLockModalVisible(false);
+        } catch (error) {
+            Alert.alert("Chat lock", getReadableApiErrorMessage(error, "Please try again."));
+        } finally {
+            setLockingBusy(false);
+        }
+    }, [currentUserId, lockModalMode, pendingLockAction, resolvedConversationId]);
+
+    const toggleChatLock = useCallback(async () => {
+        if (!currentUserId || !resolvedConversationId) {
+            return;
+        }
+
+        if (!isLocked) {
+            const hasPasscode = await hasChatLockPasscode();
+            if (!hasPasscode) {
+                setPendingLockAction("lock");
+                setLockModalMode("setup");
+                setLockModalVisible(true);
+                return;
+            }
+
+            await setConversationLocked(currentUserId, resolvedConversationId, true);
+            setIsLocked(true);
+            return;
+        }
+
+        setPendingLockAction("unlock");
+        setLockModalMode("unlock");
+        setLockModalVisible(true);
+    }, [currentUserId, isLocked, resolvedConversationId]);
 
     // ─── Render helpers ─────────────────────────────────────────────────────
 
@@ -406,6 +493,14 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                             colors={colors}
                         />
                     ) : null}
+                    <Option
+                        icon={isLocked ? "lock-open-outline" : "lock-closed-outline"}
+                        title={isLocked ? "Unlock chat" : "Lock chat"}
+                        onPress={() => {
+                            toggleChatLock().catch(() => {});
+                        }}
+                        colors={colors}
+                    />
                 </View>
 
                 {/* Search bar */}
@@ -480,6 +575,14 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                     onThemeChanged={(themeId) => setCurrentTheme(themeId)}
                 />
             )}
+
+            <ChatLockModal
+                visible={lockModalVisible}
+                mode={lockModalMode}
+                busy={lockingBusy}
+                onClose={() => setLockModalVisible(false)}
+                onSubmit={submitLockPasscode}
+            />
         </SafeAreaView>
     );
 };

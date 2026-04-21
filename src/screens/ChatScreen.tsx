@@ -67,9 +67,17 @@ import VoiceMessageBubble from "../components/chat/VoiceMessageBubble";
 import MessageContextMenu from "../components/chat/MessageContextMenu";
 import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 import AISupportSheet from "../components/chat/AISupportSheet";
+import MessageLinkPreview from "../components/chat/MessageLinkPreview";
+import ChatLockModal from "../components/chat/ChatLockModal";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
+import {
+  hasChatLockPasscode,
+  isConversationLocked,
+  setChatLockPasscode,
+  verifyChatLockPasscode,
+} from "../utils/chatSecurity";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -84,7 +92,7 @@ interface ChatUser {
   username?: string;
   name?: string;
   profilePic?: string;
-  availabilityStatus?: boolean;
+  availabilityStatus?: string;
   isOnline?: boolean;
   lastSeenAt?: string;
 }
@@ -105,7 +113,7 @@ interface ChatMessage {
   fileName?: string;
   fileSize?: number;
   duration?: number;
-  sender?: string | { _id?: string; id?: string; username?: string; name?: string };
+  sender?: string | { _id?: string; id?: string; username?: string; name?: string; profilePic?: string };
   isEdited?: boolean;
   editedAt?: string;
   isDeleted?: boolean;
@@ -414,8 +422,10 @@ const buildCallEventPreview = (
 const ChatScreen = ({ navigation, route }: any) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { userId, conversationId, conversationType = "direct", serviceId, groupName, groupAvatar, memberCount } = route.params || {};
-  const isGroupConversation = conversationType === "group";
+  const { userId, conversationId, conversationType: conversationTypeParam, serviceId, groupName, groupAvatar, memberCount, groupConversation } = route.params || {};
+  const initialConversationType = (String(conversationTypeParam || "").trim().toLowerCase() || "direct") as "direct" | "seller" | "group";
+  const [resolvedConversationType, setResolvedConversationType] = useState<"direct" | "seller" | "group">(initialConversationType);
+  const isGroupConversation = resolvedConversationType === "group";
   const [user, setUser] = useState<ChatUser | null>(null);
   const [text, setText] = useState("");
   const [showTools, setShowTools] = useState(false);
@@ -433,8 +443,19 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [chatWallpaper, setChatWallpaper] = useState("");
   const [typingUserId, setTypingUserId] = useState("");
   const [isPeerOnline, setIsPeerOnline] = useState(false);
+  const [isConversationLockedState, setIsConversationLockedState] = useState(false);
+  const [chatLockModalVisible, setChatLockModalVisible] = useState(false);
+  const [chatLockMode, setChatLockMode] = useState<"unlock" | "setup">("unlock");
+  const [lockingBusy, setLockingBusy] = useState(false);
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
+
+  useEffect(() => {
+    const normalized = String(conversationTypeParam || "").trim().toLowerCase();
+    if (normalized === "direct" || normalized === "seller" || normalized === "group") {
+      setResolvedConversationType(normalized as "direct" | "seller" | "group");
+    }
+  }, [conversationTypeParam]);
   const [groupMeta, setGroupMeta] = useState<GroupMeta>({
     groupName: groupName || "Group chat",
     groupAvatar: groupAvatar || "",
@@ -540,6 +561,10 @@ const ChatScreen = ({ navigation, route }: any) => {
     try {
       const data = await fetchChatConversationDetails(targetConversationId);
       const nextConversation = data?.conversation;
+      const apiType = String(nextConversation?.conversationType || "").trim().toLowerCase();
+      if (apiType === "direct" || apiType === "seller" || apiType === "group") {
+        setResolvedConversationType(apiType as "direct" | "seller" | "group");
+      }
 
       if (nextConversation?.chatTheme) {
         setChatTheme(nextConversation.chatTheme);
@@ -555,7 +580,7 @@ const ChatScreen = ({ navigation, route }: any) => {
           : null,
       );
 
-      if (isGroupConversation) {
+      if (apiType === "group") {
         const nextGroupMeta: GroupMeta = {
           groupName: nextConversation?.groupName || "Group chat",
           groupAvatar: nextConversation?.groupAvatar || "",
@@ -572,7 +597,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     } catch (error: any) {
       console.log("Fetch conversation details error:", error?.response?.data || error);
     }
-  }, [currentConversationId, isGroupConversation, navigation]);
+  }, [currentConversationId, navigation]);
 
   const ensureConversation = useCallback(async (): Promise<string | null> => {
     if (currentConversationId) {
@@ -586,7 +611,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     try {
       const res = await createChatConversation({
         receiverId: userId,
-        conversationType,
+        conversationType: resolvedConversationType,
         serviceId,
       });
 
@@ -605,7 +630,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       setErrorMessage(getReadableApiErrorMessage(err, "Unable to start this conversation right now."));
       return null;
     }
-  }, [conversationType, currentConversationId, serviceId, userId]);
+  }, [currentConversationId, resolvedConversationType, serviceId, userId]);
 
   const joinConversationRealtime = useCallback(async (targetConversationId: string | null) => {
     if (!targetConversationId) {
@@ -797,6 +822,43 @@ const ChatScreen = ({ navigation, route }: any) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!currentUserId || !currentConversationId) {
+      setIsConversationLockedState(false);
+      return;
+    }
+
+    isConversationLocked(currentUserId, currentConversationId)
+      .then((locked) => {
+        setIsConversationLockedState(locked);
+      })
+      .catch((error) => {
+        console.log("chat lock state error:", error);
+      });
+  }, [currentConversationId, currentUserId]);
+
+  const submitChatLockPasscode = useCallback(async (passcode: string) => {
+    try {
+      setLockingBusy(true);
+      if (chatLockMode === "setup") {
+        await setChatLockPasscode(passcode);
+        setIsConversationLockedState(false);
+      } else {
+        const isValid = await verifyChatLockPasscode(passcode);
+        if (!isValid) {
+          throw new Error("Incorrect passcode.");
+        }
+        setIsConversationLockedState(false);
+      }
+
+      setChatLockModalVisible(false);
+    } catch (error) {
+      Alert.alert("Chat lock", getReadableApiErrorMessage(error, "Unable to unlock chat."));
+    } finally {
+      setLockingBusy(false);
+    }
+  }, [chatLockMode]);
+
   useFocusEffect(
     useCallback(() => {
       if (currentConversationId) {
@@ -812,6 +874,28 @@ const ChatScreen = ({ navigation, route }: any) => {
         });
       }
     }, [currentConversationId, fetchConversationMeta, fetchMessages, initializeChat])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isGroupConversation || !userId) {
+        return undefined;
+      }
+
+      fetchUser().catch((error) => {
+        console.log("presence refresh error:", error);
+      });
+
+      const presenceTimer = setInterval(() => {
+        fetchUser().catch((error) => {
+          console.log("presence refresh error:", error);
+        });
+      }, 20000);
+
+      return () => {
+        clearInterval(presenceTimer);
+      };
+    }, [fetchUser, isGroupConversation, userId]),
   );
 
   useEffect(() => {
@@ -883,6 +967,21 @@ const ChatScreen = ({ navigation, route }: any) => {
       setChatWallpaper(String(data?.wallpaperUrl || ""));
     };
 
+    const handlePresenceUpdate = (data: any) => {
+      const nextUserId = String(data?.userId || "");
+      if (!nextUserId || nextUserId !== String(userId || "")) {
+        return;
+      }
+
+      setUser((prev) => prev ? {
+        ...prev,
+        isOnline: Boolean(data?.isOnline),
+        lastSeenAt: String(data?.lastSeenAt || prev?.lastSeenAt || ""),
+        availabilityStatus: String(data?.availabilityStatus || prev?.availabilityStatus || ""),
+      } : prev);
+      setIsPeerOnline(Boolean(data?.isOnline));
+    };
+
     socket.on("receiveMessage", handleReceiveMessage);
     socket.on("typing", handleTyping);
     socket.on("stopTyping", handleStopTyping);
@@ -891,6 +990,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     socket.on("messageEdited", handleMessageEdited);
     socket.on("chatThemeChanged", handleChatThemeChanged);
     socket.on("chatWallpaperChanged", handleChatWallpaperChanged);
+    socket.on("presence:update", handlePresenceUpdate);
 
     return () => {
       socket.off("receiveMessage", handleReceiveMessage);
@@ -901,6 +1001,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       socket.off("messageEdited", handleMessageEdited);
       socket.off("chatThemeChanged", handleChatThemeChanged);
       socket.off("chatWallpaperChanged", handleChatWallpaperChanged);
+      socket.off("presence:update", handlePresenceUpdate);
     };
   }, [
     applyMessageReaction,
@@ -908,6 +1009,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     currentConversationId,
     currentUserId,
     mergeMessage,
+    userId,
     user?.availabilityStatus,
     user?.isOnline,
   ]);
@@ -1002,12 +1104,16 @@ const ChatScreen = ({ navigation, route }: any) => {
       return "Typing...";
     }
 
-    if (isDirectActive) {
+    if (String(user?.availabilityStatus || "").trim().toLowerCase() === "away") {
+      return "Away";
+    }
+
+    if (isDirectActive || String(user?.availabilityStatus || "").trim().toLowerCase() === "active") {
       return "Active now";
     }
 
     return formatLastSeenStatus(user?.lastSeenAt);
-  }, [isDirectActive, typingUserId, user?.lastSeenAt]);
+  }, [isDirectActive, typingUserId, user?.availabilityStatus, user?.lastSeenAt]);
 
   const groupPresenceText = useMemo(() => {
     if (typingUserId) {
@@ -1668,12 +1774,21 @@ const ChatScreen = ({ navigation, route }: any) => {
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isMine = String(getMessageSenderId(item)) === String(currentUserId || "");
     const isSystemMessage = String(item?.messageType || "") === "system";
+    const senderId = String(getMessageSenderId(item) || "");
+    const senderInfo = typeof item?.sender === "object" ? item.sender : null;
+    const senderDisplayName = String(
+      senderInfo?.username
+      || senderInfo?.name
+      || "Aline2 user"
+    ).trim() || "Aline2 user";
+    const showGroupSender = isGroupConversation && !isMine && !isSystemMessage;
     const attachment: MessageAttachment | null = getMessageAttachment(item);
     const textValue = getMessageText(item);
     const sharedContent = parseSharedContentMessage(item);
     const callEvent = buildCallEventPreview(item, currentUserId);
     const sharedMedia = Array.isArray(sharedContent?.media) ? sharedContent.media[0] : null;
     const locationPayload = parseLocationMessage(textValue);
+    const linkPreview = item?.linkPreview || null;
     const seenCount = Array.isArray(item?.seenBy) ? item.seenBy.length : 0;
     const reactions = Array.isArray(item?.reactions) ? item.reactions : [];
     const repliedMessage = getMessageReply(item) as ChatMessage | null;
@@ -1718,20 +1833,46 @@ const ChatScreen = ({ navigation, route }: any) => {
             isMine ? { justifyContent: "flex-end" } : { justifyContent: "flex-start" }
           ]}
         >
-          <TouchableOpacity
-            activeOpacity={isSystemMessage ? 1 : 0.92}
-            onPress={isSystemMessage ? undefined : () => handleMessagePress(item, attachment, locationPayload)}
-            onLongPress={isSystemMessage ? undefined : () => {
-              setContextMessage(item);
-              setShowContextMenu(true);
-            }}
-            style={[
-              styles.messageBubble,
-              sharedContent?.kind === "post" || callEvent ? styles.messageBubbleWide : null,
-              isMine ? [styles.myMessage, { backgroundColor: primaryThemeColor }] : styles.otherMessage,
-              isHighlighted ? styles.messageBubbleHighlighted : null,
-            ]}
-          >
+          {showGroupSender ? (
+            <TouchableOpacity
+              activeOpacity={0.86}
+              style={styles.groupSenderAvatarWrap}
+              onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: senderId })}
+            >
+              <Image
+                source={{ uri: normalizeMediaUrl(senderInfo?.profilePic || DEFAULT_AVATAR_URL) }}
+                style={styles.groupSenderAvatar}
+              />
+            </TouchableOpacity>
+          ) : null}
+
+          <View style={showGroupSender ? styles.groupMessageColumn : undefined}>
+            {showGroupSender ? (
+              <TouchableOpacity
+                activeOpacity={0.86}
+                onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: senderId })}
+              >
+                <Text style={[styles.groupSenderName, { color: primaryThemeColor }]} numberOfLines={1}>
+                  {senderDisplayName}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity
+              activeOpacity={isSystemMessage ? 1 : 0.92}
+              onPress={isSystemMessage ? undefined : () => handleMessagePress(item, attachment, locationPayload)}
+              onLongPress={isSystemMessage ? undefined : () => {
+                setContextMessage(item);
+                setShowContextMenu(true);
+              }}
+              style={[
+                styles.messageBubble,
+                showGroupSender ? styles.groupMessageBubble : null,
+                sharedContent?.kind === "post" || callEvent ? styles.messageBubbleWide : null,
+                isMine ? [styles.myMessage, { backgroundColor: primaryThemeColor }] : styles.otherMessage,
+                isHighlighted ? styles.messageBubbleHighlighted : null,
+              ]}
+            >
             {replyPreview ? (
               <TouchableOpacity
                 activeOpacity={0.82}
@@ -1863,6 +2004,18 @@ const ChatScreen = ({ navigation, route }: any) => {
               </Text>
             )}
 
+            {!locationPayload && !sharedContent && !callEvent && linkPreview?.url ? (
+              <MessageLinkPreview
+                preview={linkPreview}
+                isMine={isMine}
+                onPress={() => {
+                  Linking.openURL(String(linkPreview.url)).catch((error) => {
+                    console.log("link preview open error:", error);
+                  });
+                }}
+              />
+            ) : null}
+
             {locationPayload ? (
               <TouchableOpacity
                 activeOpacity={0.85}
@@ -1906,7 +2059,8 @@ const ChatScreen = ({ navigation, route }: any) => {
                 <Icon name={messageStatusIcon} size={13} color={messageStatusIconColor} />
               </View>
             ) : null}
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </View>
         </View>
       </Swipeable>
     );
@@ -1927,7 +2081,15 @@ const ChatScreen = ({ navigation, route }: any) => {
           <TouchableOpacity
             style={styles.userInfo}
             activeOpacity={0.8}
-            onPress={() => navigation.navigate("GroupDetailsScreen", { conversationId: currentConversationId })}
+            onPress={() => navigation.navigate("GroupDetailsScreen", {
+              conversationId: currentConversationId,
+              conversationSnapshot: groupConversation || {
+                _id: currentConversationId,
+                groupName: groupMeta.groupName,
+                groupAvatar: groupMeta.groupAvatar,
+                memberCount: groupMeta.memberCount,
+              },
+            })}
           >
             {groupMeta.groupAvatar ? (
               <Image
@@ -2002,7 +2164,15 @@ const ChatScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.headerActionButton}
-                onPress={() => navigation.navigate("GroupDetailsScreen", { conversationId: currentConversationId })}
+                onPress={() => navigation.navigate("GroupDetailsScreen", {
+                  conversationId: currentConversationId,
+                  conversationSnapshot: groupConversation || {
+                    _id: currentConversationId,
+                    groupName: groupMeta.groupName,
+                    groupAvatar: groupMeta.groupAvatar,
+                    memberCount: groupMeta.memberCount,
+                  },
+                })}
               >
                 <Icon name="ellipsis-horizontal" size={20} color={headerIconColor} />
               </TouchableOpacity>
@@ -2430,6 +2600,36 @@ const ChatScreen = ({ navigation, route }: any) => {
           )}
         </View>
       </KeyboardAvoidingView>
+
+      {isConversationLockedState ? (
+        <View style={styles.lockedChatOverlay}>
+          <View style={[styles.lockedChatCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Icon name="lock-closed-outline" size={26} color={colors.primary} />
+            <Text style={[styles.lockedChatTitle, { color: colors.text }]}>Chat locked</Text>
+            <Text style={[styles.lockedChatText, { color: colors.mutedText }]}>
+              Yeh conversation lock hai. Passcode dal kar messages khol sakte ho.
+            </Text>
+            <TouchableOpacity
+              style={[styles.lockedChatButton, { backgroundColor: colors.primary }]}
+              onPress={async () => {
+                const hasPasscode = await hasChatLockPasscode();
+                setChatLockMode(hasPasscode ? "unlock" : "setup");
+                setChatLockModalVisible(true);
+              }}
+            >
+              <Text style={styles.lockedChatButtonText}>Unlock chat</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+
+      <ChatLockModal
+        visible={chatLockModalVisible}
+        mode={chatLockMode}
+        busy={lockingBusy}
+        onClose={() => setChatLockModalVisible(false)}
+        onSubmit={submitChatLockPasscode}
+      />
     </SafeAreaView>
   );
 };
@@ -2442,6 +2642,44 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "#fff"
+  },
+  lockedChatOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(15,23,42,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  lockedChatCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 24,
+    borderWidth: 1,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    alignItems: "center",
+  },
+  lockedChatTitle: {
+    marginTop: 12,
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  lockedChatText: {
+    marginTop: 8,
+    fontSize: 13.5,
+    lineHeight: 19,
+    textAlign: "center",
+  },
+  lockedChatButton: {
+    marginTop: 16,
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+  },
+  lockedChatButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
   },
   flexFill: {
     flex: 1,
@@ -2566,6 +2804,25 @@ const styles = StyleSheet.create({
     width: "100%",
     marginVertical: 4
   },
+  groupSenderAvatarWrap: {
+    marginRight: 8,
+    alignSelf: "flex-end",
+  },
+  groupSenderAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  groupMessageColumn: {
+    maxWidth: "82%",
+    flexShrink: 1,
+  },
+  groupSenderName: {
+    marginBottom: 5,
+    marginLeft: 2,
+    fontSize: 12,
+    fontWeight: "700",
+  },
   swipeReplyAction: {
     alignSelf: "center",
     flexDirection: "row",
@@ -2592,6 +2849,9 @@ const styles = StyleSheet.create({
     maxWidth: "80%",
     minWidth: 86,
     flexShrink: 1,
+  },
+  groupMessageBubble: {
+    maxWidth: "100%",
   },
   messageBubbleWide: {
     maxWidth: "92%",

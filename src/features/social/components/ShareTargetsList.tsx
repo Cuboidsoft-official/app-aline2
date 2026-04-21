@@ -17,6 +17,7 @@ import { getStoredUserId } from "../../../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../../../constants/defaultAssets";
 import { shouldShowVerifiedBadge } from "../../../utils/verificationBadges";
 import { normalizeMediaUrl } from "../../../utils/mediaUrls";
+import { useAppTheme } from "../../../theme/AppThemeContext";
 
 export interface ShareTarget {
   id: string;
@@ -39,6 +40,7 @@ function ShareTargetsList({
   title = "Send to",
   scrollEnabled = true,
 }: ShareTargetsListProps) {
+  const { colors } = useAppTheme();
   const [targets, setTargets] = useState<ShareTarget[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -116,20 +118,20 @@ function ShareTargetsList({
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{title}</Text>
-      <View style={styles.searchWrap}>
-        <Icon name="search" size={16} color="#6b7280" />
+      <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+      <View style={[styles.searchWrap, { borderColor: colors.border, backgroundColor: colors.card }]}>
+        <Icon name="search" size={16} color={colors.mutedText} />
         <TextInput
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholder="Search people"
-          placeholderTextColor="#9ca3af"
-          style={styles.searchInput}
+          placeholderTextColor={colors.placeholder}
+          style={[styles.searchInput, { color: colors.text }]}
         />
       </View>
       {loading ? (
         <View style={styles.loadingWrap}>
-          <ActivityIndicator size="small" color="#111827" />
+          <ActivityIndicator size="small" color={colors.text} />
         </View>
       ) : null}
       <FlatList
@@ -140,7 +142,7 @@ function ShareTargetsList({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         numColumns={4}
-        ListEmptyComponent={emptyMessage ? <Text style={styles.emptyText}>{emptyMessage}</Text> : null}
+        ListEmptyComponent={emptyMessage ? <Text style={[styles.emptyText, { color: colors.mutedText }]}>{emptyMessage}</Text> : null}
         renderItem={({ item }) => (
           <TouchableOpacity style={styles.card} activeOpacity={0.86} onPress={() => onToggleTarget(item)}>
             <View style={styles.avatarWrap}>
@@ -158,12 +160,12 @@ function ShareTargetsList({
               </View>
             </View>
             <View style={styles.nameRow}>
-              <Text style={styles.name} numberOfLines={1}>
+              <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
                 {item.name}
               </Text>
               {item.isVerified ? <Icon name="checkmark-circle" size={12} color="#2563eb" /> : null}
             </View>
-            <Text style={styles.username} numberOfLines={1}>
+            <Text style={[styles.username, { color: colors.mutedText }]} numberOfLines={1}>
               @{item.username}
             </Text>
           </TouchableOpacity>
@@ -175,13 +177,11 @@ function ShareTargetsList({
 
 const styles = StyleSheet.create({
   container: { paddingTop: 12 },
-  title: { color: "#111827", fontWeight: "700", fontSize: 13, marginBottom: 10 },
+  title: { fontWeight: "700", fontSize: 13, marginBottom: 10 },
   searchWrap: {
     height: 42,
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#d1d5db",
-    backgroundColor: "#f9fafb",
     paddingHorizontal: 12,
     marginBottom: 12,
     flexDirection: "row",
@@ -190,7 +190,6 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     marginLeft: 8,
-    color: "#111827",
     fontSize: 14,
     paddingVertical: 0,
   },
@@ -218,8 +217,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
     maxWidth: "100%",
   },
-  name: { color: "#111827", fontWeight: "700", fontSize: 12.5, marginRight: 4, maxWidth: "86%" },
-  username: { marginTop: 2, color: "#6b7280", fontSize: 11.5, textAlign: "center", maxWidth: "100%" },
+  name: { fontWeight: "700", fontSize: 12.5, marginRight: 4, maxWidth: "86%" },
+  username: { marginTop: 2, fontSize: 11.5, textAlign: "center", maxWidth: "100%" },
   checkCircle: {
     width: 20,
     height: 20,

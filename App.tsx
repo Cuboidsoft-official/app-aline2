@@ -65,7 +65,7 @@ import AppAlertProvider from './src/components/AppAlertProvider';
 import { callingDisabledMessage, productFlags } from './src/config/productFlags';
 import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
 import { installReadableUiDefaults } from './src/theme/readability';
-import { connectSocket, disconnectSocket, socket } from './src/socket';
+import { connectSocket, disconnectSocket, socket, updateSocketPresence } from './src/socket';
 import { Alert } from './src/utils/appAlert';
 import { getStoredToken, setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
 import { registerPushToken, setupNotificationListeners } from './src/utils/pushRegistration';
@@ -239,11 +239,16 @@ function AppNavigator() {
     syncSocketConnection();
     const unsubscribe = subscribeSessionChanges(syncSocketConnection);
     const appStateSubscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState !== "active") {
+      if (nextState === "active") {
+        syncSocketConnection();
+        updateSocketPresence("active");
         return;
       }
 
-      syncSocketConnection();
+      if (nextState === "background" || nextState === "inactive") {
+        updateSocketPresence("away");
+        return;
+      }
     });
 
     return () => {

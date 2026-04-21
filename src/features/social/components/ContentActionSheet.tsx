@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +15,8 @@ import { socialApi } from "../socialApi";
 import { ContentKind, ReportReason } from "../types";
 import { toUserSafeMessage } from "../validation";
 import { getStoredUserId } from "../../../utils/authSession";
+import { useAppTheme } from "../../../theme/AppThemeContext";
+import DraggableBottomSheet from "../../../components/DraggableBottomSheet";
 
 const reportReasons: ReportReason[] = [
   "spam",
@@ -51,6 +51,7 @@ function ContentActionSheet({
   onClose,
   onActionComplete,
 }: ContentActionSheetProps) {
+  const { colors } = useAppTheme();
   const [note, setNote] = useState("");
   const [selectedReason, setSelectedReason] = useState<ReportReason>("spam");
   const [busyAction, setBusyAction] = useState<ActionKind | null>(null);
@@ -107,142 +108,125 @@ function ContentActionSheet({
   const canModerateUser = Boolean(userId);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={styles.sheetWrap}>
-        <View style={styles.handle} />
-        <ScrollView style={styles.sheetContent} contentContainerStyle={styles.sheetContentInner}>
-          <View style={styles.header}>
-            <Text style={styles.title}>{displayTitle}</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Icon name="close" size={20} color="#111" />
-            </TouchableOpacity>
-          </View>
+    <DraggableBottomSheet visible={visible} onClose={onClose} snapPoints={[0.44, 0.7, 0.88]}>
+      <ScrollView style={styles.sheetContent} contentContainerStyle={styles.sheetContentInner}>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.text }]}>{displayTitle}</Text>
+          <TouchableOpacity onPress={onClose}>
+            <Icon name="close" size={20} color={colors.text} />
+          </TouchableOpacity>
+        </View>
 
-          {isOwner && contentType === "post" ? (
+        {isOwner && contentType === "post" ? (
+          <TouchableOpacity
+            style={[styles.actionRow, { borderColor: colors.border }]}
+            disabled={!!busyAction}
+            onPress={() => runAction("archive", () => socialApi.archivePost(contentId))}
+          >
+            <Icon name="archive-outline" size={20} color={colors.text} />
+            <Text style={[styles.actionText, { color: colors.text }]}>Archive post</Text>
+            {busyAction === "archive" ? <ActivityIndicator size="small" color={colors.text} /> : null}
+          </TouchableOpacity>
+        ) : (
+          <>
             <TouchableOpacity
-              style={styles.actionRow}
+              style={[styles.actionRow, { borderColor: colors.border }]}
               disabled={!!busyAction}
-              onPress={() => runAction("archive", () => socialApi.archivePost(contentId))}
+              onPress={() => runAction("not_interested", () => socialApi.markNotInterested(contentType, contentId))}
             >
-              <Icon name="archive-outline" size={20} color="#111" />
-              <Text style={styles.actionText}>Archive post</Text>
-              {busyAction === "archive" ? <ActivityIndicator size="small" color="#111" /> : null}
+              <Icon name="eye-off-outline" size={20} color={colors.text} />
+              <Text style={[styles.actionText, { color: colors.text }]}>Not interested</Text>
+              {busyAction === "not_interested" ? <ActivityIndicator size="small" color={colors.text} /> : null}
             </TouchableOpacity>
-          ) : (
-            <>
-              <TouchableOpacity
-                style={styles.actionRow}
-                disabled={!!busyAction}
-                onPress={() => runAction("not_interested", () => socialApi.markNotInterested(contentType, contentId))}
-              >
-                <Icon name="eye-off-outline" size={20} color="#111" />
-                <Text style={styles.actionText}>Not interested</Text>
-                {busyAction === "not_interested" ? <ActivityIndicator size="small" color="#111" /> : null}
-              </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.actionRow}
-                disabled={!!busyAction || !canModerateUser}
-                onPress={() => {
-                  if (!userId) {
-                    return;
-                  }
-                  runAction("mute", () => socialApi.muteUser(userId));
-                }}
-              >
-                <Icon name="volume-mute-outline" size={20} color="#111" />
-                <Text style={styles.actionText}>Mute {userLabel ? `@${userLabel}` : "user"}</Text>
-                {busyAction === "mute" ? <ActivityIndicator size="small" color="#111" /> : null}
-              </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionRow, { borderColor: colors.border }]}
+              disabled={!!busyAction || !canModerateUser}
+              onPress={() => {
+                if (!userId) {
+                  return;
+                }
+                runAction("mute", () => socialApi.muteUser(userId));
+              }}
+            >
+              <Icon name="volume-mute-outline" size={20} color={colors.text} />
+              <Text style={[styles.actionText, { color: colors.text }]}>Mute {userLabel ? `@${userLabel}` : "user"}</Text>
+              {busyAction === "mute" ? <ActivityIndicator size="small" color={colors.text} /> : null}
+            </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.actionRow}
-                disabled={!!busyAction || !canModerateUser}
-                onPress={() => {
-                  if (!userId) {
-                    return;
-                  }
-                  runAction("block", () => socialApi.blockUser(userId));
-                }}
-              >
-                <Icon name="ban-outline" size={20} color="#b91c1c" />
-                <Text style={[styles.actionText, styles.dangerText]}>Block {userLabel ? `@${userLabel}` : "user"}</Text>
-                {busyAction === "block" ? <ActivityIndicator size="small" color="#b91c1c" /> : null}
-              </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionRow, { borderColor: colors.border }]}
+              disabled={!!busyAction || !canModerateUser}
+              onPress={() => {
+                if (!userId) {
+                  return;
+                }
+                runAction("block", () => socialApi.blockUser(userId));
+              }}
+            >
+              <Icon name="ban-outline" size={20} color="#b91c1c" />
+              <Text style={[styles.actionText, styles.dangerText]}>Block {userLabel ? `@${userLabel}` : "user"}</Text>
+              {busyAction === "block" ? <ActivityIndicator size="small" color="#b91c1c" /> : null}
+            </TouchableOpacity>
 
-              {!canModerateUser ? (
-                <Text style={styles.helperText}>
-                  User moderation options are unavailable for this item until its owner details finish syncing.
-                </Text>
-              ) : null}
+            {!canModerateUser ? (
+              <Text style={[styles.helperText, { color: colors.mutedText }]}>
+                User moderation options are unavailable for this item until its owner details finish syncing.
+              </Text>
+            ) : null}
 
-              <Text style={styles.reportTitle}>Report {contentType}</Text>
-              <View style={styles.reasonWrap}>
-                {reportReasons.map((reason) => (
+            <Text style={[styles.reportTitle, { color: colors.text }]}>Report {contentType}</Text>
+            <View style={styles.reasonWrap}>
+              {reportReasons.map((reason) => {
+                const selected = selectedReason === reason;
+
+                return (
                   <TouchableOpacity
                     key={reason}
-                    style={[styles.reasonPill, selectedReason === reason && styles.reasonPillSelected]}
+                    style={[
+                      styles.reasonPill,
+                      { borderColor: colors.border, backgroundColor: colors.surface },
+                      selected && { borderColor: colors.primary, backgroundColor: `${colors.primary}18` },
+                    ]}
                     disabled={!!busyAction}
                     onPress={() => setSelectedReason(reason)}
                   >
-                    <Text style={[styles.reasonText, selectedReason === reason && styles.reasonTextSelected]}>
+                    <Text style={[styles.reasonText, { color: selected ? colors.primary : colors.mutedText }, selected && styles.reasonTextSelected]}>
                       {reason.replace("_", " ")}
                     </Text>
                   </TouchableOpacity>
-                ))}
-              </View>
+                );
+              })}
+            </View>
 
-              <TextInput
-                style={styles.noteInput}
-                placeholder="Additional context (optional)"
-                placeholderTextColor="#8a8a8a"
-                value={note}
-                onChangeText={setNote}
-                editable={!busyAction}
-                multiline
-                maxLength={500}
-              />
+            <TextInput
+              style={[styles.noteInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+              placeholder="Additional context (optional)"
+              placeholderTextColor={colors.placeholder}
+              value={note}
+              onChangeText={setNote}
+              editable={!busyAction}
+              multiline
+              maxLength={500}
+            />
 
-              <TouchableOpacity
-                style={[styles.reportButton, !!busyAction && styles.reportButtonDisabled]}
-                disabled={!!busyAction}
-                onPress={() =>
-                  runAction("report", () => socialApi.reportContent(contentType, contentId, selectedReason, note))
-                }
-              >
-                <Text style={styles.reportButtonText}>Submit report</Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </ScrollView>
-      </View>
-    </Modal>
+            <TouchableOpacity
+              style={[styles.reportButton, { backgroundColor: colors.primary }, !!busyAction && styles.reportButtonDisabled]}
+              disabled={!!busyAction}
+              onPress={() =>
+                runAction("report", () => socialApi.reportContent(contentType, contentId, selectedReason, note))
+              }
+            >
+              <Text style={styles.reportButtonText}>Submit report</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </ScrollView>
+    </DraggableBottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  sheetWrap: {
-    marginTop: "auto",
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    minHeight: 360,
-    maxHeight: "82%",
-    paddingTop: 10,
-  },
-  handle: {
-    alignSelf: "center",
-    width: 44,
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: "#d1d5db",
-    marginBottom: 10,
-  },
   sheetContent: { flex: 1 },
   sheetContentInner: { paddingHorizontal: 16, paddingBottom: 24 },
   header: {
@@ -251,46 +235,40 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingBottom: 12,
   },
-  title: { fontSize: 18, fontWeight: "800", color: "#111827" },
+  title: { fontSize: 18, fontWeight: "800" },
   actionRow: {
     minHeight: 52,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
     flexDirection: "row",
     alignItems: "center",
   },
-  actionText: { marginLeft: 12, marginRight: "auto", color: "#111827", fontWeight: "600", fontSize: 14 },
+  actionText: { marginLeft: 12, marginRight: "auto", fontWeight: "600", fontSize: 14 },
   dangerText: { color: "#b91c1c" },
-  helperText: { marginTop: 8, color: "#6b7280", fontSize: 13, lineHeight: 18 },
-  reportTitle: { marginTop: 16, marginBottom: 10, color: "#111827", fontWeight: "800" },
+  helperText: { marginTop: 8, fontSize: 13, lineHeight: 18 },
+  reportTitle: { marginTop: 16, marginBottom: 10, fontWeight: "800" },
   reasonWrap: { flexDirection: "row", flexWrap: "wrap" },
   reasonPill: {
     borderWidth: 1,
-    borderColor: "#d1d5db",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
     marginRight: 8,
     marginBottom: 8,
   },
-  reasonPillSelected: { borderColor: "#3345d1", backgroundColor: "#eef2ff" },
-  reasonText: { color: "#4b5563", fontSize: 12.5 },
-  reasonTextSelected: { color: "#3345d1", fontWeight: "700" },
+  reasonText: { fontSize: 12.5 },
+  reasonTextSelected: { fontWeight: "700" },
   noteInput: {
     minHeight: 90,
     borderWidth: 1,
-    borderColor: "#d1d5db",
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     textAlignVertical: "top",
-    color: "#111827",
   },
   reportButton: {
     marginTop: 12,
     height: 46,
     borderRadius: 12,
-    backgroundColor: "#111827",
     justifyContent: "center",
     alignItems: "center",
   },

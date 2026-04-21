@@ -30,7 +30,12 @@ import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getStoredUser } from "../utils/authSession";
-import { startCallRingtone, stopCallRingtone } from "../utils/callAudio";
+import {
+  resetCallAudioRoute,
+  setCallSpeakerEnabled,
+  startCallRingtone,
+  stopCallRingtone,
+} from "../utils/callAudio";
 import { ensureCameraPermission, ensureMicrophonePermission } from "../utils/permissions";
 
 const TERMINAL_STATUSES = new Set(["rejected", "ended", "cancelled", "missed", "failed"]);
@@ -174,6 +179,7 @@ const CallScreen = ({ navigation, route }: any) => {
   const [remoteStreams, setRemoteStreams] = useState<RemoteStreamEntry[]>([]);
   const [microphoneEnabled, setMicrophoneEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(String(route.params?.callType || "audio") === "video");
+  const [speakerEnabled, setSpeakerEnabledState] = useState(String(route.params?.callType || "audio") === "video");
 
   const callSessionRef = useRef<any>(initialCallSession);
   const closingRef = useRef(false);
@@ -774,6 +780,7 @@ const CallScreen = ({ navigation, route }: any) => {
     }
 
     stopCallRingtone().catch(() => {});
+    resetCallAudioRoute().catch(() => {});
     ringtoneActiveRef.current = false;
     joinedCallRoomRef.current = false;
     cleanupAllPeers();
@@ -833,6 +840,30 @@ const CallScreen = ({ navigation, route }: any) => {
       track.enabled = cameraEnabled;
     });
   }, [cameraEnabled]);
+
+  useEffect(() => {
+    let active = true;
+
+    const syncAudioRoute = async () => {
+      if (!shouldEnterMediaRoom) {
+        await resetCallAudioRoute();
+        return;
+      }
+
+      const didApply = await setCallSpeakerEnabled(speakerEnabled);
+      if (active && !didApply) {
+        console.log("call speaker route unavailable");
+      }
+    };
+
+    syncAudioRoute().catch((error) => {
+      console.log("call speaker sync error", error);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [shouldEnterMediaRoom, speakerEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1057,6 +1088,10 @@ const CallScreen = ({ navigation, route }: any) => {
     setCameraEnabled((prev) => !prev);
   }, [effectiveCallType]);
 
+  const toggleSpeaker = useCallback(() => {
+    setSpeakerEnabledState((prev) => !prev);
+  }, []);
+
   const renderParticipantPlaceholder = useCallback(
     (name: string, avatarSource: string, subtitle: string) => (
       <View style={styles.placeholderStage}>
@@ -1159,6 +1194,13 @@ const CallScreen = ({ navigation, route }: any) => {
                 <Icon name={microphoneEnabled ? "mic" : "mic-off"} size={22} color="#fff" />
               </TouchableOpacity>
 
+              <TouchableOpacity
+                style={[styles.callButton, speakerEnabled ? styles.secondaryButton : styles.disabledButton]}
+                onPress={toggleSpeaker}
+              >
+                <Icon name={speakerEnabled ? "volume-high" : "volume-medium"} size={22} color="#fff" />
+              </TouchableOpacity>
+
               {effectiveCallType === "video" ? (
                 <TouchableOpacity
                   style={[styles.callButton, cameraEnabled ? styles.secondaryButton : styles.disabledButton]}
@@ -1215,6 +1257,12 @@ const CallScreen = ({ navigation, route }: any) => {
               </View>
             ) : (
               <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[styles.callButton, speakerEnabled ? styles.secondaryButton : styles.disabledButton]}
+                  onPress={toggleSpeaker}
+                >
+                  <Icon name={speakerEnabled ? "volume-high" : "volume-medium"} size={22} color="#fff" />
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.callButton, styles.endButton]}
                   onPress={handleHangUp}

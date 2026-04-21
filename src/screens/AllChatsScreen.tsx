@@ -6,6 +6,7 @@ import {
   FlatList,
   Image,
   TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   RefreshControl,
   Modal,
@@ -19,12 +20,28 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import Icon from "react-native-vector-icons/Ionicons";
 import { getStoredUserId } from "../utils/authSession";
-import { createChatConversation, createGroupChatConversation, fetchChatConversations, forwardChatMessage } from "../utils/chatApi";
+import {
+  createChatConversation,
+  createGroupChatConversation,
+  fetchChatConversations,
+  fetchPublicGroupChatConversations,
+  forwardChatMessage,
+  joinPublicGroupChatConversation,
+} from "../utils/chatApi";
 import { getConversationPreview } from "../utils/chatPresentation";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { connectSocket, socket } from "../socket";
 import AISupportSheet from "../components/chat/AISupportSheet";
+import ChatLockModal from "../components/chat/ChatLockModal";
+import {
+  getLockedConversationIds,
+  hasChatLockPasscode,
+  setChatLockPasscode,
+  setConversationLocked,
+  verifyChatLockPasscode,
+} from "../utils/chatSecurity";
+import { getMutedConversationIds, setConversationMuted } from "../utils/chatMute";
 
 interface ChatUser {
   _id: string;
@@ -33,6 +50,9 @@ interface ChatUser {
   profilePic?: string;
   sellerProfile?: string;
   category?: string;
+  isOnline?: boolean;
+  lastSeenAt?: string;
+  availabilityStatus?: string;
 }
 
 interface SellerServiceSummary {
@@ -54,12 +74,15 @@ interface Conversation {
   members?: ChatUser[];
   groupName?: string | null;
   groupAvatar?: string | null;
+  groupDescription?: string | null;
+  groupVisibility?: "private" | "public";
   memberCount?: number;
   updatedAt?: string;
   lastMessageTime?: string;
   lastMessageText?: string;
   lastMessageType?: string;
   unreadCount?: number;
+  isJoined?: boolean;
 }
 
 interface ForwardTarget {
@@ -71,6 +94,7 @@ interface ForwardTarget {
 }
 
 type ChatTab = "regular" | "seller" | "group";
+const MAX_GROUP_MEMBERS = 100;
 
 const formatConversationTime = (value?: string) => {
   if (!value) {
@@ -111,8 +135,22 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   const [groupModalVisible, setGroupModalVisible] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
+  const [groupVisibility, setGroupVisibility] = useState<"private" | "public">("private");
+  const [groupDescription, setGroupDescription] = useState("");
   const [creatingGroup, setCreatingGroup] = useState(false);
-  const [eligibleGroupMemberIds, setEligibleGroupMemberIds] = useState<string[]>([]);
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [publicGroupsVisible, setPublicGroupsVisible] = useState(false);
+  const [publicGroups, setPublicGroups] = useState<Conversation[]>([]);
+  const [loadingPublicGroups, setLoadingPublicGroups] = useState(false);
+  const [lockedConversationIds, setLockedConversationIds] = useState<string[]>([]);
+  const [mutedConversationIds, setMutedConversationIds] = useState<string[]>([]);
+  const [chatLockModalVisible, setChatLockModalVisible] = useState(false);
+  const [chatLockMode, setChatLockMode] = useState<"unlock" | "setup">("unlock");
+  const [pendingLockedTarget, setPendingLockedTarget] = useState<(() => void) | null>(null);
+  const [pendingLockChange, setPendingLockChange] = useState<{ conversationId: string; locked: boolean } | null>(null);
+  const [lockingBusy, setLockingBusy] = useState(false);
+  const [groupActionsVisible, setGroupActionsVisible] = useState(false);
+  const [activeGroupConversation, setActiveGroupConversation] = useState<Conversation | null>(null);
   const [selectedForwardTargets, setSelectedForwardTargets] = useState<Record<string, ForwardTarget>>({});
   const [forwarding, setForwarding] = useState(false);
   const [showAssistant, setShowAssistant] = useState(false);
@@ -158,20 +196,16 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         fetchChatConversations({ conversationType }),
       ]);
 
-      const profileRes = await API.get("/auth/profile");
-      const me = profileRes?.data?.user || {};
-      const followingIds = new Set((Array.isArray(me?.following) ? me.following : []).map((entry: any) => String(entry || "")));
-      const followerIds = new Set((Array.isArray(me?.followers) ? me.followers : []).map((entry: any) => String(entry || "")));
-
       const fetchedUsers = ((usersRes?.data?.users || []) as ChatUser[]).filter(
         (user: ChatUser) => user?._id !== currentUserId
       );
-      const mutualIds = fetchedUsers
-        .map((user) => String(user?._id || ""))
-        .filter((id) => id && followingIds.has(id) && followerIds.has(id));
 
-      setUsers(fetchedUsers);
-      setEligibleGroupMemberIds(mutualIds);
+      setUsers(
+        [...fetchedUsers].sort((left, right) =>
+          String(left?.username || left?.name || "").localeCompare(String(right?.username || right?.name || ""))
+        )
+      );
+      setCurrentUserId(currentUserId || "");
       setConversations((conversationsRes?.conversations || []) as Conversation[]);
       setErrorMessage("");
     } catch (error) {
@@ -188,16 +222,75 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     }
   }, [activeTab]);
 
-  const eligibleGroupUsers = useMemo(() => {
-    const eligibleSet = new Set(eligibleGroupMemberIds);
-    return users.filter((user) => eligibleSet.has(String(user?._id || "")));
-  }, [eligibleGroupMemberIds, users]);
+  const loadLockedChats = useCallback(async (userIdOverride?: string) => {
+    const resolvedUserId = String(userIdOverride || currentUserId || "").trim();
+    if (!resolvedUserId) {
+      setLockedConversationIds([]);
+      return;
+    }
+
+    const lockedIds = await getLockedConversationIds(resolvedUserId);
+    setLockedConversationIds(lockedIds);
+  }, [currentUserId]);
+
+  const loadMutedChats = useCallback(async (userIdOverride?: string) => {
+    const resolvedUserId = String(userIdOverride || currentUserId || "").trim();
+    if (!resolvedUserId) {
+      setMutedConversationIds([]);
+      return;
+    }
+
+    const mutedIds = await getMutedConversationIds(resolvedUserId);
+    setMutedConversationIds(mutedIds);
+  }, [currentUserId]);
+
+  const loadPublicGroups = useCallback(async () => {
+    try {
+      setLoadingPublicGroups(true);
+      const response = await fetchPublicGroupChatConversations({ limit: 30 });
+      setPublicGroups((response?.groups || []) as Conversation[]);
+    } catch (error) {
+      console.log("public groups load error:", error);
+      Alert.alert("Unable to load public groups", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setLoadingPublicGroups(false);
+    }
+  }, []);
+
+  const eligibleGroupUsers = useMemo(() => users, [users]);
+  const remainingGroupSlots = Math.max(0, MAX_GROUP_MEMBERS - 1 - selectedGroupMembers.length);
 
   useFocusEffect(
     useCallback(() => {
       fetchChatData();
     }, [fetchChatData])
   );
+
+  useFocusEffect(
+    useCallback(() => {
+      loadLockedChats().catch((error) => {
+        console.log("locked chats load error:", error);
+      });
+    }, [loadLockedChats])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      loadMutedChats().catch((error) => {
+        console.log("muted chats load error:", error);
+      });
+    }, [loadMutedChats])
+  );
+
+  useEffect(() => {
+    if (activeTab !== "group" || !publicGroupsVisible) {
+      return;
+    }
+
+    loadPublicGroups().catch((error) => {
+      console.log("public groups effect error:", error);
+    });
+  }, [activeTab, loadPublicGroups, publicGroupsVisible]);
 
   useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -222,6 +315,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     socket.on("messageSeen", scheduleRefresh);
     socket.on("call:incoming", scheduleRefresh);
     socket.on("call:status", scheduleRefresh);
+    socket.on("presence:update", scheduleRefresh);
 
     return () => {
       if (refreshTimeout) {
@@ -232,6 +326,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       socket.off("messageSeen", scheduleRefresh);
       socket.off("call:incoming", scheduleRefresh);
       socket.off("call:status", scheduleRefresh);
+      socket.off("presence:update", scheduleRefresh);
     };
   }, [fetchChatData]);
 
@@ -299,15 +394,86 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   const closeGroupModal = useCallback(() => {
     setGroupModalVisible(false);
     setGroupName("");
+    setGroupDescription("");
+    setGroupVisibility("private");
     setSelectedGroupMembers([]);
   }, []);
 
+  const openLockedChat = useCallback(async (onUnlocked: () => void) => {
+    const hasPasscode = await hasChatLockPasscode();
+    setPendingLockChange(null);
+    setPendingLockedTarget(() => onUnlocked);
+    setChatLockMode(hasPasscode ? "unlock" : "setup");
+    setChatLockModalVisible(true);
+  }, []);
+
+  const closeGroupActions = useCallback(() => {
+    setGroupActionsVisible(false);
+    setActiveGroupConversation(null);
+  }, []);
+
+  const openGroupActions = useCallback((conversation: Conversation) => {
+    setActiveGroupConversation(conversation);
+    setGroupActionsVisible(true);
+  }, []);
+
+  const toggleActiveGroupMute = useCallback(async () => {
+    if (!activeGroupConversation?._id || !String(currentUserId || "").trim()) {
+      return;
+    }
+
+    const conversationId = String(activeGroupConversation._id);
+    const isMuted = mutedConversationIds.includes(conversationId);
+    const nextIds = await setConversationMuted(currentUserId, conversationId, !isMuted);
+    setMutedConversationIds(nextIds);
+    closeGroupActions();
+  }, [activeGroupConversation, closeGroupActions, currentUserId, mutedConversationIds]);
+
+  const requestActiveGroupLockToggle = useCallback(async () => {
+    if (!activeGroupConversation?._id || !String(currentUserId || "").trim()) {
+      return;
+    }
+
+    const conversationId = String(activeGroupConversation._id);
+    const isLocked = lockedConversationIds.includes(conversationId);
+
+    if (!isLocked) {
+      const hasPasscode = await hasChatLockPasscode();
+      if (!hasPasscode) {
+        setPendingLockedTarget(null);
+        setPendingLockChange({ conversationId, locked: true });
+        setChatLockMode("setup");
+        setChatLockModalVisible(true);
+        closeGroupActions();
+        return;
+      }
+
+      const nextIds = await setConversationLocked(currentUserId, conversationId, true);
+      setLockedConversationIds(nextIds);
+      closeGroupActions();
+      return;
+    }
+
+    setPendingLockedTarget(null);
+    setPendingLockChange({ conversationId, locked: false });
+    setChatLockMode("unlock");
+    setChatLockModalVisible(true);
+    closeGroupActions();
+  }, [activeGroupConversation, closeGroupActions, currentUserId, lockedConversationIds]);
+
   const toggleGroupMember = useCallback((memberId: string) => {
-    setSelectedGroupMembers((prev) =>
-      prev.includes(memberId)
-        ? prev.filter((entry) => entry !== memberId)
-        : [...prev, memberId]
-    );
+    setSelectedGroupMembers((prev) => {
+      if (prev.includes(memberId)) {
+        return prev.filter((entry) => entry !== memberId);
+      }
+
+      if (prev.length >= MAX_GROUP_MEMBERS - 1) {
+        Alert.alert("Group limit reached", `A group can have up to ${MAX_GROUP_MEMBERS} members.`);
+        return prev;
+      }
+
+      return [...prev, memberId];
+    });
   }, []);
 
   const createGroup = useCallback(async () => {
@@ -321,11 +487,18 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       return;
     }
 
+    if (selectedGroupMembers.length + 1 > MAX_GROUP_MEMBERS) {
+      setErrorMessage(`A group can have up to ${MAX_GROUP_MEMBERS} members.`);
+      return;
+    }
+
     try {
       setCreatingGroup(true);
       const response = await createGroupChatConversation({
         groupName: groupName.trim(),
         memberIds: selectedGroupMembers,
+        groupVisibility,
+        groupDescription: groupDescription.trim(),
       });
 
       const conversation = response?.conversation;
@@ -339,6 +512,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           groupName: conversation.groupName,
           groupAvatar: conversation.groupAvatar,
           memberCount: conversation.memberCount || conversation.members?.length || 0,
+          groupConversation: conversation,
         });
       }
     } catch (error) {
@@ -346,7 +520,53 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     } finally {
       setCreatingGroup(false);
     }
-  }, [closeGroupModal, fetchChatData, groupName, navigation, selectedGroupMembers]);
+  }, [closeGroupModal, fetchChatData, groupDescription, groupName, groupVisibility, navigation, selectedGroupMembers]);
+
+  const handleChatLockSubmit = useCallback(async (passcode: string) => {
+    try {
+      setLockingBusy(true);
+      if (chatLockMode === "setup") {
+        await setChatLockPasscode(passcode);
+        if (pendingLockChange) {
+          const nextIds = await setConversationLocked(currentUserId, pendingLockChange.conversationId, pendingLockChange.locked);
+          setLockedConversationIds(nextIds);
+          setPendingLockChange(null);
+          setChatLockModalVisible(false);
+          closeGroupActions();
+          return;
+        }
+
+        const nextAction = pendingLockedTarget;
+        setChatLockModalVisible(false);
+        setPendingLockedTarget(null);
+        nextAction?.();
+        return;
+      }
+
+      const isValid = await verifyChatLockPasscode(passcode);
+      if (!isValid) {
+        throw new Error("Incorrect passcode.");
+      }
+
+      if (pendingLockChange) {
+        const nextIds = await setConversationLocked(currentUserId, pendingLockChange.conversationId, pendingLockChange.locked);
+        setLockedConversationIds(nextIds);
+        setPendingLockChange(null);
+        setChatLockModalVisible(false);
+        closeGroupActions();
+        return;
+      }
+
+      const nextAction = pendingLockedTarget;
+      setChatLockModalVisible(false);
+      setPendingLockedTarget(null);
+      nextAction?.();
+    } catch (error) {
+      Alert.alert("Chat lock", getReadableApiErrorMessage(error, "Unable to unlock chat."));
+    } finally {
+      setLockingBusy(false);
+    }
+  }, [chatLockMode, closeGroupActions, currentUserId, pendingLockChange, pendingLockedTarget]);
 
   const selectedForwardTargetList = useMemo(
     () => Object.values(selectedForwardTargets),
@@ -450,6 +670,31 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     });
   }, [conversationMap, toggleForwardTarget]);
 
+  const handleJoinPublicGroup = useCallback(async (group: Conversation) => {
+    try {
+      const response = await joinPublicGroupChatConversation(String(group?._id || ""));
+      const joinedConversation = response?.conversation || group;
+      setPublicGroups((prev) =>
+        prev.map((item) => (String(item?._id || "") === String(group?._id || "") ? {
+          ...item,
+          ...joinedConversation,
+          isJoined: true,
+        } : item))
+      );
+      await fetchChatData(true);
+      setPublicGroupsVisible(false);
+      navigation.navigate("ChatScreen", {
+        conversationId: joinedConversation?._id || group?._id,
+        conversationType: "group",
+        groupName: joinedConversation?.groupName || group?.groupName,
+        groupAvatar: joinedConversation?.groupAvatar || group?.groupAvatar,
+        memberCount: joinedConversation?.memberCount || joinedConversation?.members?.length || group?.memberCount || 0,
+      });
+    } catch (error) {
+      Alert.alert("Unable to join group", getReadableApiErrorMessage(error, "Please try again."));
+    }
+  }, [fetchChatData, navigation]);
+
   const renderChat = ({ item }: { item: ChatUser }) => {
     const conversation = conversationMap.get(item._id);
     const subtitle = getConversationPreview(conversation)
@@ -462,6 +707,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       userId: item._id,
     };
     const isSelectedForForward = Boolean(selectedForwardTargets[forwardTarget.key]);
+    const isOnline = Boolean(item?.isOnline);
 
     return (
       <TouchableOpacity
@@ -494,7 +740,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             style={styles.avatar}
           />
 
-          <View style={[styles.onlineDot, { borderColor: colors.card }]}/>
+          {isOnline ? <View style={[styles.onlineDot, { borderColor: colors.card }]}/> : null}
         </View>
 
         <View style={styles.chatInfo}>
@@ -530,6 +776,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     const participant = item?.otherUser || item?.sellerUser;
     const subtitle = getConversationPreview(item) || "Tap to open conversation";
     const timestamp = formatConversationTime(item?.updatedAt || item?.lastMessageTime);
+    const isLocked = lockedConversationIds.includes(String(item?._id || ""));
     const forwardTarget: ForwardTarget = {
       key: `conversation:direct:${item._id}`,
       label: participant?.username || participant?.name || "User",
@@ -555,11 +802,18 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             return;
           }
 
-          navigation.navigate("ChatScreen", {
+          const openChat = () => navigation.navigate("ChatScreen", {
             userId: participant?._id,
             conversationId: item?._id,
             conversationType: "direct",
           });
+
+          if (isLocked) {
+            openLockedChat(openChat).catch(() => {});
+            return;
+          }
+
+          openChat();
         }}
       >
         <View style={styles.avatarContainer}>
@@ -570,7 +824,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             style={styles.avatar}
           />
 
-          {!!item?.unreadCount && <View style={[styles.onlineDot, styles.unreadDot, { borderColor: colors.card }]} />}
+          {participant?.isOnline ? <View style={[styles.onlineDot, { borderColor: colors.card }]} /> : null}
         </View>
 
         <View style={styles.chatInfo}>
@@ -594,6 +848,8 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             <View style={[styles.forwardCheck, isSelectedForForward ? { backgroundColor: colors.primary, borderColor: colors.primary } : { borderColor: colors.border }]}>
               {isSelectedForForward ? <Icon name="checkmark" size={14} color="#fff" /> : null}
             </View>
+          ) : isLocked ? (
+            <Icon name="lock-closed" size={16} color={colors.mutedText} />
           ) : !!item?.unreadCount ? <View style={styles.unreadBadge} /> : null}
         </View>
       </TouchableOpacity>
@@ -611,6 +867,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       getConversationPreview(item),
     ].filter(Boolean);
     const timestamp = formatConversationTime(item?.updatedAt || item?.lastMessageTime);
+    const isLocked = lockedConversationIds.includes(String(item?._id || ""));
     const forwardTarget: ForwardTarget = {
       key: `conversation:seller:${item._id}`,
       label: sellerName,
@@ -630,13 +887,20 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         return;
       }
 
-      navigation.navigate("SellerChatScreen", {
+      const openChat = () => navigation.navigate("SellerChatScreen", {
         sellerId,
         sellerUserId,
         conversationId: item._id,
         serviceId: item?.service?._id,
         serviceName: item?.service?.serviceName,
       });
+
+      if (isLocked) {
+        openLockedChat(openChat).catch(() => {});
+        return;
+      }
+
+      openChat();
     };
 
     return (
@@ -662,7 +926,9 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             style={styles.avatar}
           />
 
-          <View style={[styles.onlineDot, { borderColor: colors.card }]}/>
+          {(item?.sellerUser?.isOnline || item?.otherUser?.isOnline) ? (
+            <View style={[styles.onlineDot, { borderColor: colors.card }]}/>
+          ) : null}
         </View>
 
         <View style={styles.chatInfo}>
@@ -688,7 +954,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             <View style={[styles.forwardCheck, isSelectedForForward ? { backgroundColor: colors.primary, borderColor: colors.primary } : { borderColor: colors.border }]}>
               {isSelectedForForward ? <Icon name="checkmark" size={14} color="#fff" /> : null}
             </View>
-          ) : !!item?.unreadCount ? <View style={styles.unreadBadge} /> : null}
+          ) : isLocked ? <Icon name="lock-closed" size={16} color={colors.mutedText} /> : !!item?.unreadCount ? <View style={styles.unreadBadge} /> : null}
 
           <Icon
             name={
@@ -717,6 +983,8 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     const subtitle = getConversationPreview(item)
       || `${item?.memberCount || item?.members?.length || 0} members`;
     const timestamp = formatConversationTime(item?.updatedAt || item?.lastMessageTime);
+    const isLocked = lockedConversationIds.includes(String(item?._id || ""));
+    const isMuted = mutedConversationIds.includes(String(item?._id || ""));
     const forwardTarget: ForwardTarget = {
       key: `conversation:group:${item._id}`,
       label: title,
@@ -741,14 +1009,28 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             return;
           }
 
-          navigation.navigate("ChatScreen", {
+          const openChat = () => navigation.navigate("ChatScreen", {
             conversationId: item._id,
             conversationType: "group",
             groupName: item?.groupName,
             groupAvatar: item?.groupAvatar,
             memberCount: item?.memberCount || item?.members?.length || 0,
+            groupConversation: item,
           });
+
+          if (isLocked) {
+            openLockedChat(openChat).catch(() => {});
+            return;
+          }
+
+          openChat();
         }}
+        onLongPress={() => {
+          if (!isForwardMode) {
+            openGroupActions(item);
+          }
+        }}
+        delayLongPress={220}
       >
         {item?.groupAvatar ? (
           <View style={styles.avatarContainer}>
@@ -761,7 +1043,14 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         )}
 
         <View style={styles.chatInfo}>
-          <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>{title}</Text>
+          <View style={styles.groupTitleRow}>
+            <Text style={[styles.username, { color: colors.text, flex: 1 }]} numberOfLines={1}>{title}</Text>
+            <View style={[styles.groupVisibilityPill, { backgroundColor: item?.groupVisibility === "public" ? `${colors.primary}16` : colors.background }]}>
+              <Text style={[styles.groupVisibilityText, { color: item?.groupVisibility === "public" ? colors.primary : colors.mutedText }]}>
+                {item?.groupVisibility === "public" ? "Public" : "Private"}
+              </Text>
+            </View>
+          </View>
           <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={2}>
             {subtitle}
           </Text>
@@ -778,7 +1067,11 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             <View style={[styles.forwardCheck, isSelectedForForward ? { backgroundColor: colors.primary, borderColor: colors.primary } : { borderColor: colors.border }]}>
               {isSelectedForForward ? <Icon name="checkmark" size={14} color="#fff" /> : null}
             </View>
-          ) : !!item?.unreadCount ? <View style={styles.unreadBadge} /> : null}
+          ) : isLocked ? <Icon name="lock-closed" size={16} color={colors.mutedText} /> : !!item?.unreadCount ? <View style={styles.unreadBadge} /> : null}
+
+          {!isForwardMode && isMuted ? (
+            <Icon name="notifications-off-outline" size={16} color={colors.mutedText} />
+          ) : null}
 
           <Icon name={isForwardMode && isSelectedForForward ? "checkmark-circle" : "chevron-forward-outline"} size={20} color={isForwardMode && isSelectedForForward ? colors.primary : colors.mutedText}/>
         </View>
@@ -860,6 +1153,17 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             >
               <Icon name="sparkles-outline" size={20} color={accentColor} />
             </TouchableOpacity>
+          {activeTab === "group" ? (
+            <TouchableOpacity
+              style={[styles.headerActionButton, styles.headerIconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
+              onPress={() => {
+                setPublicGroupsVisible(true);
+                loadPublicGroups().catch(() => {});
+              }}
+            >
+              <Icon name="globe-outline" size={20} color={accentColor} />
+            </TouchableOpacity>
+          ) : null}
           {activeTab === "group" ? (
             <TouchableOpacity
               style={[styles.headerActionButton, styles.headerIconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
@@ -1013,8 +1317,41 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             />
 
             <Text style={[styles.modalHelper, { color: colors.mutedText }]}>
-              Choose at least two people who mutually follow you.
+              Choose 2 to 99 people. The group can have up to 100 members including you.
             </Text>
+
+            <View style={styles.groupModeRow}>
+              {(["private", "public"] as const).map((mode) => {
+                const isActive = groupVisibility === mode;
+                return (
+                  <TouchableOpacity
+                    key={mode}
+                    style={[
+                      styles.groupModeButton,
+                      {
+                        backgroundColor: isActive ? colors.primary : modalInputBackgroundColor,
+                        borderColor: isActive ? colors.primary : colors.border,
+                      },
+                    ]}
+                    onPress={() => setGroupVisibility(mode)}
+                  >
+                    <Text style={[styles.groupModeText, { color: isActive ? "#fff" : colors.text }]}>
+                      {mode === "public" ? "Public Group" : "Private Group"}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TextInput
+              value={groupDescription}
+              onChangeText={setGroupDescription}
+              placeholder="Group description (optional)"
+              placeholderTextColor={colors.placeholder}
+              multiline
+              maxLength={240}
+              style={[styles.groupDescriptionInput, { borderColor: colors.border, color: colors.text, backgroundColor: modalInputBackgroundColor }]}
+            />
 
             <FlatList
               data={eligibleGroupUsers}
@@ -1054,9 +1391,13 @@ const AllChatsScreen = ({ navigation, route }: any) => {
 
             {!eligibleGroupUsers.length ? (
               <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
-                Only mutually following users can be added to a group right now.
+                No users are available for a new group right now.
               </Text>
             ) : null}
+
+            <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
+              Selected {selectedGroupMembers.length} people. {remainingGroupSlots} spots left.
+            </Text>
 
             <TouchableOpacity
               style={[styles.createGroupButton, { backgroundColor: creatingGroup ? disabledCreateGroupColor : colors.primary }]}
@@ -1068,6 +1409,153 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={publicGroupsVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPublicGroupsVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Browse Public Groups</Text>
+              <TouchableOpacity onPress={() => setPublicGroupsVisible(false)}>
+                <Icon name="close-outline" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {loadingPublicGroups ? (
+              <View style={styles.publicGroupsLoader}>
+                <ActivityIndicator size="small" color={colors.primary} />
+              </View>
+            ) : (
+              <FlatList
+                data={publicGroups}
+                keyExtractor={(item) => String(item?._id || "")}
+                style={styles.groupPickerList}
+                ListEmptyComponent={(
+                  <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
+                    Koi public group available nahi hai abhi.
+                  </Text>
+                )}
+                renderItem={({ item }) => {
+                  const alreadyJoined = Boolean(item?.isJoined || orderedGroupConversations.some((entry) => entry._id === item._id));
+
+                  return (
+                    <View style={[styles.publicGroupRow, { borderColor: colors.border }]}>
+                      <View style={styles.publicGroupCopy}>
+                        <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
+                          {item?.groupName || "Public group"}
+                        </Text>
+                        <Text style={[styles.memberSubtitle, { color: colors.mutedText }]} numberOfLines={2}>
+                          {item?.groupDescription || `${item?.memberCount || item?.members?.length || 0} members`}
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.joinGroupButton,
+                          { backgroundColor: alreadyJoined ? modalInputBackgroundColor : colors.primary, borderColor: colors.border },
+                        ]}
+                        onPress={() => {
+                          if (alreadyJoined) {
+                            setPublicGroupsVisible(false);
+                            navigation.navigate("ChatScreen", {
+                              conversationId: item._id,
+                              conversationType: "group",
+                              groupName: item?.groupName,
+                              groupAvatar: item?.groupAvatar,
+                              memberCount: item?.memberCount || item?.members?.length || 0,
+                            });
+                            return;
+                          }
+
+                          handleJoinPublicGroup(item).catch(() => {});
+                        }}
+                      >
+                        <Text style={[styles.joinGroupButtonText, { color: alreadyJoined ? colors.text : "#fff" }]}>
+                          {alreadyJoined ? "Open" : "Join"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                }}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={groupActionsVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeGroupActions}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={closeGroupActions}>
+          <Pressable
+            style={[styles.groupActionsCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>
+                {activeGroupConversation?.groupName || "Group options"}
+              </Text>
+              <TouchableOpacity onPress={closeGroupActions}>
+                <Icon name="close-outline" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.groupActionRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => {
+                toggleActiveGroupMute().catch(() => {});
+              }}
+              disabled={!activeGroupConversation?._id}
+            >
+              <Icon
+                name={mutedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "notifications-outline" : "notifications-off-outline"}
+                size={20}
+                color={colors.primary}
+              />
+              <Text style={[styles.groupActionText, { color: colors.text }]}>
+                {mutedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "Unmute group" : "Mute group"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.groupActionRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => {
+                requestActiveGroupLockToggle().catch(() => {});
+              }}
+              disabled={!activeGroupConversation?._id}
+            >
+              <Icon
+                name={lockedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "lock-open-outline" : "lock-closed-outline"}
+                size={20}
+                color={colors.primary}
+              />
+              <Text style={[styles.groupActionText, { color: colors.text }]}>
+                {lockedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "Unlock group" : "Lock group"}
+              </Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <ChatLockModal
+        visible={chatLockModalVisible}
+        mode={chatLockMode}
+        busy={lockingBusy}
+        onClose={() => {
+          setChatLockModalVisible(false);
+          setPendingLockedTarget(null);
+          setPendingLockChange(null);
+          setLockingBusy(false);
+        }}
+        onSubmit={handleChatLockSubmit}
+      />
 
       <AISupportSheet
         visible={showAssistant}
@@ -1245,6 +1733,20 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  groupTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  groupVisibilityPill: {
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  groupVisibilityText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
   chatMeta: {
     alignItems: "flex-end",
     justifyContent: "center",
@@ -1326,6 +1828,33 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     maxHeight: "85%",
   },
+  groupActionsCard: {
+    width: "100%",
+    maxWidth: 560,
+    alignSelf: "center",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 22,
+    maxHeight: "60%",
+  },
+  groupActionRow: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  groupActionText: {
+    marginLeft: 12,
+    fontSize: 15,
+    fontWeight: "700",
+    flex: 1,
+  },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1348,8 +1877,62 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  groupModeRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+  },
+  groupModeButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  groupModeText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  groupDescriptionInput: {
+    marginTop: 12,
+    minHeight: 82,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    textAlignVertical: "top",
+  },
   groupPickerList: {
     marginTop: 16,
+  },
+  publicGroupsLoader: {
+    paddingVertical: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  publicGroupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    gap: 12,
+  },
+  publicGroupCopy: {
+    flex: 1,
+  },
+  joinGroupButton: {
+    minWidth: 76,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  joinGroupButtonText: {
+    fontSize: 13,
+    fontWeight: "700",
   },
   groupEligibilityHint: {
     marginTop: 10,
