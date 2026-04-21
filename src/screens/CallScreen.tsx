@@ -37,6 +37,13 @@ import {
   startCallRingtone,
   stopCallRingtone,
 } from "../utils/callAudio";
+import {
+  applyArFilterPresetToTrack,
+  AR_FILTER_LABELS,
+  AR_FILTER_PRESET_ORDER,
+  isArFilterSupported,
+  type ArFilterPreset,
+} from "../utils/arFilters";
 import { ensureCameraPermission, ensureMicrophonePermission } from "../utils/permissions";
 
 const TERMINAL_STATUSES = new Set(["rejected", "ended", "cancelled", "missed", "failed"]);
@@ -133,7 +140,10 @@ const normalizeIceServers = (iceServers: any) => {
   return nextServers.length ? nextServers : DEFAULT_ICE_SERVERS;
 };
 
-const buildMediaConstraints = (callType: "audio" | "video") => ({
+const buildMediaConstraints = (
+  callType: "audio" | "video",
+  facingMode: "user" | "environment" = "user",
+) => ({
   audio: {
     echoCancellation: true,
     noiseSuppression: true,
@@ -148,7 +158,7 @@ const buildMediaConstraints = (callType: "audio" | "video") => ({
   video:
     callType === "video"
       ? {
-          facingMode: "user",
+          facingMode,
           frameRate: 24,
           width: 960,
           height: 540,
@@ -163,32 +173,6 @@ type RemoteStreamEntry = {
   userId: string;
   stream: any;
   streamURL: string;
-};
-
-type VideoFilterPreset = "none" | "warm" | "cool" | "mono" | "dream";
-
-const VIDEO_FILTER_PRESET_ORDER: VideoFilterPreset[] = ["none", "warm", "cool", "mono", "dream"];
-const VIDEO_FILTER_LABELS: Record<VideoFilterPreset, string> = {
-  none: "Filter",
-  warm: "Warm",
-  cool: "Cool",
-  mono: "Mono",
-  dream: "Dream",
-};
-
-const getVideoFilterOverlayStyle = (preset: VideoFilterPreset) => {
-  switch (preset) {
-    case "warm":
-      return { backgroundColor: "rgba(245, 158, 11, 0.14)" };
-    case "cool":
-      return { backgroundColor: "rgba(59, 130, 246, 0.15)" };
-    case "mono":
-      return { backgroundColor: "rgba(148, 163, 184, 0.22)" };
-    case "dream":
-      return { backgroundColor: "rgba(236, 72, 153, 0.12)" };
-    default:
-      return null;
-  }
 };
 
 const CallScreen = ({ navigation, route }: any) => {
@@ -217,7 +201,9 @@ const CallScreen = ({ navigation, route }: any) => {
   const [microphoneEnabled, setMicrophoneEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(String(route.params?.callType || "audio") === "video");
   const [speakerEnabled, setSpeakerEnabledState] = useState(String(route.params?.callType || "audio") === "video");
-  const [videoFilterPreset, setVideoFilterPreset] = useState<VideoFilterPreset>("none");
+  const [arFilterPreset, setArFilterPreset] = useState<ArFilterPreset>("none");
+  const [arFiltersSupported, setArFiltersSupported] = useState(false);
+  const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
 
   const callSessionRef = useRef<any>(initialCallSession);
   const closingRef = useRef(false);
@@ -345,6 +331,33 @@ const CallScreen = ({ navigation, route }: any) => {
 
   useEffect(() => {
     setCameraEnabled(effectiveCallType === "video");
+  }, [effectiveCallType]);
+
+  useEffect(() => {
+    if (effectiveCallType !== "video") {
+      setArFiltersSupported(false);
+      setCameraFacingMode("user");
+      return;
+    }
+
+    let active = true;
+
+    isArFilterSupported()
+      .then((supported) => {
+        if (active) {
+          setArFiltersSupported(supported);
+        }
+      })
+      .catch((error) => {
+        console.log("call ar filter capability error", error);
+        if (active) {
+          setArFiltersSupported(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, [effectiveCallType]);
 
   const setRemoteStreamForUser = useCallback((userId: string, stream: any) => {
@@ -564,7 +577,7 @@ const CallScreen = ({ navigation, route }: any) => {
       }
     }
 
-    const stream = await mediaDevices.getUserMedia(buildMediaConstraints(effectiveCallType));
+    const stream = await mediaDevices.getUserMedia(buildMediaConstraints(effectiveCallType, cameraFacingMode));
     localStreamRef.current = stream;
     setLocalStreamURL(typeof stream?.toURL === "function" ? stream.toURL() : null);
     setMediaReady(true);
@@ -578,7 +591,7 @@ const CallScreen = ({ navigation, route }: any) => {
     });
 
     return stream;
-  }, [cameraEnabled, effectiveCallType, microphoneEnabled]);
+  }, [cameraEnabled, cameraFacingMode, effectiveCallType, microphoneEnabled]);
 
   const syncPeerGraph = useCallback(async () => {
     if (!shouldEnterMediaRoom || !callSessionId || !currentUserId || !joinedCallRoomRef.current || !localStreamRef.current) {
@@ -877,6 +890,25 @@ const CallScreen = ({ navigation, route }: any) => {
   }, [cameraEnabled]);
 
   useEffect(() => {
+    if (effectiveCallType !== "video") {
+      return;
+    }
+
+    const localVideoTrack = localStreamRef.current?.getVideoTracks?.()?.[0];
+    if (!localVideoTrack) {
+      return;
+    }
+
+    if (!arFiltersSupported) {
+      return;
+    }
+
+    applyArFilterPresetToTrack(localVideoTrack, arFilterPreset).catch((error) => {
+      console.log("call ar filter sync error", error);
+    });
+  }, [arFilterPreset, arFiltersSupported, effectiveCallType, localStreamURL]);
+
+  useEffect(() => {
     let active = true;
 
     const syncAudioRoute = async () => {
@@ -1125,16 +1157,46 @@ const CallScreen = ({ navigation, route }: any) => {
     setCameraEnabled((prev) => !prev);
   }, [effectiveCallType]);
 
+  const switchCameraFacing = useCallback(() => {
+    if (effectiveCallType !== "video") {
+      return;
+    }
+
+    const localVideoTrack = localStreamRef.current?.getVideoTracks?.()?.[0];
+    if (!localVideoTrack || typeof (localVideoTrack as any)?._switchCamera !== "function") {
+      Alert.alert("Camera switch unavailable", "This device could not switch cameras during the call.");
+      return;
+    }
+
+    try {
+      (localVideoTrack as any)._switchCamera();
+      setCameraFacingMode((current) => (current === "user" ? "environment" : "user"));
+
+      if (arFiltersSupported) {
+        applyArFilterPresetToTrack(localVideoTrack, arFilterPreset).catch((error) => {
+          console.log("call ar filter resync after camera switch error", error);
+        });
+      }
+    } catch (error) {
+      console.log("call switch camera error", error);
+      Alert.alert("Camera switch unavailable", "The camera could not be switched right now.");
+    }
+  }, [arFilterPreset, arFiltersSupported, effectiveCallType]);
+
   const toggleSpeaker = useCallback(() => {
     setSpeakerEnabledState((prev) => !prev);
   }, []);
 
-  const cycleVideoFilter = useCallback(() => {
-    setVideoFilterPreset((current) => {
-      const currentIndex = VIDEO_FILTER_PRESET_ORDER.indexOf(current);
-      return VIDEO_FILTER_PRESET_ORDER[(currentIndex + 1) % VIDEO_FILTER_PRESET_ORDER.length] || "none";
+  const cycleArFilter = useCallback(() => {
+    if (!arFiltersSupported) {
+      return;
+    }
+
+    setArFilterPreset((current) => {
+      const currentIndex = AR_FILTER_PRESET_ORDER.indexOf(current);
+      return AR_FILTER_PRESET_ORDER[(currentIndex + 1) % AR_FILTER_PRESET_ORDER.length] || "none";
     });
-  }, []);
+  }, [arFiltersSupported]);
 
   const renderParticipantPlaceholder = useCallback(
     (name: string, avatarSource: string, subtitle: string) => (
@@ -1162,6 +1224,12 @@ const CallScreen = ({ navigation, route }: any) => {
     : mode === "incoming" && String(callSession?.status || "") === "ringing";
   const statusLabel = buildStatusLabel(callSession, mode, isGroupCall);
   const warningText = Array.isArray(callRuntime?.warnings) ? callRuntime.warnings.join(" ") : "";
+  const combinedWarningText = [
+    warningText,
+    effectiveCallType === "video" && !arFiltersSupported ? "Dog AR filter is unavailable on this device." : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? "#050816" : "#0f172a" }]}>
@@ -1193,7 +1261,7 @@ const CallScreen = ({ navigation, route }: any) => {
 
                 {localStreamURL ? (
                   <View style={styles.groupVideoTile}>
-                    <RTCView streamURL={localStreamURL} style={styles.groupVideoStream} objectFit="cover" mirror />
+                    <RTCView streamURL={localStreamURL} style={styles.groupVideoStream} objectFit="cover" mirror={cameraFacingMode === "user"} />
                     <View style={styles.groupVideoLabel}>
                       <Text style={styles.groupVideoName}>You</Text>
                     </View>
@@ -1205,7 +1273,7 @@ const CallScreen = ({ navigation, route }: any) => {
                 <RTCView streamURL={remotePrimaryTile.streamURL} style={styles.remoteVideo} objectFit="cover" />
                 {localStreamURL ? (
                   <View style={styles.localVideoWrap}>
-                    <RTCView streamURL={localStreamURL} style={styles.localVideo} objectFit="cover" mirror />
+                    <RTCView streamURL={localStreamURL} style={styles.localVideo} objectFit="cover" mirror={cameraFacingMode === "user"} />
                   </View>
                 ) : null}
               </>
@@ -1222,14 +1290,10 @@ const CallScreen = ({ navigation, route }: any) => {
             )
           )}
 
-          {effectiveCallType === "video" && videoFilterPreset !== "none" ? (
-            <View pointerEvents="none" style={[styles.videoFilterOverlay, getVideoFilterOverlayStyle(videoFilterPreset)]} />
-          ) : null}
-
           <View style={styles.overlay}>
-            {effectiveCallType === "video" && videoFilterPreset !== "none" ? (
+            {effectiveCallType === "video" && arFilterPreset !== "none" ? (
               <View style={styles.filterPill}>
-                <Text style={styles.filterPillText}>{VIDEO_FILTER_LABELS[videoFilterPreset]} filter</Text>
+                <Text style={styles.filterPillText}>{AR_FILTER_LABELS[arFilterPreset]}</Text>
               </View>
             ) : null}
             <Text style={styles.name}>{displayName}</Text>
@@ -1237,7 +1301,7 @@ const CallScreen = ({ navigation, route }: any) => {
               {String(callSession?.status || "") === "ongoing" ? formatDuration(durationSeconds) : statusLabel}
             </Text>
 
-            {warningText ? <Text style={styles.warningText}>{warningText}</Text> : null}
+            {combinedWarningText ? <Text style={styles.warningText}>{combinedWarningText}</Text> : null}
 
             <View style={styles.actionRow}>
               <TouchableOpacity
@@ -1265,8 +1329,18 @@ const CallScreen = ({ navigation, route }: any) => {
 
               {effectiveCallType === "video" ? (
                 <TouchableOpacity
-                  style={[styles.callButton, videoFilterPreset === "none" ? styles.disabledButton : styles.secondaryButton]}
-                  onPress={cycleVideoFilter}
+                  style={[styles.callButton, styles.secondaryButton, !arFiltersSupported && styles.disabledButton]}
+                  onPress={switchCameraFacing}
+                >
+                  <Icon name="camera-reverse-outline" size={22} color="#fff" />
+                </TouchableOpacity>
+              ) : null}
+
+              {effectiveCallType === "video" ? (
+                <TouchableOpacity
+                  style={[styles.callButton, arFiltersSupported ? styles.secondaryButton : styles.disabledButton]}
+                  onPress={cycleArFilter}
+                  disabled={!arFiltersSupported}
                 >
                   <Icon name="color-filter-outline" size={22} color="#fff" />
                 </TouchableOpacity>
@@ -1417,9 +1491,6 @@ const styles = StyleSheet.create({
   localVideo: {
     width: "100%",
     height: "100%",
-  },
-  videoFilterOverlay: {
-    ...StyleSheet.absoluteFillObject,
   },
   groupVideoGrid: {
     flex: 1,

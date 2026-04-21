@@ -92,6 +92,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const [microphoneEnabled, setMicrophoneEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [speakerEnabled, setSpeakerEnabled] = useState(true);
+  const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
   const [iceServers, setIceServers] = useState<any[]>(Array.isArray(initialIceServers) ? initialIceServers : []);
   const [floatingReactions, setFloatingReactions] = useState<any[]>([]);
 
@@ -259,7 +260,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
         sampleRate: 48000,
       } as any,
       video: {
-        facingMode: "user",
+        facingMode: cameraFacingMode,
         frameRate: 24,
         width: 960,
         height: 540,
@@ -268,7 +269,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
 
     localStreamRef.current = stream;
     setLocalStreamURL(typeof stream?.toURL === "function" ? stream.toURL() : null);
-  }, [isHost]);
+  }, [cameraFacingMode, isHost]);
 
   const loadLiveStream = useCallback(async () => {
     const response = await getLiveStream(liveStreamId);
@@ -610,6 +611,22 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     setCameraEnabled(nextEnabled);
   }, [cameraEnabled]);
 
+  const switchCameraFacing = useCallback(() => {
+    const localVideoTrack = localStreamRef.current?.getVideoTracks?.()?.[0];
+    if (!localVideoTrack || typeof (localVideoTrack as any)?._switchCamera !== "function") {
+      Alert.alert("Camera switch unavailable", "This device could not switch cameras during the live stream.");
+      return;
+    }
+
+    try {
+      (localVideoTrack as any)._switchCamera();
+      setCameraFacingMode((current) => (current === "user" ? "environment" : "user"));
+    } catch (error) {
+      console.log("live stream switch camera error:", error);
+      Alert.alert("Camera switch unavailable", "The camera could not be switched right now.");
+    }
+  }, []);
+
   const toggleSpeaker = useCallback(() => {
     setSpeakerEnabled((current) => !current);
   }, []);
@@ -649,7 +666,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.stage}>
           {isHost && localStreamURL ? (
-            <RTCView objectFit="cover" streamURL={localStreamURL} style={styles.video} />
+            <RTCView objectFit="cover" streamURL={localStreamURL} style={styles.video} mirror={cameraFacingMode === "user"} />
           ) : remoteStreamURL ? (
             <RTCView objectFit="cover" streamURL={remoteStreamURL} style={styles.video} />
           ) : (
@@ -693,6 +710,9 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.controlButton, !cameraEnabled && styles.controlButtonMuted]} onPress={toggleCamera}>
                   <Icon name={cameraEnabled ? "videocam-outline" : "videocam-off-outline"} size={18} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.controlButton} onPress={switchCameraFacing}>
+                  <Icon name="camera-reverse-outline" size={18} color="#fff" />
                 </TouchableOpacity>
               </>
             ) : null}

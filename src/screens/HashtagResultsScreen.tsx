@@ -113,7 +113,7 @@ function HashtagResultsScreen({ route, navigation }: any) {
         />
         <View style={styles.cardMeta}>
           <Text style={styles.username}>{item.user?.username || item.user?.name || "creator"}</Text>
-          <Text style={styles.postMeta}>{item.postType === "reel" ? "Swipe / Reel" : "Post"}</Text>
+          <Text style={styles.postMeta}>{item.postType === "reel" ? "Swipes" : "Post"}</Text>
         </View>
       </View>
 

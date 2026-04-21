@@ -8,6 +8,8 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import com.aline2.arfilters.AlineArProcessorRegistry
+import com.aline2.arfilters.ArFilterPackage
 import com.aline2.callaudio.CallAudioPackage
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
@@ -22,6 +24,7 @@ class MainApplication : Application(), ReactApplication {
       context = applicationContext,
       packageList =
         PackageList(this).packages.apply {
+          add(ArFilterPackage())
           add(CallAudioPackage())
         },
     )
@@ -29,6 +32,7 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    AlineArProcessorRegistry.register(applicationContext)
     createNotificationChannels()
     loadReactNative(this)
   }

@@ -1,10 +1,11 @@
 export const APP_VERSION = "0.0.1";
 export const APP_RELEASE_DATE = "April 21, 2026";
-export const APP_RELEASE_TITLE = "Communication polish and product clarity";
+export const APP_RELEASE_TITLE = "Call filters, camera switching, and communication polish";
 
 export const APP_RELEASE_HIGHLIGHTS = [
   "Calls and live sessions now sound clearer and louder.",
-  "Video calls now include easy filter options for a better on-camera look.",
+  "Android video calls now support a real Dog AR face filter powered by MediaPipe face tracking.",
+  "Video calls and live streams now include a front and rear camera switch option.",
   "Added in-app version visibility plus a dedicated release notes and feature catalog screen.",
 ];
 
@@ -13,7 +14,7 @@ export const APP_FEATURE_SECTIONS = [
     title: "Core experience",
     items: [
       "Phone login, OTP verification, signup, forgot password, and session restore.",
-      "Home feed with stories, posts, reels-style swipes, reactions, saves, shares, and archives.",
+  "Home feed with stories, posts, swipes, reactions, saves, shares, and archives.",
       "Profile management with previews, followers, following, close friends, blocked users, and privacy controls.",
     ],
   },
@@ -53,12 +54,13 @@ export const APP_BUG_FIXES = [
   "Improved voice and live session clarity so conversations sound fuller and easier to hear.",
   "Made speaker playback stronger and more consistent during calls and live viewing.",
   "Added direct sidebar access to release notes and surfaced the current app version in the feed menu.",
-  "Added video-call filter presets so users can quickly switch the look of live video sessions.",
+  "Wired the Dog AR filter into Android video-call tracks and made unsupported devices fail gracefully.",
+  "Added front and rear camera switching during live video calls and host live-stream previews.",
 ];
 
 export const APP_UPCOMING_CHANGES = [
   "More helpful call quality status updates inside the call screen.",
   "Expanded creator tooling for richer live-stream moderation and better seller promo surfaces.",
   "A fuller historical release archive so each version can be reviewed directly inside the app.",
-  "More advanced call effects after final quality checks are completed.",
+  "More advanced AR call effects beyond Dog AR after final quality checks are completed.",
 ];
