@@ -5,6 +5,32 @@ const isTimeoutFailure = (error) =>
   String(error?.code || "").trim().toUpperCase() === "ECONNABORTED"
   || /timeout/i.test(String(error?.message || ""));
 
+const getModerationBlockedMessage = (error, fallbackMessage) => {
+  const responseData = error?.response?.data || {};
+  const moderation = responseData?.moderation || {};
+  const mediaType = String(moderation?.mediaType || "").trim().toLowerCase();
+  const target = String(moderation?.target || "").trim();
+  const isChatMedia = String(responseData?.code || "").trim() === "CHAT_MEDIA_BLOCKED";
+  const mediaLabel =
+    mediaType === "gif"
+      ? "GIF"
+      : mediaType === "video"
+        ? "video"
+        : mediaType === "image"
+          ? "image"
+          : "media";
+
+  if (isChatMedia) {
+    return `This ${mediaLabel} could not be sent because it may contain nudity or explicit content. Please choose a different file.`;
+  }
+
+  if (target.startsWith("media[") || target === "mediaUrl" || target === "storyData.mediaUrl") {
+    return `This ${mediaLabel} could not be published because it may contain nudity or explicit content. Please choose a different file.`;
+  }
+
+  return fallbackMessage;
+};
+
 export const getReadableApiErrorMessage = (error, fallbackMessage = "Please try again.") => {
   if (error?.response?.data?.code) {
     const code = String(error.response.data.code).trim();
@@ -26,6 +52,12 @@ export const getReadableApiErrorMessage = (error, fallbackMessage = "Please try 
     if (code === "TOO_MANY_ATTEMPTS") {
       return "Too many attempts. Please wait a few minutes and try again.";
     }
+    if (code === "CHAT_MEDIA_BLOCKED" || code === "SOCIAL_MEDIA_BLOCKED") {
+      return getModerationBlockedMessage(error, fallbackMessage);
+    }
+    if (code === "CHAT_MODERATION_UNAVAILABLE" || code === "SOCIAL_MEDIA_MODERATION_UNAVAILABLE") {
+      return "Safety checks are temporarily unavailable right now. Please try again in a moment.";
+    }
   }
 
   if (error?.response?.data?.message) {
@@ -41,4 +73,9 @@ export const getReadableApiErrorMessage = (error, fallbackMessage = "Please try 
   }
 
   return `Unable to connect to the server. Please check your internet connection and try again.`;
+};
+
+export const isModerationBlockedError = (error) => {
+  const code = String(error?.response?.data?.code || "").trim();
+  return code === "CHAT_MEDIA_BLOCKED" || code === "SOCIAL_MEDIA_BLOCKED";
 };

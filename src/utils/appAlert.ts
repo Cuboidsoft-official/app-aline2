@@ -14,11 +14,14 @@ export type AppAlertOptions = {
   onDismiss?: () => void;
 };
 
+export type AppAlertPresentation = "dialog" | "sheet";
+
 export type AppAlertPromptType = "plain-text" | "secure-text" | "login-password";
 
 export type AppAlertConfig = {
   id: number;
   kind: "alert" | "prompt";
+  presentation?: AppAlertPresentation;
   title: string;
   message?: string;
   buttons: AppAlertButton[];
@@ -49,6 +52,7 @@ const queueAlert = (config: Omit<AppAlertConfig, "id">) => {
   const nextConfig: AppAlertConfig = {
     ...config,
     id: nextAlertId++,
+    presentation: config.presentation || "dialog",
     buttons: normalizeButtons(config.buttons),
   };
 
@@ -87,6 +91,23 @@ const alert = (
 ) => {
   queueAlert({
     kind: "alert",
+    presentation: "dialog",
+    title,
+    message,
+    buttons: normalizeButtons(buttons),
+    options,
+  });
+};
+
+const sheet = (
+  title: string,
+  message?: string,
+  buttons?: AppAlertButton[],
+  options?: AppAlertOptions,
+) => {
+  queueAlert({
+    kind: "alert",
+    presentation: "sheet",
     title,
     message,
     buttons: normalizeButtons(buttons),
@@ -126,6 +147,7 @@ const dismiss = () => {
 
 export const Alert = {
   alert,
+  sheet,
   prompt,
   dismiss,
 };

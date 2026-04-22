@@ -73,6 +73,7 @@ import AISupportSheet from "../components/chat/AISupportSheet";
 import MessageLinkPreview from "../components/chat/MessageLinkPreview";
 import ChatLockModal from "../components/chat/ChatLockModal";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { showModerationBlockedSheet } from "../utils/moderationNotice";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 import {
@@ -1511,6 +1512,9 @@ const ChatScreen = ({ navigation, route }: any) => {
       setPendingAttachment(null);
     } catch (error: any) {
       console.log("attachment message send error:", error);
+      if (showModerationBlockedSheet(error, { fallbackMessage: "This attachment could not be sent right now." })) {
+        return;
+      }
       Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send attachment"));
     } finally {
       setUploading(false);

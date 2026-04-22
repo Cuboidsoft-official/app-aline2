@@ -2,6 +2,8 @@
 #
 .DS_Store
 .vscode/
+.gradle-local/
+.npm-cache/
 
 # Xcode
 #
@@ -25,7 +27,6 @@ DerivedData
 
 # Android/IntelliJ
 #
-build/
 .idea
 .gradle
 local.properties

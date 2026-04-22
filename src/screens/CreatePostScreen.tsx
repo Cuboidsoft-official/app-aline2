@@ -23,7 +23,7 @@ import { createSound } from "react-native-nitro-sound";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import { API } from "../api/api";
-import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { getReadableApiErrorMessage, isModerationBlockedError } from "../api/networkErrors";
 import {
   captureComposerAssets,
   ComposerAsset,
@@ -54,6 +54,7 @@ import {
   getUserOriginalSounds,
 } from "../utils/musicApi";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
+import { showModerationBlockedSheet } from "../utils/moderationNotice";
 import { getStoredUserId } from "../utils/authSession";
 import { useAppTheme } from "../theme/AppThemeContext";
 import SocialVideo from "../features/social/components/SocialVideo";
@@ -1444,6 +1445,10 @@ function CreatePostScreen({ navigation, route }: any) {
     } catch (error) {
       const nextMessage = getReadableApiErrorMessage(error, toUserSafeMessage(error));
       setPublishError(nextMessage);
+      if (isModerationBlockedError(error) && showModerationBlockedSheet(error, { fallbackMessage: nextMessage })) {
+        return;
+      }
+
       Alert.alert("Publish failed", nextMessage);
     } finally {
       setPublishing(false);

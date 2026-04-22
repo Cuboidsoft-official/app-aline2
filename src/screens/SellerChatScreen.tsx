@@ -72,6 +72,7 @@ import { useAppTheme } from "../theme/AppThemeContext";
 import { alpha, appFonts, appShadows } from "../theme/designSystem";
 import { getChatLayoutMetrics } from "../theme/chatUi";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { showModerationBlockedSheet } from "../utils/moderationNotice";
 import VoiceMessageBubble from "../components/chat/VoiceMessageBubble";
 import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 import AISupportSheet from "../components/chat/AISupportSheet";
@@ -1083,6 +1084,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           setText("");
         } catch (error) {
           console.log("seller image send error:", error);
+          if (showModerationBlockedSheet(error, { fallbackMessage: "This attachment could not be sent right now." })) {
+            return;
+          }
           Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send attachment"));
         } finally {
           setUploading(false);
@@ -1139,6 +1143,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           setText("");
         } catch (error) {
           console.log("seller camera send error:", error);
+          if (showModerationBlockedSheet(error, { fallbackMessage: "This capture could not be sent right now." })) {
+            return;
+          }
           Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send camera capture"));
         } finally {
           setUploading(false);
