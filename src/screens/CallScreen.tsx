@@ -274,9 +274,25 @@ const CallScreen = ({ navigation, route }: any) => {
     ? callSession?.conversation?.groupAvatar || avatarUrl || DEFAULT_AVATAR_URL
     : otherParticipant?.profilePic || avatarUrl || DEFAULT_AVATAR_URL;
   const hasActiveCall = callSession && !TERMINAL_STATUSES.has(String(callSession.status || ""));
+  const initiatorId = String(
+    callSession?.initiatedBy?._id
+    || callSession?.initiatedBy?.id
+    || callSession?.initiatedBy
+    || "",
+  );
   const shouldEnterMediaRoom = isGroupCall
     ? String(currentParticipantState?.status || "") === "joined"
     : String(callSession?.status || "") === "ongoing";
+  const isIncomingInviteState = isGroupCall
+    ? String(currentParticipantState?.status || "") === "invited" && String(callSession?.status || "") === "ongoing"
+    : String(callSession?.status || "") === "ringing";
+  const isIncomingCallScreen = mode === "incoming"
+    || (
+      !!currentUserId
+      && !!initiatorId
+      && initiatorId !== String(currentUserId)
+      && isIncomingInviteState
+    );
   const shouldPlayRingtone =
     !loading
     && !shouldEnterMediaRoom
@@ -1217,9 +1233,7 @@ const CallScreen = ({ navigation, route }: any) => {
     );
   }
 
-  const showIncomingActions = isGroupCall
-    ? mode === "incoming" && String(currentParticipantState?.status || "") === "invited" && String(callSession?.status || "") === "ongoing"
-    : mode === "incoming" && String(callSession?.status || "") === "ringing";
+  const showIncomingActions = isIncomingCallScreen && isIncomingInviteState;
   const statusLabel = buildStatusLabel(callSession, mode, isGroupCall);
   const overlayDisplayName =
     isGroupCall && shouldEnterMediaRoom

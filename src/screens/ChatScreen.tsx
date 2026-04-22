@@ -1615,6 +1615,7 @@ const ChatScreen = ({ navigation, route }: any) => {
           name: file.name || `audio_${Date.now()}`,
           type: file.type || "audio/*",
         },
+        messageType: "audio",
         replyToMessageId: replyingToMessageId,
         replyToMessage: replyingToMessage,
       });

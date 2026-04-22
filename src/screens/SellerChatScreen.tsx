@@ -1236,7 +1236,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           uri: normalizedFile.uri,
           name: normalizedFile.name || `audio_${Date.now()}`,
           type: normalizedFile.type || "audio/*",
-        }
+        },
+        messageType: "audio",
       });
       setText("");
     } catch (error) {
