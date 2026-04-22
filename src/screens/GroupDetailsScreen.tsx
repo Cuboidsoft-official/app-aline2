@@ -785,7 +785,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
           </View>
         ) : (
           <View style={styles.groupNameRow}>
-            <Text style={[styles.groupName, { color: colors.text, fontSize: chatMetrics.titleFontSize + 6, lineHeight: chatMetrics.titleFontSize + 12 }]}>
+            <Text style={[styles.groupName, { color: colors.text, fontSize: chatMetrics.titleFontSize + 4, lineHeight: chatMetrics.titleFontSize + 10 }]}>
               {conversation?.groupName || "Group chat"}
             </Text>
             {canEditGroup ? (

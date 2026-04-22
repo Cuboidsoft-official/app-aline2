@@ -8,19 +8,21 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
-import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Icon from "react-native-vector-icons/Ionicons";
 
 import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { useAppTheme } from "../theme/AppThemeContext";
+import { alpha, appFonts, appRadii, appShadows, appSpacing, appTypography } from "../theme/designSystem";
+import { Alert } from "../utils/appAlert";
 import { setStoredSession } from "../utils/authSession";
 import { registerPushToken } from "../utils/pushRegistration";
-import { useAppTheme } from "../theme/AppThemeContext";
 
-const USERNAME_REGEX = /^(?!.*[.]{2})(?!.*[_]{2})[a-z0-9._]{3,30}$/;
-const OTP_SENDER_HINT = "Verification emails may currently arrive from our delivery inbox while Aline2 branded mail is being finalized.";
+const OTP_SENDER_HINT =
+  "Verification emails may currently arrive from our delivery inbox while Aline2 branded mail is being finalized.";
 
 const showOtpComingSoon = () => {
   Alert.alert(
@@ -31,27 +33,22 @@ const showOtpComingSoon = () => {
 
 const OtpVerifyScreen = ({ route, navigation }: any) => {
   const { colors } = useAppTheme();
-  const email = route?.params?.email || null;
+  const email = String(route?.params?.email || "").trim().toLowerCase();
   const purpose = route?.params?.purpose === "login" ? "login" : "signup";
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
-  const inputRef = useRef<TextInput>(null);
-  const [showPasswordCard, setShowPasswordCard] = useState(false);
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordLoading, setPasswordLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
-  const [name, setName] = useState("");
-  const [username, setUsername] = useState("");
+  const inputRef = useRef<TextInput>(null);
 
   const verifyOtp = async () => {
     if (!email) {
-      Alert.alert("Error", "Email not found. Please start again.");
+      Alert.alert("Missing email", "Please start again from the sign in screen.");
+      navigation.replace(purpose === "login" ? "Login" : "Signup");
       return;
     }
 
     if (String(otp || "").trim().length !== 6) {
-      Alert.alert("Error", "Please enter a valid 6 digit OTP.");
+      Alert.alert("Invalid OTP", "Please enter the 6 digit code sent to your email.");
       return;
     }
 
@@ -68,7 +65,7 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
       });
 
       if (!res?.data?.success) {
-        Alert.alert("Verification Failed", res?.data?.message || "Invalid OTP");
+        Alert.alert("Verification failed", res?.data?.message || "Invalid OTP");
         return;
       }
 
@@ -81,7 +78,7 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
           session: res.data.session,
           user: res.data.user,
         });
-        registerPushToken().catch(() => { });
+        registerPushToken().catch(() => {});
 
         navigation.reset({
           index: 0,
@@ -96,88 +93,15 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
       }
 
       if (nextStep === "set_password" || purpose === "signup") {
-        setShowPasswordCard(true);
-        setOtp("");
+        navigation.replace("SetupAccount", { email });
         return;
       }
 
-      Alert.alert("Verification Failed", "The server returned an unexpected verification state.");
+      Alert.alert("Verification failed", "The server returned an unexpected verification state.");
     } catch (error: any) {
-      Alert.alert("Verification Failed", getReadableApiErrorMessage(error, "Please try again."));
+      Alert.alert("Verification failed", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSetPassword = async () => {
-    if (!password || password.length < 6) {
-      Alert.alert("Error", "Password must be at least 6 characters.");
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      Alert.alert("Error", "Passwords do not match.");
-      return;
-    }
-
-    try {
-      setPasswordLoading(true);
-
-      const cleanName = name.trim();
-      const cleanUsername = username.trim().toLowerCase();
-
-      if (!cleanName || cleanName.length < 2) {
-        Alert.alert("Error", "Please enter your name (at least 2 characters).");
-        return;
-      }
-
-      if (!cleanUsername || cleanUsername.length < 3) {
-        Alert.alert("Error", "Please choose a username with at least 3 characters.");
-        return;
-      }
-
-      if (!USERNAME_REGEX.test(cleanUsername)) {
-        Alert.alert("Error", "Username must be 3 to 30 characters using lowercase letters, numbers, dots, or underscores, without double dots or underscores.");
-        return;
-      }
-
-      const res = await API.post("/auth/set-password", {
-        email,
-        password,
-        name: cleanName,
-        username: cleanUsername,
-      });
-
-      if (!res?.data?.success) {
-        Alert.alert("Error", res?.data?.message || "Something went wrong.");
-        return;
-      }
-
-      const loginRes = await API.post("/auth/login", { email, password });
-
-      if (!loginRes?.data?.success || !loginRes?.data?.user) {
-        Alert.alert("Almost there", "Password was set, but we could not sign you in automatically. Please log in.");
-        navigation.replace("Login", { email });
-        return;
-      }
-
-      await setStoredSession({
-        accessToken: loginRes.data.accessToken || loginRes.data.token,
-        refreshToken: loginRes.data.refreshToken,
-        session: loginRes.data.session,
-        user: loginRes.data.user,
-      });
-
-      registerPushToken().catch(() => { });
-
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "MainApp" }],
-      });
-    } catch (error: any) {
-      Alert.alert("Error", getReadableApiErrorMessage(error, "Server error"));
-    } finally {
-      setPasswordLoading(false);
     }
   };
 
@@ -195,6 +119,7 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
 
       if (res?.data?.success) {
         Alert.alert("OTP sent", res?.data?.message || "A fresh verification code has been sent.");
+        inputRef.current?.focus();
         return;
       }
 
@@ -212,113 +137,84 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <KeyboardAvoidingView style={styles.flexFill} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={[styles.backArrow, { color: colors.text }]}>← Back</Text>
+    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
+      <View style={[styles.orb, styles.orbTop, { backgroundColor: alpha(colors.primary, "22") }]} />
+      <View style={[styles.orb, styles.orbBottom, { backgroundColor: alpha("#0C91E3", "18") }]} />
+
+      <KeyboardAvoidingView
+        style={styles.flexFill}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          style={styles.flexFill}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Icon name="arrow-back" size={20} color={colors.text} />
+            <Text style={[styles.backText, { color: colors.text }]}>Back</Text>
           </TouchableOpacity>
 
-          <Text style={[styles.title, { color: colors.text }]}>Verify OTP</Text>
-          <Text style={[styles.subtitle, { color: colors.mutedText }]}>
-            {purpose === "login" ? "Login code sent to " : "OTP sent to "} {email || "your email"}
-          </Text>
-          <Text style={[styles.subtitle, { color: colors.mutedText }]}>{OTP_SENDER_HINT}</Text>
+          <View style={[styles.heroCard, { backgroundColor: alpha(colors.card, "EC"), borderColor: alpha(colors.border, "90") }]}>
+            <View style={[styles.logoRing, { borderColor: alpha(colors.primary, "4A") }]}>
+              <Text style={styles.logoMark}>A2</Text>
+            </View>
+            <Text style={[styles.heroTitle, { color: colors.text }]}>Verify your email</Text>
+            <Text style={[styles.heroSubtitle, { color: colors.mutedText }]}>
+              {purpose === "login" ? "Use the OTP to sign in." : "Use the OTP to continue creating your account."}
+            </Text>
+          </View>
 
-          <TextInput
-            ref={inputRef}
-            placeholder="Enter 6 digit OTP"
-            value={otp}
-            onChangeText={setOtp}
-            style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-            keyboardType="number-pad"
-            textContentType="oneTimeCode"
-            maxLength={6}
-            autoFocus
-            placeholderTextColor={colors.placeholder}
-          />
+          <View style={[styles.panel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.emailRow}>
+              <Icon name="mail-outline" size={16} color={colors.primary} />
+              <Text style={[styles.emailText, { color: colors.text }]} numberOfLines={1}>
+                {email || "your email"}
+              </Text>
+            </View>
 
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: colors.primary }, loading && styles.disabledButton]}
-            onPress={verifyOtp}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>{purpose === "login" ? "Log in with OTP" : "Verify"}</Text>
-            )}
-          </TouchableOpacity>
+            <Text style={[styles.hintText, { color: colors.mutedText }]}>{OTP_SENDER_HINT}</Text>
 
-          {!showPasswordCard ? (
-            <TouchableOpacity style={styles.secondaryButton} onPress={resendOtp} disabled={resendLoading || loading}>
-              <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>
+            <TextInput
+              ref={inputRef}
+              placeholder="Enter 6 digit OTP"
+              value={otp}
+              onChangeText={(value) => setOtp(String(value || "").replace(/[^0-9]/g, ""))}
+              style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+              keyboardType="number-pad"
+              textContentType="oneTimeCode"
+              maxLength={6}
+              autoFocus
+              placeholderTextColor={colors.placeholder}
+            />
+
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.primary }, loading && styles.buttonDisabled]}
+              onPress={() => {
+                verifyOtp().catch(() => {});
+              }}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>{purpose === "login" ? "Log in with OTP" : "Verify and continue"}</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.secondaryButton, { borderColor: colors.border, backgroundColor: alpha(colors.surface, "E8") }]}
+              onPress={() => {
+                resendOtp().catch(() => {});
+              }}
+              disabled={resendLoading || loading}
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
                 {resendLoading ? "Sending..." : "Resend OTP"}
               </Text>
             </TouchableOpacity>
-          ) : null}
-
-          {showPasswordCard ? (
-            <View style={[styles.passwordCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.passwordCardTitle, { color: colors.text }]}>Complete your profile</Text>
-              <Text style={[styles.passwordCardSubtitle, { color: colors.mutedText }]}>
-                Choose a name and username, then set a password to finish signing up.
-              </Text>
-
-              <TextInput
-                placeholder="Full name"
-                value={name}
-                onChangeText={setName}
-                style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-                placeholderTextColor={colors.placeholder}
-                autoCapitalize="words"
-                textContentType="name"
-              />
-
-              <TextInput
-                placeholder="Username"
-                value={username}
-                onChangeText={(text) => setUsername(text.toLowerCase().replace(/[^a-z0-9_.]/g, ''))}
-                style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-                placeholderTextColor={colors.placeholder}
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType="username"
-              />
-
-              <TextInput
-                placeholder="Enter password"
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-                style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-                placeholderTextColor={colors.placeholder}
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType="newPassword"
-              />
-
-              <TextInput
-                placeholder="Confirm password"
-                secureTextEntry
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                style={[styles.modalInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-                placeholderTextColor={colors.placeholder}
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType="password"
-              />
-
-              <TouchableOpacity
-                style={[styles.modalButton, { backgroundColor: colors.primary }, passwordLoading && styles.disabledButton]}
-                onPress={handleSetPassword}
-                disabled={passwordLoading}
-              >
-                {passwordLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Save password</Text>}
-              </TouchableOpacity>
-            </View>
-          ) : null}
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -328,89 +224,135 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
 export default OtpVerifyScreen;
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
   },
   flexFill: {
     flex: 1,
   },
-  content: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 32,
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: appSpacing.lg,
+    paddingTop: appSpacing.sm,
+    paddingBottom: appSpacing.xxl,
   },
-  backArrow: {
-    fontSize: 17,
-    fontWeight: "700",
+  orb: {
+    position: "absolute",
+    borderRadius: 999,
   },
-  title: {
-    fontSize: 26,
-    fontWeight: "bold",
-    marginBottom: 10,
-    marginTop: 18,
+  orbTop: {
+    width: 220,
+    height: 220,
+    top: -70,
+    right: -40,
   },
-  subtitle: {
-    fontSize: 14,
-    marginBottom: 25,
-    lineHeight: 20,
+  orbBottom: {
+    width: 240,
+    height: 240,
+    bottom: -110,
+    left: -60,
+  },
+  backButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 8,
+    paddingVertical: appSpacing.xs,
+  },
+  backText: {
+    fontFamily: appFonts.semibold,
+    fontSize: 15,
+  },
+  heroCard: {
+    marginTop: appSpacing.md,
+    borderWidth: 1,
+    borderRadius: appRadii.xl,
+    paddingHorizontal: appSpacing.lg,
+    paddingVertical: appSpacing.xl,
+    alignItems: "center",
+    ...appShadows.card,
+  },
+  logoRing: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  logoMark: {
+    color: "#FFFFFF",
+    fontFamily: appFonts.bold,
+    fontSize: 24,
+    letterSpacing: 1.2,
+  },
+  heroTitle: {
+    marginTop: appSpacing.md,
+    ...appTypography.h2,
+    textAlign: "center",
+  },
+  heroSubtitle: {
+    marginTop: appSpacing.xs,
+    ...appTypography.body,
+    textAlign: "center",
+  },
+  panel: {
+    marginTop: appSpacing.lg,
+    borderWidth: 1,
+    borderRadius: appRadii.xl,
+    padding: appSpacing.lg,
+    ...appShadows.card,
+  },
+  emailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  emailText: {
+    flex: 1,
+    marginLeft: appSpacing.xs,
+    ...appTypography.title,
+  },
+  hintText: {
+    marginTop: appSpacing.sm,
+    ...appTypography.caption,
   },
   input: {
-    height: 55,
+    marginTop: appSpacing.lg,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 15,
-    fontSize: 16,
-    marginBottom: 20,
+    borderRadius: appRadii.lg,
+    paddingHorizontal: appSpacing.md,
+    paddingVertical: Platform.OS === "ios" ? 16 : 14,
+    fontFamily: appFonts.semibold,
+    fontSize: 18,
+    letterSpacing: 4,
+    textAlign: "center",
   },
-  button: {
-    height: 55,
-    borderRadius: 30,
-    justifyContent: "center",
+  primaryButton: {
+    marginTop: appSpacing.lg,
+    minHeight: 54,
+    borderRadius: appRadii.pill,
     alignItems: "center",
+    justifyContent: "center",
   },
-  disabledButton: {
-    opacity: 0.7,
-  },
-  buttonText: {
-    color: "#fff",
+  primaryButtonText: {
+    color: "#FFFFFF",
+    fontFamily: appFonts.bold,
     fontSize: 16,
-    fontWeight: "600",
-  },
-  passwordCard: {
-    marginTop: 18,
-    borderWidth: 1,
-    borderRadius: 20,
-    padding: 20,
   },
   secondaryButton: {
-    marginTop: 14,
+    marginTop: appSpacing.sm,
+    minHeight: 52,
+    borderRadius: appRadii.pill,
+    borderWidth: 1,
     alignItems: "center",
+    justifyContent: "center",
   },
   secondaryButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontFamily: appFonts.semibold,
+    fontSize: 15,
   },
-  passwordCardTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  passwordCardSubtitle: {
-    marginTop: 6,
-    marginBottom: 16,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 15,
-    height: 50,
-    marginBottom: 15,
-  },
-  modalButton: {
-    height: 50,
-    borderRadius: 25,
-    justifyContent: "center",
-    alignItems: "center",
+  buttonDisabled: {
+    opacity: 0.7,
   },
 });

@@ -53,7 +53,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
   const bottomPadding = Math.max(insets.bottom, Platform.OS === "ios" ? 14 : 10);
   const surfaceColor = isDarkMode ? colors.surface : colors.card;
   const activeTintColor = colors.primary;
-  const labelFontSize = Platform.OS === "ios" ? 11 : 10.5;
+  const labelFontSize = Platform.OS === "ios" ? 10 : 9.5;
 
   return (
     <View pointerEvents="box-none" style={styles.wrap}>
@@ -98,9 +98,9 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
               }}
             >
               {item.key === "ProfileView" ? (
-                <ProfileTabAvatar focused={isActive} color={tintColor} size={24} />
+                <ProfileTabAvatar focused={isActive} color={tintColor} size={22} />
               ) : (
-                <Icon name={isActive ? item.icons.active : item.icons.inactive} size={24} color={tintColor} />
+                <Icon name={isActive ? item.icons.active : item.icons.inactive} size={22} color={tintColor} />
               )}
               <Text
                 style={[styles.label, { color: tintColor, fontSize: labelFontSize }]}
@@ -138,18 +138,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     minWidth: 0,
-    paddingTop: 7,
+    paddingTop: 6,
     paddingHorizontal: 4,
-    marginHorizontal: 5,
+    marginHorizontal: 4,
     marginTop: 5,
     borderRadius: 16,
     borderWidth: 1,
   },
   label: {
-    marginTop: 3,
+    marginTop: 2,
     width: "100%",
     textAlign: "center",
-    lineHeight: 14,
+    lineHeight: 12,
     fontFamily: appFonts.semibold,
     fontWeight: "700",
   },

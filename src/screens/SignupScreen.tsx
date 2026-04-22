@@ -1,27 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState } from "react";
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  TextInput,
-  StyleSheet,
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform
-} from 'react-native';
-import { Alert } from '../utils/appAlert';
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Icon from "react-native-vector-icons/Ionicons";
 
-import { API } from '../api/api';
+import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { alpha, appFonts, appRadii, appShadows, appSpacing, appTypography } from "../theme/designSystem";
+import { Alert } from "../utils/appAlert";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const SignupScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
-
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
 
   const goToLogin = (params?: Record<string, any>) => {
@@ -34,27 +36,28 @@ const SignupScreen = ({ navigation }: any) => {
   };
 
   const sendOtp = async () => {
-
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = String(email || "").trim().toLowerCase();
 
     if (!cleanEmail) {
-      Alert.alert("Error", "Please enter email");
-      return;
-    }
-    if (!EMAIL_REGEX.test(cleanEmail)) {
-      Alert.alert("Invalid Email", "Please enter a valid email address.");
+      Alert.alert("Missing email", "Please enter your email address.");
       return;
     }
 
-    if (loading) return;
+    if (!EMAIL_REGEX.test(cleanEmail)) {
+      Alert.alert("Invalid email", "Please enter a valid email address.");
+      return;
+    }
+
+    if (loading) {
+      return;
+    }
 
     try {
-
       setLoading(true);
 
       const res = await API.post("/auth/send-otp", {
         email: cleanEmail,
-        purpose: "signup"
+        purpose: "signup",
       });
 
       if (res?.data?.success) {
@@ -62,169 +65,209 @@ const SignupScreen = ({ navigation }: any) => {
           email: cleanEmail,
           purpose: "signup",
         });
-
-      } else {
-        Alert.alert("Error", res?.data?.message || "Failed to send OTP");
+        return;
       }
 
+      Alert.alert("Unable to send OTP", res?.data?.message || "Failed to send OTP.");
     } catch (err: any) {
-
-      console.log("OTP Error:", err?.response?.data || err.message);
-
       const status = err?.response?.status;
       const code = err?.response?.data?.code;
+
       if (status === 409 && code === "ACCOUNT_EXISTS") {
         Alert.alert(
-          "Account Found",
-          "This email is already registered. Please login.",
+          "Account found",
+          "This email is already registered. Please log in instead.",
           [
             { text: "Cancel", style: "cancel" },
             {
               text: "Go to Login",
-              onPress: () => navigation.replace("Login", { email: cleanEmail })
-            }
-          ]
+              onPress: () => navigation.replace("Login", { email: cleanEmail }),
+            },
+          ],
         );
         return;
       }
 
-      Alert.alert(
-        "Unable to send OTP",
-        getReadableApiErrorMessage(err, "Something went wrong. Try again.")
-      );
-
+      Alert.alert("Unable to send OTP", getReadableApiErrorMessage(err, "Something went wrong. Try again."));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
+      <View style={[styles.orb, styles.orbTop, { backgroundColor: alpha(colors.primary, "22") }]} />
+      <View style={[styles.orb, styles.orbBottom, { backgroundColor: alpha("#0C91E3", "1C") }]} />
 
-        <TouchableOpacity onPress={() => goToLogin()}>
-          <Text style={[styles.backArrow, { color: colors.text }]}>← Back</Text>
-        </TouchableOpacity>
-
-        <Text style={[styles.title, { color: colors.text }]}>What's your email address?</Text>
-
-        <Text style={[styles.subtitle, { color: colors.mutedText }]}>
-          Enter the email address at which you can be contacted.
-          {'\n'}No one will see this on your profile.
-        </Text>
-
-        <TextInput
-          placeholder="Email address"
-          value={email}
-          onChangeText={setEmail}
-          style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-          placeholderTextColor={colors.placeholder}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoCorrect={false}
-          textContentType="emailAddress"
-        />
-
-        <TouchableOpacity
-          style={[
-            styles.nextButton,
-            { backgroundColor: colors.primary },
-            loading && styles.buttonDisabled
-          ]}
-          onPress={sendOtp}
-          disabled={loading}
+      <KeyboardAvoidingView
+        style={styles.flexFill}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          style={styles.flexFill}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.nextText}>Next</Text>
-          )}
-        </TouchableOpacity>
-
-        <View style={styles.bottomContainer}>
-          <TouchableOpacity onPress={() => goToLogin()}>
-            <Text style={styles.loginText}>
-              I already have an account
-            </Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => goToLogin()}>
+            <Icon name="arrow-back" size={20} color={colors.text} />
+            <Text style={[styles.backText, { color: colors.text }]}>Back</Text>
           </TouchableOpacity>
-        </View>
 
-      </SafeAreaView>
-    </KeyboardAvoidingView>
+          <View style={[styles.heroCard, { backgroundColor: alpha(colors.card, "EC"), borderColor: alpha(colors.border, "90") }]}>
+            <Text style={[styles.heroEyebrow, { color: colors.primary }]}>New account</Text>
+            <Text style={[styles.heroTitle, { color: colors.text }]}>Start with your email</Text>
+            <Text style={[styles.heroSubtitle, { color: colors.mutedText }]}>
+              We will send a one-time code, then you can set your password and basic profile details.
+            </Text>
+          </View>
+
+          <View style={[styles.formCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.formLabel, { color: colors.text }]}>Email address</Text>
+            <TextInput
+              placeholder="you@example.com"
+              value={email}
+              onChangeText={setEmail}
+              style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+              placeholderTextColor={colors.placeholder}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="emailAddress"
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                { backgroundColor: colors.primary },
+                loading && styles.buttonDisabled,
+              ]}
+              onPress={() => {
+                sendOtp().catch(() => {});
+              }}
+              disabled={loading}
+            >
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Send OTP</Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.secondaryButton, { borderColor: colors.border, backgroundColor: alpha(colors.surface, "E8") }]}
+              onPress={() => goToLogin()}
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.text }]}>I already have an account</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
 export default SignupScreen;
+
 const styles = StyleSheet.create({
-
-  container: {
+  screen: {
     flex: 1,
-    padding: 20,
-    backgroundColor: '#fff',
   },
-
-  backArrow: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    color: '#333'
+  flexFill: {
+    flex: 1,
   },
-
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 20,
-    marginBottom: 10,
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: appSpacing.lg,
+    paddingTop: appSpacing.sm,
+    paddingBottom: appSpacing.xxl,
   },
-
-  subtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 25,
-    lineHeight: 20,
+  orb: {
+    position: "absolute",
+    borderRadius: 999,
   },
-
-  input: {
-    height: 55,
+  orbTop: {
+    width: 220,
+    height: 220,
+    top: -70,
+    right: -40,
+  },
+  orbBottom: {
+    width: 250,
+    height: 250,
+    bottom: -120,
+    left: -50,
+  },
+  backButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 8,
+    paddingVertical: appSpacing.xs,
+  },
+  backText: {
+    fontFamily: appFonts.semibold,
+    fontSize: 15,
+  },
+  heroCard: {
+    marginTop: appSpacing.md,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    paddingHorizontal: 15,
-    fontSize: 16,
-    marginBottom: 20,
+    borderRadius: appRadii.xl,
+    paddingHorizontal: appSpacing.lg,
+    paddingVertical: appSpacing.xl,
+    ...appShadows.card,
   },
-
-  nextButton: {
-    height: 55,
-    backgroundColor: 'black',
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 15,
+  heroEyebrow: {
+    ...appTypography.overline,
+  },
+  heroTitle: {
+    marginTop: appSpacing.sm,
+    ...appTypography.h2,
+  },
+  heroSubtitle: {
+    marginTop: appSpacing.xs,
+    ...appTypography.body,
+  },
+  formCard: {
+    marginTop: appSpacing.lg,
+    borderWidth: 1,
+    borderRadius: appRadii.xl,
+    padding: appSpacing.lg,
+    ...appShadows.card,
+  },
+  formLabel: {
+    ...appTypography.label,
+    marginBottom: appSpacing.sm,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: appRadii.lg,
+    paddingHorizontal: appSpacing.md,
+    paddingVertical: Platform.OS === "ios" ? 16 : 14,
+    fontFamily: appFonts.regular,
+    fontSize: 15,
+  },
+  primaryButton: {
+    marginTop: appSpacing.lg,
+    minHeight: 54,
+    borderRadius: appRadii.pill,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  primaryButtonText: {
+    color: "#FFFFFF",
+    fontFamily: appFonts.bold,
+    fontSize: 16,
+  },
+  secondaryButton: {
+    marginTop: appSpacing.sm,
+    minHeight: 52,
+    borderRadius: appRadii.pill,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  secondaryButtonText: {
+    fontFamily: appFonts.semibold,
+    fontSize: 15,
   },
   buttonDisabled: {
     opacity: 0.7,
   },
-
-  nextText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-
-  bottomContainer: {
-    position: 'absolute',
-    bottom: 30,
-    alignSelf: 'center',
-  },
-
-  loginText: {
-    color: '#ab2aeb',
-    fontSize: 15,
-    fontWeight: '500',
-  }
-
 });

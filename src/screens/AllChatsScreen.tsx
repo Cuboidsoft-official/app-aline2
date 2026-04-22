@@ -1207,7 +1207,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         >
           <View style={styles.headerCopy}>
             <Text style={[styles.headerEyebrow, { color: accentColor, fontSize: chatMetrics.metaFontSize + 0.5 }]}>Messages</Text>
-            <Text style={[styles.headerTitle, { color: colors.text, fontSize: chatMetrics.titleFontSize + 7 }]}>Chats</Text>
+            <Text style={[styles.headerTitle, { color: colors.text, fontSize: chatMetrics.titleFontSize + 5 }]}>Chats</Text>
             <Text
               style={[
                 styles.headerSubtitle,
