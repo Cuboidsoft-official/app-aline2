@@ -1723,15 +1723,29 @@ const ChatScreen = ({ navigation, route }: any) => {
       });
   }, [applyMessageReaction, currentUserId]);
 
-  const sendVoiceMessage = useCallback((voiceFile: { uri: string; name: string; type: string; duration: number }) => {
-    setPendingAttachment(null);
-    setPendingVoiceNote({
-      uri: voiceFile.uri,
-      name: voiceFile.name,
-      type: voiceFile.type,
-      duration: voiceFile.duration,
-    });
-  }, []);
+  const sendVoiceMessage = useCallback(async (voiceFile: { uri: string; name: string; type: string; duration: number }) => {
+    try {
+      setPendingAttachment(null);
+      setPendingVoiceNote(null);
+      setUploading(true);
+      await submitMessage({
+        file: {
+          uri: voiceFile.uri,
+          name: voiceFile.name,
+          type: voiceFile.type,
+        },
+        duration: voiceFile.duration,
+        messageType: "voice",
+        replyToMessageId: replyingToMessageId,
+        replyToMessage: replyingToMessage,
+      });
+    } catch (error) {
+      console.log("voice send error:", error);
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send voice message"));
+    } finally {
+      setUploading(false);
+    }
+  }, [replyingToMessage, replyingToMessageId, submitMessage]);
 
   const sendPendingVoiceMessage = useCallback(async () => {
     if (!pendingVoiceNote) {
@@ -2765,7 +2779,9 @@ const ChatScreen = ({ navigation, route }: any) => {
               <VoiceRecorderButton
                 color={primaryThemeColor}
                 disabled={uploading}
-                onSend={sendVoiceMessage}
+                onSend={(voiceFile) => {
+                  sendVoiceMessage(voiceFile).catch(() => {});
+                }}
               />
             )}
           </View>

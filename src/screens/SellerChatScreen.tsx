@@ -1689,14 +1689,26 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       });
   }, [applyMessageReaction, currentUserId]);
 
-  const sendVoiceMessage = useCallback((voiceFile: { uri: string; name: string; type: string; duration: number }) => {
-    setPendingVoiceNote({
-      uri: voiceFile.uri,
-      name: voiceFile.name,
-      type: voiceFile.type,
-      duration: voiceFile.duration,
-    });
-  }, []);
+  const sendVoiceMessage = useCallback(async (voiceFile: { uri: string; name: string; type: string; duration: number }) => {
+    try {
+      setPendingVoiceNote(null);
+      setUploading(true);
+      await submitMessage({
+        file: {
+          uri: voiceFile.uri,
+          name: voiceFile.name,
+          type: voiceFile.type,
+        },
+        duration: voiceFile.duration,
+        messageType: "voice",
+      });
+    } catch (error) {
+      console.log("seller voice send error:", error);
+      Alert.alert("Voice message failed", getReadableApiErrorMessage(error, "Unable to send voice message right now."));
+    } finally {
+      setUploading(false);
+    }
+  }, [submitMessage]);
 
   const sendPendingVoiceMessage = useCallback(async () => {
     if (!pendingVoiceNote) {

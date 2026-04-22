@@ -229,6 +229,8 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             setStopping(false);
             setDuration(0);
             setCancelled(false);
+            cancelledRef.current = false;
+            slideX.setValue(0);
             pendingStopSendRef.current = null;
         }
     };
@@ -246,6 +248,12 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
                 if (dx < CANCEL_THRESHOLD && !cancelledRef.current) {
                     cancelledRef.current = true;
                     setCancelled(true);
+                    return;
+                }
+
+                if (dx > CANCEL_THRESHOLD + 18 && cancelledRef.current) {
+                    cancelledRef.current = false;
+                    setCancelled(false);
                 }
             },
             onPanResponderRelease: () => {

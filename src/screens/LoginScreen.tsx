@@ -1,40 +1,33 @@
-import React, { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-
-import { API } from "../api/api";
+import React, { useEffect, useState } from 'react';
+import { API } from '../api/api';
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import { useAppTheme } from "../theme/AppThemeContext";
-import { alpha, appFonts, appRadii, appShadows, appSpacing, appTypography } from "../theme/designSystem";
-import { Alert } from "../utils/appAlert";
 import { setStoredSession } from "../utils/authSession";
 import { registerPushToken } from "../utils/pushRegistration";
 
+
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  SafeAreaView,
+  Image,
+} from 'react-native';
+import { Alert } from '../utils/appAlert';
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const LOGO_URI = "https://aline2.com/asstes/images/logo/logo.jpeg";
 
 const LoginScreen = ({ navigation, route }: any) => {
-  const { colors } = useAppTheme();
-  const presetEmail = String(route?.params?.email || "").trim().toLowerCase();
-  const [email, setEmail] = useState(presetEmail);
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const presetEmail = route?.params?.email || '';
+
+  const [email, setEmail] = useState(presetEmail || '');
+  const [password, setPassword] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
 
   useEffect(() => {
     if (presetEmail) {
-      setEmail(presetEmail);
+      setEmail(String(presetEmail).trim().toLowerCase());
     }
   }, [presetEmail]);
 
@@ -55,62 +48,60 @@ const LoginScreen = ({ navigation, route }: any) => {
   };
 
   const handleLogin = async () => {
-    const normalizedEmail = String(email || "").trim().toLowerCase();
 
-    if (!normalizedEmail || !password) {
+    if (!email || !password) {
       Alert.alert("Missing credentials", "Please enter email and password.");
       return;
     }
 
-    if (!EMAIL_REGEX.test(normalizedEmail)) {
+    if (!EMAIL_REGEX.test(String(email || "").trim().toLowerCase())) {
       Alert.alert("Invalid email", "Please enter a valid email address.");
       return;
     }
 
-    if (loading) {
-      return;
-    }
-
     try {
-      setLoading(true);
+      const res = await API.post("/auth/login", { email, password });
 
-      const res = await API.post("/auth/login", {
-        email: normalizedEmail,
-        password,
-      });
+      if (res?.data?.success) {
+        await setStoredSession({
+          accessToken: res.data.accessToken || res.data.token,
+          refreshToken: res.data.refreshToken,
+          session: res.data.session,
+          user: res.data.user,
+        });
 
-      if (!res?.data?.success) {
+        registerPushToken().catch(() => { });
+
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "MainApp" }],
+        });
+
+      } else {
         Alert.alert("Login failed", res?.data?.message || "Login failed");
-        return;
       }
 
-      await setStoredSession({
-        accessToken: res.data.accessToken || res.data.token,
-        refreshToken: res.data.refreshToken,
-        session: res.data.session,
-        user: res.data.user,
-      });
-
-      registerPushToken().catch(() => {});
-
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "MainApp" }],
-      });
     } catch (error: any) {
+      console.log("LOGIN ERROR:", error);
+      console.log("LOGIN ERROR DETAILS:", {
+        baseURL: API.defaults?.baseURL,
+        requestUrl: error?.config?.url,
+        method: error?.config?.method,
+        status: error?.response?.status,
+        responseData: error?.response?.data,
+      });
+
       if (["password_missing", "PASSWORD_NOT_SET"].includes(String(error?.response?.data?.reason || error?.response?.data?.code || "").trim())) {
         handleMissingPassword();
         return;
       }
 
-      Alert.alert("Login failed", getReadableApiErrorMessage(error, "Something went wrong."));
-    } finally {
-      setLoading(false);
+      Alert.alert("Login failed", getReadableApiErrorMessage(error, "Something went wrong"));
     }
   };
 
   const handleEmailOtpLogin = async () => {
-    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanEmail = String(email || '').trim().toLowerCase();
 
     if (!cleanEmail) {
       Alert.alert("Missing email", "Enter your email first to receive a login OTP.");
@@ -144,88 +135,63 @@ const LoginScreen = ({ navigation, route }: any) => {
       setOtpLoading(false);
     }
   };
-
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
-      <View style={[styles.orb, styles.orbTop, { backgroundColor: alpha(colors.primary, "24") }]} />
-      <View style={[styles.orb, styles.orbBottom, { backgroundColor: alpha("#0C91E3", "1E") }]} />
+    <SafeAreaView style={styles.container}>
 
-      <KeyboardAvoidingView
-        style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <ScrollView
-          style={styles.flexFill}
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={[styles.heroCard, { backgroundColor: alpha(colors.card, "EC"), borderColor: alpha(colors.border, "90") }]}>
-            <Image source={{ uri: LOGO_URI }} style={styles.logo} />
-            <Text style={[styles.heroTitle, { color: colors.text }]}>Welcome back</Text>
-            <Text style={[styles.heroSubtitle, { color: colors.mutedText }]}>
-              Sign in to continue your social, seller, and appointment experience.
-            </Text>
-          </View>
+      {/* Top Section */}
+      <View style={styles.topSection}>
+        <Image
+          style={styles.logoImg}
+          source={{ uri: 'https://aline2.com/asstes/images/logo/logo.jpeg' }}
+        />
+        <Text style={styles.logoText}>Aline2</Text>
+        <Text style={styles.subtitle}>Let's connect together</Text>
+      </View>
 
-          <View style={[styles.formCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.formTitle, { color: colors.text }]}>Log in</Text>
+      {/* Card Section */}
+      <View style={styles.card}>
 
-            <TextInput
-              placeholder="Email address"
-              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-              value={email}
-              onChangeText={setEmail}
-              placeholderTextColor={colors.placeholder}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              textContentType="emailAddress"
-            />
+        <TextInput
+          placeholder="Email address"
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+          placeholderTextColor="#999"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="emailAddress"
+        />
 
-            <TextInput
-              placeholder="Password"
-              secureTextEntry
-              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-              value={password}
-              onChangeText={setPassword}
-              placeholderTextColor={colors.placeholder}
-              autoCapitalize="none"
-              autoCorrect={false}
-              textContentType="password"
-            />
+        <TextInput
+          placeholder="Password"
+          secureTextEntry
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+          placeholderTextColor="#999"
+          autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="password"
+        />
 
-            <TouchableOpacity
-              style={[styles.primaryButton, { backgroundColor: colors.primary }, loading && styles.buttonDisabled]}
-              onPress={() => {
-                handleLogin().catch(() => {});
-              }}
-              disabled={loading}
-            >
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Log in</Text>}
-            </TouchableOpacity>
+        <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
+          <Text style={styles.loginText}>Log in</Text>
+        </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => navigation.navigate("ForgotPassword", { email })}>
-              <Text style={[styles.linkText, { color: colors.primary }]}>Forgot password?</Text>
-            </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate("ForgotPassword", { email })}>
+          <Text style={styles.forgot}>Forgot password?</Text>
+        </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => {
-              handleEmailOtpLogin().catch(() => {});
-            }} disabled={otpLoading}>
-              <Text style={[styles.linkText, { color: colors.text }]}>
-                {otpLoading ? "Sending OTP..." : "Use email OTP instead"}
-              </Text>
-            </TouchableOpacity>
+        <TouchableOpacity onPress={handleEmailOtpLogin} disabled={otpLoading}>
+          <Text style={styles.forgot}>{otpLoading ? "Sending OTP..." : "Use email OTP instead"}</Text>
+        </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.secondaryButton, { borderColor: colors.border, backgroundColor: alpha(colors.surface, "E8") }]}
-              onPress={() => navigation.navigate("Signup")}
-            >
-              <Text style={[styles.secondaryButtonText, { color: colors.text }]}>Create new account</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        <TouchableOpacity style={styles.signupButton} onPress={() => navigation.navigate('Signup')}>
+          <Text style={styles.signupText}>Create new account</Text>
+        </TouchableOpacity>
+
+      </View>
     </SafeAreaView>
   );
 };
@@ -233,108 +199,108 @@ const LoginScreen = ({ navigation, route }: any) => {
 export default LoginScreen;
 
 const styles = StyleSheet.create({
-  screen: {
+  container: {
     flex: 1,
+    backgroundColor: '#0c91e3', // Instagram-like gradient could be added later
   },
-  flexFill: {
+
+  topSection: {
     flex: 1,
+    backgroundColor: '#041a28',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
   },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: appSpacing.lg,
-    paddingVertical: appSpacing.xl,
+
+  logoImg: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 15,
+    borderWidth: 2,
+    borderColor: '#fff',
   },
-  orb: {
-    position: "absolute",
-    borderRadius: 999,
+
+  logoText: {
+    fontSize: 38,
+    color: '#fff',
+    fontWeight: '800',
+    letterSpacing: 2,
   },
-  orbTop: {
-    width: 240,
-    height: 240,
-    top: -70,
-    right: -40,
+
+  subtitle: {
+    fontSize: 16,
+    color: '#ccc',
+    marginTop: 8,
   },
-  orbBottom: {
-    width: 280,
-    height: 280,
-    bottom: -110,
-    left: -70,
+
+  card: {
+    flex: 2,
+    backgroundColor: '#fff',
+    marginTop: -50,
+    borderTopLeftRadius: 35,
+    borderTopRightRadius: 35,
+    paddingHorizontal: 25,
+    paddingVertical: 30,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 5,
   },
-  heroCard: {
-    marginTop: appSpacing.lg,
-    borderWidth: 1,
-    borderRadius: appRadii.xl,
-    paddingHorizontal: appSpacing.lg,
-    paddingVertical: appSpacing.xl,
-    alignItems: "center",
-    ...appShadows.card,
-  },
-  logo: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    marginBottom: appSpacing.md,
-  },
-  heroTitle: {
-    ...appTypography.h2,
-    textAlign: "center",
-  },
-  heroSubtitle: {
-    marginTop: appSpacing.xs,
-    ...appTypography.body,
-    textAlign: "center",
-  },
-  formCard: {
-    marginTop: appSpacing.lg,
-    borderWidth: 1,
-    borderRadius: appRadii.xl,
-    padding: appSpacing.lg,
-    ...appShadows.card,
-  },
-  formTitle: {
-    ...appTypography.h3,
-    marginBottom: appSpacing.md,
-  },
+
   input: {
-    borderWidth: 1,
-    borderRadius: appRadii.lg,
-    paddingHorizontal: appSpacing.md,
-    paddingVertical: Platform.OS === "ios" ? 16 : 14,
-    fontFamily: appFonts.regular,
-    fontSize: 15,
-    marginBottom: appSpacing.sm,
+    backgroundColor: '#f2f2f2',
+    borderRadius: 15,
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    marginBottom: 15,
+    fontSize: 16,
+    color: '#333',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  primaryButton: {
-    marginTop: appSpacing.xs,
-    minHeight: 54,
-    borderRadius: appRadii.pill,
-    alignItems: "center",
-    justifyContent: "center",
+
+  loginButton: {
+    backgroundColor: '#ab2aeb',
+    paddingVertical: 15,
+    borderRadius: 30,
+    alignItems: 'center',
+    marginBottom: 15,
+    shadowColor: "#ab2aeb",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 6,
   },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontFamily: appFonts.bold,
+
+  loginText: {
+    color: '#fff',
+    fontWeight: 'bold',
     fontSize: 16,
   },
-  linkText: {
-    textAlign: "center",
-    marginTop: appSpacing.md,
-    fontFamily: appFonts.semibold,
-    fontSize: 14,
+
+  forgot: {
+    textAlign: 'center',
+    marginBottom: 12,
+    color: '#555',
+    fontWeight: '500',
   },
-  secondaryButton: {
-    marginTop: appSpacing.lg,
-    minHeight: 52,
-    borderRadius: appRadii.pill,
+
+  signupButton: {
     borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
+    borderColor: '#ab2aeb',
+    paddingVertical: 15,
+    borderRadius: 30,
+    alignItems: 'center',
   },
-  secondaryButtonText: {
-    fontFamily: appFonts.semibold,
-    fontSize: 15,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
+
+  signupText: {
+    color: '#ab2aeb',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });

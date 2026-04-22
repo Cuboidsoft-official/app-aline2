@@ -1,4 +1,4 @@
-import { Linking } from "react-native";
+import { Linking, Share } from "react-native";
 
 import { normalizeMediaUrl } from "./mediaUrls";
 
@@ -38,6 +38,22 @@ export const downloadImageAsset = async (rawUrl: string, fileNameBase = "aline2_
     }
 
     console.log("media download fallback error:", error);
+  }
+
+  try {
+    await Share.share({
+      title: "Download image",
+      message: normalizedUrl,
+      url: normalizedUrl,
+    });
+    return normalizedUrl;
+  } catch (error) {
+    const errorMessage = getDownloadErrorMessage(error);
+    if (errorMessage.includes("cancel")) {
+      throw error;
+    }
+
+    console.log("media share fallback error:", error);
   }
 
   await Linking.openURL(normalizedUrl);

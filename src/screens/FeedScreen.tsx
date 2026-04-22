@@ -630,7 +630,7 @@ function FeedScreen({ navigation }: any) {
       if (/^file:\/\//i.test(fileUri)) {
         Alert.alert("Downloaded", `Image saved to:\n${fileUri}`);
       } else {
-        Alert.alert("Opened image", "The image was opened in your browser or download app.");
+        Alert.alert("Download ready", "The download or share sheet has been opened for this image.");
       }
     } catch (error) {
       const errorMessage = String((error as { message?: string })?.message || "");

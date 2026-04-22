@@ -6,6 +6,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -98,22 +99,6 @@ const SplashScreen = ({ navigation }: any) => {
     setShowGuestIntro(true);
     setSlideIndex(0);
     animateSlideCopy();
-
-    clearScheduledTimers();
-
-    GUEST_SLIDES.slice(1).forEach((_, index) => {
-      const handle = setTimeout(() => {
-        setSlideIndex(index + 1);
-      }, 1200 * (index + 1));
-      timeoutHandlesRef.current.push(handle);
-    });
-
-    const finishHandle = setTimeout(() => {
-      navigateGuestToLogin().catch(() => {
-        navigation.replace("Login");
-      });
-    }, 1200 * GUEST_SLIDES.length + 380);
-    timeoutHandlesRef.current.push(finishHandle);
   }, [animateSlideCopy, navigateGuestToLogin, navigation]);
 
   const checkLaunchState = useCallback(async () => {
@@ -227,6 +212,23 @@ const SplashScreen = ({ navigation }: any) => {
     outputRange: [1, 1.18],
   });
 
+  const handleNext = () => {
+    if (slideIndex >= GUEST_SLIDES.length - 1) {
+      navigateGuestToLogin().catch(() => {
+        navigation.replace("Login");
+      });
+      return;
+    }
+
+    setSlideIndex((current) => Math.min(current + 1, GUEST_SLIDES.length - 1));
+  };
+
+  const handleSkip = () => {
+    navigateGuestToLogin().catch(() => {
+      navigation.replace("Login");
+    });
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar backgroundColor="#041421" barStyle="light-content" />
@@ -318,6 +320,19 @@ const SplashScreen = ({ navigation }: any) => {
             />
           ))}
         </View>
+
+        {showGuestIntro ? (
+          <View style={styles.actionRow}>
+            <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
+              <Text style={styles.skipButtonText}>Skip</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
+              <Text style={styles.nextButtonText}>
+                {slideIndex === GUEST_SLIDES.length - 1 ? "Start" : "Next"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </Animated.View>
 
       <Text style={styles.footer}>
@@ -462,6 +477,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     marginTop: 18,
   },
+  actionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 22,
+  },
   progressDot: {
     width: 10,
     height: 10,
@@ -472,6 +492,34 @@ const styles = StyleSheet.create({
   progressDotActive: {
     width: 26,
     backgroundColor: "#9B4DFF",
+  },
+  skipButton: {
+    minWidth: 96,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  skipButtonText: {
+    color: "#C4D2E3",
+    fontSize: 14,
+    fontFamily: appFonts.semibold,
+  },
+  nextButton: {
+    minWidth: 120,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#9B4DFF",
+  },
+  nextButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontFamily: appFonts.bold,
   },
   footer: {
     position: "absolute",
