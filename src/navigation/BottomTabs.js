@@ -1,101 +1,94 @@
-import React from "react";
+import React, { useMemo } from "react";
+import { PanResponder, View } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import Icon from "react-native-vector-icons/Ionicons";
-import { Platform, TouchableNativeFeedback, View, StyleSheet } from "react-native";
 
 import FeedScreen from "../screens/FeedScreen";
 import ProfileView from "../screens/ProfileView";
 import CreatePostScreen from "../screens/CreatePostScreen";
 import AllChatsScreen from "../screens/AllChatsScreen";
-import { useAppTheme } from "../theme/AppThemeContext";
-import ProfileTabAvatar from "../components/ProfileTabAvatar";
+import AppBottomDock from "../components/AppBottomDock";
 
 const Tab = createBottomTabNavigator();
-const TAB_RIPPLE_COLOR = "rgba(155,77,255,0.18)";
 const SwipesTabPlaceholder = () => null;
+const TAB_SEQUENCE = ["Feed", "SwipesLauncher", "Create", "Chats", "ProfileView"];
 
-const tabIconNameByRoute = {
-  Feed: { active: "home", inactive: "home-outline", label: "Feed" },
-  SwipesLauncher: { active: "play-circle", inactive: "play-circle-outline", label: "Swipes" },
-  Create: { active: "add-circle", inactive: "add-circle-outline", label: "Create" },
-  Chats: { active: "chatbubbles", inactive: "chatbubbles-outline", label: "Chats" },
-  ProfileView: { active: "person", inactive: "person-outline", label: "Profile" },
-};
+function BottomTabSwipeWrapper({ navigation, activeRouteName, children }) {
+  const activeIndex = useMemo(
+    () => Math.max(0, TAB_SEQUENCE.findIndex((routeName) => routeName === activeRouteName)),
+    [activeRouteName],
+  );
 
-const renderTabIcon = (routeName, focused, color) => {
-  const config = tabIconNameByRoute[routeName] || tabIconNameByRoute.Feed;
-  if (routeName === "ProfileView") {
-    return <ProfileTabAvatar focused={focused} color={color} size={26} />;
-  }
-  return <Icon name={focused ? config.active : config.inactive} size={26} color={color} />;
-};
+  const navigateToTab = (routeName) => {
+    if (routeName === "SwipesLauncher") {
+      navigation.getParent?.()?.navigate("Swipes");
+      return;
+    }
 
-function TabBarButton(props) {
-  if (Platform.OS === "android") {
-    return (
-      <TouchableNativeFeedback
-        {...props}
-        background={TouchableNativeFeedback.Ripple(TAB_RIPPLE_COLOR, true, 25)}
-        useForeground
-      >
-        <View style={styles.tabButtonContainer}>{props.children}</View>
-      </TouchableNativeFeedback>
-    );
-  }
+    if (typeof navigation.jumpTo === "function") {
+      navigation.jumpTo(routeName);
+      return;
+    }
 
-  return <View style={styles.tabButtonContainer}>{props.children}</View>;
-}
+    navigation.navigate(routeName);
+  };
 
-export default function BottomTabs() {
-  const { colors } = useAppTheme();
-  const activeTintColor = colors.primary;
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gestureState) =>
+          Math.abs(gestureState.dx) > 36 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.35,
+        onPanResponderRelease: (_event, gestureState) => {
+          const { dx, dy } = gestureState;
+          if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.35) {
+            return;
+          }
+
+          const direction = dx < 0 ? 1 : -1;
+          const nextRouteName = TAB_SEQUENCE[activeIndex + direction];
+          if (nextRouteName) {
+            navigateToTab(nextRouteName);
+          }
+        },
+      }),
+    [activeIndex],
+  );
 
   return (
+    <View style={{ flex: 1 }} {...panResponder.panHandlers}>
+      {children}
+    </View>
+  );
+}
+
+const wrapWithBottomTabSwipe = (Component, activeRouteName) =>
+  function BottomTabWrappedScreen(props) {
+    return (
+      <BottomTabSwipeWrapper navigation={props.navigation} activeRouteName={activeRouteName}>
+        <Component {...props} />
+      </BottomTabSwipeWrapper>
+    );
+  };
+
+const FeedTabScreen = wrapWithBottomTabSwipe(FeedScreen, "Feed");
+const CreateTabScreen = wrapWithBottomTabSwipe(CreatePostScreen, "Create");
+const ChatsTabScreen = wrapWithBottomTabSwipe(AllChatsScreen, "Chats");
+const ProfileTabScreen = wrapWithBottomTabSwipe(ProfileView, "ProfileView");
+
+export default function BottomTabs() {
+  return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
+      screenOptions={{
         headerShown: false,
-        tabBarShowLabel: true,
-        tabBarActiveTintColor: activeTintColor,
-        tabBarInactiveTintColor: colors.tabInactive,
-        tabBarIcon: ({ focused, color }) => renderTabIcon(route.name, focused, color),
-        tabBarLabel: tabIconNameByRoute[route.name]?.label || route.name,
-        tabBarButton: TabBarButton,
-        tabBarLabelStyle: {
-          fontSize: 12.5,
-          fontWeight: "700",
-          marginTop: -2,
-        },
-        tabBarItemStyle: {
-          borderRadius: 0,
-          marginHorizontal: 0,
-          paddingTop: 2,
-        },
-        tabBarStyle: {
-          position: "absolute",
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: colors.card,
-          borderTopColor: `${activeTintColor}26`,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderWidth: 0,
-          borderColor: "transparent",
-          borderRadius: 0,
-          height: Platform.OS === "ios" ? 76 : 68,
-          paddingTop: 4,
-          paddingBottom: Platform.OS === "ios" ? 12 : 8,
-          shadowColor: "transparent",
-          shadowOpacity: 0,
-          shadowRadius: 0,
-          shadowOffset: { width: 0, height: 0 },
-          elevation: 0,
-        },
-        sceneStyle: {
-          backgroundColor: colors.background,
-        },
-      })}
+        animation: "fade",
+      }}
+      tabBar={({ navigation, state }) => (
+        <AppBottomDock
+          navigation={navigation}
+          activeRouteName={state.routeNames[state.index]}
+        />
+      )}
     >
-      <Tab.Screen name="Feed" component={FeedScreen} />
+      <Tab.Screen name="Feed" component={FeedTabScreen} />
       <Tab.Screen
         name="SwipesLauncher"
         component={SwipesTabPlaceholder}
@@ -106,21 +99,9 @@ export default function BottomTabs() {
           },
         })}
       />
-      <Tab.Screen name="Create" component={CreatePostScreen} />
-      <Tab.Screen name="Chats" component={AllChatsScreen} />
-      <Tab.Screen name="ProfileView" component={ProfileView} />
+      <Tab.Screen name="Create" component={CreateTabScreen} />
+      <Tab.Screen name="Chats" component={ChatsTabScreen} />
+      <Tab.Screen name="ProfileView" component={ProfileTabScreen} />
     </Tab.Navigator>
   );
 }
-
-const styles = StyleSheet.create({
-  tabButtonContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 0,
-    paddingTop: 4,
-    paddingBottom: 2,
-    overflow: "hidden",
-  },
-});

@@ -42,6 +42,35 @@ const normalizeUploadUri = (value) => {
   return rawValue;
 };
 
+const buildModerationBody = ({ file, mediaUrl, messageType } = {}) => {
+  if (!file?.uri) {
+    return {
+      kind: "json",
+      payload: {
+        mediaUrl,
+        messageType,
+      },
+    };
+  }
+
+  const body = new FormData();
+
+  if (messageType) {
+    body.append("messageType", messageType);
+  }
+
+  body.append("file", {
+    uri: normalizeUploadUri(file.uri),
+    name: file.name || `moderation_${Date.now()}`,
+    type: file.type || "application/octet-stream",
+  });
+
+  return {
+    kind: "multipart",
+    payload: body,
+  };
+};
+
 /**
  * @param {{ receiverId?: string; conversationType?: string; serviceId?: string }} [params]
  */
@@ -168,6 +197,7 @@ export const updateGroupChatConversation = async ({
   groupVisibility,
   groupDescription,
   groupLinks,
+  groupMessagePermission,
 } = {}) => {
   const headers = await buildAuthHeaders();
   const payload = {};
@@ -190,6 +220,10 @@ export const updateGroupChatConversation = async ({
 
   if (typeof groupLinks !== "undefined") {
     payload.groupLinks = groupLinks;
+  }
+
+  if (typeof groupMessagePermission !== "undefined") {
+    payload.groupMessagePermission = groupMessagePermission;
   }
 
   const response = await API.patch(
@@ -250,6 +284,19 @@ export const deleteGroupChatConversation = async ({ conversationId } = {}) => {
   return response.data;
 };
 
+export const deleteChatConversation = async ({ conversationId } = {}) => {
+  if (!conversationId) {
+    throw new Error("conversationId is required");
+  }
+
+  const headers = await buildAuthHeaders();
+  const response = await requestWithNotFoundFallback(
+    () => API.delete(`/chat/${conversationId}`, { headers }),
+    () => API.delete(`/chat/conversations/${conversationId}`, { headers }),
+  );
+  return response.data;
+};
+
 export const fetchConversationMessages = async (conversationId, params = {}) => {
   const headers = await buildAuthHeaders();
   const response = await API.get(`/message/${conversationId}`, {
@@ -275,6 +322,28 @@ export const searchConversationMessages = async (conversationId, params = {}) =>
     params,
   });
   return response.data;
+};
+
+export const fetchChatModerationStatus = async () => {
+  const headers = await buildAuthHeaders();
+  const response = await API.get("/moderation/status", { headers });
+  return response.data;
+};
+
+export const checkChatMediaModeration = async ({ file, mediaUrl, messageType } = {}) => {
+  const { kind, payload } = buildModerationBody({ file, mediaUrl, messageType });
+
+  if (kind === "json") {
+    const headers = await buildAuthHeaders();
+    const response = await API.post("/moderation/chat-media", payload, { headers });
+    return response.data;
+  }
+
+  return postMultipart({
+    path: "/moderation/chat-media",
+    body: payload,
+    timeoutMs: 120000,
+  });
 };
 
 export const reactToChatMessage = async (messageId, emoji) => {

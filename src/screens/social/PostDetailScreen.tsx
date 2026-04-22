@@ -24,8 +24,10 @@ import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
+import { DEFAULT_AVATAR_URL } from "../../constants/defaultAssets";
 import { PHOTO_FILTER_LIST } from "../../utils/photoFilters";
 import { getStoredUserId } from "../../utils/authSession";
+import { downloadImageAsset } from "../../utils/mediaDownload";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { useAppTheme } from "../../theme/AppThemeContext";
 
@@ -35,6 +37,24 @@ try {
 } catch {
   ColorMatrix = null;
 }
+
+const formatPostTime = (timestamp?: number) => {
+  if (!timestamp || !Number.isFinite(timestamp)) {
+    return "now";
+  }
+
+  const minutes = Math.max(1, Math.floor((Date.now() - timestamp) / (1000 * 60)));
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+
+  return `${Math.floor(hours / 24)}d`;
+};
 
 function PostDetailScreen({ route, navigation }: any) {
   const { colors } = useAppTheme();
@@ -48,6 +68,7 @@ function PostDetailScreen({ route, navigation }: any) {
   const [currentUserId, setCurrentUserId] = useState("");
   const [busyLike, setBusyLike] = useState(false);
   const [busySave, setBusySave] = useState(false);
+  const [busyDownload, setBusyDownload] = useState(false);
   const [activeSheet, setActiveSheet] = useState<null | "comments" | "share" | "actions">(null);
   const [isMediaSoundEnabled, setIsMediaSoundEnabled] = useState(true);
 
@@ -57,6 +78,10 @@ function PostDetailScreen({ route, navigation }: any) {
   const musicPlayerRef = useRef(createSound());
   const musicTrackKeyRef = useRef("");
   const musicEndMsRef = useRef(0);
+  const postTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
+    time: 0,
+    timeout: null,
+  });
 
   useFocusEffect(
     React.useCallback(() => {
@@ -127,6 +152,10 @@ function PostDetailScreen({ route, navigation }: any) {
     });
 
     return () => {
+      if (postTapRef.current.timeout) {
+        clearTimeout(postTapRef.current.timeout);
+      }
+
       try {
         player.removePlayBackListener();
       } catch {
@@ -282,6 +311,63 @@ function PostDetailScreen({ route, navigation }: any) {
     }
   };
 
+  const handleDownload = async () => {
+    if (!post || busyDownload) {
+      return;
+    }
+
+    const primaryImage = post.media.find((asset) => asset.mediaType === "image");
+    if (!primaryImage?.url) {
+      Alert.alert("Download unavailable", "Only image posts can be downloaded right now.");
+      return;
+    }
+
+    try {
+      setBusyDownload(true);
+      const fileUri = await downloadImageAsset(primaryImage.url, `aline2_post_${post.id}`);
+      if (/^file:\/\//i.test(fileUri)) {
+        Alert.alert("Downloaded", `Image saved to:\n${fileUri}`);
+      } else {
+        Alert.alert("Download ready", "The download or share sheet has been opened for this image.");
+      }
+    } catch (error) {
+      Alert.alert("Could not download image", toUserSafeMessage(error));
+    } finally {
+      setBusyDownload(false);
+    }
+  };
+
+  const handleMediaPress = () => {
+    if (!post) {
+      return;
+    }
+
+    const now = Date.now();
+    const lastTap = postTapRef.current;
+    const hasAudioLayer = post.media.some((asset) => asset.mediaType === "video") || !!post.music?.previewUrl;
+
+    if (now - lastTap.time < 260) {
+      if (lastTap.timeout) {
+        clearTimeout(lastTap.timeout);
+      }
+      postTapRef.current = { time: 0, timeout: null };
+      toggleLike().catch(() => undefined);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      if (hasAudioLayer) {
+        setIsMediaSoundEnabled((current) => !current);
+      }
+      postTapRef.current = { time: 0, timeout: null };
+    }, 260);
+
+    postTapRef.current = {
+      time: now,
+      timeout,
+    };
+  };
+
   const closeSheet = () => setActiveSheet(null);
 
   const renderMediaAsset = (asset: Post["media"][number], key?: string) => {
@@ -411,7 +497,7 @@ function PostDetailScreen({ route, navigation }: any) {
         </View>
 
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
-          <Pressable style={[styles.mediaSurface, { backgroundColor: colors.card }]} onPress={() => setIsMediaSoundEnabled((current) => !current)}>
+          <Pressable style={[styles.mediaSurface, { backgroundColor: colors.card }]} onPress={handleMediaPress}>
             {post.type === "carousel" ? (
               <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
                 {post.media.map((asset) => renderMediaAsset(asset, asset.id))}
@@ -436,8 +522,28 @@ function PostDetailScreen({ route, navigation }: any) {
           </Pressable>
 
           <View style={[styles.body, { backgroundColor: colors.card }]}>
-            <Text style={[styles.meta, { color: colors.mutedText }]}>Type: {post.type}</Text>
-            {post.editedAt ? <Text style={[styles.meta, { color: colors.mutedText }]}>Edited</Text> : null}
+            <View style={styles.userRow}>
+              <TouchableOpacity
+                style={styles.userIdentity}
+                activeOpacity={0.85}
+                onPress={() =>
+                  navigation.navigate(
+                    String(post.user.id || "") === String(currentUserId || "") ? "Profile" : "ProfilePreviewScreen",
+                    String(post.user.id || "") === String(currentUserId || "") ? undefined : { userId: post.user.id },
+                  )
+                }
+              >
+                <Image source={{ uri: normalizeMediaUrl(post.user.avatarUrl || DEFAULT_AVATAR_URL) }} style={styles.userAvatar} />
+                <View style={styles.userCopy}>
+                  <Text style={[styles.userName, { color: colors.text }]} numberOfLines={1}>
+                    {post.user.username || post.user.name || "User"}
+                  </Text>
+                  <Text style={[styles.userMeta, { color: colors.mutedText }]} numberOfLines={1}>
+                    {formatPostTime(post.createdAt)} {post.editedAt ? "• Edited" : ""}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
 
             <View style={styles.actionRow}>
               <TouchableOpacity style={styles.actionIcon} onPress={toggleLike}>
@@ -451,6 +557,13 @@ function PostDetailScreen({ route, navigation }: any) {
               <TouchableOpacity style={styles.actionIcon} onPress={() => setActiveSheet("share")}>
                 <Icon name="paper-plane-outline" size={22} color={colors.text} />
                 <Text style={[styles.actionCount, { color: colors.text }]}>{post.sharesCount}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.actionIcon} onPress={handleDownload}>
+                {busyDownload ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Icon name="download-outline" size={22} color={colors.text} />
+                )}
               </TouchableOpacity>
               <TouchableOpacity style={styles.bookmarkIcon} onPress={toggleSave}>
                 <Icon name={post.saved ? "bookmark" : "bookmark-outline"} size={22} color={colors.text} />
@@ -470,8 +583,6 @@ function PostDetailScreen({ route, navigation }: any) {
               multiline
               placeholderTextColor={colors.placeholder}
             />
-
-            <Text style={[styles.helperText, { color: colors.mutedText }]}>The current backend allows editing caption, hidden likes, and comment settings only.</Text>
 
             <Text style={[styles.label, { color: colors.text }]}>Location</Text>
             <View style={[styles.readOnlyField, { borderColor: colors.border, backgroundColor: colors.card }]}>
@@ -648,6 +759,32 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   body: { padding: 14 },
+  userRow: {
+    marginBottom: 10,
+  },
+  userIdentity: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  userAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#E5E7EB",
+  },
+  userCopy: {
+    marginLeft: 10,
+    flex: 1,
+  },
+  userName: {
+    fontSize: 14.5,
+    fontWeight: "700",
+  },
+  userMeta: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: "600",
+  },
   meta: { color: "#666", fontSize: 12, marginBottom: 4 },
   actionRow: { flexDirection: "row", alignItems: "center", marginTop: 8, marginBottom: 10 },
   actionIcon: { flexDirection: "row", alignItems: "center", marginRight: 18 },

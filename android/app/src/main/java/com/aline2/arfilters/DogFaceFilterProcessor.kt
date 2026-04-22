@@ -52,14 +52,40 @@ private const val NOSE_TIP_INDEX = 1
 private const val NOSE_LEFT_INDEX = 98
 private const val NOSE_RIGHT_INDEX = 327
 
+private enum class FaceOverlayPreset {
+  DOG,
+  CAT,
+  CROWN,
+  SHADES,
+}
+
 class DogFaceFilterProcessorFactory(
   private val context: Context,
 ) : VideoFrameProcessorFactoryInterface {
-  override fun build(): VideoFrameProcessor = DogFaceFilterProcessor(context)
+  override fun build(): VideoFrameProcessor = DogFaceFilterProcessor(context, FaceOverlayPreset.DOG)
+}
+
+class CatFaceFilterProcessorFactory(
+  private val context: Context,
+) : VideoFrameProcessorFactoryInterface {
+  override fun build(): VideoFrameProcessor = DogFaceFilterProcessor(context, FaceOverlayPreset.CAT)
+}
+
+class CrownFaceFilterProcessorFactory(
+  private val context: Context,
+) : VideoFrameProcessorFactoryInterface {
+  override fun build(): VideoFrameProcessor = DogFaceFilterProcessor(context, FaceOverlayPreset.CROWN)
+}
+
+class ShadesFaceFilterProcessorFactory(
+  private val context: Context,
+) : VideoFrameProcessorFactoryInterface {
+  override fun build(): VideoFrameProcessor = DogFaceFilterProcessor(context, FaceOverlayPreset.SHADES)
 }
 
 private class DogFaceFilterProcessor(
   private val appContext: Context,
+  overlayPreset: FaceOverlayPreset,
 ) : VideoFrameProcessor {
   private val inferenceExecutor: ExecutorService =
     Executors.newSingleThreadExecutor { runnable ->
@@ -69,7 +95,7 @@ private class DogFaceFilterProcessor(
   private val lastQueuedInferenceTimestampMs = AtomicLong(-1L)
   private val latestFaceState = AtomicReference<FaceAnchorState?>(null)
   private val colorCache = HashMap<Int, YuvColor>()
-  private val renderer = DogFaceOverlayRenderer()
+  private val renderer = DogFaceOverlayRenderer(overlayPreset)
   private val landmarkerLock = Any()
 
   @Volatile
@@ -322,7 +348,9 @@ private class DogFaceFilterProcessor(
   }
 }
 
-private class DogFaceOverlayRenderer {
+private class DogFaceOverlayRenderer(
+  private val preset: FaceOverlayPreset,
+) {
   private val outerEarPaint =
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = Color.argb(255, 139, 90, 43)
@@ -342,6 +370,63 @@ private class DogFaceOverlayRenderer {
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = Color.argb(168, 255, 238, 226)
       style = Paint.Style.FILL
+    }
+  private val catOuterEarPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(255, 73, 31, 104)
+      style = Paint.Style.FILL
+    }
+  private val catInnerEarPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(240, 255, 176, 214)
+      style = Paint.Style.FILL
+    }
+  private val catNosePaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(255, 255, 120, 172)
+      style = Paint.Style.FILL
+    }
+  private val catWhiskerPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(218, 255, 255, 255)
+      style = Paint.Style.STROKE
+      strokeWidth = 4f
+      strokeCap = Paint.Cap.ROUND
+    }
+  private val crownPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(255, 246, 196, 67)
+      style = Paint.Style.FILL
+    }
+  private val crownShadowPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(196, 163, 102, 17)
+      style = Paint.Style.FILL
+    }
+  private val crownGemPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(255, 82, 174, 255)
+      style = Paint.Style.FILL
+    }
+  private val shadesFramePaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(255, 12, 18, 29)
+      style = Paint.Style.STROKE
+      strokeWidth = 10f
+      strokeCap = Paint.Cap.ROUND
+      strokeJoin = Paint.Join.ROUND
+    }
+  private val shadesLensPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(148, 9, 15, 24)
+      style = Paint.Style.FILL
+    }
+  private val shadesHighlightPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.argb(86, 255, 255, 255)
+      style = Paint.Style.STROKE
+      strokeWidth = 3f
+      strokeCap = Paint.Cap.ROUND
     }
 
   fun render(
@@ -367,63 +452,218 @@ private class DogFaceOverlayRenderer {
 
     val faceWidth = max(42f, leftTemple.distanceTo(rightTemple))
     val eyeDistance = max(28f, leftEye.distanceTo(rightEye))
-    val earWidth = faceWidth * 0.30f
-    val earHeight = faceWidth * 0.52f
-
-    val leftEarCenter = topHead + faceRight * (-faceWidth * 0.31f) + faceUp * (-earHeight * 0.10f)
-    val rightEarCenter = topHead + faceRight * (faceWidth * 0.31f) + faceUp * (-earHeight * 0.10f)
-
     val overallBounds = RectF()
     val boundsBuffer = RectF()
     val reusablePath = Path()
 
-    drawEar(
-      canvas = canvas,
-      path = reusablePath,
-      bounds = boundsBuffer,
-      overallBounds = overallBounds,
-      center = leftEarCenter,
-      faceUp = faceUp,
-      faceRight = faceRight * -1f,
-      earWidth = earWidth,
-      earHeight = earHeight,
-    )
+    when (preset) {
+      FaceOverlayPreset.DOG -> {
+        val earWidth = faceWidth * 0.30f
+        val earHeight = faceWidth * 0.52f
+        val leftEarCenter = topHead + faceRight * (-faceWidth * 0.31f) + faceUp * (-earHeight * 0.10f)
+        val rightEarCenter = topHead + faceRight * (faceWidth * 0.31f) + faceUp * (-earHeight * 0.10f)
 
-    drawEar(
-      canvas = canvas,
-      path = reusablePath,
-      bounds = boundsBuffer,
-      overallBounds = overallBounds,
-      center = rightEarCenter,
-      faceUp = faceUp,
-      faceRight = faceRight,
-      earWidth = earWidth,
-      earHeight = earHeight,
-    )
+        drawEar(
+          canvas = canvas,
+          path = reusablePath,
+          bounds = boundsBuffer,
+          overallBounds = overallBounds,
+          center = leftEarCenter,
+          faceUp = faceUp,
+          faceRight = faceRight * -1f,
+          earWidth = earWidth,
+          earHeight = earHeight,
+          outerPaint = outerEarPaint,
+          innerPaint = innerEarPaint,
+        )
 
-    val noseCenter = Vec2((noseLeft.x + noseRight.x + noseTip.x) / 3f, (noseLeft.y + noseRight.y + noseTip.y) / 3f)
-    val noseWidth = max(eyeDistance * 0.34f, noseLeft.distanceTo(noseRight) * 1.65f)
-    val noseHeight = noseWidth * 0.72f
-    val noseRect =
-      RectF(
-        noseCenter.x - noseWidth / 2f,
-        noseCenter.y - noseHeight / 2f,
-        noseCenter.x + noseWidth / 2f,
-        noseCenter.y + noseHeight / 2f,
-      )
+        drawEar(
+          canvas = canvas,
+          path = reusablePath,
+          bounds = boundsBuffer,
+          overallBounds = overallBounds,
+          center = rightEarCenter,
+          faceUp = faceUp,
+          faceRight = faceRight,
+          earWidth = earWidth,
+          earHeight = earHeight,
+          outerPaint = outerEarPaint,
+          innerPaint = innerEarPaint,
+        )
 
-    canvas.drawOval(noseRect, nosePaint)
-    overallBounds.union(noseRect)
+        val noseCenter = Vec2((noseLeft.x + noseRight.x + noseTip.x) / 3f, (noseLeft.y + noseRight.y + noseTip.y) / 3f)
+        val noseWidth = max(eyeDistance * 0.34f, noseLeft.distanceTo(noseRight) * 1.65f)
+        val noseHeight = noseWidth * 0.72f
+        val noseRect =
+          RectF(
+            noseCenter.x - noseWidth / 2f,
+            noseCenter.y - noseHeight / 2f,
+            noseCenter.x + noseWidth / 2f,
+            noseCenter.y + noseHeight / 2f,
+          )
 
-    val noseHighlightRect =
-      RectF(
-        noseRect.left + noseWidth * 0.16f,
-        noseRect.top + noseHeight * 0.18f,
-        noseRect.left + noseWidth * 0.42f,
-        noseRect.top + noseHeight * 0.42f,
-      )
-    canvas.drawOval(noseHighlightRect, noseHighlightPaint)
-    overallBounds.union(noseHighlightRect)
+        canvas.drawOval(noseRect, nosePaint)
+        overallBounds.union(noseRect)
+
+        val noseHighlightRect =
+          RectF(
+            noseRect.left + noseWidth * 0.16f,
+            noseRect.top + noseHeight * 0.18f,
+            noseRect.left + noseWidth * 0.42f,
+            noseRect.top + noseHeight * 0.42f,
+          )
+        canvas.drawOval(noseHighlightRect, noseHighlightPaint)
+        overallBounds.union(noseHighlightRect)
+      }
+      FaceOverlayPreset.CAT -> {
+        val earWidth = faceWidth * 0.27f
+        val earHeight = faceWidth * 0.44f
+        val leftEarCenter = topHead + faceRight * (-faceWidth * 0.28f) + faceUp * (-earHeight * 0.12f)
+        val rightEarCenter = topHead + faceRight * (faceWidth * 0.28f) + faceUp * (-earHeight * 0.12f)
+
+        drawEar(
+          canvas = canvas,
+          path = reusablePath,
+          bounds = boundsBuffer,
+          overallBounds = overallBounds,
+          center = leftEarCenter,
+          faceUp = faceUp,
+          faceRight = faceRight * -1f,
+          earWidth = earWidth,
+          earHeight = earHeight,
+          outerPaint = catOuterEarPaint,
+          innerPaint = catInnerEarPaint,
+        )
+
+        drawEar(
+          canvas = canvas,
+          path = reusablePath,
+          bounds = boundsBuffer,
+          overallBounds = overallBounds,
+          center = rightEarCenter,
+          faceUp = faceUp,
+          faceRight = faceRight,
+          earWidth = earWidth,
+          earHeight = earHeight,
+          outerPaint = catOuterEarPaint,
+          innerPaint = catInnerEarPaint,
+        )
+
+        val noseCenter = Vec2(noseTip.x, noseTip.y + eyeDistance * 0.04f)
+        val noseHalfWidth = max(14f, noseLeft.distanceTo(noseRight) * 0.72f)
+        val noseHeight = noseHalfWidth * 0.95f
+        reusablePath.reset()
+        reusablePath.moveTo(noseCenter.x, noseCenter.y + noseHeight * 0.48f)
+        reusablePath.lineTo(noseCenter.x - noseHalfWidth, noseCenter.y - noseHeight * 0.52f)
+        reusablePath.lineTo(noseCenter.x + noseHalfWidth, noseCenter.y - noseHeight * 0.52f)
+        reusablePath.close()
+        canvas.drawPath(reusablePath, catNosePaint)
+        reusablePath.computeBounds(boundsBuffer, true)
+        overallBounds.union(boundsBuffer)
+
+        val whiskerLength = faceWidth * 0.34f
+        val whiskerOffsets = listOf(-12f, 0f, 12f)
+        whiskerOffsets.forEach { offset ->
+          val leftStart = noseCenter + faceRight * (-noseHalfWidth * 0.2f) + faceUp * offset
+          val leftEnd = leftStart + faceRight * (-whiskerLength)
+          val rightStart = noseCenter + faceRight * (noseHalfWidth * 0.2f) + faceUp * offset
+          val rightEnd = rightStart + faceRight * whiskerLength
+          canvas.drawLine(leftStart.x, leftStart.y, leftEnd.x, leftEnd.y, catWhiskerPaint)
+          canvas.drawLine(rightStart.x, rightStart.y, rightEnd.x, rightEnd.y, catWhiskerPaint)
+          overallBounds.union(
+            min(leftStart.x, leftEnd.x),
+            min(leftStart.y, leftEnd.y),
+            max(rightStart.x, rightEnd.x),
+            max(rightStart.y, rightEnd.y),
+          )
+        }
+      }
+      FaceOverlayPreset.CROWN -> {
+        val crownWidth = faceWidth * 1.18f
+        val crownHeight = faceWidth * 0.38f
+        val crownBaseCenter = topHead + faceUp * (-crownHeight * 0.42f)
+        val leftBase = crownBaseCenter + faceRight * (-crownWidth * 0.52f)
+        val rightBase = crownBaseCenter + faceRight * (crownWidth * 0.52f)
+        val leftPeak = crownBaseCenter + faceRight * (-crownWidth * 0.30f) + faceUp * (-crownHeight * 0.92f)
+        val centerPeak = crownBaseCenter + faceUp * (-crownHeight * 1.18f)
+        val rightPeak = crownBaseCenter + faceRight * (crownWidth * 0.30f) + faceUp * (-crownHeight * 0.92f)
+
+        reusablePath.reset()
+        reusablePath.moveTo(leftBase.x, leftBase.y)
+        reusablePath.lineTo(leftPeak.x, leftPeak.y)
+        reusablePath.lineTo(crownBaseCenter.x, crownBaseCenter.y - crownHeight * 0.46f)
+        reusablePath.lineTo(centerPeak.x, centerPeak.y)
+        reusablePath.lineTo(crownBaseCenter.x, crownBaseCenter.y - crownHeight * 0.46f)
+        reusablePath.lineTo(rightPeak.x, rightPeak.y)
+        reusablePath.lineTo(rightBase.x, rightBase.y)
+        reusablePath.close()
+
+        canvas.save()
+        canvas.translate(0f, crownHeight * 0.12f)
+        canvas.drawPath(reusablePath, crownShadowPaint)
+        canvas.restore()
+        canvas.drawPath(reusablePath, crownPaint)
+        reusablePath.computeBounds(boundsBuffer, true)
+        overallBounds.union(boundsBuffer)
+
+        val baseRect = RectF(leftBase.x, crownBaseCenter.y - crownHeight * 0.28f, rightBase.x, crownBaseCenter.y + crownHeight * 0.08f)
+        canvas.drawRoundRect(baseRect, crownHeight * 0.12f, crownHeight * 0.12f, crownPaint)
+        overallBounds.union(baseRect)
+
+        val gemRadius = crownHeight * 0.12f
+        listOf(leftPeak, centerPeak, rightPeak).forEach { peak ->
+          canvas.drawCircle(peak.x, peak.y + gemRadius * 0.9f, gemRadius, crownGemPaint)
+          overallBounds.union(
+            peak.x - gemRadius,
+            peak.y - gemRadius,
+            peak.x + gemRadius,
+            peak.y + gemRadius * 2f,
+          )
+        }
+      }
+      FaceOverlayPreset.SHADES -> {
+        val lensWidth = max(eyeDistance * 0.66f, faceWidth * 0.28f)
+        val lensHeight = lensWidth * 0.62f
+        val leftLensRect = RectF(
+          leftEye.x - lensWidth / 2f,
+          leftEye.y - lensHeight / 2f,
+          leftEye.x + lensWidth / 2f,
+          leftEye.y + lensHeight / 2f,
+        )
+        val rightLensRect = RectF(
+          rightEye.x - lensWidth / 2f,
+          rightEye.y - lensHeight / 2f,
+          rightEye.x + lensWidth / 2f,
+          rightEye.y + lensHeight / 2f,
+        )
+
+        canvas.drawRoundRect(leftLensRect, lensHeight * 0.45f, lensHeight * 0.45f, shadesLensPaint)
+        canvas.drawRoundRect(rightLensRect, lensHeight * 0.45f, lensHeight * 0.45f, shadesLensPaint)
+        canvas.drawRoundRect(leftLensRect, lensHeight * 0.45f, lensHeight * 0.45f, shadesFramePaint)
+        canvas.drawRoundRect(rightLensRect, lensHeight * 0.45f, lensHeight * 0.45f, shadesFramePaint)
+        canvas.drawLine(leftLensRect.right, leftEye.y, rightLensRect.left, rightEye.y, shadesFramePaint)
+        canvas.drawLine(leftLensRect.left, leftEye.y, leftLensRect.left - faceWidth * 0.14f, leftEye.y - faceWidth * 0.05f, shadesFramePaint)
+        canvas.drawLine(rightLensRect.right, rightEye.y, rightLensRect.right + faceWidth * 0.14f, rightEye.y - faceWidth * 0.05f, shadesFramePaint)
+
+        val leftHighlight = RectF(
+          leftLensRect.left + lensWidth * 0.16f,
+          leftLensRect.top + lensHeight * 0.18f,
+          leftLensRect.right - lensWidth * 0.38f,
+          leftLensRect.top + lensHeight * 0.34f,
+        )
+        val rightHighlight = RectF(
+          rightLensRect.left + lensWidth * 0.16f,
+          rightLensRect.top + lensHeight * 0.18f,
+          rightLensRect.right - lensWidth * 0.38f,
+          rightLensRect.top + lensHeight * 0.34f,
+        )
+        canvas.drawLine(leftHighlight.left, leftHighlight.bottom, leftHighlight.right, leftHighlight.top, shadesHighlightPaint)
+        canvas.drawLine(rightHighlight.left, rightHighlight.bottom, rightHighlight.right, rightHighlight.top, shadesHighlightPaint)
+
+        overallBounds.union(leftLensRect)
+        overallBounds.union(rightLensRect)
+      }
+    }
 
     overallBounds.inset(-10f, -10f)
     return overallBounds
@@ -439,6 +679,8 @@ private class DogFaceOverlayRenderer {
     faceRight: Vec2,
     earWidth: Float,
     earHeight: Float,
+    outerPaint: Paint,
+    innerPaint: Paint,
   ) {
     val baseLeft = center + faceRight * (-earWidth * 0.55f) + faceUp * (earHeight * 0.18f)
     val baseRight = center + faceRight * (earWidth * 0.55f) + faceUp * (earHeight * 0.18f)
@@ -449,7 +691,7 @@ private class DogFaceOverlayRenderer {
     path.lineTo(baseRight.x, baseRight.y)
     path.lineTo(tip.x, tip.y)
     path.close()
-    canvas.drawPath(path, outerEarPaint)
+    canvas.drawPath(path, outerPaint)
     path.computeBounds(bounds, true)
     overallBounds.union(bounds)
 
@@ -462,7 +704,7 @@ private class DogFaceOverlayRenderer {
     path.lineTo(innerBaseRight.x, innerBaseRight.y)
     path.lineTo(innerTip.x, innerTip.y)
     path.close()
-    canvas.drawPath(path, innerEarPaint)
+    canvas.drawPath(path, innerPaint)
     path.computeBounds(bounds, true)
     overallBounds.union(bounds)
   }

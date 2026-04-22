@@ -7,6 +7,10 @@ export interface SocialUser {
   name: string;
   avatarUrl: string;
   isVerified?: boolean;
+  followerIds?: string[];
+  followingIds?: string[];
+  viewerFollows?: boolean;
+  followsViewer?: boolean;
 }
 
 export interface StoryMusic {

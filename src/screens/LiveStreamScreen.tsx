@@ -95,6 +95,8 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
   const [iceServers, setIceServers] = useState<any[]>(Array.isArray(initialIceServers) ? initialIceServers : []);
   const [floatingReactions, setFloatingReactions] = useState<any[]>([]);
+  const [requestingGuestSlot, setRequestingGuestSlot] = useState(false);
+  const [processingGuestUserId, setProcessingGuestUserId] = useState("");
 
   const localStreamRef = useRef<any>(null);
   const peerConnectionsRef = useRef<Map<string, any>>(new Map());
@@ -103,6 +105,15 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const leavingRef = useRef(false);
 
   const isHost = useMemo(() => Boolean(liveStream?.isHost || mode === "host"), [liveStream?.isHost, mode]);
+  const currentUserId = String(currentUser?._id || currentUser?.id || "").trim();
+  const pendingGuestRequestIds = Array.isArray(liveStream?.pendingGuestRequestIds)
+    ? liveStream.pendingGuestRequestIds
+      .map((entry: any) => String(entry?._id || entry?.id || entry || "").trim())
+      .filter(Boolean)
+    : [];
+  const pendingGuestRequests = Array.isArray(liveStream?.pendingGuestRequests) ? liveStream.pendingGuestRequests : [];
+  const isApprovedGuest = Boolean(liveStream?.isApprovedGuest);
+  const hasPendingGuestRequest = pendingGuestRequestIds.includes(currentUserId);
   const liveStatus = String(liveStream?.status || "").trim() || "live";
   const viewerCount = Number(liveStream?.viewerCount) || 0;
   const normalizedIceServers = useMemo(() => normalizeIceServers(iceServers), [iceServers]);
@@ -369,6 +380,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
         return;
       }
 
+      setRequestingGuestSlot(false);
       if (payload?.liveStream) {
         setLiveStream(payload.liveStream);
       }
@@ -379,6 +391,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
         return;
       }
 
+      setRequestingGuestSlot(false);
       setLiveStream(payload.liveStream);
       if (String(payload?.liveStream?.status || "") === "ended") {
         setRemoteStreamURL(null);
@@ -514,6 +527,37 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       }, 2100);
     };
 
+    const handleGuestRequested = (payload: any) => {
+      if (String(payload?.liveStreamId || "") !== String(liveStreamId)) {
+        return;
+      }
+
+      setRequestingGuestSlot(false);
+      if (payload?.liveStream) {
+        setLiveStream(payload.liveStream);
+      }
+    };
+
+    const handleGuestResponse = (payload: any) => {
+      if (String(payload?.liveStreamId || "") !== String(liveStreamId)) {
+        return;
+      }
+
+      setProcessingGuestUserId("");
+      if (payload?.liveStream) {
+        setLiveStream(payload.liveStream);
+      }
+
+      if (String(payload?.targetUserId || "") === currentUserId) {
+        Alert.alert(
+          payload?.approved ? "Guest request approved" : "Guest request declined",
+          payload?.approved
+            ? "The host approved your request. Stay active in the stream chat while everything syncs."
+            : "The host declined your request to join on stream."
+        );
+      }
+    };
+
     socket.on("live-stream:joined", handleJoined);
     socket.on("live-stream:status", handleStatus);
     socket.on("live-stream:viewer-ready", handleViewerReady);
@@ -523,6 +567,8 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     socket.on("live-stream:chat", handleChat);
     socket.on("live-stream:viewer-left", handleViewerLeft);
     socket.on("live-stream:reaction", handleReaction);
+    socket.on("live-stream:guest-requested", handleGuestRequested);
+    socket.on("live-stream:guest-response", handleGuestResponse);
 
     return () => {
       socket.off("live-stream:joined", handleJoined);
@@ -534,8 +580,10 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       socket.off("live-stream:chat", handleChat);
       socket.off("live-stream:viewer-left", handleViewerLeft);
       socket.off("live-stream:reaction", handleReaction);
+      socket.off("live-stream:guest-requested", handleGuestRequested);
+      socket.off("live-stream:guest-response", handleGuestResponse);
     };
-  }, [cleanupPeerConnection, createOfferForViewer, ensurePeerConnection, flushPendingIceCandidates, isHost, liveStreamId]);
+  }, [cleanupPeerConnection, createOfferForViewer, currentUserId, ensurePeerConnection, flushPendingIceCandidates, isHost, liveStreamId]);
 
   useEffect(() => () => {
     leavingRef.current = true;
@@ -586,6 +634,31 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       emoji,
     });
   }, [liveStatus, liveStreamId]);
+
+  const requestGuestSlot = useCallback(() => {
+    if (!liveStreamId || liveStatus !== "live" || requestingGuestSlot || hasPendingGuestRequest || isApprovedGuest || isHost) {
+      return;
+    }
+
+    setRequestingGuestSlot(true);
+    socket.emit("live-stream:guest-request", {
+      liveStreamId,
+    });
+  }, [hasPendingGuestRequest, isApprovedGuest, isHost, liveStatus, liveStreamId, requestingGuestSlot]);
+
+  const respondToGuestRequest = useCallback((targetUserId: string, approved: boolean) => {
+    const nextTargetUserId = String(targetUserId || "").trim();
+    if (!isHost || !nextTargetUserId || processingGuestUserId) {
+      return;
+    }
+
+    setProcessingGuestUserId(nextTargetUserId);
+    socket.emit("live-stream:guest-response", {
+      liveStreamId,
+      targetUserId: nextTargetUserId,
+      approved,
+    });
+  }, [isHost, liveStreamId, processingGuestUserId]);
 
   const toggleMicrophone = useCallback(() => {
     if (!localStreamRef.current) {
@@ -690,7 +763,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
               </View>
               <Text style={styles.streamTitle}>{liveStream?.title || "Live Session"}</Text>
               <Text style={styles.streamSubtitle}>
-                    {liveStream?.hostDisplayName || liveStream?.hostSeller?.sellerName || "Aline2 Creator"} · {viewerCount} viewers
+                {liveStream?.hostDisplayName || liveStream?.hostSeller?.sellerName || "Aline2 Creator"} · {viewerCount} viewers
               </Text>
             </View>
 
@@ -750,18 +823,109 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
             </Text>
           </View>
 
+          {!isHost ? (
+            <View style={[styles.guestRequestCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.guestRequestIconWrap}>
+                <Icon name="hand-left-outline" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.guestRequestCopy}>
+                <Text style={[styles.guestRequestTitle, { color: colors.text }]}>Request to join live</Text>
+                <Text style={[styles.guestRequestHint, { color: colors.mutedText }]}>
+                  {isApprovedGuest
+                    ? "The host approved your request for the guest queue."
+                    : hasPendingGuestRequest
+                      ? "Your request is pending host approval."
+                      : "Ask the host to bring you on stream from this chat area."}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.guestRequestButton,
+                  {
+                    backgroundColor: isApprovedGuest || hasPendingGuestRequest ? colors.surface : colors.primary,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={requestGuestSlot}
+                disabled={liveStatus !== "live" || requestingGuestSlot || hasPendingGuestRequest || isApprovedGuest}
+              >
+                <Text style={[styles.guestRequestButtonText, { color: isApprovedGuest || hasPendingGuestRequest ? colors.text : "#fff" }]}>
+                  {isApprovedGuest ? "Approved" : hasPendingGuestRequest ? "Pending" : requestingGuestSlot ? "Sending..." : "Request to join"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : pendingGuestRequests.length ? (
+            <View style={[styles.guestQueueCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.guestQueueTitle, { color: colors.text }]}>Requests to join</Text>
+              {pendingGuestRequests.slice(0, 3).map((requester: any) => {
+                const requesterId = String(requester?._id || requester?.id || "").trim();
+                const requesterLabel = requester?.name || requester?.username || "Viewer";
+                const isProcessing = processingGuestUserId === requesterId;
+
+                return (
+                  <View key={requesterId} style={styles.guestQueueRow}>
+                    <View style={styles.guestQueueCopy}>
+                      <Text style={[styles.guestQueueName, { color: colors.text }]} numberOfLines={1}>
+                        {requesterLabel}
+                      </Text>
+                      <Text style={[styles.guestQueueMeta, { color: colors.mutedText }]} numberOfLines={1}>
+                        Wants to join your live stream.
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.guestQueueAction, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      onPress={() => respondToGuestRequest(requesterId, false)}
+                      disabled={isProcessing}
+                    >
+                      <Text style={[styles.guestQueueActionText, { color: colors.text }]}>Later</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.guestQueueAction, styles.guestQueueApproveButton, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+                      onPress={() => respondToGuestRequest(requesterId, true)}
+                      disabled={isProcessing}
+                    >
+                      <Text style={styles.guestQueueApproveText}>{isProcessing ? "Saving..." : "Approve"}</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+
           <ScrollView style={styles.chatList} contentContainerStyle={styles.chatListContent}>
             {messages.length === 0 ? (
               <Text style={[styles.emptyChatText, { color: colors.mutedText }]}>The chat is quiet right now. Send the first message.</Text>
             ) : (
-              messages.map((message) => (
-                <View key={message?.id} style={[styles.chatBubble, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <Text style={[styles.chatSender, { color: colors.text }]}>
-                    {message?.sender?.name || message?.sender?.username || "Aline2 User"}
-                  </Text>
-                  <Text style={[styles.chatMessage, { color: colors.text }]}>{message?.text}</Text>
-                </View>
-              ))
+              messages.map((message, index) => {
+                const senderId = String(message?.sender?._id || message?.sender?.id || message?.senderId || "").trim();
+                const isOwnMessage = Boolean(currentUserId) && senderId === currentUserId;
+
+                return (
+                  <View
+                    key={message?.id || message?._id || `message-${index}`}
+                    style={[styles.chatBubbleRow, isOwnMessage ? styles.chatBubbleRowMine : null]}
+                  >
+                    <View
+                      style={[
+                        styles.chatBubble,
+                        {
+                          backgroundColor: isOwnMessage ? colors.primary : colors.card,
+                          borderColor: isOwnMessage ? colors.primary : colors.border,
+                        },
+                      ]}
+                    >
+                      {!isOwnMessage ? (
+                        <Text style={[styles.chatSender, { color: colors.text }]}>
+                          {message?.sender?.name || message?.sender?.username || "Aline2 User"}
+                        </Text>
+                      ) : null}
+                      <Text style={[styles.chatMessage, { color: isOwnMessage ? "#fff" : colors.text }]}>
+                        {message?.text}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
             )}
           </ScrollView>
 
@@ -910,7 +1074,7 @@ const styles = StyleSheet.create({
   },
   errorText: { color: "#fff", fontSize: 12.5, lineHeight: 18 },
   chatPanel: {
-    maxHeight: 290,
+    maxHeight: 360,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     paddingTop: 14,
@@ -920,9 +1084,113 @@ const styles = StyleSheet.create({
   chatHeader: { marginBottom: 10 },
   chatTitle: { fontSize: 16, fontWeight: "900" },
   chatHint: { marginTop: 4, fontSize: 12, lineHeight: 18 },
+  guestRequestCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  guestRequestIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(123,63,228,0.1)",
+    marginRight: 12,
+  },
+  guestRequestCopy: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 12,
+  },
+  guestRequestTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  guestRequestHint: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  guestRequestButton: {
+    minWidth: 122,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  guestRequestButtonText: {
+    fontSize: 12.5,
+    fontWeight: "800",
+  },
+  guestQueueCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  guestQueueTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    marginBottom: 10,
+  },
+  guestQueueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  guestQueueCopy: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 10,
+  },
+  guestQueueName: {
+    fontSize: 13.5,
+    fontWeight: "700",
+  },
+  guestQueueMeta: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  guestQueueAction: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginLeft: 8,
+  },
+  guestQueueActionText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  guestQueueApproveButton: {
+    minWidth: 78,
+    alignItems: "center",
+  },
+  guestQueueApproveText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
+  },
   chatList: { flexGrow: 0 },
   chatListContent: { paddingBottom: 12 },
   emptyChatText: { fontSize: 13, lineHeight: 19 },
+  chatBubbleRow: {
+    width: "100%",
+    marginBottom: 10,
+    alignItems: "flex-start",
+  },
+  chatBubbleRowMine: {
+    alignItems: "flex-end",
+  },
   reactionRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -959,13 +1227,13 @@ const styles = StyleSheet.create({
   },
   chatBubble: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
+    borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    marginBottom: 10,
+    maxWidth: "84%",
   },
   chatSender: { fontSize: 12, fontWeight: "800" },
-  chatMessage: { marginTop: 5, fontSize: 13, lineHeight: 18 },
+  chatMessage: { marginTop: 4, fontSize: 13, lineHeight: 18 },
   chatComposer: {
     flexDirection: "row",
     alignItems: "center",

@@ -53,6 +53,7 @@ const ProfilePreviewScreen = ({ route, navigation }: { route: any; navigation: a
  const [errorMessage, setErrorMessage] = useState("");
  const [activeTab, setActiveTab] = useState<ProfilePreviewTab>("posts");
  const [isFollowing, setIsFollowing] = useState(false);
+ const [followsViewer, setFollowsViewer] = useState(false);
  const [isMutualConnection, setIsMutualConnection] = useState(false);
  const [canViewPosts, setCanViewPosts] = useState(false);
  const [actionLoading, setActionLoading] = useState(false);
@@ -146,6 +147,7 @@ const fetchProfile = useCallback(async ({ refresh = false }: { refresh?: boolean
    : false;
 
   setIsFollowing(!!amIFollowing);
+  setFollowsViewer(!!followsMe);
   setIsMutualConnection(Boolean(amIFollowing && followsMe));
   setCanViewPosts(accessGranted);
   setErrorMessage("");
@@ -154,6 +156,7 @@ const fetchProfile = useCallback(async ({ refresh = false }: { refresh?: boolean
   setUser(null);
   setAllPosts([]);
   setTaggedPosts([]);
+  setFollowsViewer(false);
   setIsMutualConnection(false);
   setErrorMessage(getReadableApiErrorMessage(err, "Failed to load this profile."));
  } finally {
@@ -251,6 +254,9 @@ const statItems = [
  { key: "following", label: "Following", value: user?.following?.length || 0 },
 ];
 const previewData = isPrivateLocked ? [] : posts;
+const followActionLabel = followsViewer && !isFollowing ? "Follow back" : "Follow";
+const showMessageAction = !!user?._id && isMutualConnection;
+const showFollowingState = isFollowing;
 const getPostPreviewUrl = (post: ProfilePreviewPost): string =>
  normalizeMediaUrl(
   post.media?.[0]?.thumbnailUrl ||
@@ -547,16 +553,19 @@ const renderProfileHeader = () => (
    </View>
 
     <View style={[styles.buttons, isCompact && styles.buttonsCompact]}>
-     {isFollowing ? (
+     {showMessageAction ? (
       <TouchableOpacity
+       style={[styles.primaryAction, { backgroundColor: colors.primary }]}
        activeOpacity={0.7}
-       style={[styles.secondaryAction, { borderColor: colors.border, backgroundColor: isDarkMode ? colors.surface : colors.card }]}
-       onPress={unfollowUser}
-       disabled={actionLoading}
+       onPress={() => navigation.navigate("ChatScreen", {
+        userId: user?._id,
+        conversationType: user?.category === "Seller" ? "seller" : "direct"
+      })}
       >
-      <Text style={[styles.secondaryActionText, { color: colors.text }]}>Following</Text>
-     </TouchableOpacity>
-    ) : (
+       <Icon name="chatbubble-ellipses-outline" size={18} color="#fff" />
+       <Text style={styles.primaryActionText}>Message</Text>
+      </TouchableOpacity>
+     ) : !isFollowing ? (
       <TouchableOpacity
        activeOpacity={0.7}
        style={[styles.primaryAction, { backgroundColor: colors.primary }]}
@@ -565,24 +574,21 @@ const renderProfileHeader = () => (
        >
        <Icon name="person-add-outline" size={18} color="#fff" />
        <Text style={styles.primaryActionText}>
-        {actionLoading ? "Loading..." : "Follow"}
+        {actionLoading ? "Loading..." : followActionLabel}
        </Text>
       </TouchableOpacity>
-    )}
+    ) : null}
 
-    {!!user?._id && isMutualConnection && (
+    {showFollowingState ? (
       <TouchableOpacity
        style={[styles.secondaryAction, { borderColor: colors.border, backgroundColor: isDarkMode ? colors.surface : colors.card }]}
        activeOpacity={0.7}
-       onPress={() => navigation.navigate("ChatScreen", {
-        userId: user?._id,
-       conversationType: user?.category === "Seller" ? "seller" : "direct"
-      })}
+       onPress={unfollowUser}
+       disabled={actionLoading}
      >
-      <Icon name="chatbubble-ellipses-outline" size={18} color={colors.text} />
-      <Text style={[styles.secondaryActionText, { color: colors.text }]}>Message</Text>
+      <Text style={[styles.secondaryActionText, { color: colors.text }]}>Following</Text>
      </TouchableOpacity>
-    )}
+    ) : null}
    </View>
 
    {!!suggestions.length && (

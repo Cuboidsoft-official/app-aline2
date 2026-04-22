@@ -1,5 +1,5 @@
-import React from "react";
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useMemo, useRef } from "react";
+import { PanResponder, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -53,11 +53,64 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
   const bottomPadding = Math.max(insets.bottom, Platform.OS === "ios" ? 14 : 10);
   const surfaceColor = isDarkMode ? colors.surface : colors.card;
   const activeTintColor = colors.primary;
-  const labelFontSize = Platform.OS === "ios" ? 10 : 9.5;
+  const labelFontSize = Platform.OS === "ios" ? 9.5 : 9;
+  const routeNames = navigation?.getState?.()?.routeNames || [];
+  const swipeLockRef = useRef(false);
+  const resolvedActiveKey = activeRouteName === "SwipesLauncher" ? "Swipes" : activeRouteName;
+  const activeIndex = useMemo(
+    () => Math.max(0, bottomNavItems.findIndex((item) => item.key === resolvedActiveKey)),
+    [resolvedActiveKey],
+  );
+
+  const navigateToItem = (screen: string) => {
+    if (screen === "Swipes") {
+      navigation.getParent?.()?.navigate("Swipes");
+      return;
+    }
+
+    if (Array.isArray(routeNames) && routeNames.includes(screen)) {
+      navigation.navigate(screen);
+      return;
+    }
+
+    if (Array.isArray(routeNames) && routeNames.includes("MainApp")) {
+      navigation.navigate("MainApp", { screen });
+      return;
+    }
+
+    navigation.getParent?.()?.navigate("MainApp", { screen });
+  };
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gestureState) =>
+          Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2,
+        onPanResponderRelease: (_event, gestureState) => {
+          if (swipeLockRef.current) {
+            swipeLockRef.current = false;
+            return;
+          }
+
+          const { dx, dy } = gestureState;
+          if (Math.abs(dx) < 28 || Math.abs(dx) < Math.abs(dy) * 1.2) {
+            return;
+          }
+
+          const direction = dx < 0 ? 1 : -1;
+          const nextItem = bottomNavItems[activeIndex + direction];
+          if (nextItem) {
+            navigateToItem(nextItem.screen);
+          }
+        },
+      }),
+    [activeIndex],
+  );
 
   return (
     <View pointerEvents="box-none" style={styles.wrap}>
       <View
+        {...panResponder.panHandlers}
         style={[
           styles.surface,
           {
@@ -73,7 +126,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
         ]}
       >
         {bottomNavItems.map((item) => {
-          const isActive = activeRouteName === item.key;
+          const isActive = resolvedActiveKey === item.key;
           const tintColor = isActive ? activeTintColor : colors.tabInactive || colors.mutedText;
           const activeBackgroundColor = isDarkMode ? alpha(activeTintColor, "22") : alpha(activeTintColor, "14");
 
@@ -89,12 +142,8 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
                 },
               ]}
               onPress={() => {
-                if (item.screen === "Swipes") {
-                  navigation.navigate("Swipes");
-                  return;
-                }
-
-                navigation.navigate("MainApp", { screen: item.screen });
+                swipeLockRef.current = true;
+                navigateToItem(item.screen);
               }}
             >
               {item.key === "ProfileView" ? (
@@ -126,6 +175,7 @@ const styles = StyleSheet.create({
   surface: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     borderTopWidth: StyleSheet.hairlineWidth,
     shadowColor: "transparent",
     shadowOpacity: 0,
@@ -138,18 +188,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     minWidth: 0,
-    paddingTop: 6,
-    paddingHorizontal: 4,
-    marginHorizontal: 4,
-    marginTop: 5,
-    borderRadius: 16,
+    paddingTop: 4,
+    paddingHorizontal: 2,
+    marginHorizontal: 1,
+    marginTop: 4,
+    borderRadius: 14,
     borderWidth: 1,
   },
   label: {
-    marginTop: 2,
+    marginTop: 1,
     width: "100%",
     textAlign: "center",
-    lineHeight: 12,
+    lineHeight: 11,
     fontFamily: appFonts.semibold,
     fontWeight: "700",
   },

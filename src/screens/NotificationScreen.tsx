@@ -510,7 +510,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
         >
           <View style={styles.avatarColumn}>
             <Image source={{ uri: avatarUrl || FALLBACK_AVATAR }} style={[styles.avatar, { backgroundColor: colors.surface }]} />
-            <View style={[styles.typeBadge, { backgroundColor: colors.primary }]}>
+            <View style={[styles.typeBadge, { backgroundColor: colors.primary, borderColor: colors.card }]}>
               <Icon name={getNotificationIcon(item.type)} size={12} color="#fff" />
             </View>
           </View>
@@ -835,15 +835,13 @@ const styles = StyleSheet.create({
   },
   typeBadge: {
     position: "absolute",
-    right: -2,
-    bottom: -2,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    right: -3,
+    bottom: -3,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#fff",
   },
   notificationCopy: {
     flex: 1,

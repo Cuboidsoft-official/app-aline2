@@ -466,12 +466,33 @@ class RemoteSocialApi implements SocialApi {
   }
 
   private mapUser(user: any) {
+    const followerIds = Array.isArray(user?.followers)
+      ? user.followers.map((entry: any) => this.getId(entry)).filter(Boolean)
+      : [];
+    const followingIds = Array.isArray(user?.following)
+      ? user.following.map((entry: any) => this.getId(entry)).filter(Boolean)
+      : [];
+
     return {
       id: this.getId(user),
       username: user?.username || "user",
       name: user?.name || user?.fullName || user?.username || "User",
       avatarUrl: user?.profilePic || user?.avatarUrl || this.fallbackAvatarUrl,
       isVerified: !!user?.isVerified,
+      followerIds,
+      followingIds,
+      viewerFollows:
+        typeof user?.viewerFollows === "boolean"
+          ? user.viewerFollows
+          : typeof user?.isFollowing === "boolean"
+            ? user.isFollowing
+            : undefined,
+      followsViewer:
+        typeof user?.followsViewer === "boolean"
+          ? user.followsViewer
+          : typeof user?.isFollower === "boolean"
+            ? user.isFollower
+            : undefined,
     };
   }
 

@@ -71,6 +71,7 @@ type GroupConversation = {
   groupDescription?: string | null;
   groupLinks?: string[];
   groupVisibility?: "private" | "public";
+  groupMessagePermission?: "everyone" | "admins";
   chatTheme?: string | null;
   chatWallpaper?: string | null;
 };
@@ -141,6 +142,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
   const [groupDescriptionDraft, setGroupDescriptionDraft] = useState("");
   const [groupLinksDraft, setGroupLinksDraft] = useState("");
   const [groupVisibilityDraft, setGroupVisibilityDraft] = useState<"private" | "public">("private");
+  const [groupMessagePermissionDraft, setGroupMessagePermissionDraft] = useState<"everyone" | "admins">("everyone");
   const [savingMeta, setSavingMeta] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -227,6 +229,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
       setGroupDescriptionDraft(nextConversation?.groupDescription || "");
       setGroupLinksDraft(Array.isArray(nextConversation?.groupLinks) ? nextConversation.groupLinks.join("\n") : "");
       setGroupVisibilityDraft((nextConversation?.groupVisibility || "private") as "private" | "public");
+      setGroupMessagePermissionDraft((nextConversation?.groupMessagePermission || "everyone") as "everyone" | "admins");
       setCurrentTheme(String(nextConversation?.chatTheme || "default"));
       setChatWallpaper(String(nextConversation?.chatWallpaper || ""));
       if (storedUserId) {
@@ -248,6 +251,11 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
           members: normalizeChatUsers(Array.isArray((conversationSnapshot as GroupConversation)?.members) ? (conversationSnapshot as GroupConversation).members as any[] : []),
         } as GroupConversation;
         setConversation(normalizedSnapshot);
+        setGroupNameDraft(normalizedSnapshot?.groupName || "");
+        setGroupDescriptionDraft(normalizedSnapshot?.groupDescription || "");
+        setGroupLinksDraft(Array.isArray(normalizedSnapshot?.groupLinks) ? normalizedSnapshot.groupLinks.join("\n") : "");
+        setGroupVisibilityDraft((normalizedSnapshot?.groupVisibility || "private") as "private" | "public");
+        setGroupMessagePermissionDraft((normalizedSnapshot?.groupMessagePermission || "everyone") as "everyone" | "admins");
       } else {
         setConversation(null);
       }
@@ -370,6 +378,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
       await updateGroupChatConversation({
         conversationId,
         groupVisibility: groupVisibilityDraft,
+        groupMessagePermission: groupMessagePermissionDraft,
         groupDescription: groupDescriptionDraft.trim(),
         groupLinks: groupLinksDraft
           .split(/\r?\n/)
@@ -382,7 +391,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
     } finally {
       setSavingMeta(false);
     }
-  }, [conversationId, groupDescriptionDraft, groupLinksDraft, groupVisibilityDraft, loadConversation]);
+  }, [conversationId, groupDescriptionDraft, groupLinksDraft, groupMessagePermissionDraft, groupVisibilityDraft, loadConversation]);
 
   const handleThemeChanged = useCallback((themeId: string) => {
     setCurrentTheme(themeId);
@@ -841,6 +850,38 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
               >
                 <Text style={[styles.visibilityButtonText, { color: isActive ? "#fff" : colors.text }]}>
                   {mode === "public" ? "Public" : "Private"}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={[styles.metaSectionLabel, { color: colors.text }]}>Who can send messages</Text>
+        <Text style={[styles.metaCardText, { color: colors.mutedText }]}>
+          Choose whether everyone can chat, ya sirf admins announcements bhej sakein.
+        </Text>
+
+        <View style={styles.visibilityRow}>
+          {([
+            { value: "everyone" as const, label: "Everyone" },
+            { value: "admins" as const, label: "Admins only" },
+          ]).map((mode) => {
+            const isActive = groupMessagePermissionDraft === mode.value;
+            return (
+              <TouchableOpacity
+                key={mode.value}
+                style={[
+                  styles.visibilityButton,
+                  {
+                    backgroundColor: isActive ? colors.primary : colors.background,
+                    borderColor: isActive ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setGroupMessagePermissionDraft(mode.value)}
+                disabled={!canEditGroup}
+              >
+                <Text style={[styles.visibilityButtonText, { color: isActive ? "#fff" : colors.text }]}>
+                  {mode.label}
                 </Text>
               </TouchableOpacity>
             );
@@ -1359,6 +1400,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     fontFamily: appFonts.regular,
+  },
+  metaSectionLabel: {
+    marginTop: 18,
+    fontSize: 13.5,
+    fontFamily: appFonts.bold,
   },
   visibilityRow: {
     flexDirection: "row",

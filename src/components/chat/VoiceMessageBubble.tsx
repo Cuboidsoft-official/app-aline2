@@ -184,7 +184,7 @@ const VoiceMessageBubble = ({
               style={[
                 styles.waveBar,
                 {
-                  height: 22 * bar.height,
+                  height: 14 * bar.height,
                   backgroundColor: bar.active ? resolvedTextColor : `${resolvedMetaColor}88`,
                 },
               ]}
@@ -192,9 +192,11 @@ const VoiceMessageBubble = ({
           ))}
         </View>
         <View style={styles.metaRow}>
-          <Text style={[styles.label, { color: resolvedTextColor }]} numberOfLines={1}>
-            {label}
-          </Text>
+          {label ? (
+            <Text style={[styles.label, { color: resolvedTextColor }]} numberOfLines={1}>
+              {label}
+            </Text>
+          ) : null}
           <Text style={[styles.meta, { color: resolvedMetaColor }]}>
             {formatAudioTime(currentPosition)} / {formatAudioTime(duration || Number(durationSeconds || 0) * 1000)}
           </Text>
@@ -206,49 +208,50 @@ const VoiceMessageBubble = ({
 
 const styles = StyleSheet.create({
   container: {
-    minWidth: 220,
-    borderRadius: 18,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    minWidth: 124,
+    maxWidth: 168,
+    borderRadius: 14,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
     flexDirection: "row",
     alignItems: "center",
   },
   playButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
   },
   waveformWrap: {
     flex: 1,
-    marginLeft: 10,
+    marginLeft: 7,
     minWidth: 0,
   },
   waveformRow: {
     flexDirection: "row",
     alignItems: "center",
-    height: 24,
+    height: 14,
   },
   waveBar: {
-    width: 4,
+    width: 3,
     borderRadius: 999,
-    marginRight: 3,
+    marginRight: 2.5,
   },
   metaRow: {
-    marginTop: 6,
+    marginTop: 2,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   label: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "700",
     flexShrink: 1,
-    marginRight: 8,
+    marginRight: 5,
   },
   meta: {
-    fontSize: 11.5,
+    fontSize: 9.5,
     fontVariant: ["tabular-nums"],
   },
 });
