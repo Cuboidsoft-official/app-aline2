@@ -1,5 +1,9 @@
 import {
+  clampStickerPosition,
+  clampStickerRotation,
+  clampStickerScale,
   getAngleDeltaDegrees,
+  getStickerBounds,
   getTouchMetrics,
   getTouchPoints,
   normalizeAngleDelta,
@@ -33,5 +37,30 @@ describe("stickerGestureUtils", () => {
     expect(normalizeAngleDelta(190)).toBe(-170);
     expect(normalizeAngleDelta(-190)).toBe(170);
     expect(getAngleDeltaDegrees(170, -170)).toBe(20);
+  });
+
+  it("keeps sticker transforms smooth while respecting the allowed range", () => {
+    expect(clampStickerScale(1.236)).toBe(1.24);
+    expect(clampStickerScale(5)).toBe(3);
+    expect(clampStickerRotation(45.44)).toBe(45.4);
+    expect(clampStickerRotation(-999)).toBe(-180);
+  });
+
+  it("clamps sticker position using the scaled sticker footprint", () => {
+    expect(getStickerBounds({ width: 0.16, height: 0.12 }, 2.5)).toEqual({
+      width: 0.4,
+      height: 0.3,
+    });
+
+    expect(
+      clampStickerPosition(
+        { width: 0.16, height: 0.12 },
+        { x: 0.9, y: 0.85 },
+        2.5,
+      ),
+    ).toEqual({
+      x: 0.6,
+      y: 0.7,
+    });
   });
 });

@@ -4,6 +4,7 @@ import {
   type DimensionValue,
   Image,
   KeyboardAvoidingView,
+  Linking,
   PanResponder,
   PermissionsAndroid,
   Platform,
@@ -55,8 +56,16 @@ import {
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
 import { showModerationBlockedSheet } from "../utils/moderationNotice";
 import { getStoredUserId } from "../utils/authSession";
-import { getAngleDeltaDegrees, getTouchMetrics, getTouchPoints } from "../features/social/stickerGestureUtils";
+import {
+  clampStickerPosition as clampStickerPositionWithinBounds,
+  clampStickerRotation,
+  clampStickerScale,
+  getAngleDeltaDegrees,
+  getTouchMetrics,
+  getTouchPoints,
+} from "../features/social/stickerGestureUtils";
 import { useAppTheme } from "../theme/AppThemeContext";
+import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import SocialVideo from "../features/social/components/SocialVideo";
 import {
   InstagramComposerHeader,
@@ -220,8 +229,6 @@ const createStickerGestureState = (position: { x: number; y: number }): StickerG
   startDistance: 0,
   startAngle: 0,
 });
-const clampStickerScale = (value: number): number => Math.min(2, Math.max(0.6, Math.round(value * 10) / 10));
-const clampStickerRotation = (value: number): number => Math.min(180, Math.max(-180, Math.round(value)));
 const clampNormalizedValue = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const getStoryFilterOverlayStyle = (
   preset: StoryFilterPreset,
@@ -775,23 +782,6 @@ function CreatePostScreen({ navigation, route }: any) {
     [storyStickerEmojiPlacement, storyStickerEmojiPosition, storyStickerTextPlacement, storyStickerTextPosition],
   );
 
-  const clampStickerPosition = useCallback((type: "text" | "emoji", x: number, y: number) => {
-    const bounds = storyStickerDimensions[type];
-    return {
-      x: Math.min(Math.max(0, x), 1 - bounds.width),
-      y: Math.min(Math.max(0, y), 1 - bounds.height),
-    };
-  }, []);
-
-  const updateStickerPosition = useCallback((type: "text" | "emoji", position: { x: number; y: number }) => {
-    const clamped = clampStickerPosition(type, position.x, position.y);
-    if (type === "text") {
-      setStoryStickerTextPosition(clamped);
-      return;
-    }
-    setStoryStickerEmojiPosition(clamped);
-  }, [clampStickerPosition]);
-
   const getStickerScale = useCallback(
     (type: "text" | "emoji") => (type === "text" ? storyStickerTextScale : storyStickerEmojiScale),
     [storyStickerEmojiScale, storyStickerTextScale],
@@ -801,6 +791,24 @@ function CreatePostScreen({ navigation, route }: any) {
     (type: "text" | "emoji") => (type === "text" ? storyStickerTextRotation : storyStickerEmojiRotation),
     [storyStickerEmojiRotation, storyStickerTextRotation],
   );
+
+  const updateStickerPosition = useCallback((
+    type: "text" | "emoji",
+    position: { x: number; y: number },
+    scaleOverride?: number,
+  ) => {
+    const clamped = clampStickerPositionWithinBounds(
+      storyStickerDimensions[type],
+      position,
+      scaleOverride ?? getStickerScale(type),
+    );
+
+    if (type === "text") {
+      setStoryStickerTextPosition(clamped);
+      return;
+    }
+    setStoryStickerEmojiPosition(clamped);
+  }, [getStickerScale]);
 
   const updateStickerScale = useCallback((type: "text" | "emoji", value: number) => {
     const clampedValue = clampStickerScale(value);
@@ -865,17 +873,31 @@ function CreatePostScreen({ navigation, route }: any) {
         return;
       }
 
+      let nextScale = getStickerScale(type);
+
+      if (touches.length >= 2 && gestureState.startDistance > 0) {
+        nextScale = clampStickerScale(gestureState.startScale * (metrics.distance / gestureState.startDistance));
+        updateStickerScale(type, nextScale);
+        updateStickerRotation(
+          type,
+          clampStickerRotation(gestureState.startRotation + getAngleDeltaDegrees(gestureState.startAngle, metrics.angle)),
+        );
+      }
+
       updateStickerPosition(type, {
         x: gestureState.startPosition.x + (metrics.centerX - gestureState.startCenter.x) / storyPreviewSize.width,
         y: gestureState.startPosition.y + (metrics.centerY - gestureState.startCenter.y) / storyPreviewSize.height,
-      });
-
-      if (touches.length >= 2 && gestureState.startDistance > 0) {
-        updateStickerScale(type, gestureState.startScale * (metrics.distance / gestureState.startDistance));
-        updateStickerRotation(type, gestureState.startRotation + getAngleDeltaDegrees(gestureState.startAngle, metrics.angle));
-      }
+      }, nextScale);
     },
-    [storyPreviewSize.height, storyPreviewSize.width, syncStickerGestureBaseline, updateStickerPosition, updateStickerRotation, updateStickerScale],
+    [
+      getStickerScale,
+      storyPreviewSize.height,
+      storyPreviewSize.width,
+      syncStickerGestureBaseline,
+      updateStickerPosition,
+      updateStickerRotation,
+      updateStickerScale,
+    ],
   );
 
   const resetStickerGesture = useCallback((type: "text" | "emoji") => {
@@ -1065,6 +1087,18 @@ function CreatePostScreen({ navigation, route }: any) {
     navigation.navigate("LiveStreamsScreen", { focusMode: "host" });
   }, [navigation]);
 
+  const resetTextStickerTransform = useCallback(() => {
+    setStoryStickerTextPosition(storyStickerPresetPositions[storyStickerTextPlacement]);
+    setStoryStickerTextScale(1);
+    setStoryStickerTextRotation(0);
+  }, [storyStickerTextPlacement]);
+
+  const resetEmojiStickerTransform = useCallback(() => {
+    setStoryStickerEmojiPosition(storyStickerPresetPositions[storyStickerEmojiPlacement]);
+    setStoryStickerEmojiScale(1);
+    setStoryStickerEmojiRotation(0);
+  }, [storyStickerEmojiPlacement]);
+
   const setFramePresetForTab = (tab: ComposerTab, preset: ComposerFramePreset) => {
     setFramePresetByTab((prev) => ({
       ...prev,
@@ -1178,6 +1212,25 @@ function CreatePostScreen({ navigation, route }: any) {
       setMusicImportingId("");
     }
   };
+
+  const openMusicSource = useCallback(async (item: SelectedMusicClip | MusicCatalogItem | null | undefined) => {
+    const targetUrl = String(item?.externalUrl || "").trim();
+
+    if (!targetUrl) {
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(targetUrl);
+      if (!supported) {
+        throw new Error("Track link is unavailable right now.");
+      }
+
+      await Linking.openURL(targetUrl);
+    } catch (error) {
+      Alert.alert("Could not open track", toUserSafeMessage(error));
+    }
+  }, []);
 
   const updateSelectedMusic = (updater: (current: SelectedMusicClip) => SelectedMusicClip) => {
     const current = musicSelections[activeTab];
@@ -1821,20 +1874,6 @@ function CreatePostScreen({ navigation, route }: any) {
           </View>
         </View>
 
-        <View style={styles.galleryTabsRow}>
-          {["Gallery", "Camera", "Video"].map((label, index) => (
-            <View
-              key={`gallery-tab-${label}`}
-              style={[
-                styles.galleryTab,
-                { backgroundColor: index === 0 ? composerAccent : subtleSurfaceColor, borderColor: composerBorderColor },
-              ]}
-            >
-              <Text style={[styles.galleryTabText, { color: index === 0 ? "#fff" : composerText }]}>{label}</Text>
-            </View>
-          ))}
-        </View>
-
         {selectedAssets.length ? renderSelectedAssets() : (
           <View style={styles.selectorSkeletonGrid}>
             {[0, 1, 2, 3, 4, 5].map((item) => (
@@ -1975,7 +2014,6 @@ function CreatePostScreen({ navigation, route }: any) {
       },
     ];
     const previewMetaItems = [
-      { id: "frame", label: activeFrameConfig.label },
       activeTab === "story" ? (storyLocation.trim() ? { id: "location", label: storyLocation.trim() } : null) : (location.trim() ? { id: "location", label: location.trim() } : null),
       buildMusicLabel(musicSelections[activeTab]) ? { id: "music", label: buildMusicLabel(musicSelections[activeTab]) } : null,
     ].filter(Boolean) as Array<{ id: string; label: string }>;
@@ -2031,11 +2069,12 @@ function CreatePostScreen({ navigation, route }: any) {
             onLayout={(event) => handleStoryPreviewLayout(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}
           >
             {selectedAssets.map((asset) => (
-              <Image
+              <ProgressiveImage
                 key={`preview-carousel-${asset.id}`}
-                source={{ uri: asset.thumbnailUrl || asset.uri }}
+                uri={asset.uri}
+                previewUri={asset.thumbnailUrl || asset.uri}
                 style={[styles.previewMediaFill, { width: storyPreviewSize.width || 280 }]}
-                resizeMode="cover"
+                fallbackColor="#0b0d12"
               />
             ))}
           </ScrollView>
@@ -2076,19 +2115,21 @@ function CreatePostScreen({ navigation, route }: any) {
       return previewVideo;
     }
 
-    const rawPreviewImage = (
-      <Image
-        source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }}
-        style={styles.previewMediaFill}
-      />
-    );
+    const rawPreviewImage = <Image source={{ uri: primaryAsset.thumbnailUrl || primaryAsset.uri }} style={styles.previewMediaFill} />;
     const activePhotoFilter = selectedPhotoFilter !== "none"
       ? PHOTO_FILTER_LIST.find((filter) => filter.id === selectedPhotoFilter)
       : null;
     const filteredPostPreview =
       activeTab === "post" && ColorMatrix && activePhotoFilter?.matrix
         ? <ColorMatrix matrix={activePhotoFilter.matrix}>{rawPreviewImage}</ColorMatrix>
-        : rawPreviewImage;
+        : (
+          <ProgressiveImage
+            uri={primaryAsset.uri}
+            previewUri={primaryAsset.thumbnailUrl || primaryAsset.uri}
+            style={styles.previewMediaFill}
+            fallbackColor="#0b0d12"
+          />
+        );
 
     return (
       <View
@@ -2397,7 +2438,15 @@ function CreatePostScreen({ navigation, route }: any) {
             style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, musicBrowseMode === "original" && [styles.pillActive, activePillStyle]]}
             onPress={loadOriginalSounds}
           >
-            <Text style={[styles.pillText, { color: musicBrowseMode === "original" ? "#fff" : composerText }, musicBrowseMode === "original" && styles.pillTextActive]}>My Audio</Text>
+            <Text style={[styles.pillText, { color: musicBrowseMode === "original" ? "#fff" : composerText }, musicBrowseMode === "original" && styles.pillTextActive]}>Originals</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, musicBrowseMode === "search" && [styles.pillActive, activePillStyle]]}
+            onPress={() => {
+              runMusicSearch().catch(() => undefined);
+            }}
+          >
+            <Text style={[styles.pillText, { color: musicBrowseMode === "search" ? "#fff" : composerText }, musicBrowseMode === "search" && styles.pillTextActive]}>Search</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.musicSearchRow}>
@@ -2422,6 +2471,18 @@ function CreatePostScreen({ navigation, route }: any) {
         {current ? (
           <View style={[styles.musicCard, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
             <View style={styles.musicCardHeader}>
+              {current.artworkUrl ? (
+                <ProgressiveImage
+                  uri={current.artworkUrl}
+                  previewUri={current.artworkUrl}
+                  style={styles.musicCardArtwork}
+                  fallbackColor={surfaceColor}
+                />
+              ) : (
+                <View style={[styles.musicCardArtwork, styles.musicArtworkPlaceholder, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]}>
+                  <Icon name="musical-notes-outline" size={20} color={composerMutedText} />
+                </View>
+              )}
               <View style={styles.musicTitleBlock}>
                 <Text style={[styles.musicTitle, { color: composerText }]}>{buildMusicLabel(current)}</Text>
                 <Text style={[styles.musicMeta, helperTextStyle]}>
@@ -2430,9 +2491,21 @@ function CreatePostScreen({ navigation, route }: any) {
                     .join(" • ")}
                 </Text>
               </View>
-              <TouchableOpacity style={[styles.musicClearButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setMusicForTab(tab, null)}>
-                <Text style={[styles.musicClearText, { color: composerText }]}>Remove</Text>
-              </TouchableOpacity>
+              <View style={styles.musicCardActions}>
+                {current.externalUrl ? (
+                  <TouchableOpacity
+                    style={[styles.musicClearButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]}
+                    onPress={() => {
+                      openMusicSource(current).catch(() => undefined);
+                    }}
+                  >
+                    <Text style={[styles.musicClearText, { color: composerText }]}>Open</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity style={[styles.musicClearButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setMusicForTab(tab, null)}>
+                  <Text style={[styles.musicClearText, { color: composerText }]}>Remove</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <Text style={[styles.sectionLabel, { color: composerText }]}>Clip length</Text>
@@ -2517,6 +2590,18 @@ function CreatePostScreen({ navigation, route }: any) {
                   isCurrent && [styles.musicResultCardActive, { backgroundColor: elevatedSurfaceColor, borderColor: composerAccent }],
                 ]}
               >
+                {item.artworkUrl ? (
+                  <ProgressiveImage
+                    uri={item.artworkUrl}
+                    previewUri={item.artworkUrl}
+                    style={styles.musicResultArtwork}
+                    fallbackColor={elevatedSurfaceColor}
+                  />
+                ) : (
+                  <View style={[styles.musicResultArtwork, styles.musicArtworkPlaceholder, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
+                    <Icon name="musical-notes-outline" size={18} color={composerMutedText} />
+                  </View>
+                )}
                 <TouchableOpacity
                   style={styles.musicResultBody}
                   onPress={() => attachMusic(item)}
@@ -2531,6 +2616,17 @@ function CreatePostScreen({ navigation, route }: any) {
                   {previewLabel ? <Text style={[styles.musicPreviewMeta, helperTextStyle]}>{previewLabel}</Text> : null}
                 </TouchableOpacity>
                 <View style={styles.musicResultActions}>
+                  {item.externalUrl ? (
+                    <TouchableOpacity
+                      style={[styles.musicResultIconButton, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}
+                      onPress={() => {
+                        openMusicSource(item).catch(() => undefined);
+                      }}
+                      disabled={isImporting}
+                    >
+                      <Icon name="open-outline" size={16} color={composerText} />
+                    </TouchableOpacity>
+                  ) : null}
                   <TouchableOpacity
                     style={[styles.musicResultIconButton, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}
                     onPress={() => {
@@ -2684,6 +2780,17 @@ function CreatePostScreen({ navigation, route }: any) {
               <Text style={[styles.scaleButtonText, { color: composerText }]}>↻</Text>
             </TouchableOpacity>
           </View>
+          <View style={styles.stickerHelperRow}>
+            <Text style={[styles.helperText, helperTextStyle, styles.stickerHelperText]}>
+              Drag on the preview to move it. Pinch with two fingers for smooth scale and rotation.
+            </Text>
+            <TouchableOpacity
+              style={[styles.stickerResetButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]}
+              onPress={resetTextStickerTransform}
+            >
+              <Text style={[styles.stickerResetButtonText, { color: composerText }]}>Reset</Text>
+            </TouchableOpacity>
+          </View>
         </>
       ) : null}
 
@@ -2730,6 +2837,17 @@ function CreatePostScreen({ navigation, route }: any) {
             <Text style={[styles.scaleValueText, { color: composerText }]}>Emoji angle {storyStickerEmojiRotation}deg</Text>
             <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setStoryStickerEmojiRotation((value) => clampStickerRotation(value + 15))}>
               <Text style={[styles.scaleButtonText, { color: composerText }]}>↻</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.stickerHelperRow}>
+            <Text style={[styles.helperText, helperTextStyle, styles.stickerHelperText]}>
+              Keep swiping the canvas to reposition the sticker after resizing it.
+            </Text>
+            <TouchableOpacity
+              style={[styles.stickerResetButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]}
+              onPress={resetEmojiStickerTransform}
+            >
+              <Text style={[styles.stickerResetButtonText, { color: composerText }]}>Reset</Text>
             </TouchableOpacity>
           </View>
         </>
@@ -2999,6 +3117,17 @@ function CreatePostScreen({ navigation, route }: any) {
               <Text style={[styles.scaleButtonText, { color: colors.text }]}>↻</Text>
             </TouchableOpacity>
           </View>
+          <View style={styles.stickerHelperRow}>
+            <Text style={[styles.helperText, helperTextStyle, styles.stickerHelperText]}>
+              Drag on the story canvas to move it. Pinch with two fingers for smooth scale and rotation.
+            </Text>
+            <TouchableOpacity
+              style={[styles.stickerResetButton, { backgroundColor: surfaceColor, borderColor: colors.border }]}
+              onPress={resetTextStickerTransform}
+            >
+              <Text style={[styles.stickerResetButtonText, { color: colors.text }]}>Reset</Text>
+            </TouchableOpacity>
+          </View>
         </>
       ) : null}
 
@@ -3045,6 +3174,17 @@ function CreatePostScreen({ navigation, route }: any) {
             <Text style={[styles.scaleValueText, { color: colors.text }]}>Emoji angle {storyStickerEmojiRotation}deg</Text>
             <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: colors.border }]} onPress={() => setStoryStickerEmojiRotation((value) => clampStickerRotation(value + 15))}>
               <Text style={[styles.scaleButtonText, { color: colors.text }]}>↻</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.stickerHelperRow}>
+            <Text style={[styles.helperText, helperTextStyle, styles.stickerHelperText]}>
+              Use the story canvas itself for final placement so the sticker stays inside frame.
+            </Text>
+            <TouchableOpacity
+              style={[styles.stickerResetButton, { backgroundColor: surfaceColor, borderColor: colors.border }]}
+              onPress={resetEmojiStickerTransform}
+            >
+              <Text style={[styles.stickerResetButtonText, { color: colors.text }]}>Reset</Text>
             </TouchableOpacity>
           </View>
         </>
@@ -3272,6 +3412,7 @@ function CreatePostScreen({ navigation, route }: any) {
           borderColor={composerBorderColor}
           surfaceColor={surfaceColor}
           onSelectTab={onSelectTab}
+          onOpenLive={openLiveComposer}
         />
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <InstagramComposerStepStrip
@@ -4008,10 +4149,27 @@ const styles = StyleSheet.create({
   musicCardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: 12,
   },
+  musicCardArtwork: {
+    width: 54,
+    height: 54,
+    borderRadius: 16,
+    overflow: "hidden",
+    flexShrink: 0,
+  },
+  musicArtworkPlaceholder: {
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   musicTitleBlock: { flex: 1 },
+  musicCardActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   musicTitle: { fontSize: 15, fontWeight: "800", color: "#111827" },
   musicMeta: { marginTop: 4, color: "#6b7280", fontSize: 12 },
   musicClearButton: {
@@ -4060,6 +4218,13 @@ const styles = StyleSheet.create({
   musicResultCardActive: {
     borderColor: "#111827",
     backgroundColor: "#f9fafb",
+  },
+  musicResultArtwork: {
+    width: 52,
+    height: 52,
+    borderRadius: 15,
+    overflow: "hidden",
+    flexShrink: 0,
   },
   musicResultBody: { flex: 1 },
   musicResultTitle: { color: "#111827", fontWeight: "800" },
@@ -4150,6 +4315,29 @@ const styles = StyleSheet.create({
     color: "#374151",
     fontWeight: "700",
     flexShrink: 1,
+  },
+  stickerHelperRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  stickerHelperText: {
+    flex: 1,
+    marginTop: 0,
+  },
+  stickerResetButton: {
+    minHeight: 34,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  stickerResetButtonText: {
+    fontSize: 12,
+    fontWeight: "800",
   },
   audienceWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   audienceChip: {
