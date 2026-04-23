@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   PanResponder,
   Platform,
   PermissionsAndroid,
@@ -125,13 +126,54 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
         pulseAnim.setValue(1);
     }, [pulseAnim]);
 
-    useEffect(() => () => {
+    const abortRecorderSession = useCallback(async (updateState = true) => {
+        isRecordingRef.current = false;
+        pendingStopSendRef.current = null;
+
+        try {
+            await Sound.stopRecorder();
+        } catch {
+            // Ignore stop errors when recorder is already idle.
+        }
+
         try {
             Sound.removeRecordBackListener();
         } catch {
             // Ignore cleanup failures.
         }
-    }, []);
+
+        stopPulse();
+
+        if (updateState) {
+            setRecording(false);
+            setStarting(false);
+            setStopping(false);
+            setDuration(0);
+            setCancelled(false);
+            cancelledRef.current = false;
+            slideX.setValue(0);
+        }
+    }, [slideX, stopPulse]);
+
+    useEffect(() => () => {
+        abortRecorderSession(false).catch(() => {});
+    }, [abortRecorderSession]);
+
+    useEffect(() => {
+        const subscription = AppState.addEventListener("change", (nextState) => {
+            if (nextState === "active") {
+                return;
+            }
+
+            if (isRecordingRef.current || recording || starting || stopping) {
+                abortRecorderSession(true).catch(() => {});
+            }
+        });
+
+        return () => {
+            subscription.remove();
+        };
+    }, [abortRecorderSession, recording, starting, stopping]);
 
     useEffect(() => {
         if (!recording && !starting && !stopping) {
