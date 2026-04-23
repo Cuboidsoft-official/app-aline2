@@ -17,7 +17,6 @@ import {
 } from "react-native";
 import { Alert } from "../utils/appAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
-import LinearGradient from "react-native-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createSound } from "react-native-nitro-sound";
 import Icon from "react-native-vector-icons/Ionicons";
@@ -1631,55 +1630,6 @@ function CreatePostScreen({ navigation, route }: any) {
     </View>
   );
   void renderCreateModeCards;
-
-  const renderStudioSummary = () => {
-    const blueprint = composerBlueprints[activeTab];
-    const selectedMusic = musicSelections[activeTab];
-    const mediaLabel = selectedAssets.length
-      ? `${selectedAssets.length} ${selectedAssets.length === 1 ? "asset" : "assets"} selected`
-      : activeTab === "story" && storyType === "text"
-        ? "Text story canvas"
-        : "Select media";
-    const activeStepLabel = activeStep === "select"
-      ? "Select screen"
-      : activeStep === "edit"
-        ? "Edit screen"
-        : "Share screen";
-
-    return (
-      <LinearGradient colors={blueprint.gradient} style={styles.instagramHero}>
-        <View style={styles.instagramHeroTop}>
-          <View>
-            <Text style={styles.instagramEyebrow}>Studio</Text>
-            <Text style={styles.instagramTitle}>{blueprint.title}</Text>
-            <Text style={styles.instagramSubtitle}>{blueprint.description}</Text>
-          </View>
-          <View style={[styles.instagramHeroIcon, { backgroundColor: "rgba(255,255,255,0.08)" }]}>
-            <Icon name={blueprint.icon} size={20} color="#fff" />
-          </View>
-        </View>
-        <View style={styles.instagramMetricRow}>
-          <View style={[styles.instagramMetricCard, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
-            <Text style={styles.instagramMetricValue}>{mediaLabel}</Text>
-            <Text style={styles.instagramMetricLabel}>Media</Text>
-          </View>
-          <View style={[styles.instagramMetricCard, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
-            <Text style={styles.instagramMetricValue}>{activeStepLabel}</Text>
-            <Text style={styles.instagramMetricLabel}>Stage</Text>
-          </View>
-          <View style={[styles.instagramMetricCard, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
-            <Text style={styles.instagramMetricValue}>{activeFrameConfig.label}</Text>
-            <Text style={styles.instagramMetricLabel}>Frame</Text>
-          </View>
-          <View style={[styles.instagramMetricCard, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
-            <Text style={styles.instagramMetricValue}>{selectedMusic ? "Attached" : "Optional"}</Text>
-            <Text style={styles.instagramMetricLabel}>Music</Text>
-          </View>
-        </View>
-      </LinearGradient>
-    );
-  };
-  void renderStudioSummary;
 
   const renderFrameSelector = () => (
     <View style={[styles.frameCard, { backgroundColor: elevatedSurfaceColor, borderColor: composerBorderColor }]}>
@@ -3324,7 +3274,6 @@ function CreatePostScreen({ navigation, route }: any) {
           onSelectTab={onSelectTab}
         />
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          {renderStudioSummary()}
           <InstagramComposerStepStrip
             activeStep={activeStep}
             accentColor={composerAccent}

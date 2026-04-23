@@ -584,13 +584,13 @@ function SwipesScreen({ navigation }: any) {
         <View style={styles.overlay}>
           <View style={styles.topBar}>
             <View>
-              <Text style={styles.screenKicker}>Short-form studio</Text>
+              <Text style={styles.screenKicker}>Swipe feed</Text>
               <Text style={styles.screenTitle}>Swipes</Text>
             </View>
             <TouchableOpacity style={styles.createButton} onPress={() => navigation.navigate("Create", { initialTab: "swipe" })}>
               <LinearGradient colors={["#00c6ff", "#7f00ff", "#ff4ecd"]} style={styles.createButtonGradient}>
                 <Icon name="add" size={18} color="#fff" />
-                <Text style={styles.createButtonText}>Create Reel</Text>
+                <Text style={styles.createButtonText}>Create Swipe</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -679,6 +679,21 @@ function SwipesScreen({ navigation }: any) {
     );
   }
 
+  if (!swipes.length) {
+    return (
+      <View style={styles.emptyState}>
+        <Icon name="albums-outline" size={36} color="#fff" />
+        <Text style={styles.emptyStateTitle}>No swipes yet</Text>
+        <Text style={styles.emptyStateBody}>
+          Create the first swipe or pull to refresh once new short-form posts are published.
+        </Text>
+        <TouchableOpacity style={styles.emptyStateButton} onPress={() => navigation.navigate("Create", { initialTab: "swipe" })}>
+          <Text style={styles.emptyStateButtonText}>Create Swipe</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <FlatList
@@ -690,6 +705,10 @@ function SwipesScreen({ navigation }: any) {
         snapToAlignment="start"
         disableIntervalMomentum
         decelerationRate="fast"
+        initialNumToRender={2}
+        maxToRenderPerBatch={2}
+        windowSize={4}
+        removeClippedSubviews
         showsVerticalScrollIndicator={false}
         getItemLayout={(_, index) => ({
           length: viewportHeight,
@@ -933,6 +952,38 @@ function SwipesScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#000" },
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 28,
+    backgroundColor: "#000",
+  },
+  emptyStateTitle: {
+    marginTop: 14,
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  emptyStateBody: {
+    marginTop: 8,
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: "center",
+  },
+  emptyStateButton: {
+    marginTop: 18,
+    borderRadius: 999,
+    backgroundColor: "#7f00ff",
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+  },
+  emptyStateButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+  },
   swipeItem: { justifyContent: "flex-end", backgroundColor: "#121212" },
   swipeMedia: { ...StyleSheet.absoluteFillObject },
   likeBurstOverlay: {
