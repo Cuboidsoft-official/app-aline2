@@ -41,6 +41,17 @@ function ProgressiveImage({
     setImageFailed(false);
   }, [imageOpacity, resolvedPreviewUri, resolvedUri]);
 
+  useEffect(() => {
+    const remoteCandidates = [resolvedPreviewUri, resolvedUri]
+      .filter(Boolean)
+      .filter((value, index, all) => all.indexOf(value) === index)
+      .filter((value) => /^https?:\/\//i.test(value));
+
+    remoteCandidates.forEach((value) => {
+      Image.prefetch(value).catch(() => undefined);
+    });
+  }, [resolvedPreviewUri, resolvedUri]);
+
   if (!resolvedUri && !resolvedPreviewUri) {
     return <View style={[styles.fallback, containerStyle, { backgroundColor: fallbackColor }]} />;
   }
@@ -54,6 +65,7 @@ function ProgressiveImage({
             style={StyleSheet.absoluteFill}
             resizeMode={resizeMode}
             blurRadius={blurRadius}
+            fadeDuration={0}
             onError={() => {
               setPreviewFailed(true);
             }}
@@ -66,6 +78,7 @@ function ProgressiveImage({
           source={{ uri: resolvedUri }}
           style={[StyleSheet.absoluteFill, { opacity: imageOpacity }]}
           resizeMode={resizeMode}
+          fadeDuration={0}
           onLoad={() => {
             Animated.timing(imageOpacity, {
               toValue: 1,
