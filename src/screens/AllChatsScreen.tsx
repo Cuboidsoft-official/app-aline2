@@ -14,7 +14,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Alert } from "../utils/appAlert";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useFocusEffect } from "@react-navigation/native";
 import { API } from "../api/api";
@@ -24,6 +24,7 @@ import { getStoredUserId } from "../utils/authSession";
 import {
   createChatConversation,
   createGroupChatConversation,
+  deleteChatConversation,
   fetchChatConversations,
   fetchPublicGroupChatConversations,
   forwardChatMessage,
@@ -37,6 +38,7 @@ import { getChatLayoutMetrics } from "../theme/chatUi";
 import { connectSocket, socket } from "../socket";
 import AISupportSheet from "../components/chat/AISupportSheet";
 import ChatLockModal from "../components/chat/ChatLockModal";
+import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import {
   getLockedConversationIds,
   hasChatLockPasscode,
@@ -98,6 +100,25 @@ interface ForwardTarget {
 
 type ChatTab = "regular" | "seller" | "group";
 const MAX_GROUP_MEMBERS = 100;
+const MAIN_TAB_ROUTES = ["Feed", "SwipesLauncher", "Create", "Chats", "ProfileView"];
+
+const hasMainTabParent = (navigation: any) => {
+  let currentNavigation = navigation;
+
+  while (currentNavigation?.getParent) {
+    currentNavigation = currentNavigation.getParent();
+    const routeNames = currentNavigation?.getState?.()?.routeNames;
+
+    if (
+      Array.isArray(routeNames)
+      && MAIN_TAB_ROUTES.every((routeName) => routeNames.includes(routeName))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+};
 
 const formatConversationTime = (value?: string) => {
   if (!value) {
@@ -126,16 +147,22 @@ const isSellerConversation = (conversation?: Conversation | null) => {
 
   return (
     conversation?.conversationType === "seller"
-    || Boolean(conversation?.service)
-    || Boolean(conversation?.sellerUser)
-    || Boolean(conversation?.otherUser?.sellerProfile)
+    || Boolean(conversation?.service?._id)
+    || Boolean(conversation?.service?.seller?._id)
+    || Boolean(conversation?.sellerUser?._id)
   );
 };
 
+const getConversationSortTime = (conversation?: Conversation | null) =>
+  new Date(conversation?.updatedAt || conversation?.lastMessageTime || 0).getTime();
+
 const AllChatsScreen = ({ navigation, route }: any) => {
   const { colors, isDarkMode } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
+  const isInsideTabNavigator = useMemo(() => hasMainTabParent(navigation), [navigation]);
+  const bottomDockOffset = isInsideTabNavigator ? 0 : APP_BOTTOM_DOCK_BASE_HEIGHT + Math.max(insets.bottom, 10);
   const accentColor = colors.primary;
   const accentSoft = alpha(accentColor, isDarkMode ? "22" : "14");
   const accentBorder = alpha(accentColor, isDarkMode ? "52" : "32");
@@ -166,6 +193,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   const [loadingPublicGroups, setLoadingPublicGroups] = useState(false);
   const [lockedConversationIds, setLockedConversationIds] = useState<string[]>([]);
   const [mutedConversationIds, setMutedConversationIds] = useState<string[]>([]);
+  const [deletingConversationId, setDeletingConversationId] = useState("");
   const [chatLockModalVisible, setChatLockModalVisible] = useState(false);
   const [chatLockMode, setChatLockMode] = useState<"unlock" | "setup">("unlock");
   const [pendingLockedTarget, setPendingLockedTarget] = useState<(() => void) | null>(null);
@@ -179,12 +207,12 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   const forwardMessageId = String(route?.params?.forwardMessageId || "");
   const isForwardMode = Boolean(forwardMessageId);
   const headerSubtitle = isForwardMode
-    ? "Choose one or more chats to forward this message."
+    ? "Choose chats to forward."
     : activeTab === "seller"
-      ? "Seller conversations with cleaner, faster access."
+      ? "Seller inbox"
       : activeTab === "group"
-        ? "Shared spaces for multiple people in one thread."
-        : "Recent direct messages with a tighter, easier layout.";
+        ? "Shared spaces"
+        : "Direct messages";
 
   useEffect(() => {
     if (!isForwardMode) {
@@ -381,9 +409,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     return [...conversations]
       .filter((conversation) => isSellerConversation(conversation))
       .sort((a, b) => {
-        const timeA = new Date(a.updatedAt || a.lastMessageTime || 0).getTime();
-        const timeB = new Date(b.updatedAt || b.lastMessageTime || 0).getTime();
-        return timeB - timeA;
+        return getConversationSortTime(b) - getConversationSortTime(a);
       });
   }, [conversations]);
 
@@ -397,9 +423,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         return !isSellerConversation(conversation);
       })
       .sort((a, b) => {
-        const timeA = new Date(a.updatedAt || a.lastMessageTime || 0).getTime();
-        const timeB = new Date(b.updatedAt || b.lastMessageTime || 0).getTime();
-        return timeB - timeA;
+        return getConversationSortTime(b) - getConversationSortTime(a);
       });
   }, [conversations]);
 
@@ -407,9 +431,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     return [...conversations]
       .filter((conversation) => conversation?.conversationType === "group")
       .sort((a, b) => {
-        const timeA = new Date(a.updatedAt || a.lastMessageTime || 0).getTime();
-        const timeB = new Date(b.updatedAt || b.lastMessageTime || 0).getTime();
-        return timeB - timeA;
+        return getConversationSortTime(b) - getConversationSortTime(a);
       });
   }, [conversations]);
 
@@ -717,6 +739,62 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     }
   }, [fetchChatData, navigation]);
 
+  const performDeleteConversation = useCallback(async (conversation: Conversation, title: string) => {
+    const conversationId = String(conversation?._id || "");
+    if (!conversationId || deletingConversationId) {
+      return;
+    }
+
+    try {
+      setDeletingConversationId(conversationId);
+      await deleteChatConversation({ conversationId });
+      setConversations((prev) => prev.filter((entry) => String(entry?._id || "") !== conversationId));
+      setLockedConversationIds((prev) => prev.filter((entry) => entry !== conversationId));
+      setMutedConversationIds((prev) => prev.filter((entry) => entry !== conversationId));
+      Alert.alert("Chat deleted", `${title} removed from your chat list.`);
+    } catch (error) {
+      Alert.alert("Delete failed", getReadableApiErrorMessage(error, "Unable to delete this chat right now."));
+    } finally {
+      setDeletingConversationId("");
+    }
+  }, [deletingConversationId]);
+
+  const promptDeleteConversation = useCallback((conversation: Conversation, title: string) => {
+    if (!conversation?._id || isForwardMode || deletingConversationId) {
+      return;
+    }
+
+    Alert.alert(
+      "Delete chat",
+      `Remove ${title} from your chat list?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: deletingConversationId === String(conversation._id) ? "Deleting..." : "Delete",
+          style: "destructive",
+          onPress: () => {
+            performDeleteConversation(conversation, title).catch(() => {});
+          },
+        },
+      ],
+    );
+  }, [deletingConversationId, isForwardMode, performDeleteConversation]);
+
+  const renderUnreadBadge = (count?: number) => {
+    const nextCount = Number(count || 0);
+    if (!nextCount) {
+      return null;
+    }
+
+    return (
+      <View style={styles.unreadBadge}>
+        <Text style={styles.unreadText}>
+          {nextCount > 99 ? "99+" : nextCount}
+        </Text>
+      </View>
+    );
+  };
+
   const renderChat = ({ item }: { item: ChatUser }) => {
     const conversation = conversationMap.get(item._id);
     const subtitle = getConversationPreview(conversation)
@@ -782,13 +860,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             <View style={[styles.forwardCheck, isSelectedForForward ? { backgroundColor: colors.primary, borderColor: colors.primary } : { borderColor: colors.border }]}>
               {isSelectedForForward ? <Icon name="checkmark" size={14} color="#fff" /> : null}
             </View>
-          ) : !!conversation?.unreadCount ? (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadText}>
-                {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
-              </Text>
-            </View>
-          ) : null}
+          ) : renderUnreadBadge(conversation?.unreadCount)}
 
           <Icon name={isForwardMode && isSelectedForForward ? "checkmark-circle" : "chevron-forward-outline"} size={20} color={isForwardMode && isSelectedForForward ? colors.primary : colors.mutedText}/>
         </View>
@@ -801,6 +873,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     const subtitle = getConversationPreview(item) || "Tap to open conversation";
     const timestamp = formatConversationTime(item?.updatedAt || item?.lastMessageTime);
     const isLocked = lockedConversationIds.includes(String(item?._id || ""));
+    const isDeleting = deletingConversationId === String(item?._id || "");
     const forwardTarget: ForwardTarget = {
       key: `conversation:direct:${item._id}`,
       label: participant?.username || participant?.name || "User",
@@ -839,6 +912,10 @@ const AllChatsScreen = ({ navigation, route }: any) => {
 
           openChat();
         }}
+        onLongPress={() => {
+          promptDeleteConversation(item, participant?.username || participant?.name || "this chat");
+        }}
+        delayLongPress={240}
       >
         <View style={styles.avatarContainer}>
           <Image
@@ -859,10 +936,14 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         </View>
 
         <View style={styles.chatInfo}>
-          <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>
-            {participant?.username || participant?.name || "User"}
-          </Text>
-
+          <View style={styles.chatPrimaryRow}>
+            <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>
+              {participant?.username || participant?.name || "User"}
+            </Text>
+            {isDeleting ? (
+              <Text style={[styles.chatStateText, { color: colors.primary }]}>Deleting...</Text>
+            ) : null}
+          </View>
           <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={1}>
             {subtitle}
           </Text>
@@ -881,7 +962,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             </View>
           ) : isLocked ? (
             <Icon name="lock-closed" size={16} color={colors.mutedText} />
-          ) : !!item?.unreadCount ? <View style={styles.unreadBadge} /> : null}
+          ) : renderUnreadBadge(item?.unreadCount)}
         </View>
       </TouchableOpacity>
     );
@@ -899,6 +980,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     ].filter(Boolean);
     const timestamp = formatConversationTime(item?.updatedAt || item?.lastMessageTime);
     const isLocked = lockedConversationIds.includes(String(item?._id || ""));
+    const isDeleting = deletingConversationId === String(item?._id || "");
     const forwardTarget: ForwardTarget = {
       key: `conversation:seller:${item._id}`,
       label: sellerName,
@@ -948,6 +1030,12 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           isSelectedForForward ? styles.chatCardSelected : null,
         ]}
         onPress={handlePress}
+        onLongPress={() => {
+          if (hasSellerLink) {
+            promptDeleteConversation(item, sellerName);
+          }
+        }}
+        delayLongPress={240}
         disabled={!hasSellerLink}
         activeOpacity={hasSellerLink ? 0.85 : 1}
       >
@@ -972,9 +1060,14 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         </View>
 
         <View style={styles.chatInfo}>
-          <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>
-            {sellerName}
-          </Text>
+          <View style={styles.chatPrimaryRow}>
+            <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>
+              {sellerName}
+            </Text>
+            {isDeleting ? (
+              <Text style={[styles.chatStateText, { color: colors.primary }]}>Deleting...</Text>
+            ) : null}
+          </View>
 
           <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={2}>
             {hasSellerLink
@@ -994,7 +1087,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             <View style={[styles.forwardCheck, isSelectedForForward ? { backgroundColor: colors.primary, borderColor: colors.primary } : { borderColor: colors.border }]}>
               {isSelectedForForward ? <Icon name="checkmark" size={14} color="#fff" /> : null}
             </View>
-          ) : isLocked ? <Icon name="lock-closed" size={16} color={colors.mutedText} /> : !!item?.unreadCount ? <View style={styles.unreadBadge} /> : null}
+          ) : isLocked ? <Icon name="lock-closed" size={16} color={colors.mutedText} /> : renderUnreadBadge(item?.unreadCount)}
 
           <Icon
             name={
@@ -1129,7 +1222,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             <View style={[styles.forwardCheck, isSelectedForForward ? { backgroundColor: colors.primary, borderColor: colors.primary } : { borderColor: colors.border }]}>
               {isSelectedForForward ? <Icon name="checkmark" size={14} color="#fff" /> : null}
             </View>
-          ) : isLocked ? <Icon name="lock-closed" size={16} color={colors.mutedText} /> : !!item?.unreadCount ? <View style={styles.unreadBadge} /> : null}
+          ) : isLocked ? <Icon name="lock-closed" size={16} color={colors.mutedText} /> : renderUnreadBadge(item?.unreadCount)}
 
           {!isForwardMode && isMuted ? (
             <Icon name="notifications-off-outline" size={16} color={colors.mutedText} />
@@ -1159,14 +1252,14 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   const assistantScope = activeTab === "seller"
     ? "Seller chats inbox support"
     : activeTab === "group"
-      ? "Group chats inbox support"
+      ? "Channels inbox support"
       : "Direct chats inbox support";
   const assistantScopeHint = headerSubtitle;
   const assistantConversationSummary = `Visible chats in this tab: ${listData.length}. Forward mode: ${isForwardMode ? "on" : "off"}.`;
   const assistantSuggestedPrompts = activeTab === "seller"
     ? ["Explain the seller chat flow", "Where do appointments appear?", "Fix the seller inbox issue"]
     : activeTab === "group"
-      ? ["How do I create a group chat?", "Fix a group message issue", "Explain forward mode"]
+      ? ["How do I create a channel?", "Fix a group message issue", "Explain forward mode"]
       : ["Fix a direct chat issue", "Explain the message inbox", "Help with search or unread filters"];
   const assistantRecentMessages = useMemo(
     () =>
@@ -1184,15 +1277,19 @@ const AllChatsScreen = ({ navigation, route }: any) => {
 
   if (loading) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={[styles.loadingScreen, { backgroundColor: colors.background }]}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+        {!isInsideTabNavigator ? <AppBottomDock navigation={navigation} activeRouteName="Chats" /> : null}
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
-      <View style={styles.headerShell}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+        <View style={styles.headerShell}>
         <View
           style={[
             styles.header,
@@ -1335,7 +1432,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             ]}
             numberOfLines={1}
           >
-            Groups
+            Channels
           </Text>
         </TouchableOpacity>
       </View>
@@ -1372,7 +1469,10 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.listContent,
-          { paddingHorizontal: inboxHorizontalPadding },
+          {
+            paddingHorizontal: inboxHorizontalPadding,
+            paddingBottom: bottomDockOffset + 18,
+          },
           !listData.length ? styles.listContentEmpty : null,
         ]}
         ListEmptyComponent={
@@ -1382,20 +1482,20 @@ const AllChatsScreen = ({ navigation, route }: any) => {
                 ? activeTab === "seller"
                   ? "Seller chats unavailable"
                   : activeTab === "group"
-                    ? "Group chats unavailable"
+                    ? "Channels unavailable"
                     : "Chats unavailable"
                 : activeTab === "seller"
                   ? "No seller chats yet"
                   : activeTab === "group"
-                    ? "No group chats yet"
+                  ? "No channels yet"
                     : "No chats yet"}
             </Text>
             <Text style={[styles.emptyText, { color: colors.mutedText }]}>
               {errorMessage || (activeTab === "seller"
-                ? "Start a seller conversation from a seller profile to see it here."
+                ? "Seller chats will appear here."
                 : activeTab === "group"
-                  ? "Create a group chat to talk with multiple people in one place."
-                  : "Start a direct conversation from a user profile or this tab.")}
+                  ? "Create a private or public channel."
+                  : "Start a new chat to see it here.")}
             </Text>
           </View>
         }
@@ -1417,7 +1517,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Create Group Chat</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Create Channel</Text>
               <TouchableOpacity onPress={closeGroupModal}>
                 <Icon name="close-outline" size={24} color={colors.text} />
               </TouchableOpacity>
@@ -1451,7 +1551,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
                     onPress={() => setGroupVisibility(mode)}
                   >
                     <Text style={[styles.groupModeText, { color: isActive ? "#fff" : colors.text }]}>
-                      {mode === "public" ? "Public Group" : "Private Group"}
+                      {mode === "public" ? "Public Channel" : "Private Channel"}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -1519,7 +1619,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
               onPress={createGroup}
               disabled={creatingGroup}
             >
-              {creatingGroup ? <ActivityIndicator color="#fff" /> : <Text style={styles.createGroupButtonText}>Create group</Text>}
+              {creatingGroup ? <ActivityIndicator color="#fff" /> : <Text style={styles.createGroupButtonText}>Create channel</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -1534,7 +1634,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Browse Public Groups</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Browse Public Channels</Text>
               <TouchableOpacity onPress={() => setPublicGroupsVisible(false)}>
                 <Icon name="close-outline" size={24} color={colors.text} />
               </TouchableOpacity>
@@ -1680,8 +1780,10 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         conversationSummary={assistantConversationSummary}
         recentMessages={assistantRecentMessages}
         suggestedPrompts={assistantSuggestedPrompts}
-      />
-    </SafeAreaView>
+        />
+      </SafeAreaView>
+      {!isInsideTabNavigator ? <AppBottomDock navigation={navigation} activeRouteName="Chats" /> : null}
+    </View>
   );
 };
 
@@ -1805,7 +1907,7 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 14,
     paddingBottom: 28,
-    paddingTop: 2,
+    paddingTop: 4,
   },
   listContentEmpty: {
     flexGrow: 1,
@@ -1813,10 +1915,12 @@ const styles = StyleSheet.create({
   chatCard: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 14,
-    marginBottom: 10,
+    minHeight: 86,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
+    marginBottom: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 20,
+    borderRadius: 22,
     ...appShadows.card,
   },
   chatCardSelected: {
@@ -1827,7 +1931,7 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     position: "relative",
-    marginRight: 14,
+    marginRight: 13,
   },
   avatar: {
     width: 54,
@@ -1856,6 +1960,13 @@ const styles = StyleSheet.create({
   chatInfo: {
     flex: 1,
     minWidth: 0,
+    justifyContent: "center",
+  },
+  chatPrimaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
   },
   groupTitleRow: {
     flexDirection: "row",
@@ -1874,9 +1985,10 @@ const styles = StyleSheet.create({
   },
   chatMeta: {
     alignItems: "flex-end",
-    justifyContent: "center",
+    justifyContent: "space-between",
     marginLeft: 12,
-    minWidth: 42,
+    minWidth: 52,
+    alignSelf: "stretch",
   },
   forwardCheck: {
     width: 22,
@@ -1893,6 +2005,12 @@ const styles = StyleSheet.create({
     fontFamily: appFonts.semibold,
     fontWeight: "600",
     marginBottom: 8,
+  },
+  chatStateText: {
+    fontSize: 11.5,
+    fontFamily: appFonts.semibold,
+    fontWeight: "600",
+    flexShrink: 0,
   },
   emptyState: {
     paddingHorizontal: 24,
@@ -1923,28 +2041,35 @@ const styles = StyleSheet.create({
     fontFamily: appFonts.regular,
   },
   unreadBadge: {
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#7b3fe4",
     marginBottom: 8,
-    paddingHorizontal: 5,
+    paddingHorizontal: 6,
   },
   unreadDot: {
     backgroundColor: "#9b4dff",
   },
   unreadText: {
     color: "#fff",
-    fontSize: 11,
+    fontSize: 11.5,
     fontFamily: appFonts.bold,
     fontWeight: "700",
+    textAlign: "center",
   },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  screen: {
+    flex: 1,
+  },
+  loadingScreen: {
+    flex: 1,
   },
   modalBackdrop: {
     flex: 1,

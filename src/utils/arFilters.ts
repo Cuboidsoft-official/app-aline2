@@ -1,6 +1,6 @@
 import { NativeModules, Platform } from "react-native";
 
-export type ArFilterPreset = "none" | "dog";
+export type ArFilterPreset = "none" | "dog" | "cat" | "crown" | "shades";
 
 type ArFilterNativeModule = {
   applyPreset?: (trackId: string, preset: ArFilterPreset) => Promise<boolean>;
@@ -9,11 +9,14 @@ type ArFilterNativeModule = {
 
 const nativeArFilterModule = NativeModules.ArFilterModule as ArFilterNativeModule | undefined;
 
-export const AR_FILTER_PRESET_ORDER: ArFilterPreset[] = ["none", "dog"];
+export const AR_FILTER_PRESET_ORDER: ArFilterPreset[] = ["none", "dog", "cat", "crown", "shades"];
 
 export const AR_FILTER_LABELS: Record<ArFilterPreset, string> = {
   none: "Filters",
   dog: "Dog AR",
+  cat: "Cat AR",
+  crown: "Royal Crown",
+  shades: "Night Shades",
 };
 
 export const isArFilterSupported = async (): Promise<boolean> => {

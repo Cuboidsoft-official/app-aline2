@@ -100,6 +100,16 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
     const cancelledRef = useRef(false);
     const isRecordingRef = useRef(false);
     const pendingStopSendRef = useRef<boolean | null>(null);
+    const recordingOpacity = slideX.interpolate({
+        inputRange: [CANCEL_THRESHOLD, 0],
+        outputRange: [0.18, 1],
+        extrapolate: "clamp",
+    });
+    const recordingScale = slideX.interpolate({
+        inputRange: [CANCEL_THRESHOLD, 0],
+        outputRange: [0.92, 1],
+        extrapolate: "clamp",
+    });
 
     const startPulse = useCallback(() => {
         Animated.loop(
@@ -122,6 +132,14 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             // Ignore cleanup failures.
         }
     }, []);
+
+    useEffect(() => {
+        if (!recording && !starting && !stopping) {
+            cancelledRef.current = false;
+            setCancelled(false);
+            slideX.setValue(0);
+        }
+    }, [recording, slideX, starting, stopping]);
 
     const requestMicPermission = async () => {
         if (Platform.OS !== "android") return true;
@@ -184,6 +202,10 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             }
         } catch (err) {
             Sound.removeRecordBackListener();
+            stopPulse();
+            slideX.setValue(0);
+            setCancelled(false);
+            cancelledRef.current = false;
             console.log("voice recorder start error:", err);
             Alert.alert("Voice Recording Error", "Could not start voice recording. Please try again.");
             pendingStopSendRef.current = null;
@@ -272,21 +294,36 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
     if (recording || starting || stopping) {
         return (
             <Animated.View
-                style={[styles.recordingContainer, { transform: [{ translateX: slideX }] }]}
+                style={[
+                    styles.recordingContainer,
+                    {
+                        opacity: recordingOpacity,
+                        transform: [{ translateX: slideX }, { scale: recordingScale }],
+                    },
+                ]}
                 {...panResponder.panHandlers}
             >
-                <Animated.View
-                    style={[
-                        styles.recordingDot,
-                        { backgroundColor: cancelled ? "#999" : "#FF3B30", transform: [{ scale: pulseAnim }] },
-                    ]}
-                />
-                <Text style={[styles.recordingTime, cancelled && styles.cancelledText]}>
-                    {starting ? "Starting..." : stopping ? "Finishing..." : cancelled ? "Release to cancel" : formatRecordTime(duration)}
-                </Text>
-                <Text style={styles.slideHint}>
-                    {cancelled || starting || stopping ? "" : "Slide left to cancel or tap mic to send"}
-                </Text>
+                <View style={styles.recordingStatus}>
+                    <Animated.View
+                        style={[
+                            styles.recordingDot,
+                            { backgroundColor: cancelled ? "#94a3b8" : "#FF3B30", transform: [{ scale: pulseAnim }] },
+                        ]}
+                    />
+                    <View style={styles.waveRow}>
+                        <View style={[styles.waveBar, cancelled && styles.waveBarCancelled, styles.waveBarShort]} />
+                        <View style={[styles.waveBar, cancelled && styles.waveBarCancelled, styles.waveBarTall]} />
+                        <View style={[styles.waveBar, cancelled && styles.waveBarCancelled, styles.waveBarMedium]} />
+                    </View>
+                </View>
+                <View style={styles.recordingCopy}>
+                    <Text style={[styles.recordingTime, cancelled && styles.cancelledText]}>
+                        {starting ? "Starting..." : stopping ? "Finishing..." : cancelled ? "Release to cancel" : formatRecordTime(duration)}
+                    </Text>
+                    <Text style={styles.slideHint}>
+                        {cancelled || starting || stopping ? "Voice note discarded" : "Slide left to cancel"}
+                    </Text>
+                </View>
                 <TouchableOpacity
                     disabled={cancelled || starting || stopping}
                     onPress={() => stopRecording(true)}
@@ -312,54 +349,95 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
 
 const styles = StyleSheet.create({
     micButton: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         alignItems: "center",
         justifyContent: "center",
         padding: 4,
+        backgroundColor: "rgba(123,63,228,0.1)",
+        borderWidth: 1,
+        borderColor: "rgba(123,63,228,0.16)",
     },
     recordingContainer: {
         flexDirection: "row",
         alignItems: "center",
         position: "absolute",
-        left: 0,
         right: 0,
-        bottom: 0,
-        backgroundColor: "#fff",
-        paddingVertical: 14,
-        paddingHorizontal: 16,
-        borderTopWidth: 1,
-        borderTopColor: "#eee",
+        bottom: 2,
+        minWidth: 212,
+        maxWidth: 280,
+        backgroundColor: "#0b1220",
+        paddingVertical: 10,
+        paddingHorizontal: 11,
+        borderRadius: 20,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: "rgba(255,255,255,0.12)",
+        shadowColor: "#000",
+        shadowOpacity: 0.24,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 10 },
+        elevation: 8,
         zIndex: 100,
     },
+    recordingStatus: {
+        flexDirection: "row",
+        alignItems: "center",
+    },
     recordingDot: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        marginRight: 8,
+    },
+    waveRow: {
+        flexDirection: "row",
+        alignItems: "center",
         marginRight: 10,
     },
+    waveBar: {
+        width: 3,
+        borderRadius: 999,
+        backgroundColor: "rgba(255,255,255,0.58)",
+        marginRight: 3,
+    },
+    waveBarCancelled: {
+        backgroundColor: "rgba(255,255,255,0.28)",
+    },
+    waveBarShort: {
+        height: 10,
+    },
+    waveBarMedium: {
+        height: 14,
+    },
+    waveBarTall: {
+        height: 18,
+    },
+    recordingCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
     recordingTime: {
-        fontSize: 16,
+        fontSize: 13,
         fontWeight: "700",
-        color: "#333",
-        marginRight: 12,
+        color: "#fff",
         fontVariant: ["tabular-nums"],
     },
     cancelledText: {
-        color: "#999",
+        color: "rgba(255,255,255,0.72)",
     },
     slideHint: {
-        flex: 1,
-        fontSize: 13,
-        color: "#999",
+        marginTop: 2,
+        fontSize: 10.5,
+        color: "rgba(255,255,255,0.66)",
     },
     recordingMic: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         alignItems: "center",
         justifyContent: "center",
+        marginLeft: 8,
     },
 });
 

@@ -274,9 +274,25 @@ const CallScreen = ({ navigation, route }: any) => {
     ? callSession?.conversation?.groupAvatar || avatarUrl || DEFAULT_AVATAR_URL
     : otherParticipant?.profilePic || avatarUrl || DEFAULT_AVATAR_URL;
   const hasActiveCall = callSession && !TERMINAL_STATUSES.has(String(callSession.status || ""));
+  const initiatorId = String(
+    callSession?.initiatedBy?._id
+    || callSession?.initiatedBy?.id
+    || callSession?.initiatedBy
+    || "",
+  );
   const shouldEnterMediaRoom = isGroupCall
     ? String(currentParticipantState?.status || "") === "joined"
     : String(callSession?.status || "") === "ongoing";
+  const isIncomingInviteState = isGroupCall
+    ? String(currentParticipantState?.status || "") === "invited" && String(callSession?.status || "") === "ongoing"
+    : String(callSession?.status || "") === "ringing";
+  const isIncomingCallScreen = mode === "incoming"
+    || (
+      !!currentUserId
+      && !!initiatorId
+      && initiatorId !== String(currentUserId)
+      && isIncomingInviteState
+    );
   const shouldPlayRingtone =
     !loading
     && !shouldEnterMediaRoom
@@ -1199,13 +1215,11 @@ const CallScreen = ({ navigation, route }: any) => {
   }, [arFiltersSupported]);
 
   const renderParticipantPlaceholder = useCallback(
-    (name: string, avatarSource: string, subtitle: string) => (
+    (_name: string, avatarSource: string, _subtitle: string) => (
       <View style={styles.placeholderStage}>
         <View style={[styles.avatarRing, { borderColor: colors.primary }]}>
           <Image source={{ uri: avatarSource || DEFAULT_AVATAR_URL }} style={styles.avatar} />
         </View>
-        <Text style={styles.name}>{name}</Text>
-        <Text style={styles.statusLabel}>{subtitle}</Text>
       </View>
     ),
     [colors.primary]
@@ -1219,14 +1233,16 @@ const CallScreen = ({ navigation, route }: any) => {
     );
   }
 
-  const showIncomingActions = isGroupCall
-    ? mode === "incoming" && String(currentParticipantState?.status || "") === "invited" && String(callSession?.status || "") === "ongoing"
-    : mode === "incoming" && String(callSession?.status || "") === "ringing";
+  const showIncomingActions = isIncomingCallScreen && isIncomingInviteState;
   const statusLabel = buildStatusLabel(callSession, mode, isGroupCall);
+  const overlayDisplayName =
+    isGroupCall && shouldEnterMediaRoom
+      ? `${Math.max(remoteParticipantTiles.length + (localStreamURL ? 1 : 0), 1)} in call`
+      : displayName;
   const warningText = Array.isArray(callRuntime?.warnings) ? callRuntime.warnings.join(" ") : "";
   const combinedWarningText = [
     warningText,
-    effectiveCallType === "video" && !arFiltersSupported ? "Dog AR filter is unavailable on this device." : "",
+    effectiveCallType === "video" && !arFiltersSupported ? "AR filters are unavailable on this device." : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -1296,7 +1312,7 @@ const CallScreen = ({ navigation, route }: any) => {
                 <Text style={styles.filterPillText}>{AR_FILTER_LABELS[arFilterPreset]}</Text>
               </View>
             ) : null}
-            <Text style={styles.name}>{displayName}</Text>
+            <Text style={styles.name}>{overlayDisplayName}</Text>
             <Text style={styles.statusLabel}>
               {String(callSession?.status || "") === "ongoing" ? formatDuration(durationSeconds) : statusLabel}
             </Text>
@@ -1365,7 +1381,7 @@ const CallScreen = ({ navigation, route }: any) => {
           </View>
 
           <View style={styles.overlay}>
-            <Text style={styles.name}>{displayName}</Text>
+            <Text style={styles.name}>{overlayDisplayName}</Text>
             <Text style={styles.statusLabel}>
               {String(callSession?.status || "") === "ongoing"
                 ? formatDuration(durationSeconds)
@@ -1479,10 +1495,10 @@ const styles = StyleSheet.create({
   localVideoWrap: {
     position: "absolute",
     top: 96,
-    right: 18,
-    width: 118,
-    height: 168,
-    borderRadius: 18,
+    right: 14,
+    width: 102,
+    height: 148,
+    borderRadius: 16,
     overflow: "hidden",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.16)",
@@ -1498,7 +1514,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     paddingTop: 92,
     paddingHorizontal: 12,
-    paddingBottom: 170,
+    paddingBottom: 156,
   },
   groupVideoTile: {
     width: "50%",
@@ -1569,16 +1585,19 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   actionRow: {
-    marginTop: 36,
+    marginTop: 28,
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "center",
-    gap: 18,
+    gap: 12,
+    maxWidth: 360,
+    paddingHorizontal: 12,
   },
   callButton: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     alignItems: "center",
     justifyContent: "center",
   },

@@ -11,6 +11,13 @@ import com.oney.WebRTCModule.WebRTCModule
 class ArFilterModule(
   reactContext: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(reactContext) {
+  private val effectIdByPreset =
+    mapOf(
+      "dog" to AlineArProcessorRegistry.DOG_FILTER_EFFECT_ID,
+      "cat" to AlineArProcessorRegistry.CAT_FILTER_EFFECT_ID,
+      "crown" to AlineArProcessorRegistry.CROWN_FILTER_EFFECT_ID,
+      "shades" to AlineArProcessorRegistry.SHADES_FILTER_EFFECT_ID,
+    )
 
   override fun getName(): String = "ArFilterModule"
 
@@ -24,10 +31,11 @@ class ArFilterModule(
       }
 
       val normalizedPreset = preset?.trim()?.lowercase() ?: "none"
-      if (normalizedPreset == "dog") {
+      val effectId = effectIdByPreset[normalizedPreset]
+      if (effectId != null) {
         val effects =
           WritableNativeArray().apply {
-            pushString(AlineArProcessorRegistry.DOG_FILTER_EFFECT_ID)
+            pushString(effectId)
           }
         webRtcModule.mediaStreamTrackSetVideoEffects(trackId, effects)
       } else {
@@ -49,6 +57,9 @@ class ArFilterModule(
           WritableNativeArray().apply {
             pushString("none")
             pushString("dog")
+            pushString("cat")
+            pushString("crown")
+            pushString("shades")
           },
         )
       }

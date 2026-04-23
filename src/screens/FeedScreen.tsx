@@ -127,12 +127,37 @@ const getPostAspectRatio = (post: Post): number => {
   return Math.min(1.91, Math.max(0.8, assetRatio || 1));
 };
 
+const hashFeedKey = (value: string): number => {
+  let hash = 0;
+  const source = String(value || "");
+
+  for (let index = 0; index < source.length; index += 1) {
+    hash = (hash * 31 + source.charCodeAt(index)) % 1000003;
+  }
+
+  return hash;
+};
+
+const buildMixedLatestFeedPosts = (items: Post[]): Post[] => {
+  return Array.from(
+    items.reduce((map, item) => {
+      if (item?.id) {
+        map.set(item.id, item);
+      }
+      return map;
+    }, new Map<string, Post>()).values(),
+  );
+};
+
 type CurrentUserSummary = {
   id: string;
   avatarUrl: string;
   username: string;
   name: string;
+  followingIds: string[];
 };
+
+type FeedRelationshipKind = "self" | "follow" | "follow_back" | "following" | "message";
 
 type SellerAccountSummary = {
   id: string;
@@ -287,19 +312,20 @@ function FeedScreen({ navigation }: any) {
       readUnreadNotificationCount(),
       listLiveStreams().catch(() => ({ liveStreams: [] })),
     ]);
-    setFeed(data);
+    setFeed({ ...data, posts: buildMixedLatestFeedPosts(data.posts) });
     setLiveStories(Array.isArray(liveStreamsResponse?.liveStreams) ? liveStreamsResponse.liveStreams : []);
     setPage(1);
     setHasMore(data.posts.length >= 20);
     setCurrentUser(
-      storedUser
-        ? {
-          id: String(storedUser._id || storedUser.id || ""),
-          avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
-          username: String(storedUser.username || ""),
-          name: String(storedUser.name || ""),
-        }
-        : null,
+              storedUser
+                ? {
+                  id: String(storedUser._id || storedUser.id || ""),
+                  avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
+                  username: String(storedUser.username || ""),
+                  name: String(storedUser.name || ""),
+                  followingIds: Array.isArray(storedUser.following) ? storedUser.following.map((entry: any) => String(entry?._id || entry?.id || entry || "")).filter(Boolean) : [],
+                }
+                : null,
     );
     setSellerAccount(seller);
     setUnreadNotificationCount(unreadNotifications);
@@ -321,17 +347,18 @@ function FeedScreen({ navigation }: any) {
             listLiveStreams().catch(() => ({ liveStreams: [] })),
           ]);
           if (active) {
-            setFeed(data);
+            setFeed({ ...data, posts: buildMixedLatestFeedPosts(data.posts) });
             setLiveStories(Array.isArray(liveStreamsResponse?.liveStreams) ? liveStreamsResponse.liveStreams : []);
             setCurrentUser(
               storedUser
                 ? {
                   id: String(storedUser._id || storedUser.id || ""),
                   avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
-                  username: String(storedUser.username || ""),
-                  name: String(storedUser.name || ""),
-                }
-                : null,
+          username: String(storedUser.username || ""),
+          name: String(storedUser.name || ""),
+          followingIds: Array.isArray(storedUser.following) ? storedUser.following.map((entry: any) => String(entry?._id || entry?.id || entry || "")).filter(Boolean) : [],
+        }
+        : null,
             );
             setSellerAccount(seller);
             setUnreadNotificationCount(unreadNotifications);
@@ -514,6 +541,9 @@ function FeedScreen({ navigation }: any) {
     try {
       const updated = await socialApi.togglePostLike(postId);
       updatePost(updated);
+      if (updated?.liked) {
+        loadFeed().catch(() => {});
+      }
     } catch (error) {
       Alert.alert("Could not like post", toUserSafeMessage(error));
     } finally {
@@ -663,6 +693,134 @@ function FeedScreen({ navigation }: any) {
 
     navigation.navigate("ProfilePreviewScreen", { userId: normalizedUserId });
   }, [currentUser?.id, navigation]);
+
+  const getFeedRelationship = useCallback((postUser: Post["user"]) => {
+    const viewerId = String(currentUser?.id || "");
+    const normalizedUserId = String(postUser?.id || "");
+
+    if (!viewerId || !normalizedUserId || viewerId === normalizedUserId) {
+      return { kind: "self" as FeedRelationshipKind, label: "" };
+    }
+
+    const viewerFollowingIds = Array.isArray(currentUser?.followingIds) ? currentUser.followingIds : [];
+    const viewerFollows = typeof postUser?.viewerFollows === "boolean"
+      ? postUser.viewerFollows
+      : viewerFollowingIds.includes(normalizedUserId);
+    const followsViewer = typeof postUser?.followsViewer === "boolean"
+      ? postUser.followsViewer
+      : Array.isArray(postUser?.followingIds)
+        ? postUser.followingIds.includes(viewerId)
+        : false;
+
+    if (viewerFollows && followsViewer) {
+      return { kind: "message" as FeedRelationshipKind, label: "Message" };
+    }
+
+    if (!viewerFollows && followsViewer) {
+      return { kind: "follow_back" as FeedRelationshipKind, label: "Follow back" };
+    }
+
+    if (viewerFollows) {
+      return { kind: "following" as FeedRelationshipKind, label: "Following" };
+    }
+
+    return { kind: "follow" as FeedRelationshipKind, label: "Follow" };
+  }, [currentUser?.followingIds, currentUser?.id]);
+
+  const handleFeedRelationshipPress = useCallback(async (postUser: Post["user"]) => {
+    const relationship = getFeedRelationship(postUser);
+    const normalizedUserId = String(postUser?.id || "");
+
+    if (!normalizedUserId || relationship.kind === "self") {
+      return;
+    }
+
+    if (relationship.kind === "message") {
+      navigation.navigate("ChatScreen", {
+        userId: normalizedUserId,
+        conversationType: "direct",
+      });
+      return;
+    }
+
+    if (relationship.kind === "following") {
+      openUserProfile(normalizedUserId);
+      return;
+    }
+
+    const busyKey = `follow_${normalizedUserId}`;
+    if (isActionBusy[busyKey]) {
+      return;
+    }
+
+    try {
+      setIsActionBusy((prev) => ({ ...prev, [busyKey]: true }));
+      await API.post(`/auth/follow/${normalizedUserId}`);
+
+      setCurrentUser((prev) => prev
+        ? {
+            ...prev,
+            followingIds: Array.from(new Set([...(prev.followingIds || []), normalizedUserId])),
+          }
+        : prev);
+      setFeed((prev) => ({
+        ...prev,
+        posts: prev.posts.map((post) =>
+          post.user.id === normalizedUserId
+            ? {
+                ...post,
+                user: {
+                  ...post.user,
+                  viewerFollows: true,
+                  followerIds: Array.from(
+                    new Set([...(post.user.followerIds || []), String(currentUser?.id || "")].filter(Boolean)),
+                  ),
+                },
+              }
+            : post,
+        ),
+      }));
+    } catch (error) {
+      Alert.alert("Follow failed", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setIsActionBusy((prev) => ({ ...prev, [busyKey]: false }));
+    }
+  }, [currentUser?.id, getFeedRelationship, isActionBusy, navigation, openUserProfile]);
+
+  const renderFeedRelationshipButton = useCallback((postUser: Post["user"]) => {
+    const relationship = getFeedRelationship(postUser);
+    if (relationship.kind === "self") {
+      return null;
+    }
+
+    const busyKey = `follow_${String(postUser?.id || "")}`;
+    const isBusy = !!isActionBusy[busyKey];
+    const isPrimary = relationship.kind === "follow" || relationship.kind === "follow_back";
+
+    return (
+      <TouchableOpacity
+        activeOpacity={0.86}
+        style={[
+          styles.followBadge,
+          isPrimary ? styles.followBadgePrimary : styles.followBadgeSecondary,
+          {
+            backgroundColor: isPrimary ? colors.primary : feedAccentSoft,
+            borderColor: isPrimary ? colors.primary : feedAccentBorder,
+          },
+        ]}
+        onPress={() => handleFeedRelationshipPress(postUser)}
+        disabled={isBusy}
+      >
+        {isBusy ? (
+          <ActivityIndicator size="small" color={isPrimary ? "#fff" : colors.primary} />
+        ) : (
+          <Text style={[styles.followBadgeText, { color: isPrimary ? "#fff" : colors.text }]}>
+            {relationship.label}
+          </Text>
+        )}
+      </TouchableOpacity>
+    );
+  }, [colors.primary, colors.text, feedAccentBorder, feedAccentSoft, getFeedRelationship, handleFeedRelationshipPress, isActionBusy]);
 
   const closeSheet = () => {
     setActiveSheet(null);
@@ -1047,21 +1205,24 @@ function FeedScreen({ navigation }: any) {
               <Text style={[styles.postTime, { color: colors.mutedText }]}>{formatAgo(item.createdAt)}</Text>
             </View>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.moreButton,
-              {
-                width: postActionButtonSize - 2,
-                height: postActionButtonSize - 2,
-                borderRadius: Math.round((postActionButtonSize - 2) / 3),
-                backgroundColor: feedAccentSoft,
-                borderColor: feedAccentBorder,
-              },
-            ]}
-            onPress={() => openContentActions(item)}
-          >
-            <Icon name="ellipsis-horizontal" size={20} color={FEED_ACCENT} />
-          </TouchableOpacity>
+          <View style={styles.postHeaderActions}>
+            {renderFeedRelationshipButton(item.user)}
+            <TouchableOpacity
+              style={[
+                styles.moreButton,
+                {
+                  width: postActionButtonSize - 2,
+                  height: postActionButtonSize - 2,
+                  borderRadius: Math.round((postActionButtonSize - 2) / 3),
+                  backgroundColor: feedAccentSoft,
+                  borderColor: feedAccentBorder,
+                },
+              ]}
+              onPress={() => openContentActions(item)}
+            >
+              <Icon name="ellipsis-horizontal" size={20} color={FEED_ACCENT} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -1311,21 +1472,24 @@ function FeedScreen({ navigation }: any) {
               </Text>
             </View>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.moreButton,
-              {
-                width: postActionButtonSize - 2,
-                height: postActionButtonSize - 2,
-                borderRadius: Math.round((postActionButtonSize - 2) / 3),
-                backgroundColor: feedAccentSoft,
-                borderColor: feedAccentBorder,
-              },
-            ]}
-            onPress={() => openContentActions(item)}
-          >
-            <Icon name="ellipsis-horizontal" size={20} color={colors.text} />
-          </TouchableOpacity>
+          <View style={styles.postHeaderActions}>
+            {renderFeedRelationshipButton(item.user)}
+            <TouchableOpacity
+              style={[
+                styles.moreButton,
+                {
+                  width: postActionButtonSize - 2,
+                  height: postActionButtonSize - 2,
+                  borderRadius: Math.round((postActionButtonSize - 2) / 3),
+                  backgroundColor: feedAccentSoft,
+                  borderColor: feedAccentBorder,
+                },
+              ]}
+              onPress={() => openContentActions(item)}
+            >
+              <Icon name="ellipsis-horizontal" size={20} color={colors.text} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <Pressable onPress={() => handlePostMediaPress(item)} style={styles.mediaPressSurface}>
@@ -1586,11 +1750,11 @@ function FeedScreen({ navigation }: any) {
                 style={[
                   styles.headerIconButton,
                   isCompactHeader && styles.headerIconButtonCompact,
-                  { backgroundColor: feedAccentSoft, borderColor: feedAccentBorder },
+                  { backgroundColor: "#F43F5E", borderColor: "rgba(255,255,255,0.22)" },
                 ]}
                 onPress={() => navigation.navigate("LiveStreamsScreen")}
               >
-                <Icon name="radio-outline" size={isCompactHeader ? 18 : 20} color={FEED_ACCENT} />
+                <Icon name="radio-outline" size={isCompactHeader ? 18 : 20} color="#FFFFFF" />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1599,11 +1763,11 @@ function FeedScreen({ navigation }: any) {
                   isCompactHeader && styles.headerIconGapCompact,
                   styles.headerIconButton,
                   isCompactHeader && styles.headerIconButtonCompact,
-                  { backgroundColor: feedAccentSoft, borderColor: feedAccentBorder },
+                  { backgroundColor: isDarkMode ? "rgba(255,255,255,0.12)" : feedAccent, borderColor: "rgba(255,255,255,0.18)" },
                 ]}
                 onPress={() => navigation.navigate("Search")}
               >
-                <Icon name="search-outline" size={isCompactHeader ? 18 : 20} color={FEED_ACCENT} />
+                <Icon name="search-outline" size={isCompactHeader ? 18 : 20} color="#FFFFFF" />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1612,11 +1776,11 @@ function FeedScreen({ navigation }: any) {
                   isCompactHeader && styles.headerIconGapCompact,
                   styles.headerIconButton,
                   isCompactHeader && styles.headerIconButtonCompact,
-                  { backgroundColor: feedAccentSoft, borderColor: feedAccentBorder },
+                  { backgroundColor: isDarkMode ? "rgba(255,255,255,0.12)" : feedAccent, borderColor: "rgba(255,255,255,0.18)" },
                 ]}
                 onPress={openNotifications}
               >
-                <Icon name="notifications-outline" size={isCompactHeader ? 18 : 20} color={FEED_ACCENT} />
+                <Icon name="notifications-outline" size={isCompactHeader ? 18 : 20} color="#FFFFFF" />
                 {unreadNotificationCount > 0 ? (
                   <View style={styles.notificationBadge}>
                     <Text style={styles.notificationBadgeText}>
@@ -1755,7 +1919,7 @@ function FeedScreen({ navigation }: any) {
                 if (data.posts.length === 0) {
                   setHasMore(false);
                 } else {
-                  setFeed((prev) => ({ ...prev, posts: [...prev.posts, ...data.posts] }));
+                  setFeed((prev) => ({ ...prev, posts: buildMixedLatestFeedPosts([...prev.posts, ...data.posts]) }));
                   setPage(nextPage);
                   if (data.posts.length < 20) setHasMore(false);
                 }
@@ -2042,15 +2206,13 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: -4,
     right: -4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 4,
+    minWidth: 19,
+    height: 19,
+    borderRadius: 9.5,
+    paddingHorizontal: 5,
     backgroundColor: "#FF3B30",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#FFFFFF",
   },
   notificationBadgeText: {
     color: "#fff",
@@ -2362,6 +2524,7 @@ const styles = StyleSheet.create({
   },
   postHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 15, paddingBottom: 12 },
   postHeaderIdentity: { flexDirection: "row", alignItems: "center", flex: 1 },
+  postHeaderActions: { flexDirection: "row", alignItems: "center", marginLeft: 10, gap: 8 },
   postAvatar: { width: 52, height: 52, borderRadius: 26 },
   postAvatarCompact: { width: 46, height: 46, borderRadius: 23 },
   userMeta: { marginLeft: 11, flexShrink: 1 },
@@ -2370,7 +2533,6 @@ const styles = StyleSheet.create({
   verifiedIcon: { marginLeft: 5 },
   postTime: { fontSize: 13.5, color: "#666", marginTop: 3 },
   moreButton: {
-    marginLeft: "auto",
     width: 38,
     height: 38,
     borderRadius: 12,
@@ -2410,7 +2572,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   postEmojiStickerText: {
-    fontSize: 30,
+    fontSize: 22,
   },
   postTextSticker: {
     position: "absolute",
@@ -2490,12 +2652,34 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginHorizontal: 18,
-    marginTop: 10,
-    marginBottom: 14,
+    marginTop: 8,
+    marginBottom: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 6,
+  },
+  followBadge: {
+    minHeight: 30,
+    minWidth: 74,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  followBadgePrimary: {
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  followBadgeSecondary: {},
+  followBadgeText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    textAlign: "center",
   },
   commentInput: { flex: 1, fontSize: 14.5, color: "#222", paddingVertical: 6 },
   postButton: { color: FEED_ACCENT, fontWeight: "700", fontSize: 14, paddingHorizontal: 8 },

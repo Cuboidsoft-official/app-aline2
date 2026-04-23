@@ -73,6 +73,7 @@ import AISupportSheet from "../components/chat/AISupportSheet";
 import MessageLinkPreview from "../components/chat/MessageLinkPreview";
 import ChatLockModal from "../components/chat/ChatLockModal";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { showModerationBlockedSheet } from "../utils/moderationNotice";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 import {
@@ -139,6 +140,8 @@ interface GroupMeta {
   groupName: string;
   groupAvatar: string;
   memberCount: number;
+  groupMessagePermission: "everyone" | "admins";
+  isGroupAdmin: boolean;
 }
 
 interface PaginationState {
@@ -207,6 +210,7 @@ interface CallEventPreview {
   callType: "audio" | "video";
   direction: "incoming" | "outgoing";
   label: string;
+  meta: string;
   icon: string;
 }
 
@@ -360,6 +364,44 @@ const formatMessageTime = (value?: string): string => {
   });
 };
 
+const isEmojiOnlyText = (value?: string | null): boolean => {
+  const text = String(value || "").trim();
+  if (!text || text.length > 10) {
+    return false;
+  }
+
+  return /^[\p{Extended_Pictographic}\p{Emoji_Component}\u200d\uFE0F\s]+$/u.test(text);
+};
+
+const isGenericAttachmentText = (value?: string | null, attachmentLabel?: string | null): boolean => {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) {
+    return false;
+  }
+
+  const genericLabels = new Set([
+    "attachment",
+    "audio",
+    "audio attachment",
+    "document",
+    "document attachment",
+    "image",
+    "image attachment",
+    "photo",
+    "video",
+    "video attachment",
+    "voice message",
+    "voice note",
+  ]);
+
+  if (genericLabels.has(text)) {
+    return true;
+  }
+
+  const normalizedAttachmentLabel = String(attachmentLabel || "").trim().toLowerCase();
+  return Boolean(normalizedAttachmentLabel && text === normalizedAttachmentLabel);
+};
+
 const getMessageTypeLabel = (message: ChatMessage | null | undefined): string => {
   if (!message) {
     return "Message";
@@ -416,21 +458,24 @@ const buildCallEventPreview = (
       return {
         callType: isVideo ? "video" : "audio",
         direction,
-        label: direction === "incoming" ? `Missed ${callLabel}` : `${direction === "outgoing" ? "Unanswered" : "Missed"} ${callLabel}`,
+        label: isVideo ? "Missed video call" : "Missed voice call",
+        meta: direction === "outgoing" ? "Unanswered" : "Incoming",
         icon: isVideo ? "videocam-outline" : "call-outline",
       };
     case "ended":
       return {
         callType: isVideo ? "video" : "audio",
         direction,
-        label: `${direction === "outgoing" ? "Outgoing" : "Incoming"} ${callLabel}`,
+        label: isVideo ? "Video call" : "Voice call",
+        meta: direction === "outgoing" ? "Outgoing" : "Incoming",
         icon: isVideo ? "videocam-outline" : "call-outline",
       };
     default:
       return {
         callType: isVideo ? "video" : "audio",
         direction,
-        label: `${direction === "outgoing" ? "Outgoing" : "Incoming"} ${callLabel}`,
+        label: isVideo ? "Video call" : "Voice call",
+        meta: direction === "outgoing" ? "Outgoing" : "Incoming",
         icon: isVideo ? "videocam-outline" : "call-outline",
       };
   }
@@ -481,6 +526,8 @@ const ChatScreen = ({ navigation, route }: any) => {
     groupName: groupName || "Group chat",
     groupAvatar: groupAvatar || "",
     memberCount: Number(memberCount || 0),
+    groupMessagePermission: (groupConversation?.groupMessagePermission || "everyone") as "everyone" | "admins",
+    isGroupAdmin: Boolean(groupConversation?.isGroupOwner || groupConversation?.isGroupAdmin),
   });
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -606,6 +653,8 @@ const ChatScreen = ({ navigation, route }: any) => {
           groupName: nextConversation?.groupName || "Group chat",
           groupAvatar: nextConversation?.groupAvatar || "",
           memberCount: Number(nextConversation?.memberCount || nextConversation?.members?.length || 0),
+          groupMessagePermission: (nextConversation?.groupMessagePermission || "everyone") as "everyone" | "admins",
+          isGroupAdmin: Boolean(nextConversation?.isGroupOwner || nextConversation?.isGroupAdmin),
         };
 
         setGroupMeta(nextGroupMeta);
@@ -814,8 +863,10 @@ const ChatScreen = ({ navigation, route }: any) => {
       groupName: groupName || "Group chat",
       groupAvatar: groupAvatar || "",
       memberCount: Number(memberCount || 0),
+      groupMessagePermission: (groupConversation?.groupMessagePermission || "everyone") as "everyone" | "admins",
+      isGroupAdmin: Boolean(groupConversation?.isGroupOwner || groupConversation?.isGroupAdmin),
     });
-  }, [groupAvatar, groupName, memberCount]);
+  }, [groupAvatar, groupConversation?.groupMessagePermission, groupConversation?.isGroupAdmin, groupConversation?.isGroupOwner, groupName, memberCount]);
 
   useEffect(() => {
     let mounted = true;
@@ -1059,6 +1110,14 @@ const ChatScreen = ({ navigation, route }: any) => {
   // ─── Message actions ──────────────────────────────────────────────────────
 
   const submitMessage = useCallback(async ({ text: nextText, file, mediaUrl, messageType, duration, replyToMessageId, replyToMessage }: SubmitMessageParams) => {
+    if (
+      isGroupConversation
+      && groupMeta.groupMessagePermission === "admins"
+      && !groupMeta.isGroupAdmin
+    ) {
+      throw new Error("Only admins can send messages in this group.");
+    }
+
     const resolvedConversationId = await ensureConversation();
     if (!resolvedConversationId) {
       throw new Error("Unable to start this conversation right now.");
@@ -1086,7 +1145,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       mergeMessage(mergedReplyMessage);
       setReplyingToMessage(null);
     }
-  }, [ensureConversation, mergeMessage]);
+  }, [ensureConversation, groupMeta.groupMessagePermission, groupMeta.isGroupAdmin, isGroupConversation, mergeMessage]);
 
   const replyingToMessageId = useMemo(() => getMessageIdentity(replyingToMessage), [replyingToMessage]);
 
@@ -1150,14 +1209,20 @@ const ChatScreen = ({ navigation, route }: any) => {
   const compactHeaderActionSize = Math.max(chatMetrics.headerAction - 4, 30);
   const compactHeaderTitleSize = Math.max(chatMetrics.titleFontSize - 3, 13);
   const compactHeaderStatusSize = Math.max(chatMetrics.statusFontSize - 1, 10.5);
-  const minimumReadableBubbleWidth = Math.min(
-    Math.max(chatMetrics.minBubbleWidth, Math.round(width * 0.44)),
-    Math.round(width * 0.62),
-  );
   const minimumWideBubbleWidth = Math.min(
-    Math.max(minimumReadableBubbleWidth + 56, Math.round(width * 0.68)),
-    Math.round(width * 0.9),
+    Math.max(134, Math.round(width * 0.38)),
+    Math.round(width * 0.66),
   );
+  const compactBubbleMaxWidth = width < 360 ? "82%" : width < 430 ? "78%" : "74%";
+  const wideContentBubbleMaxWidth = width < 360 ? "86%" : width < 430 ? "82%" : "78%";
+  const callEventBubbleWidth = Math.min(Math.max(Math.round(width * 0.52), 164), 216);
+  const mediaBubbleWidth = Math.min(width * 0.56, 192);
+  const canComposeGroupMessage = !isGroupConversation
+    || groupMeta.groupMessagePermission !== "admins"
+    || groupMeta.isGroupAdmin;
+  const groupComposeLockedText = isGroupConversation && !canComposeGroupMessage
+    ? "Only admins can send messages in this group."
+    : "";
   const chatHeroEyebrow = isGroupConversation ? "Group conversation" : "Direct conversation";
   const chatHeroTitle = isGroupConversation
     ? groupMeta.groupName || "Group chat"
@@ -1447,6 +1512,9 @@ const ChatScreen = ({ navigation, route }: any) => {
       setPendingAttachment(null);
     } catch (error: any) {
       console.log("attachment message send error:", error);
+      if (showModerationBlockedSheet(error, { fallbackMessage: "This attachment could not be sent right now." })) {
+        return;
+      }
       Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send attachment"));
     } finally {
       setUploading(false);
@@ -1551,6 +1619,7 @@ const ChatScreen = ({ navigation, route }: any) => {
           name: file.name || `audio_${Date.now()}`,
           type: file.type || "audio/*",
         },
+        messageType: "audio",
         replyToMessageId: replyingToMessageId,
         replyToMessage: replyingToMessage,
       });
@@ -1724,28 +1793,10 @@ const ChatScreen = ({ navigation, route }: any) => {
   }, [applyMessageReaction, currentUserId]);
 
   const sendVoiceMessage = useCallback(async (voiceFile: { uri: string; name: string; type: string; duration: number }) => {
-    try {
-      setPendingAttachment(null);
-      setPendingVoiceNote(null);
-      setUploading(true);
-      await submitMessage({
-        file: {
-          uri: voiceFile.uri,
-          name: voiceFile.name,
-          type: voiceFile.type,
-        },
-        duration: voiceFile.duration,
-        messageType: "voice",
-        replyToMessageId: replyingToMessageId,
-        replyToMessage: replyingToMessage,
-      });
-    } catch (error) {
-      console.log("voice send error:", error);
-      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send voice message"));
-    } finally {
-      setUploading(false);
-    }
-  }, [replyingToMessage, replyingToMessageId, submitMessage]);
+    setPendingAttachment(null);
+    setPendingVoiceNote(voiceFile);
+    setShowTools(false);
+  }, []);
 
   const sendPendingVoiceMessage = useCallback(async () => {
     if (!pendingVoiceNote) {
@@ -1857,11 +1908,41 @@ const ChatScreen = ({ navigation, route }: any) => {
     const replyPreview = buildReplyPreview(repliedMessage);
     const isHighlighted = getMessageIdentity(item) === highlightedMessageId;
     const messageTimeLabel = formatMessageTime(item?.createdAt);
+    const isEmojiOnly = !locationPayload && !sharedContent && !callEvent && !attachment?.url && isEmojiOnlyText(textValue);
+    const hasImageBubble = isImageMessage(item) && attachment?.url;
+    const hasVideoBubble = isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url);
+    const hasVoiceBubble = (isAudioMessage(item) || item?.messageType === "voice") && attachment?.url;
+    const hasDocumentBubble = isDocumentMessage(item) && attachment?.url;
+    const isGifBubble = String(item?.messageType || "").trim().toLowerCase() === "gif";
+    const mediaBubbleKind = !callEvent && !locationPayload && !sharedContent
+      ? hasImageBubble
+        ? "image"
+        : hasVideoBubble
+          ? "video"
+          : hasVoiceBubble
+            ? "voice"
+            : hasDocumentBubble
+              ? "document"
+              : null
+      : null;
+    const isMediaBubble = Boolean(mediaBubbleKind);
+    const attachmentLabel = getAttachmentDisplayName(item);
+    const shouldRenderMessageText =
+      !locationPayload
+      && !sharedContent
+      && !callEvent
+      && !!textValue
+      && (!isMediaBubble || !isGenericAttachmentText(textValue, attachmentLabel));
     let swipeableRef: Swipeable | null = null;
 
-    const bubbleTextColor = isMine ? "#fff" : colors.text;
+    const bubbleTextColor = isMine ? "#fff" : "#F8FAFC";
+    const bubbleMetaColor = isMine ? "rgba(255,255,255,0.72)" : "rgba(226,232,240,0.86)";
     const messageStatusIcon = seenCount > 0 ? "checkmark-done" : "checkmark";
     const messageStatusIconColor = seenCount > 0 ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.72)";
+    const incomingBubbleBg = colors.card;
+    const incomingBubbleBorder = alpha(colors.border, "CC");
+    const outgoingMediaBubbleColor = alpha(primaryThemeColor, "2C");
+    const outgoingMediaBubbleBorder = alpha(primaryThemeColor, "5A");
 
     return (
       <Swipeable
@@ -1909,13 +1990,19 @@ const ChatScreen = ({ navigation, route }: any) => {
             </TouchableOpacity>
           ) : null}
 
-          <View style={showGroupSender ? [styles.groupMessageColumn, { maxWidth: chatMetrics.wideBubbleMaxWidth }] : undefined}>
+          <View
+            style={[
+              styles.messageContentColumn,
+              isMine ? styles.messageContentColumnMine : styles.messageContentColumnOther,
+              showGroupSender ? [styles.groupMessageColumn, { maxWidth: chatMetrics.wideBubbleMaxWidth }] : { maxWidth: chatMetrics.wideBubbleMaxWidth },
+            ]}
+          >
             {showGroupSender ? (
               <TouchableOpacity
                 activeOpacity={0.86}
                 onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: senderId })}
               >
-                <Text style={[styles.groupSenderName, { color: primaryThemeColor, fontSize: chatMetrics.senderFontSize }]} numberOfLines={1}>
+                <Text style={[styles.groupSenderName, { color: alpha(primaryThemeColor, "E2"), fontSize: chatMetrics.senderFontSize }]} numberOfLines={1}>
                   {senderDisplayName}
                 </Text>
               </TouchableOpacity>
@@ -1930,18 +2017,43 @@ const ChatScreen = ({ navigation, route }: any) => {
               }}
               style={[
                 styles.messageBubble,
-                {
+                isMine ? styles.messageBubbleMineAligned : styles.messageBubbleOtherAligned,
+                !callEvent && !isEmojiOnly && !isMediaBubble ? {
                   paddingHorizontal: chatMetrics.bubblePaddingX,
                   paddingVertical: chatMetrics.bubblePaddingY,
                   borderRadius: chatMetrics.bubbleRadius,
-                  maxWidth: chatMetrics.bubbleMaxWidth,
-                  minWidth: minimumReadableBubbleWidth,
-                },
+                  maxWidth: compactBubbleMaxWidth,
+                  minWidth: replyPreview ? 0 : width < 360 ? 64 : width < 430 ? 76 : 84,
+                } : null,
                 showGroupSender ? styles.groupMessageBubble : null,
-                sharedContent?.kind === "post" || callEvent
-                  ? [styles.messageBubbleWide, { maxWidth: chatMetrics.wideBubbleMaxWidth, minWidth: minimumWideBubbleWidth }]
+                sharedContent?.kind === "post"
+                  ? [styles.messageBubbleWide, { maxWidth: wideContentBubbleMaxWidth, minWidth: minimumWideBubbleWidth }]
                   : null,
-                isMine ? [styles.myMessage, { backgroundColor: primaryThemeColor }] : styles.otherMessage,
+                callEvent
+                  ? [
+                    styles.callEventBubbleShell,
+                    { maxWidth: callEventBubbleWidth },
+                    isMine
+                      ? styles.callEventBubbleMine
+                      : [styles.callEventBubbleOther, { backgroundColor: incomingBubbleBg, borderColor: incomingBubbleBorder }],
+                  ]
+                  : isEmojiOnly
+                    ? [
+                      styles.emojiOnlyBubble,
+                      isMine
+                        ? { backgroundColor: alpha(primaryThemeColor, "22"), borderColor: alpha(primaryThemeColor, "34") }
+                        : { backgroundColor: alpha(colors.surface, "F2"), borderColor: incomingBubbleBorder },
+                    ]
+                    : isMediaBubble
+                      ? [
+                        styles.mediaMessageBubble,
+                        isMine
+                          ? [styles.mediaMessageBubbleMine, { backgroundColor: outgoingMediaBubbleColor, borderColor: outgoingMediaBubbleBorder }]
+                          : [styles.mediaMessageBubbleOther, { backgroundColor: incomingBubbleBg, borderColor: incomingBubbleBorder }],
+                      ]
+                      : isMine
+                        ? [styles.myMessage, styles.myMessageBubbleTail, { backgroundColor: primaryThemeColor }]
+                        : [styles.otherMessage, styles.otherMessageBubbleTail, { backgroundColor: incomingBubbleBg, borderColor: incomingBubbleBorder }],
                 isHighlighted ? styles.messageBubbleHighlighted : null,
               ]}
             >
@@ -1953,7 +2065,11 @@ const ChatScreen = ({ navigation, route }: any) => {
                     console.log("reply target focus error:", error);
                   });
                 }}
-                style={[styles.replyPreviewCard, isMine ? styles.replyPreviewCardMine : null]}
+                style={[
+                  styles.replyPreviewCard,
+                  isMine ? styles.replyPreviewCardMine : null,
+                  isMine ? styles.replyPreviewCardMineAligned : styles.replyPreviewCardOtherAligned,
+                ]}
               >
                 <View style={[styles.replyPreviewBar, isMine ? styles.replyPreviewBarMine : null]} />
                 <View style={styles.replyPreviewBody}>
@@ -2013,50 +2129,72 @@ const ChatScreen = ({ navigation, route }: any) => {
                 <View style={[styles.callEventIcon, isMine ? styles.callEventIconMine : null]}>
                   <Icon
                     name={callEvent.icon}
-                    size={16}
+                    size={15}
                     color={isMine ? "#fff" : primaryThemeColor}
                   />
                 </View>
                 <View style={styles.callEventBody}>
                   <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]}>{callEvent.label}</Text>
                   <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null, { fontSize: chatMetrics.metaFontSize }]}>
-                    Use the header to call again
+                    {messageTimeLabel ? `${callEvent.meta} • ${messageTimeLabel}` : callEvent.meta}
                   </Text>
                 </View>
               </View>
             ) : null}
 
-            {isImageMessage(item) && attachment?.url ? (
-              <Image
-                source={{ uri: normalizeMediaUrl(attachment.url) }}
-                style={styles.messageImage}
-                resizeMode="cover"
-              />
-            ) : null}
-
-            {isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url) ? (
-              <View style={styles.documentCard}>
+            {mediaBubbleKind === "image" ? (
+              <View style={styles.mediaCard}>
                 <Image
-                  source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl || attachment.url || "") }}
-                  style={styles.messageImage}
+                  source={{ uri: normalizeMediaUrl(attachment?.url || "") }}
+                  style={[
+                    styles.messageImage,
+                    {
+                      width: mediaBubbleWidth,
+                      height: Math.min(width * 0.5, 188),
+                    },
+                  ]}
+                  resizeMode="cover"
                 />
-                <Text style={[styles.documentName, isMine && styles.myDocumentName]} numberOfLines={1}>
-                  Video attachment
-                </Text>
+                {isGifBubble ? (
+                  <View style={[styles.mediaTypeBadge, isMine ? styles.mediaTypeBadgeMine : null]}>
+                    <Text style={styles.mediaTypeBadgeText}>GIF</Text>
+                  </View>
+                ) : null}
               </View>
             ) : null}
 
-            {(isAudioMessage(item) || item?.messageType === "voice") && attachment?.url ? (
+            {mediaBubbleKind === "video" ? (
+              <View style={styles.mediaCard}>
+                <Image
+                  source={{ uri: normalizeMediaUrl(attachment?.thumbnailUrl || attachment?.url || "") }}
+                  style={[
+                    styles.messageImage,
+                    {
+                      width: mediaBubbleWidth,
+                      height: Math.min(width * 0.48, 176),
+                    },
+                  ]}
+                />
+                <View style={[styles.mediaOverlayBadge, isMine ? styles.mediaOverlayBadgeMine : null]}>
+                  <Icon name="play" size={13} color="#fff" />
+                </View>
+                <View style={[styles.mediaTypeBadge, isMine ? styles.mediaTypeBadgeMine : null]}>
+                  <Text style={styles.mediaTypeBadgeText}>VIDEO</Text>
+                </View>
+              </View>
+            ) : null}
+
+            {mediaBubbleKind === "voice" ? (
               <VoiceMessageBubble
-                audioUrl={attachment.url}
+                audioUrl={attachment?.url || ""}
                 durationSeconds={Number(item?.duration || 0)}
                 isMine={isMine}
                 accentColor={primaryThemeColor}
-                label={item?.messageType === "voice" ? "Voice message" : getAttachmentDisplayName(item)}
+                label={item?.messageType === "voice" ? "" : getAttachmentDisplayName(item)}
               />
             ) : null}
 
-            {isDocumentMessage(item) && attachment?.url ? (
+            {mediaBubbleKind === "document" ? (
               <View style={styles.documentCard}>
                 <Icon name="document-text-outline" size={20} color={isMine ? "#fff" : PRIMARY} />
                 <Text style={[styles.documentName, isMine && styles.myDocumentName]} numberOfLines={1}>
@@ -2065,8 +2203,20 @@ const ChatScreen = ({ navigation, route }: any) => {
               </View>
             ) : null}
 
-            {!locationPayload && !sharedContent && !callEvent && !!textValue && (
-              <Text style={[styles.messageText, isMine && styles.myMessageText, { fontSize: chatMetrics.bodyFontSize, lineHeight: chatMetrics.bodyLineHeight }]}>
+            {shouldRenderMessageText && (
+              <Text
+                style={[
+                  styles.messageText,
+                  isMine && styles.myMessageText,
+                  isEmojiOnly ? styles.emojiOnlyText : null,
+                  {
+                    color: bubbleTextColor,
+                    fontSize: isEmojiOnly ? Math.max(chatMetrics.bodyFontSize + 8, 22) : chatMetrics.bodyFontSize,
+                    lineHeight: isEmojiOnly ? Math.max(chatMetrics.bodyLineHeight + 8, 26) : chatMetrics.bodyLineHeight,
+                  },
+                ]}
+                textBreakStrategy="simple"
+              >
                 {textValue}
                 {item?.isEdited ? (
                   <Text style={{ fontSize: 11, fontStyle: "italic", opacity: 0.6 }}> edited</Text>
@@ -2074,7 +2224,7 @@ const ChatScreen = ({ navigation, route }: any) => {
               </Text>
             )}
 
-            {!locationPayload && !sharedContent && !callEvent && linkPreview?.url ? (
+            {!locationPayload && !sharedContent && !callEvent && !isMediaBubble && !isEmojiOnly && linkPreview?.url ? (
               <MessageLinkPreview
                 preview={linkPreview}
                 isMine={isMine}
@@ -2118,31 +2268,33 @@ const ChatScreen = ({ navigation, route }: any) => {
                 ))}
               </View>
             )}
-
-            <View style={[styles.messageMetaRow, isMine ? styles.messageMetaRowMine : null]}>
-              {!!messageTimeLabel ? (
-                <Text
-                  style={[
-                    styles.messageMetaText,
-                    isMine ? styles.messageMetaTextMine : null,
-                    { fontSize: chatMetrics.metaFontSize },
-                  ]}
-                >
-                  {messageTimeLabel}
-                </Text>
-              ) : null}
-              {isMine && !isSystemMessage ? (
-                <View
-                  style={[
-                    styles.messageStatusPill,
-                    seenCount > 0 ? styles.messageStatusPillSeen : null,
-                  ]}
-                >
-                  <Icon name={messageStatusIcon} size={13} color={messageStatusIconColor} />
-                </View>
-              ) : null}
-            </View>
             </TouchableOpacity>
+            {!callEvent ? (
+              <View style={[styles.messageMetaRow, isMine ? styles.messageMetaRowMine : styles.messageMetaRowOther]}>
+                {!!messageTimeLabel ? (
+                  <Text
+                    style={[
+                      styles.messageMetaText,
+                      isMine ? styles.messageMetaTextMine : null,
+                      { color: bubbleMetaColor },
+                      { fontSize: chatMetrics.metaFontSize },
+                    ]}
+                  >
+                    {messageTimeLabel}
+                  </Text>
+                ) : null}
+                {isMine && !isSystemMessage ? (
+                  <View
+                    style={[
+                      styles.messageStatusPill,
+                      seenCount > 0 ? styles.messageStatusPillSeen : null,
+                    ]}
+                  >
+                    <Icon name={messageStatusIcon} size={13} color={messageStatusIconColor} />
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         </View>
       </Swipeable>
@@ -2161,9 +2313,9 @@ const ChatScreen = ({ navigation, route }: any) => {
           {
             backgroundColor: chatHeaderTint,
             borderBottomColor: alpha(colors.border, "80"),
-            paddingTop: 8,
+            paddingTop: 4,
             paddingHorizontal: chatMetrics.listPadding + 2,
-            paddingBottom: chatMetrics.listPadding,
+            paddingBottom: Math.max(chatMetrics.listPadding - 2, 10),
           },
         ]}
       >
@@ -2322,41 +2474,6 @@ const ChatScreen = ({ navigation, route }: any) => {
         </View>
       </View>
 
-      {isGroupConversation ? (
-        <View
-          style={[
-            styles.chatHeroPanel,
-            {
-              backgroundColor: colors.card,
-              borderColor: alpha(primaryThemeColor, "24"),
-              shadowColor: "#0f172a",
-            },
-          ]}
-        >
-          <View style={styles.chatHeroContent}>
-            <Text style={[styles.chatHeroEyebrow, { color: primaryThemeColor }]}>{chatHeroEyebrow}</Text>
-            <Text style={[styles.chatHeroTitle, { color: colors.text }]} numberOfLines={1}>
-              {chatHeroTitle}
-            </Text>
-            <Text style={[styles.chatHeroText, { color: colors.mutedText }]} numberOfLines={2}>
-              {chatHeroText}
-            </Text>
-          </View>
-          <View style={styles.chatHeroMetaRow}>
-            <View style={[styles.chatHeroMetaChip, { backgroundColor: alpha(primaryThemeColor, "14") }]}>
-              <Icon name="people-outline" size={14} color={primaryThemeColor} />
-              <Text style={[styles.chatHeroMetaText, { color: primaryThemeColor }]}>{chatHeroMeta}</Text>
-            </View>
-            <View style={[styles.chatHeroMetaChip, { backgroundColor: alpha(colors.text, "0A") }]}>
-              <Icon name={isConversationLockedState ? "lock-closed-outline" : "sparkles-outline"} size={14} color={colors.text} />
-              <Text style={[styles.chatHeroMetaText, { color: colors.text }]}>
-                {isConversationLockedState ? "Passcode enabled" : "Quick actions"}
-              </Text>
-            </View>
-          </View>
-        </View>
-      ) : null}
-
       {!isGroupConversation && conversationListing?.serviceName ? (
         <View
           style={[
@@ -2400,7 +2517,7 @@ const ChatScreen = ({ navigation, route }: any) => {
             keyExtractor={(item) => getMessageRenderKey(item)}
             renderItem={renderMessage}
             onScrollToIndexFailed={handleScrollToIndexFailed}
-            contentContainerStyle={[styles.listContent, { paddingHorizontal: chatMetrics.listPadding, paddingTop: chatMetrics.listPadding, paddingBottom: Math.max(20, 12 + insets.bottom) }]}
+            contentContainerStyle={[styles.listContent, { paddingHorizontal: Math.max(8, chatMetrics.listPadding - 3), paddingTop: chatMetrics.listPadding, paddingBottom: Math.max(20, 12 + insets.bottom) }]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             refreshControl={
@@ -2624,10 +2741,11 @@ const ChatScreen = ({ navigation, route }: any) => {
           style={[
             styles.inputContainer,
             {
-              backgroundColor: colors.card,
-              borderColor: alpha(colors.border, "B0"),
-              paddingBottom: Math.max(10, insets.bottom),
-              paddingHorizontal: chatMetrics.listPadding,
+              backgroundColor: alpha(colors.background, "FA"),
+              borderColor: alpha(colors.border, "70"),
+              paddingTop: 6,
+              paddingBottom: Math.max(7, insets.bottom - 2),
+              paddingHorizontal: Math.max(8, chatMetrics.listPadding - 2),
             },
           ]}
         >
@@ -2635,22 +2753,22 @@ const ChatScreen = ({ navigation, route }: any) => {
             style={[
               styles.composerActionButton,
               {
-                backgroundColor: colors.surface,
-                borderColor: alpha(colors.border, "B0"),
-                width: chatMetrics.headerAction,
-                height: chatMetrics.headerAction,
-                borderRadius: chatMetrics.headerAction / 2,
+                backgroundColor: alpha(colors.surface, "C8"),
+                borderColor: alpha(colors.border, "78"),
+                width: Math.max(34, chatMetrics.headerAction - 2),
+                height: Math.max(34, chatMetrics.headerAction - 2),
+                borderRadius: Math.max(34, chatMetrics.headerAction - 2) / 2,
               },
             ]}
             onPress={() => setShowTools(true)}
-            disabled={uploading}
+            disabled={uploading || !canComposeGroupMessage}
           >
             <Icon name="add" size={20} color={colors.primary} />
           </TouchableOpacity>
 
-          <View style={[styles.inputBox, { backgroundColor: colors.surface, borderColor: alpha(colors.border, "C0") }]}>
+          <View style={[styles.inputBox, { backgroundColor: alpha(colors.surface, "D8"), borderColor: alpha(colors.border, "7A") }]}>
             {replyingToPreview ? (
-              <View style={[styles.composerReplyCard, { borderColor: colors.border, backgroundColor: colors.card, borderRadius: chatMetrics.bubbleRadius - 4 }]}>
+              <View style={[styles.composerReplyCard, { borderColor: alpha(colors.border, "74"), backgroundColor: alpha(colors.background, "F2"), borderRadius: chatMetrics.bubbleRadius - 4 }]}>
                 <View style={[styles.composerReplyAccent, { backgroundColor: primaryThemeColor }]} />
                 <View style={styles.composerReplyBody}>
                   <Text style={[styles.composerReplyLabel, { color: colors.text, fontSize: chatMetrics.metaFontSize + 1 }]} numberOfLines={1}>
@@ -2722,15 +2840,23 @@ const ChatScreen = ({ navigation, route }: any) => {
                 </View>
               </View>
             ) : null}
+            {groupComposeLockedText ? (
+              <View style={[styles.composerNotice, { backgroundColor: alpha(colors.primary, "12"), borderColor: alpha(colors.primary, "36") }]}>
+                <Icon name="megaphone-outline" size={14} color={colors.primary} />
+                <Text style={[styles.composerNoticeText, { color: colors.text }]}>
+                  {groupComposeLockedText}
+                </Text>
+              </View>
+            ) : null}
             <View style={styles.composerRow}>
               <TextInput
                 ref={messageInputRef}
-                placeholder={uploading ? "Uploading attachment..." : pendingAttachment ? "Add a caption (optional)" : pendingVoiceNote ? "Voice note ready to send" : "Message"}
+                placeholder={groupComposeLockedText ? "Only admins can message" : uploading ? "Uploading attachment..." : pendingAttachment ? "Add a caption (optional)" : pendingVoiceNote ? "Voice note ready to send" : "Message"}
                 placeholderTextColor={colors.placeholder}
                 style={[styles.input, { color: colors.text, fontSize: chatMetrics.bodyFontSize, lineHeight: chatMetrics.bodyLineHeight, minHeight: chatMetrics.headerAction }]}
                 value={text}
                 onChangeText={handleTextChange}
-                editable={!sending && !uploading}
+                editable={!sending && !uploading && canComposeGroupMessage}
               />
 
               <View style={styles.inlineActions}>
@@ -2740,7 +2866,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                     setStickerPickerMode("gifs");
                     setShowStickerPicker(true);
                   }}
-                  disabled={uploading}
+                  disabled={uploading || !canComposeGroupMessage}
                 >
                   <Text style={styles.gifActionText}>GIF</Text>
                 </TouchableOpacity>
@@ -2750,15 +2876,18 @@ const ChatScreen = ({ navigation, route }: any) => {
                     setStickerPickerMode("emoji");
                     setShowStickerPicker(true);
                   }}
-                  disabled={uploading}
+                  disabled={uploading || !canComposeGroupMessage}
                 >
                   <Icon name="happy-outline" size={19} color={colors.primary} />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.inlineActionIcon} onPress={sendDocumentAttachment} disabled={uploading}>
-                  <Icon name="document-outline" size={19} color={colors.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.inlineActionIcon} onPress={sendImageAttachment} disabled={uploading}>
-                  <Icon name="image-outline" size={19} color={primaryThemeColor} />
+                <TouchableOpacity
+                  style={styles.inlineActionIcon}
+                  onPress={() => {
+                    sendCameraAttachment().catch(() => {});
+                  }}
+                  disabled={uploading || !canComposeGroupMessage}
+                >
+                  <Icon name="camera-outline" size={18} color={colors.primary} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -2771,14 +2900,14 @@ const ChatScreen = ({ navigation, route }: any) => {
               <TouchableOpacity
                 style={[styles.sendBtn, { backgroundColor: colors.primary }]}
                 onPress={pendingAttachment ? sendPendingAttachment : pendingVoiceNote ? sendPendingVoiceMessage : sendTextMessage}
-                disabled={sending}
+                disabled={sending || !canComposeGroupMessage}
               >
                 <Icon name="send" size={20} color="#fff" />
               </TouchableOpacity>
             ) : (
               <VoiceRecorderButton
                 color={primaryThemeColor}
-                disabled={uploading}
+                disabled={uploading || !canComposeGroupMessage}
                 onSend={(voiceFile) => {
                   sendVoiceMessage(voiceFile).catch(() => {});
                 }}
@@ -2873,12 +3002,12 @@ const styles = StyleSheet.create({
   },
   chatHeroPanel: {
     marginHorizontal: 12,
-    marginTop: 12,
-    marginBottom: 10,
-    borderRadius: 24,
+    marginTop: 10,
+    marginBottom: 8,
+    borderRadius: 20,
     borderWidth: 1,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
     ...appShadows.card,
   },
   chatHeroContent: {
@@ -2892,9 +3021,9 @@ const styles = StyleSheet.create({
     fontFamily: appFonts.bold,
   },
   chatHeroTitle: {
-    marginTop: 6,
-    fontSize: 20,
-    lineHeight: 25,
+    marginTop: 4,
+    fontSize: 18,
+    lineHeight: 22,
     fontFamily: appFonts.bold,
   },
   chatHeroText: {
@@ -2906,7 +3035,7 @@ const styles = StyleSheet.create({
   chatHeroMetaRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 14,
+    marginTop: 10,
   },
   chatHeroMetaChip: {
     flexDirection: "row",
@@ -2926,9 +3055,9 @@ const styles = StyleSheet.create({
   listingBanner: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 9,
     borderWidth: 1,
     borderRadius: 18,
   },
@@ -3040,7 +3169,7 @@ const styles = StyleSheet.create({
     opacity: 0.16,
   },
   listContent: {
-    padding: 12
+    padding: 14,
   },
   loadEarlierButton: {
     alignSelf: "center",
@@ -3081,26 +3210,38 @@ const styles = StyleSheet.create({
   messageRow: {
     flexDirection: "row",
     width: "100%",
-    marginVertical: 4
+    marginVertical: 1.5,
+    alignItems: "flex-end",
   },
   groupSenderAvatarWrap: {
     marginRight: 8,
-    alignSelf: "flex-end",
+    alignSelf: "flex-start",
+    marginTop: 16,
   },
   groupSenderAvatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
   },
+  messageContentColumn: {
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  messageContentColumnMine: {
+    alignItems: "flex-end",
+  },
+  messageContentColumnOther: {
+    alignItems: "flex-start",
+  },
   groupMessageColumn: {
-    maxWidth: "90%",
+    maxWidth: "88%",
     flexShrink: 1,
     minWidth: 0,
   },
   groupSenderName: {
-    marginBottom: 5,
-    marginLeft: 2,
-    fontSize: 12,
+    marginBottom: 4,
+    marginLeft: 4,
+    fontSize: 11.5,
     fontFamily: appFonts.semibold,
   },
   swipeReplyAction: {
@@ -3124,20 +3265,75 @@ const styles = StyleSheet.create({
     fontFamily: appFonts.semibold,
   },
   messageBubble: {
-    padding: 12,
+    padding: 7,
     borderRadius: 16,
-    maxWidth: "80%",
-    minWidth: 86,
-    flexShrink: 1,
+    maxWidth: "84%",
+    minWidth: 0,
+    flexShrink: 0,
+    flexGrow: 0,
     overflow: "hidden",
-    ...appShadows.card,
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  messageBubbleMineAligned: {
+    alignSelf: "flex-end",
+  },
+  messageBubbleOtherAligned: {
+    alignSelf: "flex-start",
+  },
+  mediaMessageBubble: {
+    padding: 3,
+    borderRadius: 16,
+    maxWidth: "62%",
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  mediaMessageBubbleMine: {
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  mediaMessageBubbleOther: {
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  emojiOnlyBubble: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  callEventBubbleShell: {
+    maxWidth: "62%",
+    minWidth: 152,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  callEventBubbleMine: {
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  callEventBubbleOther: {},
+  myMessageBubbleTail: {
+    borderTopRightRadius: 6,
+    borderBottomRightRadius: 4,
+  },
+  otherMessageBubbleTail: {
+    borderTopLeftRadius: 6,
+    borderBottomLeftRadius: 4,
   },
   groupMessageBubble: {
     maxWidth: "100%",
   },
   messageBubbleWide: {
-    width: "100%",
-    maxWidth: "100%",
     minWidth: 0,
     paddingHorizontal: 10,
   },
@@ -3151,28 +3347,36 @@ const styles = StyleSheet.create({
   replyPreviewCard: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
-    padding: 8,
-    borderRadius: 12,
+    alignSelf: "flex-start",
+    marginBottom: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
+    borderRadius: 9,
     backgroundColor: "rgba(123, 63, 228, 0.1)",
-    maxWidth: "100%",
+    maxWidth: "92%",
     minWidth: 0,
   },
   replyPreviewCardMine: {
     backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  replyPreviewCardMineAligned: {
+    alignSelf: "flex-end",
+  },
+  replyPreviewCardOtherAligned: {
+    alignSelf: "flex-start",
   },
   replyPreviewBar: {
     width: 3,
     alignSelf: "stretch",
     borderRadius: 999,
     backgroundColor: PRIMARY,
-    marginRight: 8,
+    marginRight: 6,
   },
   replyPreviewBarMine: {
     backgroundColor: "#fff",
   },
   replyPreviewBody: {
-    flex: 1,
+    flexShrink: 1,
     minWidth: 0,
   },
   replyPreviewAuthor: {
@@ -3184,9 +3388,9 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
   replyPreviewSnippet: {
-    marginTop: 2,
+    marginTop: 1,
     color: "#475467",
-    fontSize: 12,
+    fontSize: 11.5,
     flexShrink: 1,
   },
   replyPreviewSnippetMine: {
@@ -3194,10 +3398,10 @@ const styles = StyleSheet.create({
   },
   sharedPostCard: {
     borderRadius: 14,
-    padding: 10,
-    marginBottom: 8,
+    padding: 8,
+    marginBottom: 6,
     backgroundColor: "rgba(123, 63, 228, 0.08)",
-    width: "100%",
+    maxWidth: "100%",
     minWidth: 0,
   },
   sharedPostCardMine: {
@@ -3235,7 +3439,7 @@ const styles = StyleSheet.create({
   },
   sharedPostImage: {
     width: "100%",
-    height: 160,
+    height: 138,
     borderRadius: 12,
     marginTop: 10,
   },
@@ -3249,38 +3453,41 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.92)",
   },
   callEventCard: {
-    width: "100%",
+    width: "auto",
     minWidth: 0,
-    borderRadius: 14,
-    padding: 10,
-    marginBottom: 6,
-    backgroundColor: "rgba(123, 63, 228, 0.08)",
+    borderRadius: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    marginBottom: 0,
+    backgroundColor: "transparent",
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
   },
   callEventCardMine: {
-    backgroundColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "transparent",
   },
   callEventIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: "rgba(123, 63, 228, 0.12)",
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   callEventIconMine: {
     backgroundColor: "rgba(255,255,255,0.18)",
   },
   callEventBody: {
-    flex: 1,
-    marginLeft: 10,
+    flexShrink: 1,
     minWidth: 0,
   },
   callEventTitle: {
     color: "#111827",
-    fontSize: 13,
+    fontSize: 11.5,
     fontFamily: appFonts.semibold,
+    lineHeight: 16,
   },
   callEventTitleMine: {
     color: "#fff",
@@ -3288,7 +3495,8 @@ const styles = StyleSheet.create({
   callEventMeta: {
     marginTop: 2,
     color: "#667085",
-    fontSize: 11.5,
+    fontSize: 10.5,
+    lineHeight: 14,
   },
   callEventMetaMine: {
     color: "rgba(255,255,255,0.82)",
@@ -3297,6 +3505,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#111",
     fontFamily: appFonts.regular,
+    flexShrink: 1,
+  },
+  emojiOnlyText: {
+    textAlign: "center",
+    letterSpacing: 0,
   },
   myMessageText: {
     color: "#fff"
@@ -3305,22 +3518,56 @@ const styles = StyleSheet.create({
     backgroundColor: PRIMARY
   },
   otherMessage: {
-    backgroundColor: "#fff",
+    backgroundColor: "rgba(255,255,255,0.96)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(15,23,42,0.08)",
   },
   messageImage: {
-    width: 220,
-    height: 220,
+    width: 176,
+    height: 176,
     maxWidth: "100%",
-    borderRadius: 12,
-    marginBottom: 8
+    borderRadius: 14,
+  },
+  mediaCard: {
+    position: "relative",
+  },
+  mediaOverlayBadge: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.72)",
+  },
+  mediaOverlayBadgeMine: {
+    backgroundColor: "rgba(255,255,255,0.24)",
+  },
+  mediaTypeBadge: {
+    position: "absolute",
+    left: 10,
+    bottom: 10,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: "rgba(15,23,42,0.72)",
+  },
+  mediaTypeBadgeMine: {
+    backgroundColor: "rgba(255,255,255,0.2)",
+  },
+  mediaTypeBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontFamily: appFonts.bold,
+    letterSpacing: 0.4,
   },
   documentCard: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 2,
-    marginBottom: 6
+    marginBottom: 2
   },
   documentName: {
     marginLeft: 8,
@@ -3333,7 +3580,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginTop: 4,
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 10,
     backgroundColor: "rgba(123, 63, 228, 0.08)",
   },
@@ -3363,47 +3610,52 @@ const styles = StyleSheet.create({
   reactionRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 8
+    marginTop: 5
   },
   reactionChip: {
-    backgroundColor: "rgba(123, 63, 228, 0.12)",
+    backgroundColor: "rgba(15,23,42,0.08)",
     borderRadius: 999,
-    marginRight: 6,
-    marginTop: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4
+    marginRight: 5,
+    marginTop: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2
   },
   myReactionChip: {
-    backgroundColor: "rgba(255,255,255,0.22)"
+    backgroundColor: "rgba(255,255,255,0.18)"
   },
   reactionText: {
     color: "#1f1f1f",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600"
   },
   messageMetaRow: {
-    marginTop: 10,
+    marginTop: 3,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
+    paddingHorizontal: 2,
   },
   messageMetaRowMine: {
     justifyContent: "flex-end",
   },
+  messageMetaRowOther: {
+    justifyContent: "flex-start",
+    paddingLeft: 2,
+  },
   messageMetaText: {
     color: "#667085",
-    fontSize: 11.5,
+    fontSize: 10.5,
     fontFamily: appFonts.medium,
   },
   messageMetaTextMine: {
     color: "rgba(255,255,255,0.78)",
-    marginRight: 8,
+    marginRight: 6,
   },
   messageStatusPill: {
     alignSelf: "flex-end",
     borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
     backgroundColor: "rgba(15,23,42,0.14)",
   },
   messageStatusPillSeen: {
@@ -3414,46 +3666,61 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: "row",
-    alignItems: "flex-end",
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    backgroundColor: "#fff",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingTop: 6,
+    backgroundColor: "#121C2F",
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: "#eee",
+    borderColor: "rgba(255,255,255,0.08)",
     shadowColor: "#0f172a",
-    shadowOpacity: 0.1,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: -6 },
-    elevation: 8,
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: -3 },
+    elevation: 6,
   },
   composerActionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    marginBottom: 3,
   },
   inputBox: {
     flex: 1,
-    backgroundColor: "#f2f2f2",
-    borderRadius: 24,
-    marginHorizontal: 10,
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    paddingBottom: 9,
+    backgroundColor: "#17243A",
+    borderRadius: 22,
+    marginHorizontal: 8,
+    paddingHorizontal: 11,
+    paddingTop: 5,
+    paddingBottom: 5,
     borderWidth: 1,
-    minHeight: 48,
+    minHeight: 42,
   },
   composerReplyCard: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    marginBottom: 6,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginBottom: 5,
+  },
+  composerNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  composerNoticeText: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: appFonts.medium,
   },
   composerReplyAccent: {
     width: 3,
@@ -3463,6 +3730,7 @@ const styles = StyleSheet.create({
   },
   composerReplyBody: {
     flex: 1,
+    minWidth: 0,
   },
   composerReplyLabel: {
     fontSize: 12,
@@ -3479,15 +3747,15 @@ const styles = StyleSheet.create({
   },
   composerRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
-    minHeight: 38,
+    alignItems: "center",
+    minHeight: 32,
   },
   input: {
     flex: 1,
-    minHeight: 40,
-    paddingTop: 2,
-    paddingBottom: 2,
-    paddingRight: 8,
+    minHeight: 32,
+    paddingTop: 3,
+    paddingBottom: 3,
+    paddingRight: 2,
     fontSize: 14,
     fontFamily: appFonts.regular,
   },
@@ -3569,9 +3837,9 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     backgroundColor: PRIMARY,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -3579,28 +3847,30 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
-    marginLeft: 8,
-    marginBottom: 1,
+    marginLeft: 4,
+    marginBottom: 0,
+    gap: 4,
   },
   inlineActionIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 6,
     backgroundColor: "rgba(123,63,228,0.08)",
   },
   composerTrailingAction: {
-    minWidth: 44,
+    minWidth: 42,
     alignItems: "center",
-    justifyContent: "flex-end",
-    marginBottom: 2,
+    justifyContent: "center",
+    marginBottom: 0,
+    marginLeft: 0,
+    position: "relative",
   },
   gifActionPill: {
     width: "auto",
-    minWidth: 38,
-    paddingHorizontal: 9,
+    minWidth: 34,
+    paddingHorizontal: 7,
   },
   gifActionText: {
     fontSize: 11,

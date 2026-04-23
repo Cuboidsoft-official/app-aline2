@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import Icon from "react-native-vector-icons/Ionicons";
 
 import { useAppTheme } from "../theme/AppThemeContext";
 import {
@@ -114,6 +115,8 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
 
   const secureTextEntry = activeAlert?.kind === "prompt" && activeAlert.promptType === "secure-text";
   const shouldStackButtons = (activeAlert?.buttons.length || 0) > 2;
+  const isSheetPresentation = activeAlert?.presentation === "sheet";
+  const showsSheetHero = isSheetPresentation && activeAlert?.kind === "alert";
 
   return (
     <>
@@ -127,12 +130,13 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.overlay}
+          style={[styles.overlay, isSheetPresentation ? styles.overlaySheet : styles.overlayDialog]}
         >
           <Pressable style={styles.backdrop} onPress={handleBackdropPress} />
           <View
             style={[
               styles.card,
+              isSheetPresentation ? styles.sheetCard : styles.dialogCard,
               {
                 backgroundColor: colors.card,
                 borderColor: colors.border,
@@ -140,13 +144,38 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
               },
             ]}
           >
-            <View style={[styles.topGlow, { backgroundColor: `${colors.primary}${isDarkMode ? "18" : "10"}` }]} />
-            <View style={styles.header}>
+            {isSheetPresentation ? <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} /> : null}
+            <View
+              style={[
+                styles.topGlow,
+                isSheetPresentation ? styles.sheetTopGlow : styles.dialogTopGlow,
+                { backgroundColor: `${colors.primary}${isDarkMode ? "18" : "10"}` },
+              ]}
+            />
+            {showsSheetHero ? (
+              <View style={styles.sheetHero}>
+                <View
+                  style={[
+                    styles.sheetHeroIconWrap,
+                    {
+                      backgroundColor: isDarkMode ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.12)",
+                      borderColor: isDarkMode ? "rgba(248,113,113,0.28)" : "rgba(239,68,68,0.18)",
+                    },
+                  ]}
+                >
+                  <Icon name="shield-checkmark-outline" size={22} color={colors.primary} />
+                </View>
+                <Text style={[styles.sheetHeroLabel, { color: colors.mutedText }]}>Safety check</Text>
+              </View>
+            ) : null}
+            <View style={[styles.header, isSheetPresentation && styles.sheetHeader]}>
               <Text style={[styles.title, { color: colors.text }]}>{activeAlert?.title}</Text>
             </View>
 
             {activeAlert?.message ? (
-              <Text style={[styles.message, { color: colors.mutedText }]}>{activeAlert.message}</Text>
+              <Text style={[styles.message, isSheetPresentation && styles.sheetMessage, { color: colors.mutedText }]}>
+                {activeAlert.message}
+              </Text>
             ) : null}
 
             {activeAlert?.kind === "prompt" ? (
@@ -170,7 +199,13 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
               />
             ) : null}
 
-            <View style={[styles.buttonRow, shouldStackButtons && styles.buttonColumn]}>
+            <View
+              style={[
+                styles.buttonRow,
+                (shouldStackButtons || isSheetPresentation) && styles.buttonColumn,
+                isSheetPresentation && styles.sheetButtonColumn,
+              ]}
+            >
               {activeAlert?.buttons.map((button, index) => {
                 const isPrimaryAction = index === primaryButtonIndex;
 
@@ -180,6 +215,7 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
                     onPress={() => handleButtonPress(button)}
                     style={[
                       styles.button,
+                      isSheetPresentation && styles.sheetButton,
                       {
                         backgroundColor: buttonBackgroundColor(button.style, isPrimaryAction),
                         borderColor: isPrimaryAction ? buttonBackgroundColor(button.style, true) : colors.border,
@@ -208,9 +244,16 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
+    paddingHorizontal: 20,
+  },
+  overlayDialog: {
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 20,
+  },
+  overlaySheet: {
+    justifyContent: "flex-end",
+    alignItems: "stretch",
+    paddingBottom: 8,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -218,28 +261,75 @@ const styles = StyleSheet.create({
   },
   card: {
     width: "100%",
-    maxWidth: 410,
-    borderRadius: 28,
     borderWidth: 1,
     overflow: "hidden",
-    paddingHorizontal: 22,
-    paddingTop: 24,
-    paddingBottom: 20,
     shadowOffset: { width: 0, height: 16 },
     shadowOpacity: 0.24,
     shadowRadius: 34,
     elevation: 18,
+  },
+  dialogCard: {
+    maxWidth: 410,
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingTop: 24,
+    paddingBottom: 20,
+  },
+  sheetCard: {
+    maxWidth: 520,
+    alignSelf: "center",
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
+    paddingHorizontal: 22,
+    paddingTop: 14,
+    paddingBottom: 20,
   },
   topGlow: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
+  },
+  dialogTopGlow: {
     height: 72,
+  },
+  sheetTopGlow: {
+    height: 112,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 48,
+    height: 5,
+    borderRadius: 999,
+    marginBottom: 14,
+  },
+  sheetHero: {
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  sheetHeroIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  sheetHeroLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
   },
   header: {
     alignItems: "center",
     marginBottom: 10,
+  },
+  sheetHeader: {
+    marginBottom: 8,
   },
   title: {
     textAlign: "center",
@@ -252,6 +342,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     marginBottom: 18,
+  },
+  sheetMessage: {
+    paddingHorizontal: 4,
+    marginBottom: 20,
   },
   input: {
     minHeight: 52,
@@ -268,6 +362,9 @@ const styles = StyleSheet.create({
   buttonColumn: {
     flexDirection: "column",
   },
+  sheetButtonColumn: {
+    gap: 10,
+  },
   button: {
     flex: 1,
     minHeight: 50,
@@ -276,6 +373,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 14,
+  },
+  sheetButton: {
+    minHeight: 54,
+    borderRadius: 20,
   },
   buttonText: {
     fontSize: 15,

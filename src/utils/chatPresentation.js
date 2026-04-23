@@ -219,13 +219,39 @@ export const getMessageAttachment = (message) => {
   return null;
 };
 
-export const isImageMessage = (message) => {
+const getAttachmentMimeType = (message) => {
   const attachment = getMessageAttachment(message);
-  return ["image", "gif"].includes(String(message?.messageType || "")) || Boolean(attachment?.mimeType?.startsWith("image/"));
+  const explicitMimeType = String(attachment?.mimeType || message?.mimeType || "").trim().toLowerCase();
+  if (explicitMimeType) {
+    return explicitMimeType;
+  }
+
+  const candidate = String(attachment?.fileName || attachment?.url || "").split(/[?#]/)[0].toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|bmp|heic|heif)$/.test(candidate)) {
+    return "image/*";
+  }
+  if (/\.(mp4|mov|m4v|webm|mkv|avi)$/.test(candidate)) {
+    return "video/*";
+  }
+  if (/\.(mp3|m4a|aac|wav|ogg|oga|opus|webm|mp4)$/.test(candidate)) {
+    return "audio/*";
+  }
+
+  return "";
+};
+
+export const isImageMessage = (message) => {
+  const mimeType = getAttachmentMimeType(message);
+  return ["image", "gif"].includes(String(message?.messageType || "")) || mimeType.startsWith("image/");
 };
 
 export const isDocumentMessage = (message) => {
-  if (["video", "audio", "voice"].includes(String(message?.messageType || ""))) {
+  const mimeType = getAttachmentMimeType(message);
+  if (
+    ["video", "audio", "voice"].includes(String(message?.messageType || ""))
+    || mimeType.startsWith("audio/")
+    || mimeType.startsWith("video/")
+  ) {
     return false;
   }
 
@@ -233,9 +259,11 @@ export const isDocumentMessage = (message) => {
   return message?.messageType === "document" || Boolean(attachment?.url && !isImageMessage(message));
 };
 
-export const isVideoMessage = (message) => String(message?.messageType || "") === "video";
+export const isVideoMessage = (message) =>
+  String(message?.messageType || "") === "video" || getAttachmentMimeType(message).startsWith("video/");
 
-export const isAudioMessage = (message) => String(message?.messageType || "") === "audio";
+export const isAudioMessage = (message) =>
+  ["audio", "voice"].includes(String(message?.messageType || "")) || getAttachmentMimeType(message).startsWith("audio/");
 
 export const getAttachmentDisplayName = (message) => {
   const attachment = getMessageAttachment(message);

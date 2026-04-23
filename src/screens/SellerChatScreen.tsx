@@ -72,6 +72,7 @@ import { useAppTheme } from "../theme/AppThemeContext";
 import { alpha, appFonts, appShadows } from "../theme/designSystem";
 import { getChatLayoutMetrics } from "../theme/chatUi";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { showModerationBlockedSheet } from "../utils/moderationNotice";
 import VoiceMessageBubble from "../components/chat/VoiceMessageBubble";
 import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 import AISupportSheet from "../components/chat/AISupportSheet";
@@ -1083,6 +1084,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           setText("");
         } catch (error) {
           console.log("seller image send error:", error);
+          if (showModerationBlockedSheet(error, { fallbackMessage: "This attachment could not be sent right now." })) {
+            return;
+          }
           Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send attachment"));
         } finally {
           setUploading(false);
@@ -1139,6 +1143,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           setText("");
         } catch (error) {
           console.log("seller camera send error:", error);
+          if (showModerationBlockedSheet(error, { fallbackMessage: "This capture could not be sent right now." })) {
+            return;
+          }
           Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send camera capture"));
         } finally {
           setUploading(false);
@@ -1236,7 +1243,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           uri: normalizedFile.uri,
           name: normalizedFile.name || `audio_${Date.now()}`,
           type: normalizedFile.type || "audio/*",
-        }
+        },
+        messageType: "audio",
       });
       setText("");
     } catch (error) {
@@ -3106,8 +3114,8 @@ const styles = StyleSheet.create({
     fontFamily: appFonts.semibold,
   },
   msgBubble: {
-    padding: 13,
-    borderRadius: 22,
+    padding: 10,
+    borderRadius: 18,
     maxWidth: "80%",
     minWidth: 0,
     alignSelf: "flex-start",
@@ -3121,15 +3129,14 @@ const styles = StyleSheet.create({
     ...appShadows.card,
   },
   messageBubbleWide: {
-    width: "100%",
-    maxWidth: "100%",
     minWidth: 0,
+    paddingHorizontal: 10,
   },
   replyPreviewCard: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 9,
-    padding: 9,
+    marginBottom: 6,
+    padding: 8,
     borderRadius: 14,
     backgroundColor: "rgba(123, 77, 255, 0.12)",
     maxWidth: "100%",
@@ -3170,10 +3177,10 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.82)",
   },
   sharedPostCard: {
-    width: "100%",
+    maxWidth: "100%",
     minWidth: 0,
     borderRadius: 14,
-    padding: 10,
+    padding: 9,
     marginBottom: 8,
     backgroundColor: "rgba(123, 77, 255, 0.08)",
   },
@@ -3212,7 +3219,7 @@ const styles = StyleSheet.create({
   },
   sharedPostImage: {
     width: "100%",
-    height: 160,
+    height: 138,
     borderRadius: 12,
     marginTop: 10,
   },
@@ -3226,11 +3233,11 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.92)",
   },
   callEventCard: {
-    width: "100%",
+    maxWidth: "100%",
     minWidth: 0,
     borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
     marginBottom: 8,
     flexDirection: "row",
     alignItems: "center",
@@ -3240,9 +3247,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.14)",
   },
   callEventIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(123, 77, 255, 0.16)",
@@ -3276,8 +3283,8 @@ const styles = StyleSheet.create({
   myText: { color: "#fff", fontFamily: appFonts.regular },
   otherText: { color: "#F5F7FF", fontFamily: appFonts.regular },
   messageImage: {
-    width: 220,
-    height: 220,
+    width: 188,
+    height: 188,
     maxWidth: "100%",
     borderRadius: 12,
     marginBottom: 8
@@ -3356,37 +3363,37 @@ const styles = StyleSheet.create({
   reactionRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 8
+    marginTop: 6
   },
   reactionChip: {
     backgroundColor: "rgba(123, 77, 255, 0.12)",
     borderRadius: 999,
-    marginRight: 6,
-    marginTop: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4
+    marginRight: 5,
+    marginTop: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3
   },
   myReactionChip: {
     backgroundColor: "rgba(255,255,255,0.22)"
   },
   reactionText: {
     color: "#F8FAFF",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600"
   },
   messageStatusPill: {
     alignSelf: "flex-end",
-    marginTop: 8,
+    marginTop: 7,
     borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     backgroundColor: "rgba(15,23,42,0.14)",
   },
   messageStatusPillSeen: {
     backgroundColor: "rgba(15,23,42,0.22)",
   },
   messageMetaRow: {
-    marginTop: 10,
+    marginTop: 7,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
