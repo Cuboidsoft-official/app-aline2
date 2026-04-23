@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   RefreshControl,
   StyleSheet,
   Text,
@@ -11,7 +10,6 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
-import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
 import { Swipeable } from "react-native-gesture-handler";
 
@@ -260,7 +258,7 @@ const getNotificationHint = (item: AppNotification): string => {
 };
 
 const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
-  const { colors, isDarkMode } = useAppTheme();
+  const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -480,11 +478,6 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
   }, [sortedNotifications]);
 
   const groupKeys = useMemo(() => Object.keys(groupedNotifications), [groupedNotifications]);
-  const readCount = Math.max(0, notifications.length - unreadCount);
-  const heroGradient = isDarkMode
-    ? ["#181F3A", "#141C34", "#11192C"]
-    : ["#F8EFFF", "#EEF4FF", "#FFFFFF"];
-
   const renderRightActions = (id: string) => (
     <TouchableOpacity
       style={[styles.deleteAction, { backgroundColor: colors.danger }]}
@@ -512,7 +505,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
         <View style={styles.avatarColumn}>
             <AppAvatar
               uri={avatarUrl || FALLBACK_AVATAR}
-              name={item.sender?.username || "User"}
+              name={item.sender?.username || (item.sender as any)?.name || (item.sender as any)?.email || "User"}
               size={46}
               style={[styles.avatar, { backgroundColor: colors.surface }]}
               backgroundColor={colors.surface}
@@ -531,12 +524,6 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
               </Text>
               {!item.read ? <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} /> : null}
             </View>
-
-            {item.text ? (
-              <Text style={[styles.notificationPreview, { color: colors.mutedText }]} numberOfLines={2}>
-                {item.text}
-              </Text>
-            ) : null}
 
             <View style={styles.notificationMetaRow}>
               <Text style={[styles.notificationTime, { color: colors.mutedText }]}>{formatRelativeTime(item.createdAt)}</Text>
@@ -602,58 +589,26 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
             />
           }
           ListHeaderComponent={
-            <View>
-              <LinearGradient colors={heroGradient} style={[styles.heroPanel, { borderColor: colors.border }]}>
-                <View style={styles.heroTopRow}>
-                  <View>
-                    <Text style={[styles.heroTitle, { color: colors.text }]}>Stay on top of every signal</Text>
-                    <Text style={[styles.heroSubtitle, { color: colors.mutedText }]}>
-                      {errorMessage || (unreadCount > 0 ? `${unreadCount} new updates waiting for you.` : "Everything is cleared and up to date.")}
-                    </Text>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.heroButton,
-                      {
-                        backgroundColor: unreadCount > 0 ? colors.primary : colors.surface,
-                        opacity: unreadCount > 0 ? 1 : 0.72,
-                      },
-                    ]}
-                    onPress={markAllRead}
-                    disabled={unreadCount <= 0}
-                  >
-                    <Text style={[styles.heroButtonText, { color: unreadCount > 0 ? "#fff" : colors.mutedText }]}>
-                      Mark all read
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.heroStats}>
-                  <View style={[styles.heroStatCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Text style={[styles.heroStatValue, { color: colors.text }]}>{notifications.length}</Text>
-                    <Text style={[styles.heroStatLabel, { color: colors.mutedText }]}>Total</Text>
-                  </View>
-                  <View style={[styles.heroStatCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Text style={[styles.heroStatValue, { color: colors.text }]}>{unreadCount}</Text>
-                    <Text style={[styles.heroStatLabel, { color: colors.mutedText }]}>Unread</Text>
-                  </View>
-                  <View style={[styles.heroStatCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Text style={[styles.heroStatValue, { color: colors.text }]}>{readCount}</Text>
-                    <Text style={[styles.heroStatLabel, { color: colors.mutedText }]}>Read</Text>
-                  </View>
-                </View>
-              </LinearGradient>
-
-              {!errorMessage && notifications.length ? (
-                <View style={styles.sectionIntro}>
-                  <Text style={[styles.sectionIntroTitle, { color: colors.text }]}>Recent activity</Text>
-                  <Text style={[styles.sectionIntroText, { color: colors.mutedText }]}>
-                    Follows, comments, likes, story interactions, and service updates appear here in one stream.
-                  </Text>
-                </View>
-              ) : null}
-            </View>
+            notifications.length || errorMessage ? (
+              <View style={[styles.compactSummary, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Text style={[styles.compactSummaryText, { color: colors.mutedText }]}>
+                  {errorMessage || `${notifications.length} total • ${unreadCount} unread`}
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.compactSummaryButton,
+                    {
+                      backgroundColor: unreadCount > 0 ? colors.primary : colors.surface,
+                      opacity: unreadCount > 0 ? 1 : 0.64,
+                    },
+                  ]}
+                  onPress={markAllRead}
+                  disabled={unreadCount <= 0}
+                >
+                  <Text style={[styles.compactSummaryButtonText, { color: unreadCount > 0 ? "#fff" : colors.mutedText }]}>Mark read</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null
           }
           ListEmptyComponent={
             <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -739,73 +694,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 14,
   },
-  heroPanel: {
-    borderRadius: 26,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 18,
-    paddingVertical: 18,
-  },
-  heroTopRow: {
+  compactSummary: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-  },
-  heroTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    maxWidth: 220,
-  },
-  heroSubtitle: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 19,
-    maxWidth: 250,
-  },
-  heroButton: {
-    minHeight: 40,
-    borderRadius: 14,
-    justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 14,
-    marginLeft: 12,
-  },
-  heroButtonText: {
-    fontWeight: "800",
-    fontSize: 12.5,
-  },
-  heroStats: {
-    flexDirection: "row",
-    marginTop: 18,
-  },
-  heroStatCard: {
-    flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 18,
-    paddingVertical: 14,
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  compactSummaryText: {
+    flex: 1,
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+  compactSummaryButton: {
+    minHeight: 34,
+    borderRadius: 12,
+    justifyContent: "center",
     paddingHorizontal: 12,
-    marginRight: 10,
+    marginLeft: 12,
   },
-  heroStatValue: {
-    fontSize: 22,
-    fontWeight: "800",
-  },
-  heroStatLabel: {
-    marginTop: 4,
+  compactSummaryButtonText: {
     fontSize: 12,
-    fontWeight: "600",
-  },
-  sectionIntro: {
-    paddingHorizontal: 4,
-    paddingTop: 18,
-  },
-  sectionIntroTitle: {
-    fontSize: 16,
     fontWeight: "800",
-  },
-  sectionIntroText: {
-    marginTop: 6,
-    fontSize: 13,
-    lineHeight: 19,
   },
   groupBlock: {
     marginTop: 18,
@@ -827,7 +739,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
-    paddingVertical: 14,
+    paddingVertical: 12,
   },
   rowDivider: {
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -881,11 +793,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginTop: 6,
-  },
-  notificationPreview: {
-    marginTop: 6,
-    fontSize: 12.5,
-    lineHeight: 18,
   },
   notificationTime: {
     fontSize: 12,

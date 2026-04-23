@@ -92,14 +92,14 @@ class MainApplication : Application(), ReactApplication {
 
     val callsChannel =
       NotificationChannel(
-        "calls",
+        "calls_v2",
         "Calls",
         NotificationManager.IMPORTANCE_HIGH,
       ).apply {
         description = "Incoming call alerts"
         enableVibration(true)
         vibrationPattern = longArrayOf(0, 300, 160, 300, 160, 300)
-        setSound(defaultSoundUri, soundAttributes)
+        setSound(null, null)
         lockscreenVisibility = Notification.VISIBILITY_PUBLIC
       }
 

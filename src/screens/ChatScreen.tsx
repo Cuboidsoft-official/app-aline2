@@ -49,6 +49,7 @@ import {
   createChatConversation,
   fetchChatConversationDetails,
   fetchConversationMessages,
+  checkChatMediaModeration,
   reactToChatMessage,
   sendChatMessage,
 } from "../utils/chatApi";
@@ -541,7 +542,8 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [stickerPickerMode, setStickerPickerMode] = useState<"emoji" | "gifs" | "stickers">("emoji");
   const [contextMessage, setContextMessage] = useState<ChatMessage | null>(null);
   const [showContextMenu, setShowContextMenu] = useState(false);
-  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const pendingAttachment = pendingAttachments[0] || null;
   const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
@@ -1420,19 +1422,24 @@ const ChatScreen = ({ navigation, route }: any) => {
     }, 120);
   }, [messageIndexMap, scrollToMessageIndex]);
 
-  const queueAttachmentPreview = useCallback((asset: any) => {
-    if (!asset?.uri) {
+  const queueAttachmentPreview = useCallback((assetsInput: any[] | any) => {
+    const assets = Array.isArray(assetsInput) ? assetsInput : [assetsInput];
+    const nextAttachments = assets.filter((asset) => asset?.uri).map((asset, index) => {
+      const mimeType = String(asset.type || "application/octet-stream").trim();
+      const kind = mimeType.startsWith("video/") ? "video" : "image";
+      return {
+        uri: asset.uri,
+        name: asset.fileName || `${kind}_${Date.now()}_${index + 1}`,
+        type: mimeType,
+        kind,
+      } as PendingAttachment;
+    });
+
+    if (!nextAttachments.length) {
       return;
     }
 
-    const mimeType = String(asset.type || "application/octet-stream").trim();
-    const kind = mimeType.startsWith("video/") ? "video" : "image";
-    setPendingAttachment({
-      uri: asset.uri,
-      name: asset.fileName || `${kind}_${Date.now()}`,
-      type: mimeType,
-      kind,
-    });
+    setPendingAttachments(nextAttachments);
     setPendingVoiceNote(null);
     setShowTools(false);
   }, []);
@@ -1440,8 +1447,8 @@ const ChatScreen = ({ navigation, route }: any) => {
   const sendImageAttachment = useCallback(async () => {
     try {
       const response = await launchImageLibrary({
-        mediaType: "mixed",
-        selectionLimit: 1,
+        mediaType: "photo",
+        selectionLimit: 10,
       });
 
       if (response?.didCancel) {
@@ -1452,7 +1459,7 @@ const ChatScreen = ({ navigation, route }: any) => {
         return;
       }
 
-      queueAttachmentPreview(response.assets?.[0]);
+      queueAttachmentPreview(response.assets || []);
     } catch (error) {
       Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to select attachment"));
     }
@@ -1497,24 +1504,38 @@ const ChatScreen = ({ navigation, route }: any) => {
   }, [queueAttachmentPreview]);
 
   const sendPendingAttachment = useCallback(async () => {
-    if (!pendingAttachment) {
+    if (!pendingAttachments.length) {
       return;
     }
 
     try {
       setUploading(true);
-      await submitMessage({
-        text: text.trim(),
-        file: {
-          uri: pendingAttachment.uri,
-          name: pendingAttachment.name,
-          type: pendingAttachment.type,
-        },
-        replyToMessageId: replyingToMessageId,
-        replyToMessage: replyingToMessage,
-      });
+      for (const attachment of pendingAttachments) {
+        await checkChatMediaModeration({
+          file: {
+            uri: attachment.uri,
+            name: attachment.name,
+            type: attachment.type,
+          },
+          messageType: attachment.kind,
+        });
+      }
+
+      for (let index = 0; index < pendingAttachments.length; index += 1) {
+        const attachment = pendingAttachments[index];
+        await submitMessage({
+          text: index === 0 ? text.trim() : "",
+          file: {
+            uri: attachment.uri,
+            name: attachment.name,
+            type: attachment.type,
+          },
+          replyToMessageId: index === 0 ? replyingToMessageId : undefined,
+          replyToMessage: index === 0 ? replyingToMessage : undefined,
+        });
+      }
       setText("");
-      setPendingAttachment(null);
+      setPendingAttachments([]);
     } catch (error: any) {
       console.log("attachment message send error:", error);
       if (showModerationBlockedSheet(error, { fallbackMessage: "This attachment could not be sent right now." })) {
@@ -1524,7 +1545,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     } finally {
       setUploading(false);
     }
-  }, [pendingAttachment, replyingToMessage, replyingToMessageId, submitMessage, text]);
+  }, [pendingAttachments, replyingToMessage, replyingToMessageId, submitMessage, text]);
 
   const sendDocumentAttachment = useCallback(async () => {
     try {
@@ -1798,7 +1819,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   }, [applyMessageReaction, currentUserId]);
 
   const sendVoiceMessage = useCallback(async (voiceFile: { uri: string; name: string; type: string; duration: number }) => {
-    setPendingAttachment(null);
+    setPendingAttachments([]);
     setPendingVoiceNote(voiceFile);
     setShowTools(false);
   }, []);
@@ -1940,8 +1961,8 @@ const ChatScreen = ({ navigation, route }: any) => {
       && (!isMediaBubble || !isGenericAttachmentText(textValue, attachmentLabel));
     let swipeableRef: Swipeable | null = null;
 
-    const bubbleTextColor = isMine ? "#fff" : "#F8FAFC";
-    const bubbleMetaColor = isMine ? "rgba(255,255,255,0.72)" : "rgba(226,232,240,0.86)";
+    const bubbleTextColor = isMine ? "#fff" : colors.text;
+    const bubbleMetaColor = isMine ? "rgba(255,255,255,0.72)" : colors.mutedText;
     const messageStatusIcon = seenCount > 0 ? "checkmark-done" : "checkmark";
     const messageStatusIconColor = seenCount > 0 ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.72)";
     const incomingBubbleBg = colors.card;
@@ -2088,12 +2109,15 @@ const ChatScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             ) : null}
 
-            {sharedContent?.kind === "post" || sharedContent?.kind === "story" ? (
+            {sharedContent?.kind === "post" || sharedContent?.kind === "story" || sharedContent?.kind === "swipe" ? (
               <TouchableOpacity
                 activeOpacity={0.9}
                 onPress={() => {
                   if (sharedContent?.kind === "post" && sharedContent?.postId) {
                     navigation.navigate("PostDetail", { postId: sharedContent.postId });
+                  }
+                  if (sharedContent?.kind === "swipe" && sharedContent?.swipeId) {
+                    navigation.navigate("Swipes", { swipeId: sharedContent.swipeId });
                   }
                   if (sharedContent?.kind === "story" && sharedContent?.storyId) {
                     navigation.navigate("StoryViewer", {
@@ -2124,7 +2148,9 @@ const ChatScreen = ({ navigation, route }: any) => {
                           : sharedContent?.interaction?.type === "like"
                             ? "Story like"
                             : "Shared story"
-                        : "Shared post"}
+                        : sharedContent?.kind === "swipe"
+                          ? "Shared swipe"
+                          : "Shared post"}
                     </Text>
                   </View>
                 </View>
@@ -2331,7 +2357,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   // ─── Main render ──────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top"]}>
       <StatusBar backgroundColor={chatHeaderTint} barStyle="light-content" />
 
       <View
@@ -2526,8 +2552,9 @@ const ChatScreen = ({ navigation, route }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        enabled={Platform.OS === "ios"}
+        keyboardVerticalOffset={0}
       >
         <View style={[styles.chatBackground, { backgroundColor: colors.surface }]}>
           {chatWallpaper ? (
@@ -2827,14 +2854,16 @@ const ChatScreen = ({ navigation, route }: any) => {
                   )}
                   <View style={styles.attachmentPreviewMeta}>
                     <Text style={[styles.attachmentPreviewTitle, { color: colors.text }]} numberOfLines={1}>
-                      {pendingAttachment.kind === "image" ? "Image ready to send" : "Video ready to send"}
+                      {pendingAttachments.length > 1
+                        ? `${pendingAttachments.length} photos ready to send`
+                        : pendingAttachment.kind === "image" ? "Image ready to send" : "Video ready to send"}
                     </Text>
                     <Text style={[styles.attachmentPreviewSubtitle, { color: colors.mutedText }]} numberOfLines={1}>
-                      {pendingAttachment.name}
+                      {pendingAttachments.length > 1 ? "Each photo will pass safety checks before sending." : pendingAttachment.name}
                     </Text>
                   </View>
                   <TouchableOpacity
-                    onPress={() => setPendingAttachment(null)}
+                    onPress={() => setPendingAttachments([])}
                     disabled={uploading}
                     style={styles.attachmentPreviewClose}
                   >

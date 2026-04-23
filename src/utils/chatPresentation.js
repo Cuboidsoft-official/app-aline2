@@ -59,9 +59,26 @@ const parseSharedContentValue = (value) => {
 };
 
 export const buildSharedPostMessage = (post) => {
+  const isSwipe = !Array.isArray(post?.media) && post?.media?.url;
+  const mediaList = isSwipe
+    ? [{
+        id: String(post?.media?.id || ""),
+        mediaType: String(post?.media?.mediaType || "video"),
+        url: String(post?.media?.url || ""),
+        thumbnailUrl: String(post?.thumbnailUrl || post?.media?.thumbnailUrl || ""),
+      }]
+    : Array.isArray(post?.media)
+      ? post.media.slice(0, 4).map((asset) => ({
+          id: String(asset?.id || ""),
+          mediaType: String(asset?.mediaType || "image"),
+          url: String(asset?.url || ""),
+          thumbnailUrl: String(asset?.thumbnailUrl || ""),
+        }))
+      : [];
   const payload = {
-    kind: "post",
-    postId: String(post?.id || ""),
+    kind: isSwipe ? "swipe" : "post",
+    postId: isSwipe ? "" : String(post?.id || ""),
+    swipeId: isSwipe ? String(post?.id || "") : "",
     caption: String(post?.caption || "").trim(),
     createdAt: Number(post?.createdAt || Date.now()),
     user: {
@@ -70,14 +87,7 @@ export const buildSharedPostMessage = (post) => {
       name: String(post?.user?.name || ""),
       avatarUrl: String(post?.user?.avatarUrl || ""),
     },
-    media: Array.isArray(post?.media)
-      ? post.media.slice(0, 4).map((asset) => ({
-        id: String(asset?.id || ""),
-        mediaType: String(asset?.mediaType || "image"),
-        url: String(asset?.url || ""),
-        thumbnailUrl: String(asset?.thumbnailUrl || ""),
-      }))
-      : [],
+    media: mediaList,
   };
 
   return `${SHARED_CONTENT_PREFIX}${encodeURIComponent(JSON.stringify(payload))}`;
@@ -204,6 +214,11 @@ export const getMessageText = (message) => {
   if (sharedContent?.kind === "post") {
     const username = String(sharedContent?.user?.username || "").trim();
     return username ? `@${username}'s post` : "Shared post";
+  }
+
+  if (sharedContent?.kind === "swipe") {
+    const username = String(sharedContent?.user?.username || "").trim();
+    return username ? `@${username}'s swipe` : "Shared swipe";
   }
 
   if (sharedContent?.kind === "story") {
@@ -369,6 +384,11 @@ export const getConversationPreview = (conversation) => {
   if (sharedContent?.kind === "post") {
     const username = String(sharedContent?.user?.username || "").trim();
     return username ? `Shared @${username}'s post` : "Shared a post";
+  }
+
+  if (sharedContent?.kind === "swipe") {
+    const username = String(sharedContent?.user?.username || "").trim();
+    return username ? `Shared @${username}'s swipe` : "Shared a swipe";
   }
 
   if (sharedContent?.kind === "story") {

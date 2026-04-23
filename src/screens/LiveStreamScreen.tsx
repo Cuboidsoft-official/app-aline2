@@ -893,25 +893,15 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
         <View style={[styles.chatPanel, { backgroundColor: colors.background }]}>
           <View style={styles.chatHeader}>
             <Text style={[styles.chatTitle, { color: colors.text }]}>Live Chat</Text>
-            <Text style={[styles.chatHint, { color: colors.mutedText }]}>
-              {liveStatus === "live" ? "Real-time messages for host and viewers." : "Chat is closed because the stream ended."}
-            </Text>
           </View>
 
-          {!isHost ? (
+          {!isHost && !isApprovedGuest ? (
             <View style={[styles.guestRequestCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.guestRequestIconWrap}>
                 <Icon name="hand-left-outline" size={18} color={colors.primary} />
               </View>
               <View style={styles.guestRequestCopy}>
-                <Text style={[styles.guestRequestTitle, { color: colors.text }]}>Request to join live</Text>
-                <Text style={[styles.guestRequestHint, { color: colors.mutedText }]}>
-                  {isApprovedGuest
-                    ? "The host approved your request for the guest queue."
-                    : hasPendingGuestRequest
-                      ? "Your request is pending host approval."
-                      : "Ask the host to bring you on stream from this chat area."}
-                </Text>
+                <Text style={[styles.guestRequestTitle, { color: colors.text }]}>Join live</Text>
               </View>
               <TouchableOpacity
                 style={[
@@ -922,10 +912,10 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
                   },
                 ]}
                 onPress={requestGuestSlot}
-                disabled={liveStatus !== "live" || requestingGuestSlot || hasPendingGuestRequest || isApprovedGuest}
+                disabled={liveStatus !== "live" || requestingGuestSlot || hasPendingGuestRequest}
               >
-                <Text style={[styles.guestRequestButtonText, { color: isApprovedGuest || hasPendingGuestRequest ? colors.text : "#fff" }]}>
-                  {isApprovedGuest ? "Approved" : hasPendingGuestRequest ? "Pending" : requestingGuestSlot ? "Sending..." : "Request to join"}
+                <Text style={[styles.guestRequestButtonText, { color: hasPendingGuestRequest ? colors.text : "#fff" }]}>
+                  {hasPendingGuestRequest ? "Pending" : requestingGuestSlot ? "Sending..." : "Request"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -942,9 +932,6 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
                     <View style={styles.guestQueueCopy}>
                       <Text style={[styles.guestQueueName, { color: colors.text }]} numberOfLines={1}>
                         {requesterLabel}
-                      </Text>
-                      <Text style={[styles.guestQueueMeta, { color: colors.mutedText }]} numberOfLines={1}>
-                        Wants to join your live stream.
                       </Text>
                     </View>
                     <TouchableOpacity
@@ -969,7 +956,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
 
           <ScrollView style={styles.chatList} contentContainerStyle={styles.chatListContent}>
             {messages.length === 0 ? (
-              <Text style={[styles.emptyChatText, { color: colors.mutedText }]}>The chat is quiet right now. Send the first message.</Text>
+              <Text style={[styles.emptyChatText, { color: colors.mutedText }]}>No messages yet.</Text>
             ) : (
               messages.map((message, index) => {
                 const senderId = String(message?.sender?._id || message?.sender?.id || message?.senderId || "").trim();

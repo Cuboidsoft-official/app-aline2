@@ -1746,6 +1746,13 @@ function FeedScreen({ navigation }: any) {
     const ownStoryOwnerId = ownStory?.user.id || currentUser?.id || "";
     const ownStoryAvatar = ownStory?.user.avatarUrl || currentUser?.avatarUrl || DEFAULT_AVATAR_URL;
     const visibleLiveStories = liveStories.filter((item) => String(item?.hostUser?._id || item?.hostUser?.id || "") !== String(currentUser?.id || ""));
+    const headerSurfaceColor = isDarkMode ? colors.surface : colors.card;
+    const headerBorderColor = isDarkMode ? feedAccentBorder : colors.border;
+    const headerBrandColor = colors.text;
+    const headerSublineColor = colors.mutedText;
+    const utilityButtonBackground = isDarkMode ? "rgba(255,255,255,0.12)" : colors.surface;
+    const utilityButtonBorder = isDarkMode ? "rgba(255,255,255,0.18)" : colors.border;
+    const utilityIconColor = isDarkMode ? "#FFFFFF" : colors.text;
 
     return (
       <>
@@ -1755,7 +1762,7 @@ function FeedScreen({ navigation }: any) {
               styles.topBarPanel,
               isCompactHeader && styles.topBarPanelCompact,
               { minHeight: isTabletLayout ? 70 : undefined },
-              { backgroundColor: isDarkMode ? colors.surface : "#111827", borderColor: isDarkMode ? feedAccentBorder : "#1f2937" },
+              { backgroundColor: headerSurfaceColor, borderColor: headerBorderColor },
             ]}
           >
             <View style={styles.topLeft}>
@@ -1764,7 +1771,7 @@ function FeedScreen({ navigation }: any) {
               </TouchableOpacity>
               <View style={styles.brandCopy}>
                 <Text
-                  style={[styles.brand, isCompactHeader && styles.brandCompact, { color: "#FFFFFF" }]}
+                  style={[styles.brand, isCompactHeader && styles.brandCompact, { color: headerBrandColor }]}
                   numberOfLines={1}
                 >
                   Aline2
@@ -1773,7 +1780,7 @@ function FeedScreen({ navigation }: any) {
                   style={[
                     styles.brandSubline,
                     isCompactHeader && styles.brandSublineCompact,
-                    { color: "rgba(255,255,255,0.78)" },
+                    { color: headerSublineColor },
                   ]}
                   numberOfLines={1}
                 >
@@ -1800,11 +1807,11 @@ function FeedScreen({ navigation }: any) {
                   isCompactHeader && styles.headerIconGapCompact,
                   styles.headerIconButton,
                   isCompactHeader && styles.headerIconButtonCompact,
-                  { backgroundColor: isDarkMode ? "rgba(255,255,255,0.12)" : feedAccent, borderColor: "rgba(255,255,255,0.18)" },
+                  { backgroundColor: utilityButtonBackground, borderColor: utilityButtonBorder },
                 ]}
                 onPress={() => navigation.navigate("Search")}
               >
-                <Icon name="search-outline" size={isCompactHeader ? 18 : 20} color="#FFFFFF" />
+                <Icon name="search-outline" size={isCompactHeader ? 18 : 20} color={utilityIconColor} />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1813,11 +1820,11 @@ function FeedScreen({ navigation }: any) {
                   isCompactHeader && styles.headerIconGapCompact,
                   styles.headerIconButton,
                   isCompactHeader && styles.headerIconButtonCompact,
-                  { backgroundColor: isDarkMode ? "rgba(255,255,255,0.12)" : feedAccent, borderColor: "rgba(255,255,255,0.18)" },
+                  { backgroundColor: utilityButtonBackground, borderColor: utilityButtonBorder },
                 ]}
                 onPress={openNotifications}
               >
-                <Icon name="notifications-outline" size={isCompactHeader ? 18 : 20} color="#FFFFFF" />
+                <Icon name="notifications-outline" size={isCompactHeader ? 18 : 20} color={utilityIconColor} />
                 {unreadNotificationCount > 0 ? (
                   <View style={styles.notificationBadge}>
                     <Text style={styles.notificationBadgeText}>

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from "react";
+import React, { useCallback, useMemo, useRef } from "react";
 import { PanResponder, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -50,11 +50,12 @@ type AppBottomDockProps = {
 function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
   const { colors, isDarkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const bottomPadding = Math.max(insets.bottom, Platform.OS === "ios" ? 14 : 10);
+  const bottomPadding = Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
+  const dockHeight = APP_BOTTOM_DOCK_BASE_HEIGHT + bottomPadding;
   const surfaceColor = isDarkMode ? "#08111F" : colors.card;
   const activeTintColor = colors.primary;
   const labelFontSize = Platform.OS === "ios" ? 9.5 : 9;
-  const routeNames = navigation?.getState?.()?.routeNames || [];
+  const routeNames = useMemo(() => navigation?.getState?.()?.routeNames || [], [navigation]);
   const swipeLockRef = useRef(false);
   const resolvedActiveKey = activeRouteName === "SwipesLauncher" ? "Swipes" : activeRouteName;
   const activeIndex = useMemo(
@@ -62,7 +63,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
     [resolvedActiveKey],
   );
 
-  const navigateToItem = (screen: string) => {
+  const navigateToItem = useCallback((screen: string) => {
     if (screen === "Swipes") {
       navigation.getParent?.()?.navigate("Swipes");
       return;
@@ -79,7 +80,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
     }
 
     navigation.getParent?.()?.navigate("MainApp", { screen });
-  };
+  }, [navigation, routeNames]);
 
   const panResponder = useMemo(
     () =>
@@ -104,7 +105,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
           }
         },
       }),
-    [activeIndex],
+    [activeIndex, navigateToItem],
   );
 
   return (
@@ -114,7 +115,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
         style={[
           styles.surface,
           {
-            height: APP_BOTTOM_DOCK_BASE_HEIGHT + bottomPadding,
+            height: dockHeight,
             paddingBottom: bottomPadding,
             backgroundColor: surfaceColor,
             borderTopColor: isDarkMode ? "rgba(111,176,255,0.12)" : colors.border,
@@ -122,6 +123,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
             shadowOpacity: isDarkMode ? 0.42 : 0.08,
             shadowRadius: 18,
             shadowOffset: { width: 0, height: -4 },
+            elevation: 18,
           },
         ]}
       >
@@ -168,15 +170,20 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
 
 const styles = StyleSheet.create({
   wrap: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "flex-end",
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     zIndex: 60,
+    paddingBottom: Platform.OS === "android" ? 4 : 0,
+    elevation: 60,
   },
   surface: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderTopWidth: StyleSheet.hairlineWidth,
+    overflow: "visible",
     shadowColor: "transparent",
     shadowOpacity: 0,
     shadowRadius: 0,

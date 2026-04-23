@@ -461,7 +461,7 @@ const dedupeMessages = (items: ChatMessage[]): ChatMessage[] => {
 };
 
 const SellerChatScreen = ({ route, navigation }: any) => {
-  const { colors } = useAppTheme();
+  const { colors, isDarkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
@@ -556,7 +556,28 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     return lastSeenLabel === "Away" ? `Away • ${selectedServiceLabel}` : `${lastSeenLabel} • ${selectedServiceLabel}`;
   }, [isSellerActive, selectedServiceLabel, seller?.lastSeenAt, sellerLastSeenAt, sellerPresenceStatus, typingUserId]);
 
-  const sellerStatusColor = "rgba(255,255,255,0.78)";
+  const sellerChatColors = useMemo(() => ({
+    background: isDarkMode ? CHAT_BG : colors.background,
+    panel: isDarkMode ? CHAT_PANEL : colors.card,
+    panelAlt: isDarkMode ? CHAT_PANEL_ALT : colors.surface,
+    panelSoft: isDarkMode ? CHAT_PANEL_SOFT : alpha(colors.primary, "0E"),
+    border: isDarkMode ? CHAT_BORDER : alpha(colors.border, "D8"),
+    text: isDarkMode ? "#F8FAFF" : colors.text,
+    muted: isDarkMode ? CHAT_TEXT_MUTED : colors.mutedText,
+    headerIcon: isDarkMode ? "#FFFFFF" : colors.primary,
+    headerButtonBg: isDarkMode ? alpha("#FFFFFF", "14") : alpha(colors.primary, "10"),
+    headerButtonBorder: isDarkMode ? alpha("#FFFFFF", "24") : alpha(colors.primary, "26"),
+    headerClusterBg: isDarkMode ? alpha("#FFFFFF", "10") : alpha(colors.primary, "0E"),
+    headerClusterBorder: isDarkMode ? alpha("#FFFFFF", "16") : alpha(colors.border, "C8"),
+    accentSoft: isDarkMode ? "rgba(123, 77, 255, 0.18)" : alpha(colors.primary, "14"),
+    accentText: isDarkMode ? "#BFA7FF" : colors.primary,
+    selectedSoftText: isDarkMode ? "#E9DEFF" : "#F3EEFF",
+    warningBg: isDarkMode ? CHAT_PANEL_SOFT : "#FFF7E6",
+    warningText: isDarkMode ? "#F5D995" : "#8A5A00",
+    overlay: isDarkMode ? "rgba(10,15,28,0.62)" : "rgba(15,23,42,0.28)",
+  }), [colors, isDarkMode]);
+
+  const sellerStatusColor = isDarkMode ? "rgba(255,255,255,0.78)" : colors.mutedText;
   const canUseComposer = false;
   const assistantScope = "Seller chat support";
   const assistantScopeHint = `Get help with booking, payment, appointments, and chat support for ${seller?.sellerName || "this seller"}.`;
@@ -1811,6 +1832,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     const messageTimeLabel = formatMessageTime(item?.createdAt);
     const messageStatusIcon = seenCount > 0 ? "checkmark-done" : "checkmark";
     const messageStatusIconColor = seenCount > 0 ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.72)";
+    const incomingBubbleText = isDarkMode ? "#F5F7FF" : colors.text;
+    const incomingBubbleMeta = isDarkMode ? CHAT_TEXT_MUTED : colors.mutedText;
     let swipeableRef: Swipeable | null = null;
 
     return (
@@ -1864,29 +1887,35 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               sharedContent || callEvent
                 ? [styles.messageBubbleWide, { maxWidth: chatMetrics.wideBubbleMaxWidth, minWidth: minimumWideBubbleWidth }]
                 : null,
-              isMine ? styles.myMsg : styles.otherMsg
+              isMine ? styles.myMsg : styles.otherMsg,
+              isMine
+                ? { backgroundColor: colors.primary }
+                : { backgroundColor: sellerChatColors.panelAlt, borderColor: sellerChatColors.border }
             ]}
           >
             {replyPreview ? (
-              <View style={[styles.replyPreviewCard, isMine ? styles.replyPreviewCardMine : null]}>
+              <View style={[styles.replyPreviewCard, isMine ? styles.replyPreviewCardMine : { backgroundColor: alpha(colors.primary, "10") }]}>
                 <View style={[styles.replyPreviewBar, isMine ? styles.replyPreviewBarMine : null]} />
                 <View style={styles.replyPreviewBody}>
                   <Text style={[styles.replyPreviewAuthor, isMine ? styles.replyPreviewAuthorMine : null, { fontSize: chatMetrics.metaFontSize + 0.5 }]} numberOfLines={1}>
                     {replyPreview.author}
                   </Text>
-                  <Text style={[styles.replyPreviewSnippet, isMine ? styles.replyPreviewSnippetMine : null, { fontSize: chatMetrics.metaFontSize, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={1}>
+                  <Text style={[styles.replyPreviewSnippet, isMine ? styles.replyPreviewSnippetMine : { color: incomingBubbleMeta }, { fontSize: chatMetrics.metaFontSize, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={1}>
                     {replyPreview.snippet}
                   </Text>
                 </View>
               </View>
             ) : null}
 
-            {sharedContent?.kind === "post" || sharedContent?.kind === "story" ? (
+            {sharedContent?.kind === "post" || sharedContent?.kind === "story" || sharedContent?.kind === "swipe" ? (
               <TouchableOpacity
                 activeOpacity={0.9}
                 onPress={() => {
                   if (sharedContent?.kind === "post" && sharedContent?.postId) {
                     navigation.navigate("PostDetail", { postId: sharedContent.postId });
+                  }
+                  if (sharedContent?.kind === "swipe" && sharedContent?.swipeId) {
+                    navigation.navigate("Swipes", { swipeId: sharedContent.swipeId });
                   }
                   if (sharedContent?.kind === "story" && sharedContent?.storyId) {
                     navigation.navigate("StoryViewer", {
@@ -1895,7 +1924,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                     });
                   }
                 }}
-                style={[styles.sharedPostCard, isMine ? styles.sharedPostCardMine : null]}
+                style={[styles.sharedPostCard, isMine ? styles.sharedPostCardMine : { backgroundColor: alpha(colors.primary, "08") }]}
               >
                 <View style={styles.sharedPostHeader}>
                   <Image
@@ -1903,19 +1932,21 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                     style={styles.sharedPostAvatar}
                   />
                   <View style={styles.sharedPostMeta}>
-                    <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]} numberOfLines={1}>
+                    <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : { color: incomingBubbleText }, { fontSize: chatMetrics.metaFontSize + 1 }]} numberOfLines={1}>
                       {sharedContent?.user?.username
                         ? `@${sharedContent.user.username}`
                         : sharedContent?.user?.name || (sharedContent?.kind === "story" ? "Aline2 story" : "Aline2 post")}
                     </Text>
-                    <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : null, { fontSize: chatMetrics.metaFontSize }]} numberOfLines={1}>
+                    <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : { color: incomingBubbleMeta }, { fontSize: chatMetrics.metaFontSize }]} numberOfLines={1}>
                       {sharedContent?.kind === "story"
                         ? sharedContent?.interaction?.type === "reply"
                           ? "Story reply"
                           : sharedContent?.interaction?.type === "like"
                             ? "Story like"
                             : "Shared story"
-                        : "Shared post"}
+                        : sharedContent?.kind === "swipe"
+                          ? "Shared swipe"
+                          : "Shared post"}
                     </Text>
                   </View>
                 </View>
@@ -1929,13 +1960,13 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 ) : null}
 
                 {sharedContent?.caption ? (
-                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, { fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]} numberOfLines={3}>
+                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : { color: incomingBubbleText }, { fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]} numberOfLines={3}>
                     {sharedContent.caption}
                   </Text>
                 ) : null}
 
                 {sharedContent?.kind === "story" && sharedContent?.interaction?.text ? (
-                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, { fontSize: chatMetrics.metaFontSize + 0.5, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={2}>
+                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : { color: incomingBubbleText }, { fontSize: chatMetrics.metaFontSize + 0.5, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={2}>
                     {sharedContent.interaction.text}
                   </Text>
                 ) : null}
@@ -1943,7 +1974,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             ) : null}
 
             {callEvent ? (
-              <View style={[styles.callEventCard, isMine ? styles.callEventCardMine : null]}>
+              <View style={[styles.callEventCard, isMine ? styles.callEventCardMine : { backgroundColor: alpha(colors.primary, "08") }]}>
                 <View style={[styles.callEventIcon, isMine ? styles.callEventIconMine : null]}>
                   <Icon
                     name={callEvent.icon}
@@ -1952,10 +1983,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   />
                 </View>
                 <View style={styles.callEventBody}>
-                  <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]}>
+                  <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : { color: incomingBubbleText }, { fontSize: chatMetrics.metaFontSize + 1 }]}>
                     {callEvent.label}
                   </Text>
-                  <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null, { fontSize: chatMetrics.metaFontSize }]}>
+                  <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : { color: incomingBubbleMeta }, { fontSize: chatMetrics.metaFontSize }]}>
                     Call activity is saved in chat
                   </Text>
                 </View>
@@ -1980,7 +2011,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   style={styles.messageImage}
                 />
                 <Text
-                  style={[styles.attachmentName, isMine ? styles.myText : styles.otherText]}
+                  style={[styles.attachmentName, isMine ? styles.myText : [styles.otherText, { color: incomingBubbleText }]]}
                   numberOfLines={1}
                 >
                   Video attachment
@@ -2006,7 +2037,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   color={isMine ? "#fff" : PRIMARY}
                 />
                 <Text
-                  style={[styles.attachmentName, isMine ? styles.myText : styles.otherText]}
+                  style={[styles.attachmentName, isMine ? styles.myText : [styles.otherText, { color: incomingBubbleText }]]}
                   numberOfLines={1}
                 >
                   {getAttachmentDisplayName(item)}
@@ -2015,7 +2046,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             ) : null}
 
             {!locationPayload && !sharedContent && !callEvent && !!textValue && (
-              <Text style={[isMine ? styles.myText : styles.otherText, { fontSize: chatMetrics.bodyFontSize, lineHeight: chatMetrics.bodyLineHeight }]}>
+              <Text style={[isMine ? styles.myText : [styles.otherText, { color: incomingBubbleText }], { fontSize: chatMetrics.bodyFontSize, lineHeight: chatMetrics.bodyLineHeight }]}>
                 {textValue}
               </Text>
             )}
@@ -2036,11 +2067,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => handleMessagePress(item, attachment, locationPayload)}
-                style={[styles.locationCard, isMine ? styles.myLocationCard : null]}
+                style={[styles.locationCard, isMine ? styles.myLocationCard : { backgroundColor: alpha(colors.primary, "08") }]}
               >
                 <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
                 <View style={styles.locationBody}>
-                  <Text style={[isMine ? styles.myLocationTitle : styles.locationTitle, { fontSize: chatMetrics.metaFontSize + 1 }]}>
+                  <Text style={[isMine ? styles.myLocationTitle : [styles.locationTitle, { color: incomingBubbleText }], { fontSize: chatMetrics.metaFontSize + 1 }]}>
                     {locationPayload.label}
                   </Text>
                   <Text style={[isMine ? styles.myLocationLink : styles.locationLink, { fontSize: chatMetrics.metaFontSize }]}>
@@ -2057,7 +2088,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                     key={`${item._id}-${reaction?.emoji || "reaction"}`}
                     style={[styles.reactionChip, isMine ? styles.myReactionChip : null]}
                   >
-                    <Text style={[styles.reactionText, { fontSize: chatMetrics.metaFontSize }]}>
+                    <Text style={[styles.reactionText, { color: isMine ? "#fff" : incomingBubbleText, fontSize: chatMetrics.metaFontSize }]}>
                       {reaction?.emoji} {Array.isArray(reaction?.users) ? reaction.users.length : 0}
                     </Text>
                   </View>
@@ -2067,7 +2098,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
             <View style={[styles.messageMetaRow, isMine ? styles.messageMetaRowMine : null]}>
               {!!messageTimeLabel ? (
-                <Text style={[styles.messageMetaText, isMine ? styles.messageMetaTextMine : null, { fontSize: chatMetrics.metaFontSize }]}>
+                <Text style={[styles.messageMetaText, isMine ? styles.messageMetaTextMine : { color: incomingBubbleMeta }, { fontSize: chatMetrics.metaFontSize }]}>
                   {messageTimeLabel}
                 </Text>
               ) : null}
@@ -2174,12 +2205,12 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: CHAT_BG }]} edges={["top", "bottom"]}>
-      <StatusBar barStyle="light-content" backgroundColor={CHAT_BG} />
+    <SafeAreaView style={[styles.container, { backgroundColor: sellerChatColors.background }]} edges={["top"]}>
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={sellerChatColors.background} />
 
-      <View style={[styles.header, { backgroundColor: CHAT_BG, borderBottomColor: CHAT_BORDER, paddingTop: 8, paddingHorizontal: chatMetrics.listPadding + 2, paddingBottom: chatMetrics.listPadding }]}>
-        <TouchableOpacity style={[styles.headerActionButton, { width: compactHeaderActionSize, height: compactHeaderActionSize, borderRadius: compactHeaderActionSize / 2, backgroundColor: alpha("#FFFFFF", "14"), borderColor: alpha("#FFFFFF", "24") }]} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={20} color="#fff" />
+      <View style={[styles.header, { backgroundColor: sellerChatColors.background, borderBottomColor: sellerChatColors.border, paddingTop: 8, paddingHorizontal: chatMetrics.listPadding + 2, paddingBottom: chatMetrics.listPadding }]}>
+        <TouchableOpacity style={[styles.headerActionButton, { width: compactHeaderActionSize, height: compactHeaderActionSize, borderRadius: compactHeaderActionSize / 2, backgroundColor: sellerChatColors.headerButtonBg, borderColor: sellerChatColors.headerButtonBorder }]} onPress={() => navigation.goBack()}>
+          <Icon name="arrow-back" size={20} color={sellerChatColors.headerIcon} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -2197,7 +2228,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           />
 
           <View style={styles.headerTextBlock}>
-            <Text style={[styles.name, { fontSize: compactHeaderTitleSize }]} numberOfLines={1} ellipsizeMode="tail">
+            <Text style={[styles.name, { color: sellerChatColors.text, fontSize: compactHeaderTitleSize }]} numberOfLines={1} ellipsizeMode="tail">
               {seller?.sellerName || "Loading..."}
             </Text>
             <View style={styles.statusRow}>
@@ -2209,12 +2240,12 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           </View>
         </TouchableOpacity>
 
-        <View style={[styles.rightIcons, { backgroundColor: alpha("#FFFFFF", "10"), borderColor: alpha("#FFFFFF", "16") }]}>
+        <View style={[styles.rightIcons, { backgroundColor: sellerChatColors.headerClusterBg, borderColor: sellerChatColors.headerClusterBorder }]}>
           <TouchableOpacity
             style={[styles.headerActionButton, styles.headerActionButtonGrouped, { width: compactHeaderActionSize, height: compactHeaderActionSize, borderRadius: compactHeaderActionSize / 2 }]}
             onPress={() => setShowAssistant(true)}
           >
-            <Icon name="sparkles-outline" size={20} color="#fff" />
+            <Icon name="sparkles-outline" size={20} color={sellerChatColors.headerIcon} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.headerActionButton, styles.headerActionButtonGrouped, { width: compactHeaderActionSize, height: compactHeaderActionSize, borderRadius: compactHeaderActionSize / 2 }]}
@@ -2224,7 +2255,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               });
             }}
           >
-            <Icon name={isConversationLockedState ? "lock-open-outline" : "lock-closed-outline"} size={20} color="#fff" />
+            <Icon name={isConversationLockedState ? "lock-open-outline" : "lock-closed-outline"} size={20} color={sellerChatColors.headerIcon} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.headerActionButton, styles.headerActionButtonGrouped, { width: compactHeaderActionSize, height: compactHeaderActionSize, borderRadius: compactHeaderActionSize / 2 }]}
@@ -2232,35 +2263,35 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               navigation.navigate("SellerDetailsScreen", { sellerId })
             }
           >
-            <Icon name="ellipsis-vertical" size={20} color="#fff" />
+            <Icon name="ellipsis-vertical" size={20} color={sellerChatColors.headerIcon} />
           </TouchableOpacity>
         </View>
       </View>
 
-      <View style={styles.chatHeroPanel}>
+      <View style={[styles.chatHeroPanel, { backgroundColor: sellerChatColors.panel, borderColor: sellerChatColors.border }]}>
         <View style={styles.chatHeroContent}>
-          <Text style={styles.chatHeroEyebrow}>Booking conversation</Text>
-          <Text style={styles.chatHeroTitle} numberOfLines={2}>
+          <Text style={[styles.chatHeroEyebrow, { color: sellerChatColors.accentText }]}>Booking conversation</Text>
+          <Text style={[styles.chatHeroTitle, { color: sellerChatColors.text }]} numberOfLines={2}>
             {seller?.sellerName || "Seller"} bookings and service requests
           </Text>
-          <Text style={styles.chatHeroText}>
+          <Text style={[styles.chatHeroText, { color: sellerChatColors.muted }]}>
             Booking updates, service selections, and payment flow all stay organized in one premium thread.
           </Text>
         </View>
-        <View style={styles.chatHeroBadge}>
+        <View style={[styles.chatHeroBadge, { backgroundColor: sellerChatColors.accentSoft }]}>
           <Icon
             name={seller?.availabilityStatus === false ? "time-outline" : "checkmark-circle-outline"}
             size={16}
-            color="#F8F5FF"
+            color={colors.primary}
           />
-          <Text style={styles.chatHeroBadgeText}>
+          <Text style={[styles.chatHeroBadgeText, { color: colors.primary }]}>
             {seller?.availabilityStatus === false ? "Seller away" : "Seller available"}
           </Text>
         </View>
       </View>
 
-      <View style={styles.premiumServiceWrap}>
-        <Text style={[styles.premiumTitle, { fontSize: chatMetrics.sectionTitleFontSize }]}>Highlighted Services</Text>
+      <View style={[styles.premiumServiceWrap, { backgroundColor: sellerChatColors.panel, borderColor: sellerChatColors.border }]}>
+        <Text style={[styles.premiumTitle, { color: sellerChatColors.text, fontSize: chatMetrics.sectionTitleFontSize }]}>Highlighted Services</Text>
 
         <FlatList
           horizontal
@@ -2276,7 +2307,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               <TouchableOpacity
                 style={[
                   styles.premiumCard,
-                  { width: Math.min(214, width * 0.52), padding: chatMetrics.cardPadding },
+                  { width: Math.min(214, width * 0.52), padding: chatMetrics.cardPadding, backgroundColor: sellerChatColors.panelAlt, borderColor: sellerChatColors.border },
                   isSelected && styles.selectedCard
                 ]}
                 onPress={() => setSelectedService(item)}
@@ -2285,7 +2316,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   style={[
                     styles.serviceName,
                     { fontSize: chatMetrics.metaFontSize + 1 },
-                    isSelected && { color: "#fff" }
+                    { color: isSelected ? "#fff" : sellerChatColors.text }
                   ]}
                 >
                   {item.serviceName}
@@ -2295,7 +2326,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                   style={[
                     styles.servicePrice,
                     { fontSize: chatMetrics.bodyFontSize - 0.5 },
-                    isSelected && { color: "#fff" }
+                    isSelected ? { color: "#fff" } : null
                   ]}
                 >
                   {formatPrimaryServicePrice(item)}
@@ -2306,7 +2337,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                     style={[
                       styles.serviceSubMeta,
                       { fontSize: chatMetrics.metaFontSize },
-                      isSelected && { color: "#E9DEFF" }
+                      { color: isSelected ? sellerChatColors.selectedSoftText : sellerChatColors.muted }
                     ]}
                   >
                     {extraOptions.map((option: { label?: string }) => option.label).join(" • ")}
@@ -2350,21 +2381,21 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         />
       </View>
 
-      <View style={styles.selectedServiceBanner}>
-        <View style={styles.selectedServiceIconWrap}>
-          <Icon name="briefcase-outline" size={15} color="#EDE7FF" />
+      <View style={[styles.selectedServiceBanner, { backgroundColor: sellerChatColors.panelAlt, borderColor: sellerChatColors.border }]}>
+        <View style={[styles.selectedServiceIconWrap, { backgroundColor: sellerChatColors.accentSoft }]}>
+          <Icon name="briefcase-outline" size={15} color={colors.primary} />
         </View>
         <View style={styles.selectedServiceCopy}>
-          <Text style={styles.selectedServiceBannerLabel}>Booking only</Text>
-          <Text style={styles.selectedServiceBannerText}>
+          <Text style={[styles.selectedServiceBannerLabel, { color: sellerChatColors.accentText }]}>Booking only</Text>
+          <Text style={[styles.selectedServiceBannerText, { color: sellerChatColors.text }]}>
             {selectedServiceLabel} selected. Pick a time slot and continue to request an appointment.
           </Text>
         </View>
       </View>
 
       {seller?.availabilityStatus === false ? (
-        <View style={styles.unavailableBanner}>
-          <Text style={styles.unavailableBannerText}>
+        <View style={[styles.unavailableBanner, { backgroundColor: sellerChatColors.warningBg, borderBottomColor: sellerChatColors.border }]}>
+          <Text style={[styles.unavailableBannerText, { color: sellerChatColors.warningText }]}>
             Seller is away right now. You can review services here, and fresh booking activity will appear once availability returns.
           </Text>
         </View>
@@ -2372,10 +2403,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        enabled={Platform.OS === "ios"}
+        keyboardVerticalOffset={0}
       >
-        <View style={styles.timelineShell}>
+        <View style={[styles.timelineShell, { backgroundColor: sellerChatColors.background, borderTopColor: sellerChatColors.border }]}>
           {loading ? (
             <View style={styles.loaderWrap}>
               <ActivityIndicator size="large" color={PRIMARY} />
@@ -2401,7 +2433,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               ListHeaderComponent={
                 pagination?.hasMore ? (
                   <TouchableOpacity
-                    style={styles.loadEarlierButton}
+                    style={[styles.loadEarlierButton, { backgroundColor: sellerChatColors.panelAlt, borderColor: sellerChatColors.border }]}
                     onPress={loadMoreMessages}
                     disabled={loadingMore}
                   >
@@ -2415,13 +2447,13 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               }
               ListEmptyComponent={
                 <View style={styles.emptyWrap}>
-                  <View style={styles.emptyIconWrap}>
-                    <Icon name="calendar-clear-outline" size={24} color="#BFA7FF" />
+                  <View style={[styles.emptyIconWrap, { backgroundColor: sellerChatColors.accentSoft }]}>
+                    <Icon name="calendar-clear-outline" size={24} color={colors.primary} />
                   </View>
-                  <Text style={[styles.emptyTitle, { fontSize: chatMetrics.sectionTitleFontSize + 1 }]}>
+                  <Text style={[styles.emptyTitle, { color: sellerChatColors.text, fontSize: chatMetrics.sectionTitleFontSize + 1 }]}>
                     {errorMessage ? "Conversation unavailable" : "No booking updates yet"}
                   </Text>
-                  <Text style={[styles.emptyText, { fontSize: chatMetrics.bodyFontSize - 1, lineHeight: chatMetrics.bodyLineHeight }]}>
+                  <Text style={[styles.emptyText, { color: sellerChatColors.muted, fontSize: chatMetrics.bodyFontSize - 1, lineHeight: chatMetrics.bodyLineHeight }]}>
                     {errorMessage || "This room only keeps appointment and payment updates. Normal chat and call logs stay hidden here."}
                   </Text>
                 </View>
@@ -2431,12 +2463,12 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
         </View>
 
-        <View style={[styles.inputWrap, { backgroundColor: CHAT_BG, paddingBottom: Math.max(8, insets.bottom), borderTopColor: CHAT_BORDER }]}>
-          <View style={[styles.composerLockedCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL_ALT, borderRadius: chatMetrics.bubbleRadius }]}>
+        <View style={[styles.inputWrap, { backgroundColor: sellerChatColors.background, paddingBottom: Math.max(8, insets.bottom), borderTopColor: sellerChatColors.border }]}>
+          <View style={[styles.composerLockedCard, { borderColor: sellerChatColors.border, backgroundColor: sellerChatColors.panelAlt, borderRadius: chatMetrics.bubbleRadius }]}>
             <View style={[styles.composerLockedIconWrap, { backgroundColor: alpha(colors.primary, "1A") }]}>
               <Icon name="calendar-clear-outline" size={18} color={colors.primary} />
             </View>
-            <Text style={[styles.composerLockedText, { color: "#F8FAFF", fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]}>
+            <Text style={[styles.composerLockedText, { color: sellerChatColors.text, fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]}>
               This seller room is booking-only. Choose a highlighted service, confirm a slot, and appointment updates will stay saved here.
             </Text>
           </View>
@@ -2444,11 +2476,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       </KeyboardAvoidingView>
 
       {isConversationLockedState ? (
-        <View style={styles.lockedChatOverlay}>
-          <View style={[styles.lockedChatCard, { borderColor: CHAT_BORDER, backgroundColor: CHAT_PANEL }]}>
+        <View style={[styles.lockedChatOverlay, { backgroundColor: sellerChatColors.overlay }]}>
+          <View style={[styles.lockedChatCard, { borderColor: sellerChatColors.border, backgroundColor: sellerChatColors.panel }]}>
             <Icon name="lock-closed-outline" size={26} color={colors.primary} />
-            <Text style={styles.lockedChatTitle}>Seller chat locked</Text>
-            <Text style={styles.lockedChatText}>
+            <Text style={[styles.lockedChatTitle, { color: sellerChatColors.text }]}>Seller chat locked</Text>
+            <Text style={[styles.lockedChatText, { color: sellerChatColors.muted }]}>
               Yeh seller conversation lock hai. Passcode dal kar updates aur booking history dekh sakte ho.
             </Text>
             <TouchableOpacity
@@ -2534,18 +2566,18 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       <Modal visible={showLocationComposer} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.locationModalBox}>
-            <Text style={styles.modalTitle}>Share Location</Text>
-            <Text style={styles.locationModalText}>
+          <View style={[styles.locationModalBox, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Share Location</Text>
+            <Text style={[styles.locationModalText, { color: colors.mutedText }]}>
               Enter a place, address, or landmark. A Maps link will be sent in this chat.
             </Text>
 
             <TextInput
               value={locationDraft}
               onChangeText={setLocationDraft}
-              style={styles.locationInput}
+              style={[styles.locationInput, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
               placeholder="Cafe, airport, clinic, MG Road..."
-              placeholderTextColor="#999"
+              placeholderTextColor={colors.placeholder}
               editable={!uploading}
             />
 
@@ -2568,7 +2600,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               }}
               disabled={uploading}
             >
-              <Text style={styles.modalCancelText}>Cancel</Text>
+              <Text style={[styles.modalCancelText, { color: colors.mutedText }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2576,22 +2608,22 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       <Modal visible={showPaymentModal} transparent animationType="fade">
         <View style={styles.bookingOverlay}>
-          <View style={[styles.bookingSheet, { width: bookingSheetWidth, maxHeight: bookingSheetMaxHeight }]}>
-            <View style={styles.bookingHandle} />
+          <View style={[styles.bookingSheet, { width: bookingSheetWidth, maxHeight: bookingSheetMaxHeight, backgroundColor: sellerChatColors.panel }]}>
+            <View style={[styles.bookingHandle, { backgroundColor: alpha(sellerChatColors.muted, "55") }]} />
 
             <View style={styles.bookingHeaderRow}>
               <View style={styles.bookingHeaderCopy}>
-                <Text style={styles.modalTitle}>Request a Service</Text>
-                <Text style={styles.bookingSubtitle}>
+                <Text style={[styles.modalTitle, { color: sellerChatColors.text }]}>Request a Service</Text>
+                <Text style={[styles.bookingSubtitle, { color: sellerChatColors.muted }]}>
                   Pick seller availability first, then confirm your appointment request.
                 </Text>
               </View>
               <TouchableOpacity
-                style={styles.bookingCloseButton}
+                style={[styles.bookingCloseButton, { backgroundColor: sellerChatColors.headerButtonBg }]}
                 onPress={() => setShowPaymentModal(false)}
                 disabled={processingBookingPayment}
               >
-                <Icon name="close" size={18} color="#5B4B76" />
+                <Icon name="close" size={18} color={sellerChatColors.headerIcon} />
               </TouchableOpacity>
             </View>
 
@@ -2599,15 +2631,15 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.bookingScrollContent}
             >
-              <View style={styles.bookingSummaryCard}>
+              <View style={[styles.bookingSummaryCard, { backgroundColor: sellerChatColors.panelAlt, borderColor: sellerChatColors.border }]}>
                 <View style={styles.bookingSummaryHeader}>
                   <View style={styles.bookingSummaryTextWrap}>
-                    <Text style={styles.bookingSummaryEyebrow}>Selected service</Text>
-                    <Text style={styles.modalService}>
+                    <Text style={[styles.bookingSummaryEyebrow, { color: sellerChatColors.accentText }]}>Selected service</Text>
+                    <Text style={[styles.modalService, { color: sellerChatColors.text }]}>
                       {selectedService?.serviceName || serviceName || "Selected service"}
                     </Text>
                   </View>
-                  <View style={styles.bookingStatusBadge}>
+                  <View style={[styles.bookingStatusBadge, { backgroundColor: sellerChatColors.accentSoft }]}>
                     <Text style={styles.bookingStatusBadgeText}>
                       {seller?.availabilityStatus === false ? "Seller away" : "Seller available"}
                     </Text>
@@ -2615,35 +2647,35 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 </View>
 
                 <View style={styles.bookingMetaRow}>
-                  <View style={styles.bookingMetaCard}>
-                    <Text style={styles.bookingMetaLabel}>Price</Text>
-                    <Text style={styles.bookingMetaValue}>
+                  <View style={[styles.bookingMetaCard, { backgroundColor: sellerChatColors.panelSoft, borderColor: sellerChatColors.border }]}>
+                    <Text style={[styles.bookingMetaLabel, { color: sellerChatColors.accentText }]}>Price</Text>
+                    <Text style={[styles.bookingMetaValue, { color: sellerChatColors.text }]}>
                       {selectedPricing ? formatPrimaryServicePrice(selectedService) : "Pricing unavailable"}
                     </Text>
                   </View>
-                  <View style={styles.bookingMetaCard}>
-                    <Text style={styles.bookingMetaLabel}>Duration</Text>
-                    <Text style={styles.bookingMetaValue}>
+                  <View style={[styles.bookingMetaCard, { backgroundColor: sellerChatColors.panelSoft, borderColor: sellerChatColors.border }]}>
+                    <Text style={[styles.bookingMetaLabel, { color: sellerChatColors.accentText }]}>Duration</Text>
+                    <Text style={[styles.bookingMetaValue, { color: sellerChatColors.text }]}>
                       {selectedPricing?.durationMinutes ? `${selectedPricing.durationMinutes} min` : "Flexible"}
                     </Text>
                   </View>
                 </View>
 
-                <Text style={styles.bookingSellerLine}>
+                <Text style={[styles.bookingSellerLine, { color: sellerChatColors.muted }]}>
                   {seller?.sellerName || "Seller"} will receive this request after booking is confirmed.
                 </Text>
 
                 {selectedAppointmentSlot ? (
                   <View style={styles.bookingDateTimeRow}>
-                    <View style={styles.bookingDateTimeCard}>
-                      <Text style={styles.bookingMetaLabel}>Date</Text>
-                      <Text style={styles.bookingDateTimeValue}>
+                    <View style={[styles.bookingDateTimeCard, { backgroundColor: sellerChatColors.panelSoft, borderColor: sellerChatColors.border }]}>
+                      <Text style={[styles.bookingMetaLabel, { color: sellerChatColors.accentText }]}>Date</Text>
+                      <Text style={[styles.bookingDateTimeValue, { color: sellerChatColors.text }]}>
                         {formatAppointmentSlotDateLabel(selectedAppointmentSlot.start)}
                       </Text>
                     </View>
-                    <View style={styles.bookingDateTimeCard}>
-                      <Text style={styles.bookingMetaLabel}>Time</Text>
-                      <Text style={styles.bookingDateTimeValue}>
+                    <View style={[styles.bookingDateTimeCard, { backgroundColor: sellerChatColors.panelSoft, borderColor: sellerChatColors.border }]}>
+                      <Text style={[styles.bookingMetaLabel, { color: sellerChatColors.accentText }]}>Time</Text>
+                      <Text style={[styles.bookingDateTimeValue, { color: sellerChatColors.text }]}>
                         {formatAppointmentSlotTimeLabel(selectedAppointmentSlot.start)}
                       </Text>
                     </View>
@@ -2652,20 +2684,20 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               </View>
 
               <View style={styles.slotSection}>
-                <Text style={styles.slotHeading}>Seller availability</Text>
-                <Text style={styles.slotSubheading}>
+                <Text style={[styles.slotHeading, { color: sellerChatColors.text }]}>Seller availability</Text>
+                <Text style={[styles.slotSubheading, { color: sellerChatColors.muted }]}>
                   Choose the time that works for you from the seller's live schedule.
                 </Text>
 
                 {loadingAppointmentSlots ? (
-                  <View style={styles.bookingStateCard}>
+                  <View style={[styles.bookingStateCard, { backgroundColor: sellerChatColors.panelAlt, borderColor: sellerChatColors.border }]}>
                     <ActivityIndicator size="small" color={PRIMARY} />
-                    <Text style={styles.bookingStateText}>Loading seller availability...</Text>
+                    <Text style={[styles.bookingStateText, { color: sellerChatColors.muted }]}>Loading seller availability...</Text>
                   </View>
                 ) : !appointmentSlots.length ? (
-                  <View style={styles.bookingStateCard}>
+                  <View style={[styles.bookingStateCard, { backgroundColor: sellerChatColors.panelAlt, borderColor: sellerChatColors.border }]}>
                     <Icon name="calendar-clear-outline" size={18} color="#8A6BCF" />
-                    <Text style={styles.bookingStateText}>
+                    <Text style={[styles.bookingStateText, { color: sellerChatColors.muted }]}>
                       {appointmentSlotFallback
                         ? "Seller availability could not be loaded right now. Please try again shortly."
                         : "This seller has not shared any bookable slots right now."}
@@ -2682,17 +2714,18 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                           style={[
                             styles.slotChip,
                             isCompactBookingSheet ? styles.slotChipCompact : styles.slotChipRegular,
+                            { backgroundColor: sellerChatColors.panelSoft, borderColor: sellerChatColors.border },
                             isSelected ? styles.slotChipActive : null,
                           ]}
                           onPress={() => setSelectedAppointmentStart(slot.start)}
                         >
-                          <Text style={[styles.slotChipDay, isSelected ? styles.slotChipDayActive : null]}>
+                          <Text style={[styles.slotChipDay, { color: isSelected ? "#fff" : sellerChatColors.accentText }, isSelected ? styles.slotChipDayActive : null]}>
                             {formatAppointmentSlotDateLabel(slot.start)}
                           </Text>
-                          <Text style={[styles.slotChipTime, isSelected ? styles.slotChipTimeActive : null]}>
+                          <Text style={[styles.slotChipTime, { color: isSelected ? "#fff" : sellerChatColors.text }, isSelected ? styles.slotChipTimeActive : null]}>
                             {formatAppointmentSlotTimeLabel(slot.start)}
                           </Text>
-                          <Text style={[styles.slotChipMeta, isSelected ? styles.slotChipMetaActive : null]}>
+                          <Text style={[styles.slotChipMeta, { color: isSelected ? "rgba(255,255,255,0.82)" : sellerChatColors.muted }, isSelected ? styles.slotChipMetaActive : null]}>
                             {slot.end ? `${formatAppointmentSlotTimeLabel(slot.end)} end` : slot.timeZone || "Local time"}
                           </Text>
                         </TouchableOpacity>
@@ -2703,19 +2736,19 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               </View>
 
               {selectedAppointmentSlot ? (
-                <View style={styles.selectedSlotCard}>
-                  <Text style={styles.selectedSlotLabel}>Appointment request</Text>
-                  <Text style={styles.selectedSlotValue}>
+                <View style={[styles.selectedSlotCard, { backgroundColor: alpha(colors.primary, isDarkMode ? "24" : "12"), borderColor: alpha(colors.primary, isDarkMode ? "44" : "28") }]}>
+                  <Text style={[styles.selectedSlotLabel, { color: sellerChatColors.accentText }]}>Appointment request</Text>
+                  <Text style={[styles.selectedSlotValue, { color: sellerChatColors.text }]}>
                     {formatAppointmentSlotWindow(selectedAppointmentSlot)}
                   </Text>
-                  <Text style={styles.selectedSlotNote}>
+                  <Text style={[styles.selectedSlotNote, { color: sellerChatColors.muted }]}>
                     {`Seller gets a notification for your new service request.${selectedAppointmentSlot?.timeZone ? ` Slots shown in ${selectedAppointmentSlot.timeZone}.` : ""}`}
                   </Text>
                 </View>
               ) : null}
             </ScrollView>
 
-            <Text style={styles.modalNote}>
+            <Text style={[styles.modalNote, { color: sellerChatColors.muted }]}>
               Select a slot first. Payment is collected in the final step so the seller receives a confirmed service request.
             </Text>
 
@@ -2741,7 +2774,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => setShowPaymentModal(false)} disabled={processingBookingPayment || !!mockPaymentState}>
-              <Text style={styles.modalCancelText}>
+              <Text style={[styles.modalCancelText, { color: sellerChatColors.muted }]}>
                 Cancel
               </Text>
             </TouchableOpacity>

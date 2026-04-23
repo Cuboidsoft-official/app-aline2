@@ -873,7 +873,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         <View style={styles.avatarContainer}>
           <AppAvatar
             uri={item.profilePic || DEFAULT_AVATAR_URL}
-            name={item.username || item.name || "User"}
+            name={item.username || item.name || (item as any)?.email || "User"}
             size={44}
             style={styles.avatar}
             backgroundColor={colors.surface}
@@ -958,7 +958,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         <View style={styles.avatarContainer}>
           <AppAvatar
             uri={participant?.profilePic || DEFAULT_AVATAR_URL}
-            name={participant?.username || participant?.name || "User"}
+            name={participant?.username || participant?.name || (participant as any)?.email || "User"}
             size={compactAvatarSize}
             style={styles.avatar}
             backgroundColor={colors.surface}
@@ -1612,7 +1612,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
                   >
                     <AppAvatar
                       uri={item.profilePic || DEFAULT_AVATAR_URL}
-                      name={item.username || item.name || "User"}
+                      name={item.username || item.name || (item as any)?.email || "User"}
                       size={48}
                       style={styles.memberAvatar}
                       backgroundColor={colors.surface}

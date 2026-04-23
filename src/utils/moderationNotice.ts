@@ -18,7 +18,7 @@ export const showModerationBlockedSheet = (
 
   Alert.sheet(
     "Content blocked",
-    nextMessage,
+    nextMessage || "Choose another file.",
     [
       {
         text: "Choose another file",

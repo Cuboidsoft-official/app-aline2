@@ -61,14 +61,14 @@ function PostShareSheet({
   };
 
   const selectedTargetIds = useMemo(
-    () => selectedTargets.map((target) => target.id),
+    () => selectedTargets.map((target) => target.key),
     [selectedTargets],
   );
 
   const toggleTarget = (target: ShareTarget) => {
     setSelectedTargets((current) =>
-      current.some((item) => item.id === target.id)
-        ? current.filter((item) => item.id !== target.id)
+      current.some((item) => item.key === target.key)
+        ? current.filter((item) => item.key !== target.key)
         : [...current, target],
     );
   };
@@ -139,14 +139,19 @@ function PostShareSheet({
       const shareMessage = buildSharedPostMessage(post);
       const sendResults = await Promise.allSettled(
         selectedTargets.map(async (target) => {
-          const conversation = await createChatConversation({
-            receiverId: target.id,
-            conversationType: "direct",
-          });
-
-          const conversationId = conversation?.conversation?._id;
+          const conversationId =
+            target.kind === "group" && target.conversationId
+              ? target.conversationId
+              : String(
+                  (
+                    await createChatConversation({
+                      receiverId: target.id,
+                      conversationType: "direct",
+                    })
+                  )?.conversation?._id || "",
+                );
           if (!conversationId) {
-            throw new Error(`Could not open a conversation with @${target.username}.`);
+            throw new Error(`Could not open this chat right now.`);
           }
 
           await sendChatMessage({

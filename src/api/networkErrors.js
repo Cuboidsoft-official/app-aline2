@@ -21,11 +21,11 @@ const getModerationBlockedMessage = (error, fallbackMessage) => {
           : "media";
 
   if (isChatMedia) {
-    return `This ${mediaLabel} could not be sent because it may contain nudity or explicit content. Please choose a different file.`;
+    return `This ${mediaLabel} may contain restricted content. Choose another file.`;
   }
 
   if (target.startsWith("media[") || target === "mediaUrl" || target === "storyData.mediaUrl") {
-    return `This ${mediaLabel} could not be published because it may contain nudity or explicit content. Please choose a different file.`;
+    return `This ${mediaLabel} may contain restricted content. Choose another file.`;
   }
 
   return fallbackMessage;

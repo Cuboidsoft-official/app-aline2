@@ -22,13 +22,16 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { createSound } from "react-native-nitro-sound";
 
 import CommentThreadSheet from "../../features/social/components/CommentThreadSheet";
-import ShareTargetsList from "../../features/social/components/ShareTargetsList";
+import ShareTargetsList, { ShareTarget } from "../../features/social/components/ShareTargetsList";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, Swipe, SwipeComment } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { shouldShowVerifiedBadge } from "../../utils/verificationBadges";
+import { buildSharedPostMessage } from "../../utils/chatPresentation";
+import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
+import { API } from "../../api/api";
 
 const { height } = Dimensions.get("window");
 const reportReasons: ReportReason[] = [
@@ -66,7 +69,7 @@ const formatSwipeMusicLabel = (music?: Swipe["music"]): string => {
   return artistName ? `${trackName} • ${artistName}` : trackName;
 };
 
-function SwipesScreen({ navigation }: any) {
+function SwipesScreen({ navigation, route }: any) {
   const [viewportHeight, setViewportHeight] = useState(height);
   const [swipes, setSwipes] = useState<Swipe[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,7 +82,7 @@ function SwipesScreen({ navigation }: any) {
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetSubmitting, setSheetSubmitting] = useState(false);
   const [sheetBusyIds, setSheetBusyIds] = useState<Record<string, boolean>>({});
-  const [selectedShareTargetIds, setSelectedShareTargetIds] = useState<string[]>([]);
+  const [selectedShareTargets, setSelectedShareTargets] = useState<ShareTarget[]>([]);
   const [selectedReason, setSelectedReason] = useState<ReportReason>("spam");
   const [reportNote, setReportNote] = useState("");
   const [threadComment, setThreadComment] = useState<SwipeComment | null>(null);
@@ -97,6 +100,7 @@ function SwipesScreen({ navigation }: any) {
     time: 0,
     timeout: null,
   });
+  const swipeListRef = useRef<FlatList<Swipe> | null>(null);
 
   const activeSwipe = swipes[activeSwipeIndex] || null;
   const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipe?.music?.previewUrl || "");
@@ -244,7 +248,7 @@ function SwipesScreen({ navigation }: any) {
   const closeSheet = () => {
     setActiveSheet(null);
     setSelectedSwipe(null);
-    setSelectedShareTargetIds([]);
+    setSelectedShareTargets([]);
     setSheetComments([]);
     setSheetLoading(false);
     setSheetBusyIds({});
@@ -412,6 +416,78 @@ function SwipesScreen({ navigation }: any) {
     }
   };
 
+  const sendSwipeToSelectedChats = async () => {
+    if (!selectedSwipe || !selectedShareTargets.length) {
+      return;
+    }
+
+    try {
+      const shareMessage = buildSharedPostMessage(selectedSwipe);
+      const sendResults = await Promise.allSettled(
+        selectedShareTargets.map(async (target) => {
+          const conversationId =
+            target.kind === "group" && target.conversationId
+              ? target.conversationId
+              : String(
+                  (
+                    await createChatConversation({
+                      receiverId: target.id,
+                      conversationType: "direct",
+                    })
+                  )?.conversation?._id || "",
+                );
+
+          if (!conversationId) {
+            throw new Error("Could not open this chat.");
+          }
+
+          await sendChatMessage({
+            conversationId,
+            text: shareMessage,
+          });
+
+          await API.post(`/posts/${selectedSwipe.id}/share`, {
+            shareType: "conversation",
+            conversationId,
+          }).catch((error) => {
+            console.log("swipe share count update error:", error);
+          });
+
+          return target;
+        }),
+      );
+
+      const successCount = sendResults.filter((result) => result.status === "fulfilled").length;
+      const failedCount = sendResults.length - successCount;
+
+      if (!successCount) {
+        const firstFailure = sendResults.find((result) => result.status === "rejected");
+        throw firstFailure?.status === "rejected" ? firstFailure.reason : new Error("Could not send swipe.");
+      }
+
+      setSwipes((prev) =>
+        prev.map((item) =>
+          item.id === selectedSwipe.id
+            ? { ...item, sharesCount: item.sharesCount + successCount }
+            : item,
+        ),
+      );
+      setSelectedSwipe((prev) => (
+        prev ? { ...prev, sharesCount: prev.sharesCount + successCount } : prev
+      ));
+
+      Alert.alert(
+        failedCount > 0 ? "Partially sent" : "Sent",
+        failedCount > 0
+          ? `Sent to ${successCount} chats. ${failedCount} failed.`
+          : `Swipe sent to ${successCount} ${successCount === 1 ? "chat" : "chats"}.`,
+      );
+      closeSheet();
+    } catch (error) {
+      Alert.alert("Could not send swipe", toUserSafeMessage(error));
+    }
+  };
+
   const triggerSwipeLikeBurst = useCallback((swipeId: string) => {
     setLikeBurstSwipeId(swipeId);
     setTimeout(() => {
@@ -455,6 +531,23 @@ function SwipesScreen({ navigation }: any) {
       setActiveSwipeIndex(swipes.length - 1);
     }
   }, [activeSwipeIndex, swipes.length]);
+
+  useEffect(() => {
+    const targetSwipeId = String(route?.params?.swipeId || "").trim();
+    if (!targetSwipeId || !swipes.length) {
+      return;
+    }
+
+    const targetIndex = swipes.findIndex((item) => item.id === targetSwipeId);
+    if (targetIndex < 0) {
+      return;
+    }
+
+    setActiveSwipeIndex(targetIndex);
+    requestAnimationFrame(() => {
+      swipeListRef.current?.scrollToIndex?.({ index: targetIndex, animated: false });
+    });
+  }, [route?.params?.swipeId, swipes]);
 
   useEffect(() => {
     const player = swipeMusicPlayerRef.current;
@@ -681,8 +774,9 @@ function SwipesScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
-      <FlatList
-        data={swipes}
+        <FlatList
+          ref={swipeListRef}
+          data={swipes}
         keyExtractor={(item) => item.id}
         renderItem={renderSwipe}
         onLayout={onListLayout}
@@ -830,31 +924,25 @@ function SwipesScreen({ navigation }: any) {
                 <Text style={styles.shareActionText}>{selectedSwipe.saved ? "Remove from saved" : "Save"}</Text>
               </TouchableOpacity>
               <ShareTargetsList
-                selectedTargetIds={selectedShareTargetIds}
+                selectedTargetIds={selectedShareTargets.map((target) => target.key)}
                 onToggleTarget={(target) => {
-                  setSelectedShareTargetIds((current) =>
-                    current.includes(target.id)
-                      ? current.filter((item) => item !== target.id)
-                      : [...current, target.id],
+                  setSelectedShareTargets((current) =>
+                    current.some((item) => item.key === target.key)
+                      ? current.filter((item) => item.key !== target.key)
+                      : [...current, target],
                   );
                 }}
               />
               <TouchableOpacity
                 style={[
                   styles.commentsButton,
-                  !selectedShareTargetIds.length && styles.commentsButtonDisabled,
+                  !selectedShareTargets.length && styles.commentsButtonDisabled,
                 ]}
-                disabled={!selectedShareTargetIds.length}
-                onPress={() => {
-                  Alert.alert(
-                    "Sent",
-                    `Swipe sent to ${selectedShareTargetIds.length} ${selectedShareTargetIds.length === 1 ? "person" : "people"}.`,
-                  );
-                  closeSheet();
-                }}
+                disabled={!selectedShareTargets.length}
+                onPress={sendSwipeToSelectedChats}
               >
                 <Text style={styles.commentsButtonText}>
-                  {selectedShareTargetIds.length ? `Send to ${selectedShareTargetIds.length}` : "Select people"}
+                  {selectedShareTargets.length ? `Send to ${selectedShareTargets.length}` : "Select chats"}
                 </Text>
               </TouchableOpacity>
             </View>

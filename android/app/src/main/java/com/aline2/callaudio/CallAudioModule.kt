@@ -122,7 +122,7 @@ class CallAudioModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
 
       releaseRingtonePlayer()
 
-      val player = MediaPlayer.create(reactApplicationContext, R.raw.ringtone_default)
+      val player = MediaPlayer.create(reactApplicationContext, R.raw.call_ringing)
       if (player == null) {
         promise.resolve(false)
         return
@@ -131,15 +131,16 @@ class CallAudioModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
         player.setAudioAttributes(
           AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
         )
       } else {
         @Suppress("DEPRECATION")
-        player.setAudioStreamType(AudioManager.STREAM_RING)
+        player.setAudioStreamType(AudioManager.STREAM_MUSIC)
       }
 
+      player.setVolume(0.62f, 0.62f)
       player.isLooping = true
       player.setOnErrorListener { failedPlayer, _, _ ->
         try {

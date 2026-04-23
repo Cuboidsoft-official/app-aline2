@@ -15,8 +15,10 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
+import { useAppTheme } from "../../theme/AppThemeContext";
 
 function PostArchiveScreen({ navigation }: any) {
+  const { colors } = useAppTheme();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -98,16 +100,16 @@ function PostArchiveScreen({ navigation }: any) {
     const mediaUri = primaryMedia?.thumbnailUrl || primaryMedia?.url;
 
     return (
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         {mediaUri ? <Image source={{ uri: mediaUri }} style={styles.thumb} /> : <View style={[styles.thumb, styles.thumbPlaceholder]} />}
 
         <View style={styles.cardBody}>
           <Text style={styles.type}>{item.type.toUpperCase()}</Text>
-          <Text style={styles.meta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
-          <Text style={styles.statsLine}>
+          <Text style={[styles.meta, { color: colors.mutedText }]}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+          <Text style={[styles.statsLine, { color: colors.mutedText }]}>
             {item.likesCount} likes • {item.commentsCount} comments • {item.sharesCount} shares
           </Text>
-          <Text numberOfLines={2} style={styles.captionPreview}>
+          <Text numberOfLines={2} style={[styles.captionPreview, { color: colors.text }]}>
             {item.caption || "Untitled post"}
           </Text>
         </View>
@@ -126,19 +128,19 @@ function PostArchiveScreen({ navigation }: any) {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#7b3fe4" />
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color="#111" />
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>Post Archive</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Post Archive</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -146,14 +148,14 @@ function PostArchiveScreen({ navigation }: any) {
         data={posts}
         keyExtractor={(item) => item.id}
         renderItem={renderPostItem}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
-          <Text style={styles.helperText}>
+          <Text style={[styles.helperText, { color: colors.mutedText }]}>
             Archived posts are private to you. Restore them to publish them back to your profile, or delete them permanently.
           </Text>
         }
-        ListEmptyComponent={<Text style={styles.emptyText}>No archived posts yet.</Text>}
+        ListEmptyComponent={<Text style={[styles.emptyText, { color: colors.mutedText }]}>No archived posts yet.</Text>}
       />
     </View>
   );

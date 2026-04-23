@@ -71,6 +71,66 @@ const buildModerationBody = ({ file, mediaUrl, messageType } = {}) => {
   };
 };
 
+const buildModerationBlockedError = ({ code, message, moderation }) => {
+  const error = new Error(message || "This media could not be shared.");
+  error.name = "ModerationBlockedError";
+  error.response = {
+    status: 422,
+    data: {
+      success: false,
+      code: code || "CHAT_MEDIA_BLOCKED",
+      message: message || "This media could not be shared.",
+      moderation,
+    },
+  };
+  return error;
+};
+
+const getNormalizedScore = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const shouldBlockModerationLocally = (moderation = {}) => {
+  const status = String(moderation?.status || "").trim().toLowerCase();
+  const topLabel = String(moderation?.topLabel || "").trim().toLowerCase();
+  const confidence = getNormalizedScore(moderation?.confidence);
+  const scores = moderation?.scores || {};
+  const porn = getNormalizedScore(scores?.porn);
+  const hentai = getNormalizedScore(scores?.hentai);
+  const sexy = getNormalizedScore(scores?.sexy);
+
+  if (status === "blocked" || status === "review") {
+    return true;
+  }
+
+  if (porn >= 0.42 || hentai >= 0.42 || sexy >= 0.48) {
+    return true;
+  }
+
+  if ((topLabel === "porn" || topLabel === "hentai") && confidence >= 0.36) {
+    return true;
+  }
+
+  if (topLabel === "sexy" && confidence >= 0.55) {
+    return true;
+  }
+
+  return false;
+};
+
+const assertModerationAllowed = (payload, defaultCode = "CHAT_MEDIA_BLOCKED") => {
+  if (shouldBlockModerationLocally(payload?.moderation)) {
+    throw buildModerationBlockedError({
+      code: defaultCode,
+      message: payload?.message || "This media could not be shared because it may contain restricted content.",
+      moderation: payload?.moderation,
+    });
+  }
+
+  return payload;
+};
+
 /**
  * @param {{ receiverId?: string; conversationType?: string; serviceId?: string }} [params]
  */
@@ -369,14 +429,16 @@ export const checkChatMediaModeration = async ({ file, mediaUrl, messageType } =
   if (kind === "json") {
     const headers = await buildAuthHeaders();
     const response = await API.post("/moderation/chat-media", payload, { headers });
-    return response.data;
+    return assertModerationAllowed(response.data);
   }
 
-  return postMultipart({
+  const response = await postMultipart({
     path: "/moderation/chat-media",
     body: payload,
     timeoutMs: 120000,
   });
+
+  return assertModerationAllowed(response);
 };
 
 export const reactToChatMessage = async (messageId, emoji) => {

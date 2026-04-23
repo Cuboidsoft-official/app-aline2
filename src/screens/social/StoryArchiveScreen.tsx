@@ -15,8 +15,10 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { socialApi } from "../../features/social/socialApi";
 import { Story } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
+import { useAppTheme } from "../../theme/AppThemeContext";
 
 function StoryArchiveScreen({ navigation }: any) {
+  const { colors } = useAppTheme();
   const [stories, setStories] = useState<Story[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -95,16 +97,16 @@ function StoryArchiveScreen({ navigation }: any) {
 
   const renderStoryItem = ({ item }: { item: Story }) => {
     return (
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         {item.media ? <Image source={{ uri: item.media.url }} style={styles.thumb} /> : <View style={[styles.thumb, styles.textThumb]} />}
 
         <View style={styles.cardBody}>
           <Text style={styles.type}>{item.type.toUpperCase()}</Text>
-          <Text style={styles.meta}>{item.visibility === "close_friends" ? "Close friends" : "Public"}</Text>
-          <Text style={styles.statsLine}>
+          <Text style={[styles.meta, { color: colors.mutedText }]}>{item.visibility === "close_friends" ? "Close friends" : "Public"}</Text>
+          <Text style={[styles.statsLine, { color: colors.mutedText }]}>
             {(item.viewCount || 0)} views • {(item.replyCount || 0)} replies • {(item.reactionCount || 0)} likes
           </Text>
-          <Text numberOfLines={2} style={styles.contentPreview}>
+          <Text numberOfLines={2} style={[styles.contentPreview, { color: colors.text }]}>
             {item.text || item.poll?.question || item.question?.prompt || item.linkUrl || "Media story"}
           </Text>
         </View>
@@ -123,19 +125,19 @@ function StoryArchiveScreen({ navigation }: any) {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#7b3fe4" />
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color="#111" />
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>Story Archive</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Story Archive</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -143,9 +145,9 @@ function StoryArchiveScreen({ navigation }: any) {
         data={stories}
         keyExtractor={(item) => item.id}
         renderItem={renderStoryItem}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         contentContainerStyle={styles.listContent}
-        ListHeaderComponent={<Text style={styles.helperText}>Archived stories are private to you. Restore them to bring them back, or delete them permanently.</Text>}
+        ListHeaderComponent={<Text style={[styles.helperText, { color: colors.mutedText }]}>Archived stories are private to you. Restore them to bring them back, or delete them permanently.</Text>}
       />
     </View>
   );

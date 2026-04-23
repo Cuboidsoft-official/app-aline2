@@ -1,7 +1,8 @@
 import { Asset, CameraOptions, ImageLibraryOptions, launchCamera, launchImageLibrary } from "react-native-image-picker";
 
 import { API } from "../../api/api";
-import { getReadableApiErrorMessage } from "../../api/networkErrors";
+import { getReadableApiErrorMessage, isModerationBlockedError } from "../../api/networkErrors";
+import { checkChatMediaModeration } from "../../utils/chatApi";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../../utils/permissions";
 import { MediaAsset } from "./types";
 
@@ -66,6 +67,23 @@ const toRemoteMediaAsset = (asset: ComposerAsset): MediaAsset => ({
   width: asset.width,
   height: asset.height,
 });
+
+const runComposerModerationPrecheck = async (asset: ComposerAsset): Promise<void> => {
+  if (asset.source !== "local") {
+    return;
+  }
+
+  const messageType = asset.mediaType === "video" ? "video" : "image";
+
+  await checkChatMediaModeration({
+    file: {
+      uri: asset.uri,
+      name: sanitizeFileName(asset.fileName, messageType === "video" ? "upload.mp4" : "upload.jpg"),
+      type: asset.mimeType || (messageType === "video" ? "video/mp4" : "image/jpeg"),
+    },
+    messageType,
+  });
+};
 
 export const createRemoteComposerAsset = (
   uri: string,
@@ -144,6 +162,9 @@ const uploadSingleImage = async (asset: ComposerAsset): Promise<MediaAsset> => {
       height: asset.height,
     };
   } catch (error) {
+    if (isModerationBlockedError(error)) {
+      throw error;
+    }
     throw new Error(getReadableApiErrorMessage(error, "Image upload failed."));
   }
 };
@@ -176,6 +197,9 @@ const uploadMultipleImages = async (assets: ComposerAsset[]): Promise<MediaAsset
       height: asset.height,
     }));
   } catch (error) {
+    if (isModerationBlockedError(error)) {
+      throw error;
+    }
     throw new Error(getReadableApiErrorMessage(error, "Image upload failed."));
   }
 };
@@ -204,6 +228,9 @@ const uploadSingleVideo = async (asset: ComposerAsset): Promise<MediaAsset> => {
       height: typeof res?.data?.height === "number" ? res.data.height : asset.height,
     };
   } catch (error) {
+    if (isModerationBlockedError(error)) {
+      throw error;
+    }
     throw new Error(getReadableApiErrorMessage(error, "Video upload failed."));
   }
 };
@@ -218,6 +245,10 @@ export const uploadComposerAssets = async (assets: ComposerAsset[]): Promise<Med
 
   if (!localAssets.length) {
     return remoteAssets;
+  }
+
+  for (const asset of localAssets) {
+    await runComposerModerationPrecheck(asset);
   }
 
   const hasMixedTypes = new Set(localAssets.map((asset) => asset.mediaType)).size > 1;

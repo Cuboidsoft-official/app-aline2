@@ -66,11 +66,11 @@ async function ensureAndroidChannel() {
       sound: "default",
     });
 
-    await Notifications.setNotificationChannelAsync("calls", {
+    await Notifications.setNotificationChannelAsync("calls_v2", {
       name: "Calls",
       importance: Notifications.AndroidImportance?.MAX ?? 4,
       vibrationPattern: [0, 250, 150, 250, 150, 250],
-      sound: "default",
+      sound: null,
     });
 
     await Notifications.setNotificationChannelAsync("social", {
@@ -283,7 +283,7 @@ async function showForegroundNotification(remoteMessage: any) {
   }
   const channelId =
     type === "incoming_call"
-      ? "calls"
+      ? "calls_v2"
       : type === "chat_message"
         ? "chat"
         : "social";
@@ -293,7 +293,7 @@ async function showForegroundNotification(remoteMessage: any) {
       title,
       body,
       data,
-      sound: "default",
+      sound: type === "incoming_call" ? false : "default",
       ...(Platform.OS === "android" ? { channelId } : {}),
     },
     trigger: null,

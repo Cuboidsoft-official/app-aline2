@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppState } from 'react-native';
 import { Snackbar } from 'react-native-snackbar';
 
@@ -448,11 +449,13 @@ function AppNavigator() {
 export default function App() {
   return (
     <GestureHandlerRootView style={rootStyle}>
-      <AppThemeProvider>
-        <AppAlertProvider>
-          <AppNavigator />
-        </AppAlertProvider>
-      </AppThemeProvider>
+      <SafeAreaProvider>
+        <AppThemeProvider>
+          <AppAlertProvider>
+            <AppNavigator />
+          </AppAlertProvider>
+        </AppThemeProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

@@ -2,7 +2,6 @@ import React, { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   TextInput,
   StyleSheet,
   Text,
@@ -18,13 +17,20 @@ import { DEFAULT_AVATAR_URL } from "../../../constants/defaultAssets";
 import { shouldShowVerifiedBadge } from "../../../utils/verificationBadges";
 import { normalizeMediaUrl } from "../../../utils/mediaUrls";
 import { useAppTheme } from "../../../theme/AppThemeContext";
+import { fetchChatConversations } from "../../../utils/chatApi";
+import AppAvatar from "../../../components/AppAvatar";
 
 export interface ShareTarget {
+  key: string;
   id: string;
+  kind: "user" | "group";
   username: string;
   name: string;
   avatarUrl: string;
   isVerified?: boolean;
+  conversationId?: string;
+  conversationType?: "direct" | "seller" | "group";
+  subtitle?: string;
 }
 
 interface ShareTargetsListProps {
@@ -52,11 +58,13 @@ function ShareTargetsList({
     const loadTargets = async () => {
       try {
         setLoading(true);
-        const [res, currentUserId] = await Promise.all([
+        const [res, chatRes, currentUserId] = await Promise.all([
           API.get("/auth/users"),
+          fetchChatConversations().catch(() => ({ conversations: [] })),
           getStoredUserId(),
         ]);
         const users = Array.isArray(res?.data?.users) ? res.data.users : [];
+        const conversations = Array.isArray(chatRes?.conversations) ? chatRes.conversations : [];
 
         if (!mounted) {
           return;
@@ -64,15 +72,32 @@ function ShareTargetsList({
 
         const nextTargets = users
           .map((user: SocialUser & { _id?: string; profilePic?: string; profileImage?: string }) => ({
+            key: `user:${String(user?.id || user?._id || "")}`,
             id: String(user?.id || user?._id || ""),
+            kind: "user" as const,
             username: String(user?.username || "").trim(),
             name: String(user?.name || user?.username || "User").trim(),
             avatarUrl: String(user?.avatarUrl || user?.profilePic || user?.profileImage || "").trim(),
             isVerified: shouldShowVerifiedBadge(user),
+            subtitle: user?.username ? `@${String(user.username).trim()}` : "Direct chat",
           }))
           .filter((user: ShareTarget) => user.id && user.username && user.id !== String(currentUserId || ""));
 
-        setTargets(nextTargets);
+        const groupTargets = conversations
+          .filter((conversation: any) => String(conversation?.conversationType || "") === "group" && String(conversation?._id || "").trim())
+          .map((conversation: any) => ({
+            key: `group:${String(conversation._id)}`,
+            id: String(conversation._id),
+            kind: "group" as const,
+            username: "",
+            name: String(conversation?.groupName || "Group").trim(),
+            avatarUrl: String(conversation?.groupAvatar || "").trim(),
+            conversationId: String(conversation?._id || ""),
+            conversationType: "group" as const,
+            subtitle: `${Number(conversation?.memberCount || conversation?.members?.length || 0)} members`,
+          }));
+
+        setTargets([...groupTargets, ...nextTargets]);
       } catch (error) {
         console.log("share targets load error:", error);
         if (mounted) {
@@ -98,7 +123,7 @@ function ShareTargetsList({
     }
 
     if (deferredSearchQuery.trim()) {
-      return "No matching people found.";
+      return "No matching chats found.";
     }
 
     return "No share targets available yet.";
@@ -110,8 +135,8 @@ function ShareTargetsList({
       return targets;
     }
 
-    return targets.filter((target) => {
-      const combined = `${target.name} ${target.username}`.toLowerCase();
+      return targets.filter((target) => {
+      const combined = `${target.name} ${target.username} ${target.subtitle || ""}`.toLowerCase();
       return combined.includes(searchValue);
     });
   }, [deferredSearchQuery, targets]);
@@ -124,7 +149,7 @@ function ShareTargetsList({
         <TextInput
           value={searchQuery}
           onChangeText={setSearchQuery}
-          placeholder="Search people"
+          placeholder="Search chats"
           placeholderTextColor={colors.placeholder}
           style={[styles.searchInput, { color: colors.text }]}
         />
@@ -146,27 +171,35 @@ function ShareTargetsList({
         renderItem={({ item }) => (
           <TouchableOpacity style={styles.card} activeOpacity={0.86} onPress={() => onToggleTarget(item)}>
             <View style={styles.avatarWrap}>
-              <Image
-                source={{ uri: normalizeMediaUrl(item.avatarUrl || DEFAULT_AVATAR_URL) }}
+              <AppAvatar
+                uri={normalizeMediaUrl(item.avatarUrl || DEFAULT_AVATAR_URL)}
+                name={item.name || item.username || "Chat"}
+                size={62}
                 style={styles.avatar}
+                backgroundColor="#e5e7eb"
+                textColor="#1f2937"
               />
               <View
                 style={[
                   styles.checkCircle,
-                  selectedTargetIds.includes(item.id) && styles.checkCircleSelected,
+                  selectedTargetIds.includes(item.key) && styles.checkCircleSelected,
                 ]}
               >
-                {selectedTargetIds.includes(item.id) ? <Icon name="checkmark" size={12} color="#fff" /> : null}
+                {selectedTargetIds.includes(item.key) ? <Icon name="checkmark" size={12} color="#fff" /> : null}
               </View>
             </View>
             <View style={styles.nameRow}>
               <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
                 {item.name}
               </Text>
-              {item.isVerified ? <Icon name="checkmark-circle" size={12} color="#2563eb" /> : null}
+              {item.kind === "group"
+                ? <Icon name="people" size={12} color={colors.primary} />
+                : item.isVerified
+                  ? <Icon name="checkmark-circle" size={12} color="#2563eb" />
+                  : null}
             </View>
             <Text style={[styles.username, { color: colors.mutedText }]} numberOfLines={1}>
-              @{item.username}
+              {item.kind === "group" ? item.subtitle || "Group chat" : item.subtitle || `@${item.username}`}
             </Text>
           </TouchableOpacity>
         )}
