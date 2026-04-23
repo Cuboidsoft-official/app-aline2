@@ -23,6 +23,8 @@ import { socialApi } from "../../features/social/socialApi";
 import { Story, StoryFilterPreset } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { DEFAULT_AVATAR_URL } from "../../constants/defaultAssets";
+import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
+import { buildSharedStoryMessage } from "../../utils/chatPresentation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 
 const DEFAULT_STORY_MS = 5000;
@@ -329,6 +331,39 @@ function StoryViewerScreen({ route, navigation }: any) {
     setActiveIndex((prevIndex) => prevIndex - 1);
   };
 
+  const sendStoryInteractionToChat = useCallback(
+    async ({ action, replyText }: { action: "like" | "reply"; replyText?: string }) => {
+      if (!currentStory || currentStory.isOwner) {
+        return;
+      }
+
+      const receiverId = String(currentStory.user?.id || "").trim();
+      if (!receiverId) {
+        return;
+      }
+
+      try {
+        const conversation = await createChatConversation({
+          receiverId,
+          conversationType: "direct",
+        });
+        const conversationId = String(conversation?.conversation?._id || "").trim();
+
+        if (!conversationId) {
+          throw new Error("Could not open a conversation for this story.");
+        }
+
+        await sendChatMessage({
+          conversationId,
+          text: buildSharedStoryMessage(currentStory, { action, replyText }),
+        });
+      } catch (error) {
+        console.log("story interaction chat send error", error);
+      }
+    },
+    [currentStory],
+  );
+
   const toggleLike = useCallback(async () => {
     if (!currentStory || liking || currentStory.liked) {
       return;
@@ -338,12 +373,15 @@ function StoryViewerScreen({ route, navigation }: any) {
       setLiking(true);
       const updated = await socialApi.toggleStoryLike(currentStory.id);
       setStories((prevStories) => prevStories.map((story) => (story.id === updated.id ? updated : story)));
+      if (updated?.liked) {
+        await sendStoryInteractionToChat({ action: "like" });
+      }
     } catch (error) {
       Alert.alert("Could not update story", toUserSafeMessage(error));
     } finally {
       setLiking(false);
     }
-  }, [currentStory, liking]);
+  }, [currentStory, liking, sendStoryInteractionToChat]);
 
   const triggerStoryLikeBurst = useCallback(() => {
     setShowLikeBurst(true);
@@ -400,7 +438,8 @@ function StoryViewerScreen({ route, navigation }: any) {
 
     try {
       setBusyReply(true);
-      await socialApi.replyToStory(currentStory.id, rawText);
+      const normalizedReply = rawText.trim();
+      await socialApi.replyToStory(currentStory.id, normalizedReply);
       setReplyText("");
       setStories((prevStories) =>
         prevStories.map((story) =>
@@ -415,6 +454,7 @@ function StoryViewerScreen({ route, navigation }: any) {
             : story,
         ),
       );
+      await sendStoryInteractionToChat({ action: "reply", replyText: normalizedReply });
       Alert.alert("Sent", "Reply sent.");
     } catch (error) {
       Alert.alert("Could not send reply", toUserSafeMessage(error));

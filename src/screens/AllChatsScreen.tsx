@@ -39,6 +39,7 @@ import { connectSocket, socket } from "../socket";
 import AISupportSheet from "../components/chat/AISupportSheet";
 import ChatLockModal from "../components/chat/ChatLockModal";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
+import AppAvatar from "../components/AppAvatar";
 import {
   getLockedConversationIds,
   hasChatLockPasscode,
@@ -153,6 +154,40 @@ const isSellerConversation = (conversation?: Conversation | null) => {
   );
 };
 
+const getSellerConversationIdentity = (conversation?: Conversation | null) => {
+  const sellerId = String(
+    conversation?.service?.seller?._id
+    || conversation?.sellerUser?.sellerProfile
+    || conversation?.otherUser?.sellerProfile
+    || "",
+  ).trim();
+  const sellerUserId = String(
+    conversation?.sellerUser?._id
+    || conversation?.service?.seller?.user
+    || conversation?.otherUser?._id
+    || "",
+  ).trim();
+  const sellerName = String(
+    conversation?.service?.seller?.sellerName
+    || conversation?.sellerUser?.name
+    || conversation?.otherUser?.name
+    || conversation?.sellerUser?.username
+    || conversation?.otherUser?.username
+    || "Seller",
+  ).trim() || "Seller";
+  const profilePic = conversation?.sellerUser?.profilePic
+    || conversation?.otherUser?.profilePic
+    || DEFAULT_AVATAR_URL;
+
+  return {
+    sellerId,
+    sellerUserId,
+    sellerName,
+    profilePic,
+    hasSellerLink: Boolean(sellerId && sellerUserId),
+  };
+};
+
 const getConversationSortTime = (conversation?: Conversation | null) =>
   new Date(conversation?.updatedAt || conversation?.lastMessageTime || 0).getTime();
 
@@ -171,9 +206,10 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   const modalInputBackgroundColor = isDarkMode ? colors.surface : colors.background;
   const disabledCreateGroupColor = isDarkMode ? colors.surface : colors.border;
   const tabLabelFontSize = Math.max(chatMetrics.metaFontSize, 11);
-  const cardRadius = Math.max(chatMetrics.bubbleRadius, 18);
-  const cardPadding = Math.max(chatMetrics.cardPadding - 1, 14);
-  const inboxHorizontalPadding = chatMetrics.listPadding + 2;
+  const cardRadius = Math.max(chatMetrics.bubbleRadius - 2, 16);
+  const cardPadding = Math.max(chatMetrics.cardPadding - 4, 11);
+  const inboxHorizontalPadding = Math.max(chatMetrics.listPadding, 10);
+  const compactAvatarSize = Math.max(chatMetrics.headerAvatar + 2, 42);
 
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -407,7 +443,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
 
   const orderedSellerConversations = useMemo(() => {
     return [...conversations]
-      .filter((conversation) => isSellerConversation(conversation))
+      .filter((conversation) => isSellerConversation(conversation) && getSellerConversationIdentity(conversation).hasSellerLink)
       .sort((a, b) => {
         return getConversationSortTime(b) - getConversationSortTime(a);
       });
@@ -835,11 +871,13 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         }}
       >
         <View style={styles.avatarContainer}>
-          <Image
-            source={{
-              uri: item.profilePic || DEFAULT_AVATAR_URL
-            }}
+          <AppAvatar
+            uri={item.profilePic || DEFAULT_AVATAR_URL}
+            name={item.username || item.name || "User"}
+            size={44}
             style={styles.avatar}
+            backgroundColor={colors.surface}
+            textColor={colors.primary}
           />
 
           {isOnline ? <View style={[styles.onlineDot, { borderColor: colors.card }]}/> : null}
@@ -918,18 +956,13 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         delayLongPress={240}
       >
         <View style={styles.avatarContainer}>
-          <Image
-            source={{
-              uri: participant?.profilePic || DEFAULT_AVATAR_URL,
-            }}
-            style={[
-              styles.avatar,
-              {
-                width: chatMetrics.headerAvatar + 8,
-                height: chatMetrics.headerAvatar + 8,
-                borderRadius: (chatMetrics.headerAvatar + 8) / 2,
-              },
-            ]}
+          <AppAvatar
+            uri={participant?.profilePic || DEFAULT_AVATAR_URL}
+            name={participant?.username || participant?.name || "User"}
+            size={compactAvatarSize}
+            style={styles.avatar}
+            backgroundColor={colors.surface}
+            textColor={colors.primary}
           />
 
           {participant?.isOnline ? <View style={[styles.onlineDot, { borderColor: colors.card }]} /> : null}
@@ -969,13 +1002,15 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   };
 
   const renderSellerConversation = ({ item }: { item: Conversation }) => {
-    const sellerUserId = item?.sellerUser?._id || item?.otherUser?._id || "";
-    const sellerId = item?.service?.seller?._id || item?.otherUser?.sellerProfile || "";
-    const sellerName = item?.service?.seller?.sellerName || item?.otherUser?.username || item?.otherUser?.name || "Seller";
-    const profilePic = item?.otherUser?.profilePic || item?.sellerUser?.profilePic || DEFAULT_AVATAR_URL;
-    const hasSellerLink = Boolean(sellerUserId && sellerId);
+    const {
+      sellerUserId,
+      sellerId,
+      sellerName,
+      profilePic,
+      hasSellerLink,
+    } = getSellerConversationIdentity(item);
     const subtitleParts = [
-      item?.service?.serviceName ? `Service: ${item.service.serviceName}` : "",
+      item?.service?.serviceName || "",
       getConversationPreview(item),
     ].filter(Boolean);
     const timestamp = formatConversationTime(item?.updatedAt || item?.lastMessageTime);
@@ -1040,18 +1075,13 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         activeOpacity={hasSellerLink ? 0.85 : 1}
       >
         <View style={styles.avatarContainer}>
-          <Image
-            source={{
-              uri: profilePic
-            }}
-            style={[
-              styles.avatar,
-              {
-                width: chatMetrics.headerAvatar + 8,
-                height: chatMetrics.headerAvatar + 8,
-                borderRadius: (chatMetrics.headerAvatar + 8) / 2,
-              },
-            ]}
+          <AppAvatar
+            uri={profilePic}
+            name={sellerName}
+            size={compactAvatarSize}
+            style={styles.avatar}
+            backgroundColor={colors.surface}
+            textColor={colors.primary}
           />
 
           {(item?.sellerUser?.isOnline || item?.otherUser?.isOnline) ? (
@@ -1174,9 +1204,9 @@ const AllChatsScreen = ({ navigation, route }: any) => {
               style={[
                 styles.avatar,
                 {
-                  width: chatMetrics.headerAvatar + 8,
-                  height: chatMetrics.headerAvatar + 8,
-                  borderRadius: (chatMetrics.headerAvatar + 8) / 2,
+                  width: compactAvatarSize,
+                  height: compactAvatarSize,
+                  borderRadius: compactAvatarSize / 2,
                 },
               ]}
             />
@@ -1187,9 +1217,9 @@ const AllChatsScreen = ({ navigation, route }: any) => {
               styles.groupAvatarCard,
               {
                 backgroundColor: groupAvatarBackgroundColor,
-                width: chatMetrics.headerAvatar + 8,
-                height: chatMetrics.headerAvatar + 8,
-                borderRadius: (chatMetrics.headerAvatar + 8) / 2,
+                width: compactAvatarSize,
+                height: compactAvatarSize,
+                borderRadius: compactAvatarSize / 2,
               },
             ]}
           >
@@ -1580,9 +1610,13 @@ const AllChatsScreen = ({ navigation, route }: any) => {
                     style={[styles.memberRow, { borderColor: colors.border }]}
                     onPress={() => toggleGroupMember(item._id)}
                   >
-                    <Image
-                      source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }}
+                    <AppAvatar
+                      uri={item.profilePic || DEFAULT_AVATAR_URL}
+                      name={item.username || item.name || "User"}
+                      size={48}
                       style={styles.memberAvatar}
+                      backgroundColor={colors.surface}
+                      textColor={colors.primary}
                     />
 
                     <View style={styles.memberMeta}>
@@ -1905,9 +1939,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   listContent: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingBottom: 28,
-    paddingTop: 4,
+    paddingTop: 2,
   },
   listContentEmpty: {
     flexGrow: 1,
@@ -1915,12 +1949,12 @@ const styles = StyleSheet.create({
   chatCard: {
     flexDirection: "row",
     alignItems: "center",
-    minHeight: 86,
-    paddingHorizontal: 15,
-    paddingVertical: 14,
-    marginBottom: 12,
+    minHeight: 72,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 22,
+    borderRadius: 18,
     ...appShadows.card,
   },
   chatCardSelected: {
@@ -1931,29 +1965,29 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     position: "relative",
-    marginRight: 13,
+    marginRight: 11,
   },
   avatar: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
   },
   groupAvatarCard: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 14,
+    marginRight: 12,
   },
   onlineDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
     backgroundColor: "#22c55e",
     position: "absolute",
-    bottom: 2,
-    right: 2,
+    bottom: 1,
+    right: 1,
     borderWidth: 2,
     borderColor: "#fff",
   },
@@ -1966,7 +2000,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 8,
+    gap: 6,
   },
   groupTitleRow: {
     flexDirection: "row",
@@ -1975,19 +2009,19 @@ const styles = StyleSheet.create({
   },
   groupVisibilityPill: {
     borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   groupVisibilityText: {
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: appFonts.semibold,
     fontWeight: "700",
   },
   chatMeta: {
     alignItems: "flex-end",
     justifyContent: "space-between",
-    marginLeft: 12,
-    minWidth: 52,
+    marginLeft: 10,
+    minWidth: 46,
     alignSelf: "stretch",
   },
   forwardCheck: {
@@ -2001,13 +2035,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   chatTimestamp: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: appFonts.semibold,
     fontWeight: "600",
-    marginBottom: 8,
+    marginBottom: 6,
   },
   chatStateText: {
-    fontSize: 11.5,
+    fontSize: 10.5,
     fontFamily: appFonts.semibold,
     fontWeight: "600",
     flexShrink: 0,
@@ -2030,25 +2064,25 @@ const styles = StyleSheet.create({
     fontFamily: appFonts.regular,
   },
   username: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: appFonts.bold,
     fontWeight: "700",
   },
   lastMessage: {
-    marginTop: 4,
-    fontSize: 13,
-    lineHeight: 18,
+    marginTop: 2,
+    fontSize: 12.5,
+    lineHeight: 16,
     fontFamily: appFonts.regular,
   },
   unreadBadge: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#7b3fe4",
-    marginBottom: 8,
-    paddingHorizontal: 6,
+    marginBottom: 6,
+    paddingHorizontal: 5,
   },
   unreadDot: {
     backgroundColor: "#9b4dff",

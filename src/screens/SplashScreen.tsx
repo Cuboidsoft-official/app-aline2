@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  Image,
+  PanResponder,
+  Platform,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -15,6 +19,17 @@ import { clearStoredSession, getStoredToken } from "../utils/authSession";
 import { alpha, appFonts } from "../theme/designSystem";
 
 const GUEST_ONBOARDING_KEY = "aline2_guest_intro_seen";
+const SPLASH_WATERMARK = require("../../android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png");
+const SPLASH_BUTTON_FONT = Platform.select({
+  ios: "SF Pro Display",
+  android: "sans-serif-medium",
+  default: appFonts.semibold,
+}) as string;
+const SPLASH_BUTTON_FONT_BOLD = Platform.select({
+  ios: "SF Pro Display",
+  android: "sans-serif-bold",
+  default: appFonts.bold,
+}) as string;
 
 const GUEST_SLIDES = [
   {
@@ -22,39 +37,42 @@ const GUEST_SLIDES = [
     title: "Aline2 Present",
     body: "Trusted social, creator, and service connections in one premium place with a calmer, richer first look.",
     icon: "sparkles-outline",
+    useLogo: true,
     orbitIcons: ["people-outline", "shield-checkmark-outline"],
     highlights: ["Trusted", "Premium", "Connected"],
-    shellGradient: ["#05070D", "#070A12", "#05070D"],
-    orbGradient: ["#0A1E33", "#0C2F53", "#06111D"],
-    iconGradient: ["#FFFFFF", "#CFF6FF"],
-    accentGradient: ["#19DAFF", "#0A69FF"],
-    haloColor: "rgba(16,149,255,0.24)",
+    shellGradient: ["#06111D", "#091829", "#07111B"],
+    orbGradient: ["#0A2237", "#0F4A74", "#08131F"],
+    iconGradient: ["#F5FCFF", "#BFEFFF"],
+    accentGradient: ["#BB30EB", "#BB30EB"],
+    haloColor: "rgba(18,131,255,0.24)",
   },
   {
     eyebrow: "Communities that feel alive",
     title: "Connect with friends and influencers",
     body: "Build identity, discover people, and stay close to your favorite communities with a brighter social vibe.",
     icon: "people-outline",
+    useLogo: false,
     orbitIcons: ["chatbubbles-outline", "heart-outline"],
     highlights: ["Friends", "Creators", "Chats"],
-    shellGradient: ["#05070D", "#09040B", "#05070D"],
-    orbGradient: ["#271130", "#61195B", "#250D2C"],
-    iconGradient: ["#73C6FF", "#F75CFF"],
-    accentGradient: ["#6E90FF", "#FF2AC4"],
-    haloColor: "rgba(240,28,188,0.22)",
+    shellGradient: ["#07111D", "#0A1727", "#06111B"],
+    orbGradient: ["#0A2339", "#116386", "#09131F"],
+    iconGradient: ["#C9F5FF", "#9ED8FF"],
+    accentGradient: ["#1FD3FF", "#11A5FF"],
+    haloColor: "rgba(17,165,255,0.22)",
   },
   {
     eyebrow: "Grow your service business",
     title: "Become a seller and get appointments",
     body: "Turn your services into bookings, seller chats, and appointment growth inside Aline2 with a more professional vibe.",
     icon: "storefront-outline",
+    useLogo: false,
     orbitIcons: ["calendar-outline", "cash-outline"],
     highlights: ["Bookings", "Clients", "Growth"],
-    shellGradient: ["#05070D", "#07111A", "#05070D"],
-    orbGradient: ["#0A1A2C", "#0C3D67", "#08111D"],
-    iconGradient: ["#36D8FF", "#FF3FC7"],
-    accentGradient: ["#14DFFF", "#FF39C9"],
-    haloColor: "rgba(0,153,255,0.2)",
+    shellGradient: ["#06101B", "#0B1727", "#07111A"],
+    orbGradient: ["#0A2034", "#0F557E", "#09131E"],
+    iconGradient: ["#B9F3FF", "#7FD5FF"],
+    accentGradient: ["#22DBFF", "#0F8CFF"],
+    haloColor: "rgba(15,140,255,0.2)",
   },
 ] as const;
 
@@ -62,6 +80,9 @@ const SplashScreen = ({ navigation }: any) => {
   const [slideIndex, setSlideIndex] = useState(0);
   const [showGuestIntro, setShowGuestIntro] = useState(false);
   const timeoutHandlesRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const slideTranslateX = useRef(new Animated.Value(0)).current;
+  const slideOpacity = useRef(new Animated.Value(1)).current;
+  const isTransitioningRef = useRef(false);
 
   const activeSlide = useMemo(() => GUEST_SLIDES[slideIndex] || GUEST_SLIDES[0], [slideIndex]);
 
@@ -132,7 +153,49 @@ const SplashScreen = ({ navigation }: any) => {
     };
   }, [checkLaunchState, navigation]);
 
-  const handleNext = () => {
+  const animateToSlide = useCallback((nextIndex: number, direction: "next" | "previous") => {
+    if (isTransitioningRef.current || nextIndex === slideIndex) {
+      return;
+    }
+
+    isTransitioningRef.current = true;
+    const exitOffset = direction === "next" ? -54 : 54;
+    const enterOffset = direction === "next" ? 54 : -54;
+
+    Animated.parallel([
+      Animated.timing(slideTranslateX, {
+        toValue: exitOffset,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideOpacity, {
+        toValue: 0,
+        duration: 160,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setSlideIndex(nextIndex);
+      slideTranslateX.setValue(enterOffset);
+      slideOpacity.setValue(0);
+
+      Animated.parallel([
+        Animated.timing(slideTranslateX, {
+          toValue: 0,
+          duration: 240,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideOpacity, {
+          toValue: 1,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        isTransitioningRef.current = false;
+      });
+    });
+  }, [slideIndex, slideOpacity, slideTranslateX]);
+
+  const handleNext = useCallback(() => {
     if (slideIndex >= GUEST_SLIDES.length - 1) {
       navigateGuestToLogin().catch(() => {
         navigation.replace("Login");
@@ -140,8 +203,8 @@ const SplashScreen = ({ navigation }: any) => {
       return;
     }
 
-    setSlideIndex((current) => Math.min(current + 1, GUEST_SLIDES.length - 1));
-  };
+    animateToSlide(Math.min(slideIndex + 1, GUEST_SLIDES.length - 1), "next");
+  }, [animateToSlide, navigation, navigateGuestToLogin, slideIndex]);
 
   const handleSkip = () => {
     navigateGuestToLogin().catch(() => {
@@ -149,10 +212,64 @@ const SplashScreen = ({ navigation }: any) => {
     });
   };
 
-  return (
-    <LinearGradient colors={activeSlide.shellGradient as unknown as string[]} style={styles.container}>
-      <StatusBar backgroundColor="#05070D" barStyle="light-content" />
+  const handleSwipeAdvance = useCallback((direction: "next" | "previous") => {
+    if (!showGuestIntro) {
+      return;
+    }
 
+    if (direction === "next") {
+      if (slideIndex >= GUEST_SLIDES.length - 1) {
+        handleNext();
+        return;
+      }
+
+      animateToSlide(Math.min(slideIndex + 1, GUEST_SLIDES.length - 1), "next");
+      return;
+    }
+
+    animateToSlide(Math.max(slideIndex - 1, 0), "previous");
+  }, [animateToSlide, handleNext, showGuestIntro, slideIndex]);
+
+  const swipeResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gestureState) =>
+          showGuestIntro
+          && Math.abs(gestureState.dx) > 18
+          && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2,
+        onPanResponderRelease: (_event, gestureState) => {
+          if (gestureState.dx <= -42) {
+            handleSwipeAdvance("next");
+            return;
+          }
+
+          if (gestureState.dx >= 42) {
+            handleSwipeAdvance("previous");
+          }
+        },
+      }),
+    [handleSwipeAdvance, showGuestIntro],
+  );
+
+  return (
+    <LinearGradient
+      colors={activeSlide.shellGradient as unknown as string[]}
+      style={styles.container}
+      {...(showGuestIntro ? swipeResponder.panHandlers : {})}
+    >
+      <StatusBar backgroundColor="#05070D" barStyle="light-content" />
+      <Image source={SPLASH_WATERMARK} resizeMode="contain" style={styles.backgroundWatermark} />
+      <View style={styles.backgroundVeil} />
+
+      <Animated.View
+        style={[
+          styles.slideContent,
+          {
+            opacity: slideOpacity,
+            transform: [{ translateX: slideTranslateX }],
+          },
+        ]}
+      >
       <View style={styles.heroSection}>
         <View
           style={[
@@ -219,7 +336,11 @@ const SplashScreen = ({ navigation }: any) => {
               end={{ x: 1, y: 1 }}
               style={styles.heroIconPlate}
             >
-              <Icon name={activeSlide.icon} size={72} color="#F7FBFF" />
+              {activeSlide.useLogo ? (
+                <Image source={SPLASH_WATERMARK} resizeMode="contain" style={styles.heroLogo} />
+              ) : (
+                <Icon name={activeSlide.icon} size={72} color="#F7FBFF" />
+              )}
             </LinearGradient>
           </LinearGradient>
         </View>
@@ -259,7 +380,16 @@ const SplashScreen = ({ navigation }: any) => {
 
         {showGuestIntro ? (
           <View style={styles.actionRow}>
-            <Pressable style={styles.ghostButton} onPress={handleSkip}>
+            <Pressable
+              style={[
+                styles.ghostButton,
+                {
+                  borderColor: alpha(activeSlide.accentGradient[0], "36"),
+                  backgroundColor: alpha(activeSlide.accentGradient[0], "10"),
+                },
+              ]}
+              onPress={handleSkip}
+            >
               <Text style={styles.ghostButtonText}>Skip</Text>
             </Pressable>
             <Pressable style={styles.primaryButton} onPress={handleNext}>
@@ -277,6 +407,7 @@ const SplashScreen = ({ navigation }: any) => {
           </View>
         ) : null}
       </View>
+      </Animated.View>
     </LinearGradient>
   );
 };
@@ -290,6 +421,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingTop: 24,
     paddingBottom: 26,
+    justifyContent: "space-between",
+  },
+  backgroundWatermark: {
+    position: "absolute",
+    right: -34,
+    bottom: 92,
+    width: 320,
+    height: 320,
+    opacity: 0.09,
+    transform: [{ rotate: "-16deg" }],
+  },
+  backgroundVeil: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(3,8,15,0.16)",
+  },
+  slideContent: {
+    flex: 1,
     justifyContent: "space-between",
   },
   heroSection: {
@@ -363,6 +511,11 @@ const styles = StyleSheet.create({
     borderRadius: 46,
     alignItems: "center",
     justifyContent: "center",
+  },
+  heroLogo: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
   },
   copyBlock: {
     paddingHorizontal: 4,
@@ -448,7 +601,8 @@ const styles = StyleSheet.create({
   ghostButtonText: {
     color: "rgba(255,255,255,0.82)",
     fontSize: 15,
-    fontFamily: appFonts.semibold,
+    fontFamily: SPLASH_BUTTON_FONT,
+    letterSpacing: -0.2,
   },
   primaryButton: {
     flex: 1.15,
@@ -467,7 +621,8 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: "#FFFFFF",
     fontSize: 15,
-    fontFamily: appFonts.bold,
+    fontFamily: SPLASH_BUTTON_FONT_BOLD,
+    letterSpacing: -0.24,
   },
   heroOrbitBadge: {
     position: "absolute",

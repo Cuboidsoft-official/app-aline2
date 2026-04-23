@@ -16,6 +16,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import AppAvatar from "../components/AppAvatar";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 
@@ -125,9 +126,13 @@ const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigatio
     })
    }
   >
-   <Image
-    source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }}
+   <AppAvatar
+    uri={item.profilePic || DEFAULT_AVATAR_URL}
+    name={item.username || item.name || "User"}
+    size={44}
     style={styles.avatar}
+    backgroundColor={colors.surface}
+    textColor={colors.primary}
    />
 
    <View style={styles.userMeta}>

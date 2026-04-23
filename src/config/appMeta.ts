@@ -1,9 +1,11 @@
 export const APP_VERSION = "0.0.1";
 export const APP_RELEASE_DATE = "April 23, 2026";
-export const APP_RELEASE_TITLE = "Chat polish, safer chat media checks, and stronger calling tools";
+export const APP_RELEASE_TITLE = "Chat controls, avatar fallbacks, and safer media checks";
 
 export const APP_RELEASE_HIGHLIGHTS = [
   "Chat UI is cleaner across direct and group conversations with tighter spacing, improved bubbles, and better composer alignment.",
+  "Missing profile photos now fall back to clean first-letter avatars across key chat, notification, search, and relationship screens.",
+  "Chat details now include clear-chat controls and disappearing message timers for more WhatsApp-style chat management.",
   "Chat, post, reel, and story media now pass through backend nudity and explicit-content checks before publishing.",
   "Calls and live sessions now sound clearer, support camera switching, and include the Android Dog AR face filter flow.",
   "Release notes now reflect the live product status more clearly across chat, feed, seller, live, and account surfaces.",
@@ -22,6 +24,7 @@ export const APP_FEATURE_SECTIONS = [
     title: "Messaging and communication",
     items: [
       "Direct chats, seller chats, group chats, message forwarding, locked chats, muting, shared media, and cleaner Instagram-style chat presentation.",
+      "Chat details now support wallpaper changes, clear chat, disappearing messages, and chat locking controls.",
       "Voice notes in chat with preview-before-send support, plus live incoming call routing for audio calls and video calls.",
       "WebRTC-based live streams with host tools, viewer chat, reactions, request-to-join support, and active stream discovery.",
       "Protected chat media flow with backend moderation checks for nudity and explicit-content detection on chat images, GIFs, and videos.",
@@ -54,6 +57,8 @@ export const APP_FEATURE_SECTIONS = [
 
 export const APP_BUG_FIXES = [
   "Tightened chat bubble sizing, composer spacing, and footer alignment across direct and group chat screens.",
+  "Added first-letter avatar fallbacks when a user has not uploaded a profile photo on major list and chat surfaces.",
+  "Added clear-chat controls and disappearing message timers inside chat details.",
   "Improved voice-note handling so recordings can be previewed before sending.",
   "Clarified release-note wording so chat moderation coverage is described accurately inside the app.",
   "Extended backend nudity checks to post, reel, and story publishing flows for safer creator uploads.",

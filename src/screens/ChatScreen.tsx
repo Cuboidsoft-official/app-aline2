@@ -412,6 +412,10 @@ const getMessageTypeLabel = (message: ChatMessage | null | undefined): string =>
     return "Post";
   }
 
+  if (sharedContent?.kind === "story") {
+    return "Story";
+  }
+
   if (String(message?.messageType || "") === "gif") {
     return "GIF";
   }
@@ -2026,7 +2030,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   minWidth: replyPreview ? 0 : width < 360 ? 64 : width < 430 ? 76 : 84,
                 } : null,
                 showGroupSender ? styles.groupMessageBubble : null,
-                sharedContent?.kind === "post"
+                sharedContent
                   ? [styles.messageBubbleWide, { maxWidth: wideContentBubbleMaxWidth, minWidth: minimumWideBubbleWidth }]
                   : null,
                 callEvent
@@ -2083,12 +2087,18 @@ const ChatScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             ) : null}
 
-            {sharedContent?.kind === "post" ? (
+            {sharedContent?.kind === "post" || sharedContent?.kind === "story" ? (
               <TouchableOpacity
                 activeOpacity={0.9}
                 onPress={() => {
-                  if (sharedContent?.postId) {
+                  if (sharedContent?.kind === "post" && sharedContent?.postId) {
                     navigation.navigate("PostDetail", { postId: sharedContent.postId });
+                  }
+                  if (sharedContent?.kind === "story" && sharedContent?.storyId) {
+                    navigation.navigate("StoryViewer", {
+                      storyId: sharedContent.storyId,
+                      storyUserId: sharedContent?.user?.id,
+                    });
                   }
                 }}
                 style={[styles.sharedPostCard, isMine ? styles.sharedPostCardMine : null]}
@@ -2100,10 +2110,18 @@ const ChatScreen = ({ navigation, route }: any) => {
                   />
                   <View style={styles.sharedPostMeta}>
                     <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]} numberOfLines={1}>
-                      {sharedContent?.user?.username ? `@${sharedContent.user.username}` : sharedContent?.user?.name || "Aline2 post"}
+                      {sharedContent?.user?.username
+                        ? `@${sharedContent.user.username}`
+                        : sharedContent?.user?.name || (sharedContent?.kind === "story" ? "Aline2 story" : "Aline2 post")}
                     </Text>
                     <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : null, { fontSize: chatMetrics.metaFontSize }]} numberOfLines={1}>
-                      Shared post
+                      {sharedContent?.kind === "story"
+                        ? sharedContent?.interaction?.type === "reply"
+                          ? "Story reply"
+                          : sharedContent?.interaction?.type === "like"
+                            ? "Story like"
+                            : "Shared story"
+                        : "Shared post"}
                     </Text>
                   </View>
                 </View>
@@ -2119,6 +2137,12 @@ const ChatScreen = ({ navigation, route }: any) => {
                 {sharedContent?.caption ? (
                   <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, { fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]} numberOfLines={3}>
                     {sharedContent.caption}
+                  </Text>
+                ) : null}
+
+                {sharedContent?.kind === "story" && sharedContent?.interaction?.text ? (
+                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, { fontSize: chatMetrics.metaFontSize + 0.5, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={2}>
+                    {sharedContent.interaction.text}
                   </Text>
                 ) : null}
               </TouchableOpacity>
@@ -2143,7 +2167,7 @@ const ChatScreen = ({ navigation, route }: any) => {
             ) : null}
 
             {mediaBubbleKind === "image" ? (
-              <View style={styles.mediaCard}>
+              <View style={[styles.mediaCard, isGifBubble ? styles.gifMediaCard : null]}>
                 <Image
                   source={{ uri: normalizeMediaUrl(attachment?.url || "") }}
                   style={[
@@ -3234,7 +3258,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   groupMessageColumn: {
-    maxWidth: "88%",
+    maxWidth: "100%",
     flexShrink: 1,
     minWidth: 0,
   },
@@ -3349,12 +3373,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "flex-start",
     marginBottom: 5,
-    paddingHorizontal: 6,
-    paddingVertical: 5,
-    borderRadius: 9,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: 12,
     backgroundColor: "rgba(123, 63, 228, 0.1)",
-    maxWidth: "92%",
-    minWidth: 0,
+    maxWidth: "96%",
+    minWidth: '100%',
   },
   replyPreviewCardMine: {
     backgroundColor: "rgba(255,255,255,0.16)",
@@ -3370,7 +3394,7 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
     borderRadius: 999,
     backgroundColor: PRIMARY,
-    marginRight: 6,
+    marginRight: 8,
   },
   replyPreviewBarMine: {
     backgroundColor: "#fff",
@@ -3378,6 +3402,7 @@ const styles = StyleSheet.create({
   replyPreviewBody: {
     flexShrink: 1,
     minWidth: 0,
+    maxWidth: 196,
   },
   replyPreviewAuthor: {
     color: PRIMARY,
@@ -3388,9 +3413,9 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
   replyPreviewSnippet: {
-    marginTop: 1,
+    marginTop: 2,
     color: "#475467",
-    fontSize: 11.5,
+    fontSize: 12,
     flexShrink: 1,
   },
   replyPreviewSnippetMine: {
@@ -3530,6 +3555,14 @@ const styles = StyleSheet.create({
   },
   mediaCard: {
     position: "relative",
+    borderRadius: 18,
+    overflow: "hidden",
+  },
+  gifMediaCard: {
+    padding: 4,
+    borderWidth: 1,
+    borderColor: "rgba(56,189,248,0.32)",
+    backgroundColor: "rgba(15,23,42,0.34)",
   },
   mediaOverlayBadge: {
     position: "absolute",

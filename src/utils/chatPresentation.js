@@ -83,6 +83,41 @@ export const buildSharedPostMessage = (post) => {
   return `${SHARED_CONTENT_PREFIX}${encodeURIComponent(JSON.stringify(payload))}`;
 };
 
+export const buildSharedStoryMessage = (story, { action = "share", replyText = "" } = {}) => {
+  const normalizedAction = ["like", "reply", "share"].includes(String(action).trim().toLowerCase())
+    ? String(action).trim().toLowerCase()
+    : "share";
+  const normalizedReplyText = String(replyText || "").trim();
+  const payload = {
+    kind: "story",
+    storyId: String(story?.id || ""),
+    storyType: String(story?.type || "media"),
+    caption: String(story?.text || "").trim(),
+    createdAt: Number(story?.createdAt || Date.now()),
+    backgroundColor: String(story?.backgroundColor || "").trim(),
+    user: {
+      id: String(story?.user?.id || ""),
+      username: String(story?.user?.username || ""),
+      name: String(story?.user?.name || ""),
+      avatarUrl: String(story?.user?.avatarUrl || ""),
+    },
+    media: story?.media
+      ? [{
+        id: String(story?.media?.id || ""),
+        mediaType: String(story?.media?.mediaType || "image"),
+        url: String(story?.media?.url || ""),
+        thumbnailUrl: String(story?.media?.thumbnailUrl || ""),
+      }]
+      : [],
+    interaction: {
+      type: normalizedAction,
+      text: normalizedAction === "reply" ? normalizedReplyText : "",
+    },
+  };
+
+  return `${SHARED_CONTENT_PREFIX}${encodeURIComponent(JSON.stringify(payload))}`;
+};
+
 /**
  * @param {{
  *   callSessionId?: string;
@@ -171,6 +206,22 @@ export const getMessageText = (message) => {
     return username ? `@${username}'s post` : "Shared post";
   }
 
+  if (sharedContent?.kind === "story") {
+    const interactionType = String(sharedContent?.interaction?.type || "").trim().toLowerCase();
+    const interactionText = String(sharedContent?.interaction?.text || "").trim();
+
+    if (interactionType === "reply" && interactionText) {
+      return interactionText;
+    }
+
+    if (interactionType === "like") {
+      return "Liked a story";
+    }
+
+    const username = String(sharedContent?.user?.username || "").trim();
+    return username ? `@${username}'s story` : "Shared story";
+  }
+
   return "";
 };
 
@@ -219,7 +270,28 @@ export const getMessageAttachment = (message) => {
   return null;
 };
 
+const getNormalizedMessageType = (message) =>
+  String(message?.messageType || message?.type || "").trim().toLowerCase();
+
 const getAttachmentMimeType = (message) => {
+  const normalizedMessageType = getNormalizedMessageType(message);
+
+  if (normalizedMessageType === "voice" || normalizedMessageType === "audio") {
+    return "audio/*";
+  }
+
+  if (normalizedMessageType === "video") {
+    return "video/*";
+  }
+
+  if (normalizedMessageType === "gif") {
+    return "image/gif";
+  }
+
+  if (normalizedMessageType === "image") {
+    return "image/*";
+  }
+
   const attachment = getMessageAttachment(message);
   const explicitMimeType = String(attachment?.mimeType || message?.mimeType || "").trim().toLowerCase();
   if (explicitMimeType) {
@@ -242,7 +314,7 @@ const getAttachmentMimeType = (message) => {
 
 export const isImageMessage = (message) => {
   const mimeType = getAttachmentMimeType(message);
-  return ["image", "gif"].includes(String(message?.messageType || "")) || mimeType.startsWith("image/");
+  return ["image", "gif"].includes(getNormalizedMessageType(message)) || mimeType.startsWith("image/");
 };
 
 export const isDocumentMessage = (message) => {
@@ -260,10 +332,10 @@ export const isDocumentMessage = (message) => {
 };
 
 export const isVideoMessage = (message) =>
-  String(message?.messageType || "") === "video" || getAttachmentMimeType(message).startsWith("video/");
+  getNormalizedMessageType(message) === "video" || getAttachmentMimeType(message).startsWith("video/");
 
 export const isAudioMessage = (message) =>
-  ["audio", "voice"].includes(String(message?.messageType || "")) || getAttachmentMimeType(message).startsWith("audio/");
+  ["audio", "voice"].includes(getNormalizedMessageType(message)) || getAttachmentMimeType(message).startsWith("audio/");
 
 export const getAttachmentDisplayName = (message) => {
   const attachment = getMessageAttachment(message);
@@ -285,6 +357,22 @@ export const getConversationPreview = (conversation) => {
   if (sharedContent?.kind === "post") {
     const username = String(sharedContent?.user?.username || "").trim();
     return username ? `Shared @${username}'s post` : "Shared a post";
+  }
+
+  if (sharedContent?.kind === "story") {
+    const username = String(sharedContent?.user?.username || "").trim();
+    const targetLabel = username ? `@${username}'s story` : "a story";
+    const interactionType = String(sharedContent?.interaction?.type || "").trim().toLowerCase();
+
+    if (interactionType === "reply") {
+      return `Replied to ${targetLabel}`;
+    }
+
+    if (interactionType === "like") {
+      return `Liked ${targetLabel}`;
+    }
+
+    return `Shared ${targetLabel}`;
   }
 
   if (callEvent?.kind === "call") {

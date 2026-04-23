@@ -190,6 +190,39 @@ export const updateConversationWallpaper = async ({ conversationId, wallpaperUrl
   return response.data;
 };
 
+/**
+ * @param {{ conversationId?: string }} [params]
+ */
+export const clearConversationMessages = async ({ conversationId } = {}) => {
+  if (!conversationId) {
+    throw new Error("conversationId is required");
+  }
+
+  const headers = await buildAuthHeaders();
+  const response = await API.post(`/chat/${conversationId}/clear`, {}, { headers });
+  return response.data;
+};
+
+/**
+ * @param {{ conversationId?: string; disappearingMessagesSeconds?: number }} [params]
+ */
+export const updateConversationDisappearingMessages = async ({
+  conversationId,
+  disappearingMessagesSeconds = 0,
+} = {}) => {
+  if (!conversationId) {
+    throw new Error("conversationId is required");
+  }
+
+  const headers = await buildAuthHeaders();
+  const response = await API.put(
+    `/chat/${conversationId}/disappearing-messages`,
+    { disappearingMessagesSeconds },
+    { headers },
+  );
+  return response.data;
+};
+
 export const updateGroupChatConversation = async ({
   conversationId,
   groupName,

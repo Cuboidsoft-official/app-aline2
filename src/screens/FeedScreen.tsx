@@ -913,28 +913,62 @@ function FeedScreen({ navigation }: any) {
   };
 
   const renderStory = ({ item }: { item: Story }) => {
-    const ringStyle = item.viewed ? styles.storyRingSeen : styles.storyRingUnseen;
     const closeFriends = item.visibility === "close_friends";
     const storyAvatar = normalizeMediaUrl(item.user.avatarUrl || DEFAULT_AVATAR_URL);
+    const ringSizeStyle = {
+      width: storyRingSize,
+      height: storyRingSize,
+      borderRadius: storyRingSize / 2,
+    };
+    const ringInnerSize = Math.max(storyRingSize - (item.viewed ? 8 : 6), storyAvatarSize + 4);
+    const ringInnerStyle = {
+      width: ringInnerSize,
+      height: ringInnerSize,
+      borderRadius: ringInnerSize / 2,
+    };
+    const avatarStyle = {
+      width: storyAvatarSize,
+      height: storyAvatarSize,
+      borderRadius: storyAvatarSize / 2,
+    };
+    const storyRingColors = closeFriends
+      ? ["#34d399", "#22c55e", "#15803d"]
+      : ["#f9ce34", "#f97316", "#ee2a7b", "#8b5cf6"];
 
     return (
       <TouchableOpacity
         style={[styles.storyItem, { width: storyItemWidth }]}
         onPress={() => navigation.navigate("StoryViewer", { storyId: item.id })}
       >
-        <View
-          style={[
-            styles.storyRing,
-            ringStyle,
-            closeFriends && styles.storyRingCloseFriends,
-            { width: storyRingSize, height: storyRingSize, borderRadius: storyRingSize / 2 },
-          ]}
-        >
-          <Image
-            source={{ uri: storyAvatar }}
-            style={[styles.storyAvatar, { width: storyAvatarSize, height: storyAvatarSize, borderRadius: storyAvatarSize / 2 }]}
-          />
-        </View>
+        {item.viewed ? (
+          <View
+            style={[
+              styles.storyRing,
+              styles.storyRingSeen,
+              closeFriends && styles.storyRingCloseFriendsSeen,
+              ringSizeStyle,
+            ]}
+          >
+            <Image
+              source={{ uri: storyAvatar }}
+              style={[styles.storyAvatar, avatarStyle]}
+            />
+          </View>
+        ) : (
+          <LinearGradient
+            colors={storyRingColors}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.storyRingGradient, ringSizeStyle]}
+          >
+            <View style={[styles.storyRingInner, ringInnerStyle, { backgroundColor: colors.card }]}>
+              <Image
+                source={{ uri: storyAvatar }}
+                style={[styles.storyAvatar, avatarStyle]}
+              />
+            </View>
+          </LinearGradient>
+        )}
         <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
           {item.user.name}
         </Text>
@@ -2465,9 +2499,26 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  storyRingUnseen: { borderColor: FEED_ACCENT },
-  storyRingSeen: { borderColor: "#d4dde9" },
-  storyRingCloseFriends: { borderColor: "#22c55e" },
+  storyRingGradient: {
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 3,
+    shadowColor: "#ee2a7b",
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  storyRingInner: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  storyRingSeen: {
+    borderColor: "#334155",
+    backgroundColor: "rgba(15, 23, 42, 0.12)",
+  },
+  storyRingCloseFriendsSeen: {
+    borderColor: "rgba(34, 197, 94, 0.7)",
+  },
   liveStoryRing: {
     borderColor: "#fb7185",
     borderWidth: 2.5,

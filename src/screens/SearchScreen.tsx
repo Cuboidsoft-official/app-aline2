@@ -21,6 +21,7 @@ import { formatPrimaryServicePrice } from "../utils/servicePricing";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
+import AppAvatar from "../components/AppAvatar";
 
 type UserItem = {
   _id: string;
@@ -389,7 +390,14 @@ const SearchScreen = ({ navigation }: any) => {
             style={[styles.suggestionRow, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: item._id })}
           >
-            <Image source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }} style={styles.suggestionAvatar} />
+            <AppAvatar
+              uri={item.profilePic || DEFAULT_AVATAR_URL}
+              name={item.username || item.name || "User"}
+              size={48}
+              style={styles.suggestionAvatar}
+              backgroundColor={colors.surface}
+              textColor={colors.primary}
+            />
             <View style={styles.cardContent}>
               <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>{item.username || "user"}</Text>
               <Text style={[styles.name, { color: colors.mutedText }]} numberOfLines={1}>{item.name || item.username || "Aline2 user"}</Text>

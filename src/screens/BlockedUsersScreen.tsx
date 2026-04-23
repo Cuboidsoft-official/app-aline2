@@ -9,6 +9,7 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { socialApi } from "../features/social/socialApi";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
+import AppAvatar from "../components/AppAvatar";
 
 type BlockedUser = {
  _id: string;
@@ -96,10 +97,14 @@ const BlockedUsersScreen = ({ navigation }: any) => {
        style={styles.userInfo}
        onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: item._id })}
       >
-       <Image
-        source={{ uri: item.profilePic || DEFAULT_AVATAR_URL }}
+      <AppAvatar
+        uri={item.profilePic || DEFAULT_AVATAR_URL}
+        name={item.username || item.name || "User"}
+        size={48}
         style={styles.avatar}
-       />
+        backgroundColor={colors.surface}
+        textColor={colors.primary}
+      />
        <View style={styles.copy}>
         <Text style={{ color: colors.text, fontWeight: "600" }}>{item.name || item.username || "Blocked user"}</Text>
         <Text style={{ color: colors.mutedText }}>{item.username ? `@${item.username}` : "Aline2 account"}</Text>

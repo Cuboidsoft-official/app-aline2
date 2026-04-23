@@ -590,7 +590,7 @@ function SwipesScreen({ navigation }: any) {
             <TouchableOpacity style={styles.createButton} onPress={() => navigation.navigate("Create", { initialTab: "swipe" })}>
               <LinearGradient colors={["#00c6ff", "#7f00ff", "#ff4ecd"]} style={styles.createButtonGradient}>
                 <Icon name="add" size={18} color="#fff" />
-                <Text style={styles.createButtonText}>Create Reel</Text>
+                <Text style={styles.createButtonText}>Create Swipes</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>

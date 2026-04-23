@@ -51,7 +51,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
   const { colors, isDarkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom, Platform.OS === "ios" ? 14 : 10);
-  const surfaceColor = isDarkMode ? colors.surface : colors.card;
+  const surfaceColor = isDarkMode ? "#08111F" : colors.card;
   const activeTintColor = colors.primary;
   const labelFontSize = Platform.OS === "ios" ? 9.5 : 9;
   const routeNames = navigation?.getState?.()?.routeNames || [];
@@ -117,10 +117,10 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
             height: APP_BOTTOM_DOCK_BASE_HEIGHT + bottomPadding,
             paddingBottom: bottomPadding,
             backgroundColor: surfaceColor,
-            borderTopColor: isDarkMode ? alpha(colors.border, "CC") : colors.border,
+            borderTopColor: isDarkMode ? "rgba(111,176,255,0.12)" : colors.border,
             shadowColor: isDarkMode ? "#000" : colors.text,
-            shadowOpacity: isDarkMode ? 0.36 : 0.08,
-            shadowRadius: 14,
+            shadowOpacity: isDarkMode ? 0.42 : 0.08,
+            shadowRadius: 18,
             shadowOffset: { width: 0, height: -4 },
           },
         ]}
@@ -128,7 +128,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
         {bottomNavItems.map((item) => {
           const isActive = resolvedActiveKey === item.key;
           const tintColor = isActive ? activeTintColor : colors.tabInactive || colors.mutedText;
-          const activeBackgroundColor = isDarkMode ? alpha(activeTintColor, "22") : alpha(activeTintColor, "14");
+          const activeBackgroundColor = isDarkMode ? "rgba(17,131,255,0.16)" : alpha(activeTintColor, "14");
 
           return (
             <TouchableOpacity
@@ -138,7 +138,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
                 styles.item,
                 {
                   backgroundColor: isActive ? activeBackgroundColor : "transparent",
-                  borderColor: isActive ? alpha(activeTintColor, isDarkMode ? "42" : "24") : "transparent",
+                  borderColor: isActive ? alpha(activeTintColor, isDarkMode ? "56" : "24") : "transparent",
                 },
               ]}
               onPress={() => {
@@ -188,11 +188,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     minWidth: 0,
-    paddingTop: 4,
+    paddingTop: 5,
+    paddingBottom: 3,
     paddingHorizontal: 2,
-    marginHorizontal: 1,
-    marginTop: 4,
-    borderRadius: 14,
+    marginHorizontal: 3,
+    marginTop: 5,
+    borderRadius: 16,
     borderWidth: 1,
   },
   label: {

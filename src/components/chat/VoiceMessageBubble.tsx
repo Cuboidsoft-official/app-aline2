@@ -66,7 +66,7 @@ const VoiceMessageBubble = ({
   backgroundColor,
   textColor,
   metaColor,
-  label = "Voice message",
+  label = "",
 }: VoiceMessageBubbleProps) => {
   const soundRef = useRef(createSound());
   const [loading, setLoading] = useState(false);
@@ -130,6 +130,7 @@ const VoiceMessageBubble = ({
 
       if (currentPosition > 0 && (!duration || currentPosition < duration)) {
         await soundRef.current.resumePlayer();
+        await soundRef.current.setVolume(1);
       } else {
         setCurrentPosition(0);
         let lastError: unknown = null;
@@ -138,6 +139,7 @@ const VoiceMessageBubble = ({
         for (const source of getPlaybackSources(rawAudioUrl, resolvedAudioUrl)) {
           try {
             await soundRef.current.startPlayer(source);
+            await soundRef.current.setVolume(1);
             started = true;
             break;
           } catch (error) {
@@ -198,7 +200,7 @@ const VoiceMessageBubble = ({
             </Text>
           ) : null}
           <Text style={[styles.meta, { color: resolvedMetaColor }]}>
-            {formatAudioTime(currentPosition)} / {formatAudioTime(duration || Number(durationSeconds || 0) * 1000)}
+            {playing ? formatAudioTime(currentPosition) : formatAudioTime(duration || Number(durationSeconds || 0) * 1000)}
           </Text>
         </View>
       </View>
@@ -208,41 +210,40 @@ const VoiceMessageBubble = ({
 
 const styles = StyleSheet.create({
   container: {
-    minWidth: 124,
-    maxWidth: 168,
-    borderRadius: 14,
-    paddingHorizontal: 6,
-    paddingVertical: 5,
+    minWidth: '100%',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     flexDirection: "row",
     alignItems: "center",
   },
   playButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
   },
   waveformWrap: {
     flex: 1,
-    marginLeft: 7,
+    marginLeft: 11,
     minWidth: 0,
   },
   waveformRow: {
     flexDirection: "row",
     alignItems: "center",
-    height: 14,
+    height: 18,
   },
   waveBar: {
-    width: 3,
+    width: 3.2,
     borderRadius: 999,
     marginRight: 2.5,
   },
   metaRow: {
-    marginTop: 2,
+    marginTop: 4,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
   },
   label: {
     fontSize: 10,
@@ -251,7 +252,8 @@ const styles = StyleSheet.create({
     marginRight: 5,
   },
   meta: {
-    fontSize: 9.5,
+    fontSize: 10.5,
+    fontWeight: "600",
     fontVariant: ["tabular-nums"],
   },
 });

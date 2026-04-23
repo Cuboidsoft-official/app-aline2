@@ -18,6 +18,7 @@ import { Swipeable } from "react-native-gesture-handler";
 import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
+import AppAvatar from "../components/AppAvatar";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { connectSocket, socket } from "../socket";
 import { useAppTheme } from "../theme/AppThemeContext";
@@ -508,8 +509,15 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
           ]}
           onPress={() => handlePress(item)}
         >
-          <View style={styles.avatarColumn}>
-            <Image source={{ uri: avatarUrl || FALLBACK_AVATAR }} style={[styles.avatar, { backgroundColor: colors.surface }]} />
+        <View style={styles.avatarColumn}>
+            <AppAvatar
+              uri={avatarUrl || FALLBACK_AVATAR}
+              name={item.sender?.username || "User"}
+              size={46}
+              style={[styles.avatar, { backgroundColor: colors.surface }]}
+              backgroundColor={colors.surface}
+              textColor={colors.primary}
+            />
             <View style={[styles.typeBadge, { backgroundColor: colors.primary, borderColor: colors.card }]}>
               <Icon name={getNotificationIcon(item.type)} size={12} color="#fff" />
             </View>

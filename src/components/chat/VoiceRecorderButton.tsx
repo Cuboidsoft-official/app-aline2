@@ -20,7 +20,6 @@ import Icon from "react-native-vector-icons/Ionicons";
 import Sound, {
     AudioEncoderAndroidType,
     AudioSourceAndroidType,
-    OutputFormatAndroidType,
 } from "react-native-nitro-sound";
 
 Sound.setSubscriptionDuration(0.15);
@@ -61,12 +60,12 @@ const formatRecordTime = (ms: number) => {
 
 const getRecordedVoiceMetadata = (value: string) => {
     const uri = normalizeRecordedUri(value);
-    const fallbackExtension = Platform.OS === "android" ? "mp4" : "m4a";
+    const fallbackExtension = "m4a";
     const sanitizedPath = uri.replace(/^file:\/\//i, "").split(/[?#]/)[0];
     const fileNameFromPath = sanitizedPath.split("/").pop() || "";
     const extensionMatch = fileNameFromPath.match(/\.([a-z0-9]+)$/i);
     const extension = String(extensionMatch?.[1] || fallbackExtension).toLowerCase();
-    const mimeType = VOICE_MIME_TYPES[extension] || (Platform.OS === "android" ? "audio/mp4" : "audio/m4a");
+    const mimeType = VOICE_MIME_TYPES[extension] || "audio/m4a";
     const fileName = fileNameFromPath || `voice_${Date.now()}.${extension}`;
 
     return {
@@ -184,8 +183,7 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
 
             await Sound.startRecorder(undefined, {
                 AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
-                AudioSourceAndroid: AudioSourceAndroidType.MIC,
-                OutputFormatAndroid: OutputFormatAndroidType.MPEG_4,
+                AudioSourceAndroid: AudioSourceAndroidType.VOICE_RECOGNITION,
                 AudioSamplingRate: 44100,
                 AudioEncodingBitRate: 128000,
                 AudioChannels: 1,

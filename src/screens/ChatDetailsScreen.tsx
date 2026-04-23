@@ -22,9 +22,11 @@ import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
 import { API } from "../api/api";
 import {
+    clearConversationMessages,
     fetchConversationMedia,
     fetchChatConversationDetails,
     searchConversationMessages,
+    updateConversationDisappearingMessages,
     updateConversationWallpaper,
 } from "../utils/chatApi";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
@@ -42,6 +44,7 @@ import {
     verifyChatLockPasscode,
 } from "../utils/chatSecurity";
 import { getStoredUserId } from "../utils/authSession";
+import AppAvatar from "../components/AppAvatar";
 
 const PRIMARY = "#7b3fe4";
 
@@ -166,6 +169,9 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
     const [lockModalMode, setLockModalMode] = useState<"unlock" | "setup">("unlock");
     const [lockingBusy, setLockingBusy] = useState(false);
     const [pendingLockAction, setPendingLockAction] = useState<"lock" | "unlock">("lock");
+    const [disappearingMessagesSeconds, setDisappearingMessagesSeconds] = useState(0);
+    const [updatingDisappearingMessages, setUpdatingDisappearingMessages] = useState(false);
+    const [clearingChat, setClearingChat] = useState(false);
 
     const resolvedConversationId = useMemo(() => conversationId || null, [conversationId]);
 
@@ -204,6 +210,7 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
             const conversation = data?.conversation;
             setCurrentTheme(String(conversation?.chatTheme || "default"));
             setChatWallpaper(String(conversation?.chatWallpaper || ""));
+            setDisappearingMessagesSeconds(Number(conversation?.disappearingMessagesSeconds) || 0);
         } catch (err: any) {
             console.log("ChatDetails settings fetch error:", err?.response?.data || err);
         }
@@ -421,6 +428,89 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
         setLockModalVisible(true);
     }, [currentUserId, isLocked, resolvedConversationId]);
 
+    const formatDisappearingMessagesLabel = useCallback((value: number) => {
+        switch (Number(value) || 0) {
+            case 24 * 60 * 60:
+                return "24 hours";
+            case 7 * 24 * 60 * 60:
+                return "7 days";
+            case 90 * 24 * 60 * 60:
+                return "90 days";
+            default:
+                return "Off";
+        }
+    }, []);
+
+    const selectDisappearingMessages = useCallback(() => {
+        if (!resolvedConversationId || updatingDisappearingMessages) {
+            return;
+        }
+
+        const options = [
+            { label: "Off", value: 0 },
+            { label: "24 hours", value: 24 * 60 * 60 },
+            { label: "7 days", value: 7 * 24 * 60 * 60 },
+            { label: "90 days", value: 90 * 24 * 60 * 60 },
+        ];
+
+        Alert.alert(
+            "Disappearing messages",
+            "Choose how long new messages should stay in this chat.",
+            [
+                ...options.map((option) => ({
+                    text: option.label,
+                    onPress: async () => {
+                        try {
+                            setUpdatingDisappearingMessages(true);
+                            const response = await updateConversationDisappearingMessages({
+                                conversationId: resolvedConversationId,
+                                disappearingMessagesSeconds: option.value,
+                            });
+                            setDisappearingMessagesSeconds(Number(response?.disappearingMessagesSeconds) || 0);
+                        } catch (error) {
+                            Alert.alert("Disappearing messages", getReadableApiErrorMessage(error, "Please try again."));
+                        } finally {
+                            setUpdatingDisappearingMessages(false);
+                        }
+                    },
+                })),
+                { text: "Cancel", style: "cancel" },
+            ]
+        );
+    }, [resolvedConversationId, updatingDisappearingMessages]);
+
+    const handleClearChat = useCallback(() => {
+        if (!resolvedConversationId || clearingChat) {
+            return;
+        }
+
+        Alert.alert(
+            "Clear chat",
+            "This will remove all messages from your chat history on this device account.",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Clear",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            setClearingChat(true);
+                            await clearConversationMessages({ conversationId: resolvedConversationId });
+                            setMedia([]);
+                            setSearchResults([]);
+                            setSearchQuery("");
+                            Alert.alert("Chat cleared", "Your messages in this chat have been cleared.");
+                        } catch (error) {
+                            Alert.alert("Clear chat", getReadableApiErrorMessage(error, "Please try again."));
+                        } finally {
+                            setClearingChat(false);
+                        }
+                    },
+                },
+            ]
+        );
+    }, [clearingChat, resolvedConversationId]);
+
     // ─── Render helpers ─────────────────────────────────────────────────────
 
     const renderGridItem = useCallback(
@@ -447,9 +537,13 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 {/* Profile card */}
                 <View style={[styles.profileCard, { backgroundColor: colors.card }]}>
-                    <Image
-                        source={{ uri: user?.profilePic || DEFAULT_AVATAR_URL }}
+                    <AppAvatar
+                        uri={user?.profilePic || DEFAULT_AVATAR_URL}
+                        name={displayName}
+                        size={90}
                         style={styles.avatar}
+                        backgroundColor={colors.surface || "#E2E8F0"}
+                        textColor={colors.primary}
                     />
                     <Text style={[styles.displayName, { color: colors.text }]}>{displayName}</Text>
                     {!!subtitle && <Text style={[styles.subtitle, { color: colors.placeholder }]}>{subtitle}</Text>}
@@ -499,6 +593,18 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                         onPress={() => {
                             toggleChatLock().catch(() => {});
                         }}
+                        colors={colors}
+                    />
+                    <Option
+                        icon={updatingDisappearingMessages ? "hourglass-outline" : "timer-outline"}
+                        title={`Disappearing messages: ${formatDisappearingMessagesLabel(disappearingMessagesSeconds)}`}
+                        onPress={selectDisappearingMessages}
+                        colors={colors}
+                    />
+                    <DestructiveOption
+                        icon={clearingChat ? "hourglass-outline" : "trash-outline"}
+                        title="Clear chat"
+                        onPress={handleClearChat}
                         colors={colors}
                     />
                 </View>
