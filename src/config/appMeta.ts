@@ -1,13 +1,14 @@
 export const APP_VERSION = "0.0.1";
 export const APP_RELEASE_DATE = "April 23, 2026";
-export const APP_RELEASE_TITLE = "Chat controls, avatar fallbacks, and safer media checks";
+export const APP_RELEASE_TITLE = "Live guest video, safer calls, and cleaner shared chat cards";
 
 export const APP_RELEASE_HIGHLIGHTS = [
   "Chat UI is cleaner across direct and group conversations with tighter spacing, improved bubbles, and better composer alignment.",
   "Missing profile photos now fall back to clean first-letter avatars across key chat, notification, search, and relationship screens.",
   "Chat details now include clear-chat controls and disappearing message timers for more WhatsApp-style chat management.",
   "Chat, post, reel, and story media now pass through backend nudity and explicit-content checks before publishing.",
-  "Calls and live sessions now sound clearer, support camera switching, and include the Android Dog AR face filter flow.",
+  "Approved live-stream guest requests now bring the guest camera on screen so the host and guest can both appear in the live stage.",
+  "Calls now clean up more safely when the app disconnects so stale active sessions do not block the next call attempt.",
   "Release notes now reflect the live product status more clearly across chat, feed, seller, live, and account surfaces.",
 ];
 
@@ -25,8 +26,8 @@ export const APP_FEATURE_SECTIONS = [
     items: [
       "Direct chats, seller chats, group chats, message forwarding, locked chats, muting, shared media, and cleaner Instagram-style chat presentation.",
       "Chat details now support wallpaper changes, clear chat, disappearing messages, and chat locking controls.",
-      "Voice notes in chat with preview-before-send support, plus live incoming call routing for audio calls and video calls.",
-      "WebRTC-based live streams with host tools, viewer chat, reactions, request-to-join support, and active stream discovery.",
+      "Voice notes in chat with preview-before-send support, safer audio typing, plus live incoming call routing for audio calls and video calls.",
+      "WebRTC-based live streams with host tools, viewer chat, reactions, request-to-join support, approved guest video, and active stream discovery.",
       "Protected chat media flow with backend moderation checks for nudity and explicit-content detection on chat images, GIFs, and videos.",
     ],
   },
@@ -59,12 +60,15 @@ export const APP_BUG_FIXES = [
   "Tightened chat bubble sizing, composer spacing, and footer alignment across direct and group chat screens.",
   "Added first-letter avatar fallbacks when a user has not uploaded a profile photo on major list and chat surfaces.",
   "Added clear-chat controls and disappearing message timers inside chat details.",
-  "Improved voice-note handling so recordings can be previewed before sending.",
+  "Improved voice-note handling so recordings can be previewed before sending and no longer fall back into video-style chat cards.",
   "Clarified release-note wording so chat moderation coverage is described accurately inside the app.",
   "Extended backend nudity checks to post, reel, and story publishing flows for safer creator uploads.",
   "Improved voice and live session clarity so conversations sound fuller and easier to hear.",
   "Added direct sidebar access to release notes and surfaced the current app version in the feed menu.",
   "Wired the Dog AR filter into Android video-call tracks, camera switching, and safer live-call behavior.",
+  "Fixed live-stream guest approval flow so approved viewers can come on stage with video and the host sees the guest feed.",
+  "Tightened call-session teardown on disconnect so repeat calls in the same conversation no longer get blocked by stale active sessions.",
+  "Refined shared post cards in chat so incoming post previews look cleaner and more compact.",
 ];
 
 export const APP_UPCOMING_CHANGES = [

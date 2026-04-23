@@ -107,13 +107,19 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
 
   const isHost = useMemo(() => Boolean(liveStream?.isHost || mode === "host"), [liveStream?.isHost, mode]);
   const currentUserId = String(currentUser?._id || currentUser?.id || "").trim();
+  const approvedGuestIds = Array.isArray(liveStream?.approvedGuestIds)
+    ? liveStream.approvedGuestIds
+      .map((entry: any) => String(entry?._id || entry?.id || entry || "").trim())
+      .filter(Boolean)
+    : [];
   const pendingGuestRequestIds = Array.isArray(liveStream?.pendingGuestRequestIds)
     ? liveStream.pendingGuestRequestIds
       .map((entry: any) => String(entry?._id || entry?.id || entry || "").trim())
       .filter(Boolean)
     : [];
   const pendingGuestRequests = Array.isArray(liveStream?.pendingGuestRequests) ? liveStream.pendingGuestRequests : [];
-  const isApprovedGuest = Boolean(liveStream?.isApprovedGuest);
+  const isApprovedGuest = approvedGuestIds.includes(currentUserId) || Boolean(liveStream?.isApprovedGuest);
+  const canBroadcast = isHost || isApprovedGuest;
   const hasPendingGuestRequest = pendingGuestRequestIds.includes(currentUserId);
   const liveStatus = String(liveStream?.status || "").trim() || "live";
   const viewerCount = Number(liveStream?.viewerCount) || 0;
@@ -145,6 +151,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
 
     peerConnectionsRef.current.delete(remoteUserId);
     pendingIceCandidatesRef.current.delete(remoteUserId);
+    setRemoteStreamURL(null);
   }, []);
 
   const cleanupAllPeers = useCallback(() => {
@@ -193,7 +200,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       iceServers: normalizedIceServers,
     } as any);
 
-    if (isHost) {
+    if (canBroadcast) {
       attachLocalTracksToPeer(peerConnection);
     }
 
@@ -211,7 +218,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
 
     peerConnection.ontrack = (event: any) => {
       const nextStream = event?.streams?.[0];
-      if (!nextStream || isHost) {
+      if (!nextStream) {
         return;
       }
 
@@ -230,7 +237,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
 
     peerConnectionsRef.current.set(remoteUserId, peerConnection);
     return peerConnection;
-  }, [attachLocalTracksToPeer, cleanupPeerConnection, isHost, liveStreamId, normalizedIceServers]);
+  }, [attachLocalTracksToPeer, canBroadcast, cleanupPeerConnection, liveStreamId, normalizedIceServers]);
 
   const createOfferForViewer = useCallback(async (viewerId: string) => {
     const peerConnection = ensurePeerConnection(viewerId);
@@ -238,8 +245,8 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     try {
       attachLocalTracksToPeer(peerConnection);
       const offer = await peerConnection.createOffer({
-        offerToReceiveAudio: false,
-        offerToReceiveVideo: false,
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
       });
       await peerConnection.setLocalDescription(offer);
 
@@ -254,7 +261,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   }, [attachLocalTracksToPeer, ensurePeerConnection, liveStreamId]);
 
   const ensureLocalMedia = useCallback(async () => {
-    if (!isHost || localStreamRef.current) {
+    if (!canBroadcast || localStreamRef.current) {
       return;
     }
 
@@ -290,7 +297,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
 
     localStreamRef.current = stream;
     setLocalStreamURL(typeof stream?.toURL === "function" ? stream.toURL() : null);
-  }, [cameraFacingMode, isHost]);
+  }, [cameraFacingMode, canBroadcast]);
 
   const loadLiveStream = useCallback(async () => {
     const response = await getLiveStream(liveStreamId);
@@ -350,7 +357,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       try {
         await connectSocket();
         await activateCommunicationAudio(speakerEnabled).catch(() => false);
-        if (isHost) {
+        if (canBroadcast) {
           await ensureLocalMedia();
         }
 
@@ -382,7 +389,37 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     return () => {
       active = false;
     };
-  }, [currentUser, ensureLocalMedia, isHost, liveStreamId, speakerEnabled]);
+  }, [canBroadcast, currentUser, ensureLocalMedia, liveStreamId, speakerEnabled]);
+
+  useEffect(() => {
+    if (!currentUser || !canBroadcast || !hasJoinedRoomRef.current || localStreamRef.current) {
+      return;
+    }
+
+    let active = true;
+
+    ensureLocalMedia()
+      .then(() => {
+        if (!active || !isApprovedGuest) {
+          return;
+        }
+
+        setTimeout(() => {
+          if (active) {
+            socket.emit("live-stream:viewer-ready", { liveStreamId });
+          }
+        }, 250);
+      })
+      .catch((error) => {
+        if (active) {
+          setErrorMessage(getReadableApiErrorMessage(error, "Unable to prepare your guest video."));
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [canBroadcast, currentUser, ensureLocalMedia, isApprovedGuest, liveStreamId]);
 
   useEffect(() => {
     const handleJoined = (payload: any) => {
@@ -754,7 +791,10 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     }
   }, [isHost, leaveLiveRoom, liveStreamId, navigation]);
 
-  const statusLabel = liveStatus === "ended" ? "Stream ended" : isHost ? "You are live" : "Watching live";
+  const statusLabel = liveStatus === "ended" ? "Stream ended" : canBroadcast ? (isHost ? "You are live" : "You are live with host") : "Watching live";
+  const mainStageStreamURL = remoteStreamURL || (canBroadcast ? localStreamURL : null);
+  const shouldMirrorMainStage = !remoteStreamURL && canBroadcast && cameraFacingMode === "user";
+  const showLocalPreview = Boolean(remoteStreamURL && localStreamURL && canBroadcast);
 
   if (loading) {
     return (
@@ -768,19 +808,23 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     <SafeAreaView style={[styles.screen, { backgroundColor: "#050816" }]} edges={["top", "bottom"]}>
       <StatusBar barStyle="light-content" backgroundColor="#050816" />
       <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <View style={styles.stage}>
-          {isHost && localStreamURL ? (
-            <RTCView objectFit="cover" streamURL={localStreamURL} style={styles.video} mirror={cameraFacingMode === "user"} />
-          ) : remoteStreamURL ? (
-            <RTCView objectFit="cover" streamURL={remoteStreamURL} style={styles.video} />
-          ) : (
-            <View style={styles.videoPlaceholder}>
-              <Icon name="videocam-outline" size={44} color="#fff" />
-              <Text style={styles.videoPlaceholderTitle}>
-                {liveStatus === "ended" ? "This live stream has ended" : isHost ? "Preparing your live preview..." : "Waiting for host video..."}
-              </Text>
-            </View>
-          )}
+          <View style={styles.stage}>
+            {mainStageStreamURL ? (
+              <RTCView objectFit="cover" streamURL={mainStageStreamURL} style={styles.video} mirror={shouldMirrorMainStage} />
+            ) : (
+              <View style={styles.videoPlaceholder}>
+                <Icon name="videocam-outline" size={44} color="#fff" />
+                <Text style={styles.videoPlaceholderTitle}>
+                  {liveStatus === "ended" ? "This live stream has ended" : canBroadcast ? "Preparing your live preview..." : "Waiting for host video..."}
+                </Text>
+              </View>
+            )}
+
+            {showLocalPreview ? (
+              <View style={styles.localPreviewPip}>
+                <RTCView objectFit="cover" streamURL={localStreamURL as string} style={styles.localPreviewPipVideo} mirror={cameraFacingMode === "user"} />
+              </View>
+            ) : null}
 
           <View style={styles.topOverlay}>
             <TouchableOpacity style={styles.iconButton} onPress={() => navigation.goBack()}>
@@ -800,17 +844,17 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
 
             <TouchableOpacity style={[styles.iconButton, ending && styles.iconButtonDisabled]} onPress={handleLeave} disabled={ending}>
               {ending ? <ActivityIndicator color="#fff" /> : <Icon name={isHost ? "stop-circle-outline" : "exit-outline"} size={20} color="#fff" />}
-            </TouchableOpacity>
-          </View>
+              </TouchableOpacity>
+            </View>
 
-          <View style={styles.hostControls}>
-            <TouchableOpacity style={[styles.controlButton, !speakerEnabled && styles.controlButtonMuted]} onPress={toggleSpeaker}>
-              <Icon name={speakerEnabled ? "volume-high-outline" : "volume-mute-outline"} size={18} color="#fff" />
-            </TouchableOpacity>
-            {isHost ? (
-              <>
-                <TouchableOpacity style={[styles.controlButton, !microphoneEnabled && styles.controlButtonMuted]} onPress={toggleMicrophone}>
-                  <Icon name={microphoneEnabled ? "mic-outline" : "mic-off-outline"} size={18} color="#fff" />
+            <View style={styles.hostControls}>
+              <TouchableOpacity style={[styles.controlButton, !speakerEnabled && styles.controlButtonMuted]} onPress={toggleSpeaker}>
+                <Icon name={speakerEnabled ? "volume-high-outline" : "volume-mute-outline"} size={18} color="#fff" />
+              </TouchableOpacity>
+              {canBroadcast ? (
+                <>
+                  <TouchableOpacity style={[styles.controlButton, !microphoneEnabled && styles.controlButtonMuted]} onPress={toggleMicrophone}>
+                    <Icon name={microphoneEnabled ? "mic-outline" : "mic-off-outline"} size={18} color="#fff" />
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.controlButton, !cameraEnabled && styles.controlButtonMuted]} onPress={toggleCamera}>
                   <Icon name={cameraEnabled ? "videocam-outline" : "videocam-off-outline"} size={18} color="#fff" />
@@ -1009,6 +1053,21 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   stage: { flex: 1, backgroundColor: "#050816" },
   video: { flex: 1 },
+  localPreviewPip: {
+    position: "absolute",
+    right: 18,
+    top: 110,
+    width: 108,
+    height: 154,
+    borderRadius: 20,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(15,23,42,0.68)",
+  },
+  localPreviewPipVideo: {
+    flex: 1,
+  },
   videoPlaceholder: {
     flex: 1,
     alignItems: "center",

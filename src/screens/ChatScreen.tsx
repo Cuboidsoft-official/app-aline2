@@ -72,6 +72,7 @@ import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 import AISupportSheet from "../components/chat/AISupportSheet";
 import MessageLinkPreview from "../components/chat/MessageLinkPreview";
 import ChatLockModal from "../components/chat/ChatLockModal";
+import AppAvatar from "../components/AppAvatar";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { showModerationBlockedSheet } from "../utils/moderationNotice";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
@@ -1914,17 +1915,17 @@ const ChatScreen = ({ navigation, route }: any) => {
     const messageTimeLabel = formatMessageTime(item?.createdAt);
     const isEmojiOnly = !locationPayload && !sharedContent && !callEvent && !attachment?.url && isEmojiOnlyText(textValue);
     const hasImageBubble = isImageMessage(item) && attachment?.url;
-    const hasVideoBubble = isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url);
     const hasVoiceBubble = (isAudioMessage(item) || item?.messageType === "voice") && attachment?.url;
+    const hasVideoBubble = !hasVoiceBubble && isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url);
     const hasDocumentBubble = isDocumentMessage(item) && attachment?.url;
     const isGifBubble = String(item?.messageType || "").trim().toLowerCase() === "gif";
     const mediaBubbleKind = !callEvent && !locationPayload && !sharedContent
       ? hasImageBubble
         ? "image"
-        : hasVideoBubble
-          ? "video"
-          : hasVoiceBubble
-            ? "voice"
+        : hasVoiceBubble
+          ? "voice"
+          : hasVideoBubble
+            ? "video"
             : hasDocumentBubble
               ? "document"
               : null
@@ -2104,8 +2105,10 @@ const ChatScreen = ({ navigation, route }: any) => {
                 style={[styles.sharedPostCard, isMine ? styles.sharedPostCardMine : null]}
               >
                 <View style={styles.sharedPostHeader}>
-                  <Image
-                    source={{ uri: normalizeMediaUrl(sharedContent?.user?.avatarUrl || DEFAULT_AVATAR_URL) }}
+                  <AppAvatar
+                    uri={normalizeMediaUrl(sharedContent?.user?.avatarUrl || DEFAULT_AVATAR_URL)}
+                    name={sharedContent?.user?.name || sharedContent?.user?.username || "Aline2"}
+                    size={30}
                     style={styles.sharedPostAvatar}
                   />
                   <View style={styles.sharedPostMeta}>
@@ -3422,19 +3425,27 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.82)",
   },
   sharedPostCard: {
-    borderRadius: 14,
-    padding: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
+    padding: 10,
     marginBottom: 6,
-    backgroundColor: "rgba(123, 63, 228, 0.08)",
+    backgroundColor: "rgba(15,23,42,0.22)",
     maxWidth: "100%",
     minWidth: 0,
+    overflow: "hidden",
   },
   sharedPostCardMine: {
     backgroundColor: "rgba(255,255,255,0.14)",
+    borderColor: "rgba(255,255,255,0.16)",
   },
   sharedPostHeader: {
     flexDirection: "row",
     alignItems: "center",
+  },
+  sharedPostAvatarFallback: {
+    fontSize: 12,
+    fontWeight: "800",
   },
   sharedPostAvatar: {
     width: 28,
@@ -3464,15 +3475,15 @@ const styles = StyleSheet.create({
   },
   sharedPostImage: {
     width: "100%",
-    height: 138,
+    height: 126,
     borderRadius: 12,
-    marginTop: 10,
+    marginTop: 8,
   },
   sharedPostCaption: {
-    marginTop: 10,
+    marginTop: 8,
     color: "#344054",
     fontSize: 12.5,
-    lineHeight: 18,
+    lineHeight: 17,
   },
   sharedPostCaptionMine: {
     color: "rgba(255,255,255,0.92)",

@@ -302,11 +302,11 @@ const getAttachmentMimeType = (message) => {
   if (/\.(png|jpe?g|gif|webp|bmp|heic|heif)$/.test(candidate)) {
     return "image/*";
   }
-  if (/\.(mp4|mov|m4v|webm|mkv|avi)$/.test(candidate)) {
-    return "video/*";
-  }
   if (/\.(mp3|m4a|aac|wav|ogg|oga|opus|webm|mp4)$/.test(candidate)) {
     return "audio/*";
+  }
+  if (/\.(mp4|mov|m4v|webm|mkv|avi)$/.test(candidate)) {
+    return "video/*";
   }
 
   return "";
@@ -331,8 +331,20 @@ export const isDocumentMessage = (message) => {
   return message?.messageType === "document" || Boolean(attachment?.url && !isImageMessage(message));
 };
 
-export const isVideoMessage = (message) =>
-  getNormalizedMessageType(message) === "video" || getAttachmentMimeType(message).startsWith("video/");
+export const isVideoMessage = (message) => {
+  const normalizedType = getNormalizedMessageType(message);
+  if (normalizedType === "audio" || normalizedType === "voice") {
+    return false;
+  }
+
+  const attachment = getMessageAttachment(message);
+  const mimeType = getAttachmentMimeType(message);
+  return normalizedType === "video"
+    || (
+      mimeType.startsWith("video/")
+      && Boolean(attachment?.thumbnailUrl || message?.thumbnailUrl || attachment?.previewUrl)
+    );
+};
 
 export const isAudioMessage = (message) =>
   ["audio", "voice"].includes(getNormalizedMessageType(message)) || getAttachmentMimeType(message).startsWith("audio/");

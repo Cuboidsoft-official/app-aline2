@@ -1973,7 +1973,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               </View>
             ) : null}
 
-            {isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url) ? (
+            {!isAudioMessage(item) && String(item?.messageType || "") !== "voice" && isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url) ? (
               <View style={styles.attachmentRow}>
                 <Image
                   source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl || attachment.url) }}
