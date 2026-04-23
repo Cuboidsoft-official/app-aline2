@@ -1036,6 +1036,15 @@ const ChatScreen = ({ navigation, route }: any) => {
       }
     };
 
+    const handleMessageDeleted = (data: any) => {
+      if (!data?.messageId) {
+        return;
+      }
+
+      setMessages((prev) => prev.filter((msg) => String(msg?._id) !== String(data.messageId)));
+      setReplyingToMessage((prev) => (String(prev?._id || "") === String(data.messageId) ? null : prev));
+    };
+
     const handleChatThemeChanged = (data: any) => {
       if (data?.theme) {
         setChatTheme(data.theme);
@@ -1067,6 +1076,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     socket.on("messageSeen", handleMessageSeen);
     socket.on("messageReaction", handleMessageReaction);
     socket.on("messageEdited", handleMessageEdited);
+    socket.on("messageDeleted", handleMessageDeleted);
     socket.on("chatThemeChanged", handleChatThemeChanged);
     socket.on("chatWallpaperChanged", handleChatWallpaperChanged);
     socket.on("presence:update", handlePresenceUpdate);
@@ -1078,6 +1088,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       socket.off("messageSeen", handleMessageSeen);
       socket.off("messageReaction", handleMessageReaction);
       socket.off("messageEdited", handleMessageEdited);
+      socket.off("messageDeleted", handleMessageDeleted);
       socket.off("chatThemeChanged", handleChatThemeChanged);
       socket.off("chatWallpaperChanged", handleChatWallpaperChanged);
       socket.off("presence:update", handlePresenceUpdate);

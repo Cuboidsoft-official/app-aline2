@@ -1484,6 +1484,29 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       applyMessageReaction(data);
     };
 
+    const handleMessageEdited = (data: { messageId?: string; text?: string; editedAt?: string }) => {
+      if (!data?.messageId) {
+        return;
+      }
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          String(msg?._id) === String(data.messageId)
+            ? { ...msg, text: data.text || "", isEdited: true, editedAt: data.editedAt }
+            : msg
+        )
+      );
+    };
+
+    const handleMessageDeleted = (data: { messageId?: string }) => {
+      if (!data?.messageId) {
+        return;
+      }
+
+      setMessages((prev) => prev.filter((msg) => String(msg?._id) !== String(data.messageId)));
+      setReplyingToMessage((prev) => (String(prev?._id || "") === String(data.messageId) ? null : prev));
+    };
+
     const handlePresenceUpdate = (data: { userId?: string; isOnline?: boolean; lastSeenAt?: string; availabilityStatus?: string }) => {
       const nextUserId = String(data?.userId || "");
       if (!nextUserId || nextUserId !== String(sellerUserId || "")) {
@@ -1500,6 +1523,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     socket.on("stopTyping", handleStopTyping);
     socket.on("messageSeen", handleMessageSeen);
     socket.on("messageReaction", handleMessageReaction);
+    socket.on("messageEdited", handleMessageEdited);
+    socket.on("messageDeleted", handleMessageDeleted);
     socket.on("presence:update", handlePresenceUpdate);
 
     return () => {
@@ -1508,6 +1533,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       socket.off("stopTyping", handleStopTyping);
       socket.off("messageSeen", handleMessageSeen);
       socket.off("messageReaction", handleMessageReaction);
+      socket.off("messageEdited", handleMessageEdited);
+      socket.off("messageDeleted", handleMessageDeleted);
       socket.off("presence:update", handlePresenceUpdate);
     };
   }, [
