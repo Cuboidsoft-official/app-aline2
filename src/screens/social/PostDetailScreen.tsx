@@ -19,6 +19,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
 import PostCommentsSheet from "../../features/social/components/PostCommentsSheet";
+import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import PostShareSheet from "../../features/social/components/PostShareSheet";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
@@ -392,9 +393,10 @@ function PostDetailScreen({ route, navigation }: any) {
     }
 
     const rawImage = (
-      <Image
+      <ProgressiveImage
         key={key || asset.id}
-        source={{ uri: assetUrl }}
+        uri={assetUrl}
+        previewUri={posterUrl}
         style={styles.image}
       />
     );

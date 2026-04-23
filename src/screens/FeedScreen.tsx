@@ -26,6 +26,7 @@ import LinearGradient from "react-native-linear-gradient";
 import ContentActionSheet from "../features/social/components/ContentActionSheet";
 import PostCommentsSheet from "../features/social/components/PostCommentsSheet";
 import PostShareSheet from "../features/social/components/PostShareSheet";
+import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import SocialVideo from "../features/social/components/SocialVideo";
 import { socialApi } from "../features/social/socialApi";
 import { CommentAudioFile, FeedResponse, Post, Story } from "../features/social/types";
@@ -1001,8 +1002,9 @@ function FeedScreen({ navigation }: any) {
       }
 
       const rawImage = (
-        <Image
-          source={{ uri: normalizeMediaUrl(primaryMedia?.url) }}
+        <ProgressiveImage
+          uri={normalizeMediaUrl(primaryMedia?.url)}
+          previewUri={normalizeMediaUrl(primaryMedia?.thumbnailUrl || primaryMedia?.url)}
           style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
           resizeMode="cover"
         />
@@ -1044,9 +1046,10 @@ function FeedScreen({ navigation }: any) {
             ) : (
               (() => {
                 const rawImage = (
-                  <Image
+                  <ProgressiveImage
                     key={asset.id}
-                    source={{ uri: normalizeMediaUrl(asset.url) }}
+                    uri={normalizeMediaUrl(asset.url)}
+                    previewUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
                     style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
                     resizeMode="cover"
                   />

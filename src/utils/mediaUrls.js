@@ -29,6 +29,9 @@ const MEDIA_URL_HINT_KEYS = new Set([
   "width",
  ]);
 const LEGACY_R2_HOST_PATTERN = /^[a-z0-9-]+\.r2\.dev$/i;
+const LEGACY_R2_HOSTS_REQUIRING_PREFIX = new Set([
+  "pub-0ca80f02c91947fe9a67f96ec272c6a2.r2.dev",
+]);
 const LEGACY_R2_KEY_PREFIX = "aline2";
 const LEGACY_R2_MEDIA_PREFIXES = [
   "audio/",
@@ -42,9 +45,16 @@ const LEGACY_R2_MEDIA_PREFIXES = [
 const applyLegacyR2PathFix = (rawUrl) => {
   try {
     const parsed = new URL(rawUrl);
+    const normalizedHostname = String(parsed.hostname || "").trim().toLowerCase();
     const normalizedPath = parsed.pathname.replace(/^\/+/, "");
 
-    if (!LEGACY_R2_HOST_PATTERN.test(parsed.hostname)) {
+    if (!LEGACY_R2_HOST_PATTERN.test(normalizedHostname)) {
+      return rawUrl;
+    }
+
+    // Only the original public R2 host required the bucket key prefix.
+    // Newer hosts already return the correct bare object path.
+    if (!LEGACY_R2_HOSTS_REQUIRING_PREFIX.has(normalizedHostname)) {
       return rawUrl;
     }
 

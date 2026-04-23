@@ -965,12 +965,29 @@ class RemoteSocialApi implements SocialApi {
 
   async getSwipes(): Promise<Reel[]> {
     await loadModerationPrefs();
+    const loadSwipeFeed = async () => {
+      try {
+        return await API.get("/search/swipes");
+      } catch (error: any) {
+        const statusCode = Number(error?.response?.status || 0);
+        if (statusCode && statusCode !== 404) {
+          throw error;
+        }
+
+        return API.get("/search/reels");
+      }
+    };
+
     const [reelsRes, savedIds] = await Promise.all([
-      API.get("/search/reels"),
+      loadSwipeFeed(),
       this.getSavedPostIds(),
     ]);
 
-    const reelPayload = Array.isArray(reelsRes?.data?.reels) ? reelsRes.data.reels : [];
+    const reelPayload = Array.isArray(reelsRes?.data?.swipes)
+      ? reelsRes.data.swipes
+      : Array.isArray(reelsRes?.data?.reels)
+        ? reelsRes.data.reels
+        : [];
     const reelLikes = await this.getLikeStatusMap(reelPayload.map((reel: any) => this.getId(reel)), "postId");
 
     const reels = this.cacheReels(

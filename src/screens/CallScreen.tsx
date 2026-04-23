@@ -435,6 +435,15 @@ const CallScreen = ({ navigation, route }: any) => {
     setMediaReady(false);
   }, []);
 
+  const leaveCallRoom = useCallback(() => {
+    if (!callSessionId || !joinedCallRoomRef.current) {
+      return;
+    }
+
+    socket.emit("call:leave", { callSessionId });
+    joinedCallRoomRef.current = false;
+  }, [callSessionId]);
+
   const attachLocalTracksToPeer = useCallback((peerConnection: any) => {
     const localStream = localStreamRef.current;
     if (!peerConnection || !localStream || typeof localStream.getTracks !== "function") {
@@ -701,6 +710,7 @@ const CallScreen = ({ navigation, route }: any) => {
         durationTimerRef.current = null;
       }
 
+      leaveCallRoom();
       cleanupAllPeers();
       releaseLocalMedia();
 
@@ -713,7 +723,7 @@ const CallScreen = ({ navigation, route }: any) => {
         navigation.goBack();
       }, 900);
     },
-    [cleanupAllPeers, navigation, releaseLocalMedia]
+    [cleanupAllPeers, leaveCallRoom, navigation, releaseLocalMedia]
   );
 
   useEffect(() => {
@@ -823,6 +833,9 @@ const CallScreen = ({ navigation, route }: any) => {
       }
 
       event.preventDefault();
+      cleanupAllPeers();
+      releaseLocalMedia();
+      leaveCallRoom();
 
       const reason = mode === "incoming" && String(callSession?.status || "") === "ringing" ? "declined" : "hangup";
 
@@ -835,7 +848,7 @@ const CallScreen = ({ navigation, route }: any) => {
     });
 
     return unsubscribe;
-  }, [callSession?.status, callSessionId, hasActiveCall, mode, navigation]);
+  }, [callSession?.status, callSessionId, cleanupAllPeers, hasActiveCall, leaveCallRoom, mode, navigation, releaseLocalMedia]);
 
   useEffect(() => () => {
     if (durationTimerRef.current) {
@@ -846,10 +859,10 @@ const CallScreen = ({ navigation, route }: any) => {
     stopCallRingtone().catch(() => {});
     resetCallAudioRoute().catch(() => {});
     ringtoneActiveRef.current = false;
-    joinedCallRoomRef.current = false;
+    leaveCallRoom();
     cleanupAllPeers();
     releaseLocalMedia();
-  }, [cleanupAllPeers, releaseLocalMedia]);
+  }, [cleanupAllPeers, leaveCallRoom, releaseLocalMedia]);
 
   useEffect(() => {
     let active = true;
@@ -1014,6 +1027,19 @@ const CallScreen = ({ navigation, route }: any) => {
       });
     };
 
+    const handleParticipantLeft = (payload: any) => {
+      if (String(payload?.callSessionId || "") !== String(callSessionId || "")) {
+        return;
+      }
+
+      const remoteUserId = String(payload?.userId || "").trim();
+      if (!remoteUserId || remoteUserId === currentUserId) {
+        return;
+      }
+
+      cleanupPeerConnection(remoteUserId);
+    };
+
     const handleOffer = async (payload: any) => {
       if (String(payload?.callSessionId || "") !== String(callSessionId || "")) {
         return;
@@ -1088,18 +1114,22 @@ const CallScreen = ({ navigation, route }: any) => {
     };
 
     socket.on("call:participant-joined", handleParticipantJoined);
+    socket.on("call:participant-left", handleParticipantLeft);
     socket.on("call:offer", handleOffer);
     socket.on("call:answer", handleAnswer);
     socket.on("call:ice-candidate", handleIceCandidate);
 
     return () => {
       socket.off("call:participant-joined", handleParticipantJoined);
+      socket.off("call:participant-left", handleParticipantLeft);
       socket.off("call:offer", handleOffer);
       socket.off("call:answer", handleAnswer);
       socket.off("call:ice-candidate", handleIceCandidate);
     };
   }, [
     callSessionId,
+    cleanupPeerConnection,
+    currentUserId,
     ensureLocalMedia,
     ensurePeerConnection,
     flushPendingIceCandidates,
@@ -1137,6 +1167,7 @@ const CallScreen = ({ navigation, route }: any) => {
       await stopCallRingtone().catch(() => {});
       ringtoneActiveRef.current = false;
       await rejectCallSession(callSessionId, "declined");
+      leaveCallRoom();
       closingRef.current = true;
       navigation.goBack();
     } catch (error) {
@@ -1152,6 +1183,7 @@ const CallScreen = ({ navigation, route }: any) => {
       ringtoneActiveRef.current = false;
       cleanupAllPeers();
       releaseLocalMedia();
+      leaveCallRoom();
       await endCallSession(callSessionId, "hangup");
       closingRef.current = true;
       navigation.goBack();
@@ -1159,7 +1191,7 @@ const CallScreen = ({ navigation, route }: any) => {
       setEnding(false);
       Alert.alert("Could not end call", getReadableApiErrorMessage(error, "Please try again."));
     }
-  }, [callSessionId, cleanupAllPeers, navigation, releaseLocalMedia]);
+  }, [callSessionId, cleanupAllPeers, leaveCallRoom, navigation, releaseLocalMedia]);
 
   const toggleMicrophone = useCallback(() => {
     setMicrophoneEnabled((prev) => !prev);

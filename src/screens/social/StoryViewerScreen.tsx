@@ -17,6 +17,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { createSound } from "react-native-nitro-sound";
 
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
+import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import StoryActivitySheet from "../../features/social/components/StoryActivitySheet";
 import { socialApi } from "../../features/social/socialApi";
@@ -590,10 +591,12 @@ function StoryViewerScreen({ route, navigation }: any) {
       );
     }
 
-    const imageUri = normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url);
+    const imageUri = normalizeMediaUrl(currentStory.media?.url || currentStory.media?.thumbnailUrl);
+    const previewUri = normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url);
     return imageUri ? (
-      <Image
-        source={{ uri: imageUri }}
+      <ProgressiveImage
+        uri={imageUri}
+        previewUri={previewUri}
         style={styles.storyImage}
       />
     ) : (

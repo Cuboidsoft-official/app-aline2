@@ -1,5 +1,5 @@
-import React from "react";
-import { StyleProp, StyleSheet, View, ViewStyle } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { Animated, Image, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 import Video from "react-native-video";
 
 type SocialVideoProps = {
@@ -25,12 +25,30 @@ function SocialVideo({
   resizeMode = "cover",
   onEnd,
 }: SocialVideoProps) {
+  const placeholderOpacity = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    placeholderOpacity.stopAnimation();
+    placeholderOpacity.setValue(1);
+  }, [placeholderOpacity, posterUri, uri]);
+
   if (!uri) {
     return <View style={[styles.fallback, style]} />;
   }
 
   return (
     <View style={[styles.container, style]}>
+      {posterUri ? (
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: placeholderOpacity }]}>
+          <Image
+            source={{ uri: posterUri }}
+            style={StyleSheet.absoluteFill}
+            resizeMode={resizeMode}
+            blurRadius={14}
+          />
+          <View style={styles.placeholderTint} />
+        </Animated.View>
+      ) : null}
       <Video
         source={{ uri }}
         style={StyleSheet.absoluteFill}
@@ -41,6 +59,13 @@ function SocialVideo({
         controls={controls}
         onEnd={onEnd}
         poster={posterUri || undefined}
+        onLoad={() => {
+          Animated.timing(placeholderOpacity, {
+            toValue: 0,
+            duration: 180,
+            useNativeDriver: true,
+          }).start();
+        }}
         playWhenInactive={false}
         ignoreSilentSwitch="ignore"
       />
@@ -55,6 +80,10 @@ const styles = StyleSheet.create({
   },
   fallback: {
     backgroundColor: "#111827",
+  },
+  placeholderTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(2, 6, 23, 0.12)",
   },
 });
 

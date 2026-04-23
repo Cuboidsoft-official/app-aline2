@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -117,6 +118,15 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const liveStatus = String(liveStream?.status || "").trim() || "live";
   const viewerCount = Number(liveStream?.viewerCount) || 0;
   const normalizedIceServers = useMemo(() => normalizeIceServers(iceServers), [iceServers]);
+
+  const leaveLiveRoom = useCallback(() => {
+    if (!hasJoinedRoomRef.current) {
+      return;
+    }
+
+    socket.emit("live-stream:leave", { liveStreamId });
+    hasJoinedRoomRef.current = false;
+  }, [liveStreamId]);
 
   const cleanupPeerConnection = useCallback((remoteUserId: string) => {
     const peerConnection = peerConnectionsRef.current.get(remoteUserId);
@@ -588,16 +598,39 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   useEffect(() => () => {
     leavingRef.current = true;
 
-    if (hasJoinedRoomRef.current) {
-      socket.emit("live-stream:leave", { liveStreamId });
-      hasJoinedRoomRef.current = false;
-    }
+    leaveLiveRoom();
 
     cleanupAllPeers();
     stopMediaStream(localStreamRef.current);
     localStreamRef.current = null;
     resetCallAudioRoute().catch(() => {});
-  }, [cleanupAllPeers, liveStreamId]);
+  }, [cleanupAllPeers, leaveLiveRoom]);
+
+  useEffect(() => {
+    if (!isHost || !liveStreamId || liveStatus !== "live") {
+      return undefined;
+    }
+
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "background" || leavingRef.current || ending) {
+        return;
+      }
+
+      leavingRef.current = true;
+      setLiveStream((current: any) => (current ? { ...current, status: "ended" } : current));
+      endLiveStream(liveStreamId)
+        .catch((error) => {
+          console.log("live stream background end error:", error);
+        })
+        .finally(() => {
+          leaveLiveRoom();
+        });
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [ending, isHost, leaveLiveRoom, liveStatus, liveStreamId]);
 
   useEffect(() => {
     if (liveStatus === "ended") {
@@ -710,10 +743,8 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
 
       if (isHost && liveStreamId) {
         await endLiveStream(liveStreamId);
-      } else if (hasJoinedRoomRef.current) {
-        socket.emit("live-stream:leave", { liveStreamId });
-        hasJoinedRoomRef.current = false;
       }
+      leaveLiveRoom();
 
       navigation.goBack();
     } catch (error) {
@@ -721,7 +752,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     } finally {
       setEnding(false);
     }
-  }, [isHost, liveStreamId, navigation]);
+  }, [isHost, leaveLiveRoom, liveStreamId, navigation]);
 
   const statusLabel = liveStatus === "ended" ? "Stream ended" : isHost ? "You are live" : "Watching live";
 
