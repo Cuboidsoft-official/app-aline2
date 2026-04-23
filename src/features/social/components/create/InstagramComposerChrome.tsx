@@ -36,6 +36,7 @@ type TypeTabsProps = {
   borderColor: string;
   surfaceColor: string;
   onSelectTab: (tab: ComposerTab) => void;
+  onOpenLive?: () => void;
 };
 
 type StepStripProps = {
@@ -49,11 +50,11 @@ type StepStripProps = {
   onSelectStep: (step: ComposerStep) => void;
 };
 
-const TYPE_TABS: Array<{ id: ComposerTab | "live"; label: string; disabled?: boolean }> = [
+const TYPE_TABS: Array<{ id: ComposerTab | "live"; label: string }> = [
   { id: "post", label: "POST" },
   { id: "story", label: "STORY" },
   { id: "swipe", label: "SWIPES" },
-  { id: "live", label: "LIVE", disabled: true },
+  { id: "live", label: "LIVE" },
 ];
 
 const STEP_TABS: Array<{ id: ComposerStep; label: string; shortLabel: string }> = [
@@ -120,23 +121,24 @@ export function InstagramComposerTypeTabs({
   borderColor,
   surfaceColor,
   onSelectTab,
+  onOpenLive,
 }: TypeTabsProps) {
   return (
     <View style={[styles.typeTabsWrap, { borderColor, backgroundColor: surfaceColor }]}>
       {TYPE_TABS.map((tab) => {
         const selected = tab.id === activeTab;
-        const disabled = !!tab.disabled;
 
         return (
           <TouchableOpacity
             key={tab.id}
             style={styles.typeTabButton}
             onPress={() => {
-              if (!disabled && tab.id !== "live") {
+              if (tab.id === "live") {
+                onOpenLive?.();
+              } else {
                 onSelectTab(tab.id);
               }
             }}
-            disabled={disabled}
             activeOpacity={0.86}
           >
             <Text
@@ -144,7 +146,6 @@ export function InstagramComposerTypeTabs({
                 styles.typeTabLabel,
                 { color: selected ? textColor : mutedTextColor },
                 selected && styles.typeTabLabelActive,
-                disabled && styles.typeTabLabelDisabled,
               ]}
             >
               {tab.label}
@@ -299,9 +300,6 @@ const styles = StyleSheet.create({
   },
   typeTabLabelActive: {
     fontWeight: "900",
-  },
-  typeTabLabelDisabled: {
-    opacity: 0.42,
   },
   typeTabUnderline: {
     width: "100%",

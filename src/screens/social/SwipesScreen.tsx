@@ -583,14 +583,11 @@ function SwipesScreen({ navigation }: any) {
         <LinearGradient colors={["transparent", "rgba(0,0,0,0.42)", "rgba(0,0,0,0.88)"]} style={styles.bottomGradient} />
         <View style={styles.overlay}>
           <View style={styles.topBar}>
-            <View>
-              <Text style={styles.screenKicker}>Short-form studio</Text>
-              <Text style={styles.screenTitle}>Swipes</Text>
-            </View>
+            <Text style={styles.screenTitle}>Swipes</Text>
             <TouchableOpacity style={styles.createButton} onPress={() => navigation.navigate("Create", { initialTab: "swipe" })}>
               <LinearGradient colors={["#00c6ff", "#7f00ff", "#ff4ecd"]} style={styles.createButtonGradient}>
                 <Icon name="add" size={18} color="#fff" />
-                <Text style={styles.createButtonText}>Create Swipes</Text>
+                <Text style={styles.createButtonText}>New Swipe</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -967,7 +964,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 16 },
-  screenKicker: { color: "rgba(255,255,255,0.72)", fontSize: 11, fontWeight: "900", letterSpacing: 1.2, textTransform: "uppercase" },
   screenTitle: { color: "#fff", fontSize: 30, fontWeight: "900", letterSpacing: -0.8 },
   createButton: {
     overflow: "hidden",
