@@ -131,11 +131,18 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
   };
   const sheetContentSurfaceStyle = {
     backgroundColor: colors.card,
-    paddingBottom: Math.max(insets.bottom + 22, 30),
+    paddingBottom: Math.max(insets.bottom + 20, 30),
   };
   const sheetHeroIconStyle = {
     backgroundColor: isDarkMode ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.12)",
     borderColor: isDarkMode ? "rgba(248,113,113,0.28)" : "rgba(239,68,68,0.18)",
+  };
+  const sheetBodyCardStyle = {
+    backgroundColor: isDarkMode ? "rgba(15,23,42,0.28)" : "#FFFFFF",
+    borderColor: isDarkMode ? "rgba(148,163,184,0.14)" : colors.border,
+  };
+  const sheetFooterStyle = {
+    borderTopColor: isDarkMode ? "rgba(148,163,184,0.12)" : colors.border,
   };
 
   const renderAlertContent = (sheetMode: boolean) => (
@@ -163,45 +170,47 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
           style={sheetMode ? styles.sheetScroll : undefined}
           contentContainerStyle={sheetMode ? styles.sheetScrollContent : undefined}
         >
-          {sheetMode && showsSheetHero ? (
-            <View style={styles.sheetHero}>
-              <View style={[styles.sheetHeroIconWrap, sheetHeroIconStyle]}>
-                <Icon name="shield-checkmark-outline" size={24} color={colors.primary} />
+          <View style={sheetMode ? [styles.sheetBodyCard, sheetBodyCardStyle] : undefined}>
+            {sheetMode && showsSheetHero ? (
+              <View style={styles.sheetHero}>
+                <View style={[styles.sheetHeroIconWrap, sheetHeroIconStyle]}>
+                  <Icon name="shield-checkmark-outline" size={26} color={colors.primary} />
+                </View>
+                <Text style={[styles.sheetHeroLabel, { color: colors.mutedText }]}>Safety check</Text>
               </View>
-              <Text style={[styles.sheetHeroLabel, { color: colors.mutedText }]}>Safety check</Text>
+            ) : null}
+
+            <View style={[styles.header, sheetMode && styles.sheetHeader]}>
+              <Text style={[styles.title, sheetMode && styles.sheetTitle, { color: colors.text }]}>{activeAlert?.title}</Text>
             </View>
-          ) : null}
 
-          <View style={[styles.header, sheetMode && styles.sheetHeader]}>
-            <Text style={[styles.title, { color: colors.text }]}>{activeAlert?.title}</Text>
+            {activeAlert?.message ? (
+              <Text style={[styles.message, sheetMode && styles.sheetMessage, { color: colors.mutedText }]}>
+                {activeAlert.message}
+              </Text>
+            ) : null}
+
+            {activeAlert?.kind === "prompt" ? (
+              <TextInput
+                autoFocus
+                value={promptValue}
+                onChangeText={setPromptValue}
+                secureTextEntry={secureTextEntry}
+                keyboardType={activeAlert.keyboardType}
+                placeholder="Type here"
+                placeholderTextColor={colors.placeholder}
+                style={[
+                  styles.input,
+                  {
+                    color: colors.text,
+                    backgroundColor: colors.input,
+                    borderColor: colors.border,
+                  },
+                ]}
+                selectionColor={colors.primary}
+              />
+            ) : null}
           </View>
-
-          {activeAlert?.message ? (
-            <Text style={[styles.message, sheetMode && styles.sheetMessage, { color: colors.mutedText }]}>
-              {activeAlert.message}
-            </Text>
-          ) : null}
-
-          {activeAlert?.kind === "prompt" ? (
-            <TextInput
-              autoFocus
-              value={promptValue}
-              onChangeText={setPromptValue}
-              secureTextEntry={secureTextEntry}
-              keyboardType={activeAlert.keyboardType}
-              placeholder="Type here"
-              placeholderTextColor={colors.placeholder}
-              style={[
-                styles.input,
-                {
-                  color: colors.text,
-                  backgroundColor: colors.input,
-                  borderColor: colors.border,
-                },
-              ]}
-              selectionColor={colors.primary}
-            />
-          ) : null}
         </ScrollView>
 
         <View
@@ -209,6 +218,8 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
             styles.buttonRow,
             (shouldStackButtons || sheetMode) && styles.buttonColumn,
             sheetMode && styles.sheetButtonColumn,
+            sheetMode && styles.sheetFooter,
+            sheetMode && sheetFooterStyle,
           ]}
         >
           {activeAlert?.buttons.map((button, index) => {
@@ -260,10 +271,10 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
       <DraggableBottomSheet
         visible={sheetVisible}
         onClose={handleBackdropPress}
-        snapPoints={[0.4, 0.58, 0.78, 0.92]}
+        snapPoints={[0.42, 0.52, 0.64, 0.78]}
         initialSnapIndex={2}
-        minHeight={320}
-        maxHeightRatio={0.94}
+        minHeight={352}
+        maxHeightRatio={0.86}
       >
         {renderAlertContent(true)}
       </DraggableBottomSheet>
@@ -301,13 +312,13 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   sheetKeyboardWrap: {
-    flex: 1,
+    width: "100%",
   },
   sheetContent: {
-    flex: 1,
+    width: "100%",
     overflow: "hidden",
-    paddingHorizontal: 22,
-    paddingTop: 16,
+    paddingHorizontal: 18,
+    paddingTop: 10,
   },
   topGlow: {
     position: "absolute",
@@ -326,13 +337,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sheetHeroIconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   sheetHeroLabel: {
     fontSize: 12,
@@ -353,6 +364,10 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     lineHeight: 23,
   },
+  sheetTitle: {
+    fontSize: 20,
+    lineHeight: 26,
+  },
   message: {
     textAlign: "center",
     fontSize: 15,
@@ -360,16 +375,25 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   sheetMessage: {
-    paddingHorizontal: 4,
-    marginBottom: 18,
+    paddingHorizontal: 6,
+    marginBottom: 2,
+    fontSize: 15,
+    lineHeight: 22,
   },
   sheetScroll: {
+    flexGrow: 0,
     flexShrink: 1,
   },
   sheetScrollContent: {
-    flexGrow: 1,
-    justifyContent: "center",
-    paddingBottom: 2,
+    justifyContent: "flex-start",
+    paddingBottom: 8,
+  },
+  sheetBodyCard: {
+    borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 16,
   },
   input: {
     minHeight: 52,
@@ -389,6 +413,11 @@ const styles = StyleSheet.create({
   sheetButtonColumn: {
     gap: 10,
   },
+  sheetFooter: {
+    marginTop: 10,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
   button: {
     flex: 1,
     minHeight: 50,
@@ -399,8 +428,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   sheetButton: {
-    minHeight: 54,
-    borderRadius: 20,
+    minHeight: 56,
+    borderRadius: 18,
+    marginBottom: 2,
   },
   buttonText: {
     fontSize: 15,
