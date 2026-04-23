@@ -55,6 +55,7 @@ import {
 } from "../utils/musicApi";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
 import { getStoredUserId } from "../utils/authSession";
+import { getAngleDeltaDegrees, getTouchMetrics, getTouchPoints } from "../features/social/stickerGestureUtils";
 import { useAppTheme } from "../theme/AppThemeContext";
 import SocialVideo from "../features/social/components/SocialVideo";
 import {
@@ -77,6 +78,15 @@ try {
 type ComposerTab = "post" | "story" | "swipe";
 type ComposerStep = "select" | "edit" | "share";
 type ComposerFramePreset = "square" | "portrait" | "landscape" | "vertical";
+type StickerGestureState = {
+  touchCount: number;
+  startPosition: { x: number; y: number };
+  startScale: number;
+  startRotation: number;
+  startCenter: { x: number; y: number } | null;
+  startDistance: number;
+  startAngle: number;
+};
 
 const tabs: ComposerTab[] = ["post", "story", "swipe"];
 const composerSteps: ComposerStep[] = ["select", "edit", "share"];
@@ -201,6 +211,15 @@ const storyStickerDimensions = {
   text: { width: 0.64, height: 0.12 },
   emoji: { width: 0.16, height: 0.12 },
 } as const;
+const createStickerGestureState = (position: { x: number; y: number }): StickerGestureState => ({
+  touchCount: 0,
+  startPosition: position,
+  startScale: 1,
+  startRotation: 0,
+  startCenter: null,
+  startDistance: 0,
+  startAngle: 0,
+});
 const clampStickerScale = (value: number): number => Math.min(2, Math.max(0.6, Math.round(value * 10) / 10));
 const clampStickerRotation = (value: number): number => Math.min(180, Math.max(-180, Math.round(value)));
 const clampNormalizedValue = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
@@ -467,8 +486,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const helperTextStyle = { color: composerMutedText };
   const controlBorderStyle = { borderColor: composerBorderColor };
   const activePillStyle = { backgroundColor: composerAccent, borderColor: composerAccent };
-  const textStickerDragStartRef = useRef(storyStickerPresetPositions.bottom_left);
-  const emojiStickerDragStartRef = useRef(storyStickerPresetPositions.top_right);
+  const textStickerGestureRef = useRef<StickerGestureState>(createStickerGestureState(storyStickerPresetPositions.bottom_left));
+  const emojiStickerGestureRef = useRef<StickerGestureState>(createStickerGestureState(storyStickerPresetPositions.top_right));
   const musicPreviewPlayerRef = useRef(createSound());
   const activeFramePreset = framePresetByTab[activeTab];
   const activeFrameConfig = composerFramePresets[activeFramePreset];
@@ -773,6 +792,99 @@ function CreatePostScreen({ navigation, route }: any) {
     setStoryStickerEmojiPosition(clamped);
   }, [clampStickerPosition]);
 
+  const getStickerScale = useCallback(
+    (type: "text" | "emoji") => (type === "text" ? storyStickerTextScale : storyStickerEmojiScale),
+    [storyStickerEmojiScale, storyStickerTextScale],
+  );
+
+  const getStickerRotation = useCallback(
+    (type: "text" | "emoji") => (type === "text" ? storyStickerTextRotation : storyStickerEmojiRotation),
+    [storyStickerEmojiRotation, storyStickerTextRotation],
+  );
+
+  const updateStickerScale = useCallback((type: "text" | "emoji", value: number) => {
+    const clampedValue = clampStickerScale(value);
+
+    if (type === "text") {
+      setStoryStickerTextScale(clampedValue);
+      return;
+    }
+
+    setStoryStickerEmojiScale(clampedValue);
+  }, []);
+
+  const updateStickerRotation = useCallback((type: "text" | "emoji", value: number) => {
+    const clampedValue = clampStickerRotation(value);
+
+    if (type === "text") {
+      setStoryStickerTextRotation(clampedValue);
+      return;
+    }
+
+    setStoryStickerEmojiRotation(clampedValue);
+  }, []);
+
+  const syncStickerGestureBaseline = useCallback(
+    (type: "text" | "emoji", touches: Array<{ pageX: number; pageY: number }>) => {
+      const metrics = getTouchMetrics(touches);
+
+      if (!metrics) {
+        return;
+      }
+
+      const gestureState = type === "text" ? textStickerGestureRef.current : emojiStickerGestureRef.current;
+      gestureState.touchCount = touches.length;
+      gestureState.startPosition = getStickerPosition(type);
+      gestureState.startScale = getStickerScale(type);
+      gestureState.startRotation = getStickerRotation(type);
+      gestureState.startCenter = {
+        x: metrics.centerX,
+        y: metrics.centerY,
+      };
+      gestureState.startDistance = metrics.distance;
+      gestureState.startAngle = metrics.angle;
+    },
+    [getStickerPosition, getStickerRotation, getStickerScale],
+  );
+
+  const handleStickerGestureMove = useCallback(
+    (type: "text" | "emoji", touches: Array<{ pageX: number; pageY: number }>) => {
+      if (!storyPreviewSize.width || !storyPreviewSize.height || !touches.length) {
+        return;
+      }
+
+      const gestureState = type === "text" ? textStickerGestureRef.current : emojiStickerGestureRef.current;
+
+      if (!gestureState.startCenter || gestureState.touchCount !== touches.length) {
+        syncStickerGestureBaseline(type, touches);
+      }
+
+      const metrics = getTouchMetrics(touches);
+
+      if (!metrics || !gestureState.startCenter) {
+        return;
+      }
+
+      updateStickerPosition(type, {
+        x: gestureState.startPosition.x + (metrics.centerX - gestureState.startCenter.x) / storyPreviewSize.width,
+        y: gestureState.startPosition.y + (metrics.centerY - gestureState.startCenter.y) / storyPreviewSize.height,
+      });
+
+      if (touches.length >= 2 && gestureState.startDistance > 0) {
+        updateStickerScale(type, gestureState.startScale * (metrics.distance / gestureState.startDistance));
+        updateStickerRotation(type, gestureState.startRotation + getAngleDeltaDegrees(gestureState.startAngle, metrics.angle));
+      }
+    },
+    [storyPreviewSize.height, storyPreviewSize.width, syncStickerGestureBaseline, updateStickerPosition, updateStickerRotation, updateStickerScale],
+  );
+
+  const resetStickerGesture = useCallback((type: "text" | "emoji") => {
+    const gestureState = type === "text" ? textStickerGestureRef.current : emojiStickerGestureRef.current;
+    gestureState.touchCount = 0;
+    gestureState.startCenter = null;
+    gestureState.startDistance = 0;
+  }, []);
+
   const handleStoryPreviewLayout = (width: number, height: number) => {
     if (width > 0 && height > 0) {
       setStoryPreviewSize({ width, height });
@@ -784,21 +896,16 @@ function CreatePostScreen({ navigation, route }: any) {
       PanResponder.create({
         onStartShouldSetPanResponder: () => !!storyStickerText.trim(),
         onMoveShouldSetPanResponder: () => !!storyStickerText.trim(),
-        onPanResponderGrant: () => {
-          textStickerDragStartRef.current = getStickerPosition("text");
+        onPanResponderGrant: (event) => {
+          syncStickerGestureBaseline("text", getTouchPoints(event?.nativeEvent?.touches));
         },
-        onPanResponderMove: (_event, gestureState) => {
-          if (!storyPreviewSize.width || !storyPreviewSize.height) {
-            return;
-          }
-
-          updateStickerPosition("text", {
-            x: textStickerDragStartRef.current.x + gestureState.dx / storyPreviewSize.width,
-            y: textStickerDragStartRef.current.y + gestureState.dy / storyPreviewSize.height,
-          });
+        onPanResponderMove: (event) => {
+          handleStickerGestureMove("text", getTouchPoints(event?.nativeEvent?.touches));
         },
+        onPanResponderRelease: () => resetStickerGesture("text"),
+        onPanResponderTerminate: () => resetStickerGesture("text"),
       }),
-    [getStickerPosition, storyPreviewSize.height, storyPreviewSize.width, storyStickerText, updateStickerPosition],
+    [handleStickerGestureMove, resetStickerGesture, storyStickerText, syncStickerGestureBaseline],
   );
 
   const emojiStickerPanResponder = useMemo(
@@ -806,21 +913,16 @@ function CreatePostScreen({ navigation, route }: any) {
       PanResponder.create({
         onStartShouldSetPanResponder: () => !!storyStickerEmoji.trim(),
         onMoveShouldSetPanResponder: () => !!storyStickerEmoji.trim(),
-        onPanResponderGrant: () => {
-          emojiStickerDragStartRef.current = getStickerPosition("emoji");
+        onPanResponderGrant: (event) => {
+          syncStickerGestureBaseline("emoji", getTouchPoints(event?.nativeEvent?.touches));
         },
-        onPanResponderMove: (_event, gestureState) => {
-          if (!storyPreviewSize.width || !storyPreviewSize.height) {
-            return;
-          }
-
-          updateStickerPosition("emoji", {
-            x: emojiStickerDragStartRef.current.x + gestureState.dx / storyPreviewSize.width,
-            y: emojiStickerDragStartRef.current.y + gestureState.dy / storyPreviewSize.height,
-          });
+        onPanResponderMove: (event) => {
+          handleStickerGestureMove("emoji", getTouchPoints(event?.nativeEvent?.touches));
         },
+        onPanResponderRelease: () => resetStickerGesture("emoji"),
+        onPanResponderTerminate: () => resetStickerGesture("emoji"),
       }),
-    [getStickerPosition, storyPreviewSize.height, storyPreviewSize.width, storyStickerEmoji, updateStickerPosition],
+    [handleStickerGestureMove, resetStickerGesture, storyStickerEmoji, syncStickerGestureBaseline],
   );
 
   useEffect(() => {
@@ -958,6 +1060,10 @@ function CreatePostScreen({ navigation, route }: any) {
     const nextStep = composerSteps[Math.min(composerSteps.length - 1, currentStepIndex + 1)];
     moveToStep(nextStep);
   };
+
+  const openLiveComposer = useCallback(() => {
+    navigation.navigate("LiveStreamsScreen", { focusMode: "host" });
+  }, [navigation]);
 
   const setFramePresetForTab = (tab: ComposerTab, preset: ComposerFramePreset) => {
     setFramePresetByTab((prev) => ({
@@ -1677,6 +1783,13 @@ function CreatePostScreen({ navigation, route }: any) {
           detail: musicSelections[activeTab] ? "Attached" : "Browse",
           onPress: loadTrendingMusic,
         },
+      {
+        id: "live",
+        icon: "radio-outline",
+        label: "Live",
+        detail: "Host",
+        onPress: openLiveComposer,
+      },
     ];
 
     return (
@@ -1686,10 +1799,14 @@ function CreatePostScreen({ navigation, route }: any) {
             <Text style={[styles.panelEyebrow, { color: composerAccent }]}>Tools</Text>
             <Text style={[styles.panelTitle, { color: composerText }]}>Edit tools</Text>
           </View>
-          <View style={[styles.pipelineBadge, { backgroundColor: subtleSurfaceColor, borderColor: composerBorderColor }]}>
+          <TouchableOpacity
+            style={[styles.pipelineBadge, { backgroundColor: subtleSurfaceColor, borderColor: composerBorderColor }]}
+            onPress={openLiveComposer}
+            activeOpacity={0.85}
+          >
             <Icon name="sparkles-outline" size={13} color={composerAccent} />
-            <Text style={[styles.pipelineBadgeText, { color: composerText }]}>Live</Text>
-          </View>
+            <Text style={[styles.pipelineBadgeText, { color: composerText }]}>Go Live</Text>
+          </TouchableOpacity>
         </View>
         <View style={styles.quickToolRow}>
           {quickTools.map((tool) => (
@@ -1975,6 +2092,7 @@ function CreatePostScreen({ navigation, route }: any) {
               />
             ))}
           </View>
+          {previewStickers}
           {previewMetaOverlay}
         </View>
       );
@@ -1995,7 +2113,7 @@ function CreatePostScreen({ navigation, route }: any) {
             controls
           />
           {activeTab === "story" ? previewFaceStickers : null}
-          {activeTab === "story" ? previewStickers : null}
+          {previewStickers}
           {previewMetaOverlay}
         </View>
       );
@@ -2036,7 +2154,7 @@ function CreatePostScreen({ navigation, route }: any) {
           />
         ) : null}
         {activeTab === "story" ? previewFaceStickers : null}
-        {activeTab === "story" ? previewStickers : null}
+        {previewStickers}
         {previewMetaOverlay}
       </View>
     );
@@ -2565,6 +2683,19 @@ function CreatePostScreen({ navigation, route }: any) {
             ))}
           </View>
           <View style={styles.modeRow}>
+            {storyTextStickerAlignments.map((alignment) => (
+              <TouchableOpacity
+                key={`post-text-alignment-${alignment}`}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyStickerTextAlignment === alignment && [styles.pillActive, activePillStyle]]}
+                onPress={() => setStoryStickerTextAlignment(alignment)}
+              >
+                <Text style={[styles.pillText, { color: storyStickerTextAlignment === alignment ? "#fff" : composerText }, storyStickerTextAlignment === alignment && styles.pillTextActive]}>
+                  {storyTextStickerAlignmentLabels[alignment]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.modeRow}>
             {storyStickerPlacements.map((placement) => (
               <TouchableOpacity
                 key={`post-text-${placement}`}
@@ -2580,6 +2711,24 @@ function CreatePostScreen({ navigation, route }: any) {
               </TouchableOpacity>
             ))}
           </View>
+          <View style={styles.stickerScaleRow}>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setStoryStickerTextScale((value) => clampStickerScale(value - 0.1))}>
+              <Text style={[styles.scaleButtonText, { color: composerText }]}>A-</Text>
+            </TouchableOpacity>
+            <Text style={[styles.scaleValueText, { color: composerText }]}>Text size {storyStickerTextScale.toFixed(1)}x</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setStoryStickerTextScale((value) => clampStickerScale(value + 0.1))}>
+              <Text style={[styles.scaleButtonText, { color: composerText }]}>A+</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.stickerScaleRow}>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setStoryStickerTextRotation((value) => clampStickerRotation(value - 15))}>
+              <Text style={[styles.scaleButtonText, { color: composerText }]}>↺</Text>
+            </TouchableOpacity>
+            <Text style={[styles.scaleValueText, { color: composerText }]}>Text angle {storyStickerTextRotation}deg</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setStoryStickerTextRotation((value) => clampStickerRotation(value + 15))}>
+              <Text style={[styles.scaleButtonText, { color: composerText }]}>↻</Text>
+            </TouchableOpacity>
+          </View>
         </>
       ) : null}
 
@@ -2593,22 +2742,42 @@ function CreatePostScreen({ navigation, route }: any) {
         maxLength={16}
       />
       {storyStickerEmoji.trim() ? (
-        <View style={styles.modeRow}>
-          {storyStickerPlacements.map((placement) => (
-            <TouchableOpacity
-              key={`post-emoji-${placement}`}
-              style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyStickerEmojiPlacement === placement && [styles.pillActive, activePillStyle]]}
-              onPress={() => {
-                setStoryStickerEmojiPlacement(placement);
-                setStoryStickerEmojiPosition(storyStickerPresetPositions[placement]);
-              }}
-            >
-              <Text style={[styles.pillText, { color: storyStickerEmojiPlacement === placement ? "#fff" : composerText }, storyStickerEmojiPlacement === placement && styles.pillTextActive]}>
-                {storyStickerPlacementLabels[placement]}
-              </Text>
+        <>
+          <View style={styles.modeRow}>
+            {storyStickerPlacements.map((placement) => (
+              <TouchableOpacity
+                key={`post-emoji-${placement}`}
+                style={[styles.pill, controlBorderStyle, { backgroundColor: surfaceColor }, storyStickerEmojiPlacement === placement && [styles.pillActive, activePillStyle]]}
+                onPress={() => {
+                  setStoryStickerEmojiPlacement(placement);
+                  setStoryStickerEmojiPosition(storyStickerPresetPositions[placement]);
+                }}
+              >
+                <Text style={[styles.pillText, { color: storyStickerEmojiPlacement === placement ? "#fff" : composerText }, storyStickerEmojiPlacement === placement && styles.pillTextActive]}>
+                  {storyStickerPlacementLabels[placement]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.stickerScaleRow}>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setStoryStickerEmojiScale((value) => clampStickerScale(value - 0.1))}>
+              <Text style={[styles.scaleButtonText, { color: composerText }]}>-</Text>
             </TouchableOpacity>
-          ))}
-        </View>
+            <Text style={[styles.scaleValueText, { color: composerText }]}>Emoji size {storyStickerEmojiScale.toFixed(1)}x</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setStoryStickerEmojiScale((value) => clampStickerScale(value + 0.1))}>
+              <Text style={[styles.scaleButtonText, { color: composerText }]}>+</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.stickerScaleRow}>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setStoryStickerEmojiRotation((value) => clampStickerRotation(value - 15))}>
+              <Text style={[styles.scaleButtonText, { color: composerText }]}>↺</Text>
+            </TouchableOpacity>
+            <Text style={[styles.scaleValueText, { color: composerText }]}>Emoji angle {storyStickerEmojiRotation}deg</Text>
+            <TouchableOpacity style={[styles.scaleButton, { backgroundColor: surfaceColor, borderColor: composerBorderColor }]} onPress={() => setStoryStickerEmojiRotation((value) => clampStickerRotation(value + 15))}>
+              <Text style={[styles.scaleButtonText, { color: composerText }]}>↻</Text>
+            </TouchableOpacity>
+          </View>
+        </>
       ) : null}
 
       <View style={styles.switchRow}><Text style={[styles.switchLabel, { color: composerText }]}>Allow comments</Text><Switch value={!disableComments} onValueChange={(value) => setDisableComments(!value)} /></View>
@@ -2621,6 +2790,9 @@ function CreatePostScreen({ navigation, route }: any) {
           : postType === "video"
             ? "Choose a single video. It will upload through the backend media pipeline."
             : "Choose a single image for this post."}
+      </Text>
+      <Text style={[styles.helperText, helperTextStyle]}>
+        Drag stickers directly on the preview. Use two fingers on the canvas to resize and rotate them without leaving the composer.
       </Text>
       <Text style={[styles.helperText, helperTextStyle]}>
         Basic posting is production-focused here: caption, media, location, music, hashtags, mentions, comment control, and like-count privacy are supported. Collaboration/remix controls are hidden until they are fully product-ready.
