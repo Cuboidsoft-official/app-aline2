@@ -722,7 +722,7 @@ const styles = StyleSheet.create({
   headerActionGap: { marginRight: 10, padding: 2 },
   editButton: { fontSize: 15, color: "#3345d1", fontWeight: "700" },
   mediaSurface: { position: "relative" },
-  image: { width: "100%", height: 320, backgroundColor: "#f4f4f4" },
+  image: { width: "100%", height: 320, backgroundColor: "#0f172a" },
   stickerLayer: { ...StyleSheet.absoluteFillObject },
   emojiSticker: {
     position: "absolute",

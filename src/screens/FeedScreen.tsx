@@ -2614,8 +2614,8 @@ const styles = StyleSheet.create({
     width: 18,
     backgroundColor: "#fff",
   },
-  mediaFallback: { backgroundColor: "#f3f3f3" },
-  postImage: { height: 360, backgroundColor: "#f3f3f3" },
+  mediaFallback: { backgroundColor: "#0f172a" },
+  postImage: { height: 360 },
   mediaPressSurface: { position: "relative" },
   postStickerLayer: {
     ...StyleSheet.absoluteFillObject,

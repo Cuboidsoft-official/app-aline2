@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Image,
@@ -8,6 +8,7 @@ import {
   View,
   ViewStyle,
 } from "react-native";
+import { stripBackgroundColorFromStyle } from "./mediaSurfaceStyle";
 
 type ProgressiveImageProps = {
   uri?: string;
@@ -24,49 +25,61 @@ function ProgressiveImage({
   style,
   resizeMode = "cover",
   blurRadius = 14,
-  fallbackColor = "#111827",
+  fallbackColor = "#0f172a",
 }: ProgressiveImageProps) {
   const imageOpacity = useRef(new Animated.Value(0)).current;
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
   const resolvedUri = String(uri || "").trim();
   const resolvedPreviewUri = String(previewUri || resolvedUri).trim();
+  const containerStyle = useMemo(() => stripBackgroundColorFromStyle(style), [style]);
 
   useEffect(() => {
     imageOpacity.stopAnimation();
     imageOpacity.setValue(0);
+    setPreviewFailed(false);
+    setImageFailed(false);
   }, [imageOpacity, resolvedPreviewUri, resolvedUri]);
 
-  if (!resolvedUri) {
-    return <View style={[styles.fallback, { backgroundColor: fallbackColor }, style]} />;
+  if (!resolvedUri && !resolvedPreviewUri) {
+    return <View style={[styles.fallback, containerStyle, { backgroundColor: fallbackColor }]} />;
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: fallbackColor }, style]}>
-      {resolvedPreviewUri ? (
+    <View style={[styles.container, containerStyle, { backgroundColor: fallbackColor }]}>
+      {resolvedPreviewUri && !previewFailed ? (
         <>
           <Image
             source={{ uri: resolvedPreviewUri }}
             style={StyleSheet.absoluteFill}
             resizeMode={resizeMode}
             blurRadius={blurRadius}
+            onError={() => {
+              setPreviewFailed(true);
+            }}
           />
           <View pointerEvents="none" style={styles.placeholderTint} />
         </>
       ) : null}
-      <Animated.Image
-        source={{ uri: resolvedUri }}
-        style={[StyleSheet.absoluteFill, { opacity: imageOpacity }]}
-        resizeMode={resizeMode}
-        onLoad={() => {
-          Animated.timing(imageOpacity, {
-            toValue: 1,
-            duration: 180,
-            useNativeDriver: true,
-          }).start();
-        }}
-        onError={() => {
-          imageOpacity.setValue(1);
-        }}
-      />
+      {resolvedUri && !imageFailed ? (
+        <Animated.Image
+          source={{ uri: resolvedUri }}
+          style={[StyleSheet.absoluteFill, { opacity: imageOpacity }]}
+          resizeMode={resizeMode}
+          onLoad={() => {
+            Animated.timing(imageOpacity, {
+              toValue: 1,
+              duration: 180,
+              useNativeDriver: true,
+            }).start();
+          }}
+          onError={() => {
+            imageOpacity.stopAnimation();
+            imageOpacity.setValue(0);
+            setImageFailed(true);
+          }}
+        />
+      ) : null}
     </View>
   );
 }

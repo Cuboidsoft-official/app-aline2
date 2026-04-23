@@ -143,7 +143,7 @@ const composerBlueprints: Record<
 > = {
   post: {
     label: "Post",
-    title: "Feed Post",
+    title: "Post",
     description: "Clean post with crop, caption, and sharing controls.",
     icon: "grid-outline",
     gradient: ["#667eea", "#764ba2", "#f093fb"],
@@ -151,7 +151,7 @@ const composerBlueprints: Record<
   },
   story: {
     label: "Story",
-    title: "Story Studio",
+    title: "Story",
     description: "Quick vertical story with text, stickers, and music.",
     icon: "radio-button-on-outline",
     gradient: ["#ff7a18", "#af002d", "#319197"],
@@ -159,7 +159,7 @@ const composerBlueprints: Record<
   },
   swipe: {
     label: "Swipe",
-    title: "Swipe Editor",
+    title: "Swipe",
     description: "Short video with trim, sound, and share tools.",
     icon: "play-circle-outline",
     gradient: ["#00c6ff", "#7f00ff", "#ff4ecd"],
