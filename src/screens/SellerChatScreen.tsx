@@ -1491,7 +1491,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       setMessages((prev) =>
         prev.map((msg) =>
-          String(msg?._id) === String(data.messageId)
+          getMessageIdentity(msg) === String(data.messageId)
             ? { ...msg, text: data.text || "", isEdited: true, editedAt: data.editedAt }
             : msg
         )
@@ -1503,8 +1503,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         return;
       }
 
-      setMessages((prev) => prev.filter((msg) => String(msg?._id) !== String(data.messageId)));
-      setReplyingToMessage((prev) => (String(prev?._id || "") === String(data.messageId) ? null : prev));
+      setMessages((prev) => prev.filter((msg) => getMessageIdentity(msg) !== String(data.messageId)));
+      setReplyingToMessage((prev) => (getMessageIdentity(prev) === String(data.messageId) ? null : prev));
     };
 
     const handlePresenceUpdate = (data: { userId?: string; isOnline?: boolean; lastSeenAt?: string; availabilityStatus?: string }) => {
@@ -1705,7 +1705,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     }
 
     const nextMessage = getLastIncomingUnseenMessage(messages, currentUserId) as ChatMessage | null;
-    if (!nextMessage?._id) {
+    const nextMessageId = getMessageIdentity(nextMessage);
+    if (!nextMessageId) {
       return;
     }
 
@@ -1713,10 +1714,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       .then(() => {
         socket.emit("messageSeen", {
           conversationId: currentConversationId,
-          messageId: nextMessage._id,
+          messageId: nextMessageId,
         });
         applyMessageSeen({
-          messageId: nextMessage._id,
+          messageId: nextMessageId,
           userId: currentUserId,
           seenAt: new Date().toISOString(),
         });

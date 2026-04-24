@@ -1,3 +1,5 @@
+import { getMessageIdentity } from "./chatMessageIdentity";
+
 export const mergeMessageSeen = (messages, payload) => {
   const messageId = String(payload?.messageId || "");
   const userId = String(payload?.userId || "");
@@ -7,7 +9,7 @@ export const mergeMessageSeen = (messages, payload) => {
   }
 
   return messages.map((message) => {
-    if (String(message?._id || "") !== messageId) {
+    if (getMessageIdentity(message) !== messageId) {
       return message;
     }
 
@@ -41,7 +43,7 @@ export const mergeMessageReaction = (messages, payload) => {
   }
 
   return messages.map((message) => {
-    if (String(message?._id || "") !== messageId) {
+    if (getMessageIdentity(message) !== messageId) {
       return message;
     }
 
@@ -90,9 +92,10 @@ export const getLastIncomingUnseenMessage = (messages, currentUserId) => {
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
+    const messageId = getMessageIdentity(message);
     const senderId = String(message?.sender?._id || message?.sender || "");
 
-    if (!message?._id || senderId === viewerId) {
+    if (!messageId || senderId === viewerId) {
       continue;
     }
 

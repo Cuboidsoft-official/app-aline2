@@ -20,6 +20,7 @@ import Clipboard from "@react-native-clipboard/clipboard";
 // @ts-ignore
 import { API } from "../../api/api";
 import { getReadableApiErrorMessage } from "../../api/networkErrors";
+import { getMessageIdentity } from "../../utils/chatMessageIdentity";
 
 const EMOJI_OPTIONS = ["❤️", "😂", "😮", "😢", "😡", "👍"];
 const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
@@ -67,6 +68,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
     const [editMode, setEditMode] = useState(false);
     const [editText, setEditText] = useState("");
     const [saving, setSaving] = useState(false);
+    const messageId = getMessageIdentity(message);
 
     const canEdit =
         isMine &&
@@ -96,10 +98,14 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
 
         try {
             setSaving(true);
-            const res = await API.patch(`/message/${message!._id}`, { text: trimmed });
+            if (!messageId) {
+                throw new Error("Message is unavailable");
+            }
+
+            const res = await API.patch(`/message/${messageId}`, { text: trimmed });
             if (res.data?.success && onMessageEdited) {
                 onMessageEdited({
-                    messageId: message!._id,
+                    messageId,
                     text: trimmed,
                     isEdited: true,
                     editedAt: res.data?.data?.editedAt || new Date().toISOString(),
@@ -125,9 +131,13 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            await API.delete(`/message/${message!._id}`);
+                            if (!messageId) {
+                                throw new Error("Message is unavailable");
+                            }
+
+                            await API.delete(`/message/${messageId}`);
                             if (onMessageDeleted) {
-                                onMessageDeleted(message!._id);
+                                onMessageDeleted(messageId);
                             }
                             onClose();
                         } catch (err) {
@@ -141,20 +151,20 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
 
     const handleReact = useCallback(
         (emoji: string) => {
-            if (onReact && message?._id) {
-                onReact(message._id, emoji);
+            if (onReact && messageId) {
+                onReact(messageId, emoji);
             }
             onClose();
         },
-        [message?._id, onClose, onReact]
+        [messageId, onClose, onReact]
     );
 
     const handleForward = useCallback(() => {
-        if (onForward && message?._id) {
-            onForward(message._id);
+        if (onForward && messageId) {
+            onForward(messageId);
         }
         onClose();
-    }, [message?._id, onClose, onForward]);
+    }, [messageId, onClose, onForward]);
 
     const handleReply = useCallback(() => {
         if (onReply && message) {
