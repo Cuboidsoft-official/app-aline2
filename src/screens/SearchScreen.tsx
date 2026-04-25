@@ -75,7 +75,7 @@ const TAB_LABELS = {
   services: "services",
 } as const;
 
-const SearchScreen = ({ navigation }: any) => {
+const SearchScreen = ({ navigation, route }: any) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
   const accentColor = colors.primary;
@@ -89,7 +89,7 @@ const SearchScreen = ({ navigation }: any) => {
   const [discoverServices, setDiscoverServices] = useState<ServiceItem[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [trendingHashtags, setTrendingHashtags] = useState<TrendingHashtag[]>([]);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(String(route?.params?.initialQuery || "").trim());
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -169,6 +169,16 @@ const SearchScreen = ({ navigation }: any) => {
       init();
     }, [init])
   );
+
+  useEffect(() => {
+    const nextQuery = String(route?.params?.initialQuery || "").trim();
+    if (!nextQuery) {
+      return;
+    }
+
+    setSearch(nextQuery);
+    navigation.setParams?.({ initialQuery: undefined });
+  }, [navigation, route?.params?.initialQuery]);
 
   useEffect(() => {
     if (!search.trim()) {

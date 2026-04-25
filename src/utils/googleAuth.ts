@@ -5,10 +5,13 @@ import { API } from "../api/api";
 import { setStoredSession } from "./authSession";
 import { registerPushToken } from "./pushRegistration";
 
+const GOOGLE_WEB_CLIENT_ID_FALLBACK =
+  "698129700638-96n6dv6rp9sj1l1qeevs608pbioju3hd.apps.googleusercontent.com";
+
 let isConfigured = false;
 
 const getGoogleConfig = () => {
-  const webClientId = String(GOOGLE_WEB_CLIENT_ID || "").trim();
+  const webClientId = String(GOOGLE_WEB_CLIENT_ID || GOOGLE_WEB_CLIENT_ID_FALLBACK || "").trim();
   const iosClientId = String(GOOGLE_IOS_CLIENT_ID || "").trim();
 
   if (!webClientId) {

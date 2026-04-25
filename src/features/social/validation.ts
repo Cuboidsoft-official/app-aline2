@@ -16,6 +16,7 @@ const MAX_LOCATION_LENGTH = 80;
 const MAX_MUSIC_LENGTH = 80;
 const MAX_HASHTAGS = 20;
 const MAX_MENTIONS = 20;
+const MAX_TAGGED_USERS = 20;
 const MAX_COLLABS = 3;
 const MAX_COMMENT_LENGTH = 2200;
 const MAX_STORY_TEXT_LENGTH = 180;
@@ -78,6 +79,17 @@ const normalizeMedia = (asset: MediaAsset): MediaAsset => {
     url: normalizedUrl,
     thumbnailUrl: normalizedThumb,
     altText: asset.altText ? cleanText(asset.altText) : undefined,
+    sensitiveContent: asset.sensitiveContent?.isSensitive
+      ? {
+          isSensitive: true,
+          blur: asset.sensitiveContent.blur !== false,
+          label: asset.sensitiveContent.label ? cleanText(asset.sensitiveContent.label) : undefined,
+          confidence:
+            typeof asset.sensitiveContent.confidence === "number"
+              ? asset.sensitiveContent.confidence
+              : undefined,
+        }
+      : undefined,
   };
 };
 
@@ -105,6 +117,39 @@ const normalizeTagList = (values: string[] | undefined, maxItems: number, label:
   }
 
   return Array.from(unique);
+};
+
+const normalizeTaggedUsers = (values: CreatePostInput["taggedUsers"] | CreateReelInput["taggedUsers"]) => {
+  const unique = new Map<string, { user: string; username?: string }>();
+
+  for (const value of values || []) {
+    const user = cleanText(value?.user);
+    const username = cleanText(value?.username).replace(/^@/, "").toLowerCase() || undefined;
+
+    if (!user) {
+      continue;
+    }
+
+    if (username && !USERNAME_TOKEN.test(username)) {
+      throw new SocialValidationError("validation_error", `Invalid tagged user: ${value?.username}`);
+    }
+
+    if (!unique.has(user)) {
+      unique.set(user, {
+        user,
+        username,
+      });
+    }
+  }
+
+  if (unique.size > MAX_TAGGED_USERS) {
+    throw new SocialValidationError(
+      "validation_error",
+      `Too many tagged users. Maximum ${MAX_TAGGED_USERS} allowed.`,
+    );
+  }
+
+  return Array.from(unique.values());
 };
 
 const normalizeSelectedMusic = (music: SelectedMusicClip | undefined): SelectedMusicClip | undefined => {
@@ -194,6 +239,7 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
 
   const hashtags = normalizeTagList(input.hashtags, MAX_HASHTAGS, "hashtags");
   const mentions = normalizeTagList(input.mentions, MAX_MENTIONS, "mentions");
+  const taggedUsers = normalizeTaggedUsers(input.taggedUsers);
   const collaboratorIds = Array.from(new Set((input.collaboratorIds || []).map(cleanText).filter(Boolean))).slice(
     0,
     MAX_COLLABS,
@@ -207,6 +253,7 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
     media,
     hashtags,
     mentions,
+    taggedUsers,
     collaboratorIds,
   };
 };
@@ -230,10 +277,15 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
   const customEmojiStickerPlacement = input.customEmojiStickerPlacement;
   const customTextStickerPosition = input.customTextStickerPosition;
   const customEmojiStickerPosition = input.customEmojiStickerPosition;
+  const customImageStickerUrl = cleanText(input.customImageStickerUrl);
+  const customImageStickerLabel = cleanText(input.customImageStickerLabel);
+  const customImageStickerPosition = input.customImageStickerPosition;
   const customTextStickerScale = input.customTextStickerScale;
   const customEmojiStickerScale = input.customEmojiStickerScale;
+  const customImageStickerScale = input.customImageStickerScale;
   const customTextStickerRotation = input.customTextStickerRotation;
   const customEmojiStickerRotation = input.customEmojiStickerRotation;
+  const customImageStickerRotation = input.customImageStickerRotation;
   const customTextStickerTheme = input.customTextStickerTheme;
   const customTextStickerAlignment = input.customTextStickerAlignment;
   const extraEmojiStickers =
@@ -305,6 +357,7 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
 
   assertLength(customTextSticker, 60, "Story text sticker");
   assertLength(customEmojiSticker, 16, "Story emoji sticker");
+  assertLength(customImageStickerLabel, 40, "Story image sticker");
 
   if (extraEmojiStickers.length > MAX_STORY_EMOJI_STICKERS) {
     throw new SocialValidationError(
@@ -352,6 +405,18 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
   }
 
   if (
+    customImageStickerPosition &&
+    (typeof customImageStickerPosition.x !== "number" ||
+      typeof customImageStickerPosition.y !== "number" ||
+      customImageStickerPosition.x < 0 ||
+      customImageStickerPosition.x > 1 ||
+      customImageStickerPosition.y < 0 ||
+      customImageStickerPosition.y > 1)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid image sticker position.");
+  }
+
+  if (
     customTextStickerScale !== undefined &&
     (typeof customTextStickerScale !== "number" || customTextStickerScale < 0.6 || customTextStickerScale > 2)
   ) {
@@ -363,6 +428,13 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
     (typeof customEmojiStickerScale !== "number" || customEmojiStickerScale < 0.6 || customEmojiStickerScale > 2)
   ) {
     throw new SocialValidationError("validation_error", "Invalid emoji sticker size.");
+  }
+
+  if (
+    customImageStickerScale !== undefined &&
+    (typeof customImageStickerScale !== "number" || customImageStickerScale < 0.6 || customImageStickerScale > 2)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid image sticker size.");
   }
 
   if (
@@ -391,6 +463,17 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
     (typeof customEmojiStickerRotation !== "number" || customEmojiStickerRotation < -180 || customEmojiStickerRotation > 180)
   ) {
     throw new SocialValidationError("validation_error", "Invalid emoji sticker rotation.");
+  }
+
+  if (
+    customImageStickerRotation !== undefined &&
+    (typeof customImageStickerRotation !== "number" || customImageStickerRotation < -180 || customImageStickerRotation > 180)
+  ) {
+    throw new SocialValidationError("validation_error", "Invalid image sticker rotation.");
+  }
+
+  if (customImageStickerUrl && !URL_PROTOCOL_PATTERN.test(customImageStickerUrl)) {
+    throw new SocialValidationError("validation_error", "Story image sticker must use a valid URL.");
   }
 
   extraEmojiStickers.forEach((sticker) => {
@@ -442,6 +525,11 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
     customEmojiStickerPosition,
     customEmojiStickerScale,
     customEmojiStickerRotation,
+    customImageStickerUrl: customImageStickerUrl || undefined,
+    customImageStickerLabel: customImageStickerLabel || undefined,
+    customImageStickerPosition,
+    customImageStickerScale,
+    customImageStickerRotation,
     extraEmojiStickers: extraEmojiStickers.length ? extraEmojiStickers : undefined,
     hashtags,
     mentions,
@@ -468,6 +556,7 @@ export const normalizeReelInput = (input: CreateReelInput): CreateReelInput => {
     thumbnailUrl: input.thumbnailUrl ? cleanText(input.thumbnailUrl) : undefined,
     hashtags: normalizeTagList(input.hashtags, MAX_HASHTAGS, "hashtags"),
     mentions: normalizeTagList(input.mentions, MAX_MENTIONS, "mentions"),
+    taggedUsers: normalizeTaggedUsers(input.taggedUsers),
   };
 };
 

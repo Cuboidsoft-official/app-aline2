@@ -13,6 +13,7 @@ type SocialVideoProps = {
   controls?: boolean;
   resizeMode?: "cover" | "contain" | "stretch" | "none";
   onEnd?: () => void;
+  contentBlurRadius?: number;
   fallbackColor?: string;
 };
 
@@ -26,6 +27,7 @@ function SocialVideo({
   controls = false,
   resizeMode = "cover",
   onEnd,
+  contentBlurRadius = 0,
   fallbackColor = "#0f172a",
 }: SocialVideoProps) {
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
@@ -63,31 +65,43 @@ function SocialVideo({
         </Animated.View>
       ) : null}
       {resolvedUri && !videoFailed ? (
-        <Video
-          source={{ uri: resolvedUri }}
-          style={StyleSheet.absoluteFill}
-          resizeMode={resizeMode}
-          paused={paused}
-          muted={muted}
-          repeat={repeat}
-          controls={controls}
-          onEnd={onEnd}
-          poster={resolvedPosterUri || undefined}
-          onLoad={() => {
-            Animated.timing(placeholderOpacity, {
-              toValue: 0,
-              duration: 180,
-              useNativeDriver: true,
-            }).start();
-          }}
-          onError={() => {
-            placeholderOpacity.stopAnimation();
-            placeholderOpacity.setValue(1);
-            setVideoFailed(true);
-          }}
-          playWhenInactive={false}
-          ignoreSilentSwitch="ignore"
-        />
+        <>
+          <Video
+            source={{ uri: resolvedUri }}
+            style={StyleSheet.absoluteFill}
+            resizeMode={resizeMode}
+            paused={paused}
+            muted={muted}
+            repeat={repeat}
+            controls={controls}
+            onEnd={onEnd}
+            poster={resolvedPosterUri || undefined}
+            onLoad={() => {
+              Animated.timing(placeholderOpacity, {
+                toValue: 0,
+                duration: 180,
+                useNativeDriver: true,
+              }).start();
+            }}
+            onError={() => {
+              placeholderOpacity.stopAnimation();
+              placeholderOpacity.setValue(1);
+              setVideoFailed(true);
+            }}
+            playWhenInactive={false}
+            ignoreSilentSwitch="ignore"
+          />
+          {contentBlurRadius > 0 && resolvedPosterUri ? (
+            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+              <Image
+                source={{ uri: resolvedPosterUri }}
+                style={StyleSheet.absoluteFill}
+                resizeMode={resizeMode}
+                blurRadius={contentBlurRadius}
+              />
+            </View>
+          ) : null}
+        </>
       ) : null}
     </View>
   );

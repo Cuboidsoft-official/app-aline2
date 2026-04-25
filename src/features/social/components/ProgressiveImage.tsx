@@ -16,6 +16,7 @@ type ProgressiveImageProps = {
   style?: StyleProp<ViewStyle>;
   resizeMode?: ImageResizeMode;
   blurRadius?: number;
+  contentBlurRadius?: number;
   fallbackColor?: string;
 };
 
@@ -25,6 +26,7 @@ function ProgressiveImage({
   style,
   resizeMode = "cover",
   blurRadius = 14,
+  contentBlurRadius = 0,
   fallbackColor = "#0f172a",
 }: ProgressiveImageProps) {
   const imageOpacity = useRef(new Animated.Value(0)).current;
@@ -62,23 +64,35 @@ function ProgressiveImage({
         </>
       ) : null}
       {resolvedUri && !imageFailed ? (
-        <Animated.Image
-          source={{ uri: resolvedUri }}
-          style={[StyleSheet.absoluteFill, { opacity: imageOpacity }]}
-          resizeMode={resizeMode}
-          onLoad={() => {
-            Animated.timing(imageOpacity, {
-              toValue: 1,
-              duration: 180,
-              useNativeDriver: true,
-            }).start();
-          }}
-          onError={() => {
-            imageOpacity.stopAnimation();
-            imageOpacity.setValue(0);
-            setImageFailed(true);
-          }}
-        />
+        <>
+          <Animated.Image
+            source={{ uri: resolvedUri }}
+            style={[StyleSheet.absoluteFill, { opacity: imageOpacity }]}
+            resizeMode={resizeMode}
+            onLoad={() => {
+              Animated.timing(imageOpacity, {
+                toValue: 1,
+                duration: 180,
+                useNativeDriver: true,
+              }).start();
+            }}
+            onError={() => {
+              imageOpacity.stopAnimation();
+              imageOpacity.setValue(0);
+              setImageFailed(true);
+            }}
+          />
+          {contentBlurRadius > 0 ? (
+            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+              <Animated.Image
+                source={{ uri: resolvedUri }}
+                style={[StyleSheet.absoluteFill, { opacity: imageOpacity }]}
+                resizeMode={resizeMode}
+                blurRadius={contentBlurRadius}
+              />
+            </View>
+          ) : null}
+        </>
       ) : null}
     </View>
   );

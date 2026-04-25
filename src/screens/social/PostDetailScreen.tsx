@@ -79,6 +79,8 @@ function PostDetailScreen({ route, navigation }: any) {
   const musicPlayerRef = useRef(createSound());
   const musicTrackKeyRef = useRef("");
   const musicEndMsRef = useRef(0);
+  const musicStartMsRef = useRef(0);
+  const musicShouldLoopRef = useRef(false);
   const postTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     time: 0,
     timeout: null,
@@ -136,20 +138,32 @@ function PostDetailScreen({ route, navigation }: any) {
     : "";
 
   useEffect(() => {
+    musicStartMsRef.current = attachedMusicStartMs;
+    musicEndMsRef.current = attachedMusicDurationMs > 0 ? attachedMusicStartMs + attachedMusicDurationMs : 0;
+    musicShouldLoopRef.current = !!attachedMusicUrl && isMediaSoundEnabled && !activeSheet;
+  }, [activeSheet, attachedMusicDurationMs, attachedMusicStartMs, attachedMusicUrl, isMediaSoundEnabled]);
+
+  useEffect(() => {
     const player = musicPlayerRef.current;
 
     player.setSubscriptionDuration(0.1);
     player.addPlayBackListener((event: any) => {
       const playbackEndMs = musicEndMsRef.current;
+      const playbackStartMs = musicStartMsRef.current;
       const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
 
       if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
-        musicEndMsRef.current = 0;
-        player.pausePlayer().catch(() => undefined);
+        if (musicShouldLoopRef.current) {
+          player.seekToPlayer(playbackStartMs).then(() => player.resumePlayer()).catch(() => undefined);
+        } else {
+          player.pausePlayer().catch(() => undefined);
+        }
       }
     });
     player.addPlaybackEndListener(() => {
-      musicEndMsRef.current = 0;
+      if (musicShouldLoopRef.current) {
+        player.seekToPlayer(musicStartMsRef.current).then(() => player.resumePlayer()).catch(() => undefined);
+      }
     });
 
     return () => {
@@ -208,9 +222,6 @@ function PostDetailScreen({ route, navigation }: any) {
       }
 
       musicTrackKeyRef.current = attachedMusicTrackKey;
-      musicEndMsRef.current =
-        attachedMusicDurationMs > 0 ? attachedMusicStartMs + attachedMusicDurationMs : 0;
-
       await player.startPlayer(attachedMusicUrl);
       await player.seekToPlayer(attachedMusicStartMs);
       await player.setVolume(1);
@@ -374,6 +385,10 @@ function PostDetailScreen({ route, navigation }: any) {
   const renderMediaAsset = (asset: Post["media"][number], key?: string) => {
     const assetUrl = normalizeMediaUrl(asset?.url);
     const posterUrl = normalizeMediaUrl(asset?.thumbnailUrl || asset?.url);
+    const imageResizeMode =
+      asset?.width && asset?.height && Math.abs(asset.width / Math.max(1, asset.height) - 1) > 0.12
+        ? "contain"
+        : "cover";
 
     if (!assetUrl) {
       return <View key={key} style={styles.image} />;
@@ -381,30 +396,53 @@ function PostDetailScreen({ route, navigation }: any) {
 
     if (asset.mediaType === "video") {
       return (
-        <SocialVideo
-          key={key || asset.id}
-          uri={assetUrl}
-          posterUri={posterUrl}
-          style={styles.image}
-          muted={!isMediaSoundEnabled || !!post?.music?.previewUrl}
-          repeat
-        />
+        <View key={key || asset.id}>
+          <SocialVideo
+            uri={assetUrl}
+            posterUri={posterUrl}
+            style={styles.image}
+            muted={!isMediaSoundEnabled || !!post?.music?.previewUrl}
+            repeat
+            contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+          />
+          {asset.sensitiveContent?.isSensitive ? (
+            <View style={styles.sensitiveBadge}>
+              <Text style={styles.sensitiveBadgeText}>
+                {asset.sensitiveContent.label ? `${asset.sensitiveContent.label} sensitive content` : "Sensitive content"}
+              </Text>
+            </View>
+          ) : null}
+        </View>
       );
     }
 
     const rawImage = (
-      <ProgressiveImage
-        key={key || asset.id}
-        uri={assetUrl}
-        previewUri={posterUrl}
-        style={styles.image}
-      />
+      <View key={key || asset.id}>
+        <ProgressiveImage
+          uri={assetUrl}
+          previewUri={posterUrl}
+          style={styles.image}
+          resizeMode={imageResizeMode}
+          contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+        />
+        {asset.sensitiveContent?.isSensitive ? (
+          <View style={styles.sensitiveBadge}>
+            <Text style={styles.sensitiveBadgeText}>
+              {asset.sensitiveContent.label ? `${asset.sensitiveContent.label} sensitive content` : "Sensitive content"}
+            </Text>
+          </View>
+        ) : null}
+      </View>
     );
 
-    if (post?.filterPreset && ColorMatrix) {
+    if (post?.filterPreset && ColorMatrix && !asset.sensitiveContent?.isSensitive) {
       const activeFilter = PHOTO_FILTER_LIST.find((filter) => filter.id === post.filterPreset);
       if (activeFilter?.matrix) {
-        return <ColorMatrix key={key || asset.id} matrix={activeFilter.matrix}>{rawImage}</ColorMatrix>;
+        return (
+          <ColorMatrix key={key || asset.id} matrix={activeFilter.matrix}>
+            <Image source={{ uri: assetUrl }} style={styles.image} resizeMode={imageResizeMode} />
+          </ColorMatrix>
+        );
       }
     }
 
@@ -717,10 +755,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  title: { fontSize: 18, fontWeight: "700", color: "#111" },
+  title: { fontSize: 16, fontWeight: "700", color: "#111" },
   headerActions: { flexDirection: "row", alignItems: "center" },
   headerActionGap: { marginRight: 10, padding: 2 },
-  editButton: { fontSize: 15, color: "#3345d1", fontWeight: "700" },
+  editButton: { fontSize: 13, color: "#3345d1", fontWeight: "700" },
   mediaSurface: { position: "relative" },
   image: { width: "100%", height: 320, backgroundColor: "#0f172a" },
   stickerLayer: { ...StyleSheet.absoluteFillObject },
@@ -760,6 +798,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
+  sensitiveBadge: {
+    position: "absolute",
+    left: 14,
+    bottom: 14,
+    backgroundColor: "rgba(15,23,42,0.8)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  sensitiveBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "capitalize",
+  },
   body: { padding: 14 },
   userRow: {
     marginBottom: 10,
@@ -779,7 +832,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   userName: {
-    fontSize: 14.5,
+    fontSize: 13.5,
     fontWeight: "700",
   },
   userMeta: {
@@ -790,9 +843,9 @@ const styles = StyleSheet.create({
   meta: { color: "#666", fontSize: 12, marginBottom: 4 },
   actionRow: { flexDirection: "row", alignItems: "center", marginTop: 8, marginBottom: 10 },
   actionIcon: { flexDirection: "row", alignItems: "center", marginRight: 18 },
-  actionCount: { marginLeft: 6, color: "#111", fontWeight: "700", fontSize: 13 },
+  actionCount: { marginLeft: 6, color: "#111", fontWeight: "700", fontSize: 12 },
   bookmarkIcon: { marginLeft: "auto" },
-  label: { marginTop: 14, marginBottom: 6, fontSize: 13, fontWeight: "700", color: "#111" },
+  label: { marginTop: 14, marginBottom: 6, fontSize: 12, fontWeight: "700", color: "#111" },
   helperText: {
     marginTop: 8,
     color: "#666",

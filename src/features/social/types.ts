@@ -32,8 +32,10 @@ export interface SelectedMusicClip {
   artist?: string;
   artworkUrl?: string;
   previewUrl?: string;
+  streamUrl?: string;
   externalUrl?: string;
   source?: string;
+  youtubeVideoId?: string;
   isOriginal?: boolean;
   duration: number;
   clipStartTime?: number;
@@ -49,6 +51,12 @@ export interface MediaAsset {
   durationMs?: number;
   width?: number;
   height?: number;
+  sensitiveContent?: {
+    isSensitive: boolean;
+    blur?: boolean;
+    label?: string;
+    confidence?: number;
+  };
 }
 
 export type PostType = "photo" | "video" | "carousel";
@@ -96,7 +104,7 @@ export interface StoryQuestion {
   responseCount: number;
 }
 
-export type StoryStickerType = "text" | "emoji";
+export type StoryStickerType = "text" | "emoji" | "image";
 export type StoryStickerPlacement = "top_left" | "top_right" | "center" | "bottom_left" | "bottom_right";
 export type StoryStickerTextAlignment = "left" | "center" | "right";
 export type StoryTextStickerTheme = "dark" | "light" | "accent" | "outline";
@@ -106,6 +114,7 @@ export interface StorySticker {
   id: string;
   type: StoryStickerType;
   text: string;
+  mediaUrl?: string;
   position: {
     x: number;
     y: number;
@@ -257,6 +266,11 @@ export interface StoryViewerEntry {
   liked: boolean;
 }
 
+export interface TaggedUserInput {
+  user: string;
+  username?: string;
+}
+
 export interface CreatePostInput {
   type: PostType;
   caption: string;
@@ -265,6 +279,7 @@ export interface CreatePostInput {
   music?: SelectedMusicClip;
   hashtags?: string[];
   mentions?: string[];
+  taggedUsers?: TaggedUserInput[];
   collaboratorIds?: string[];
   settings?: Partial<PostSettings>;
   filterPreset?: string;
@@ -294,6 +309,11 @@ export interface CreateStoryInput {
   customEmojiStickerPosition?: { x: number; y: number };
   customEmojiStickerScale?: number;
   customEmojiStickerRotation?: number;
+  customImageStickerUrl?: string;
+  customImageStickerLabel?: string;
+  customImageStickerPosition?: { x: number; y: number };
+  customImageStickerScale?: number;
+  customImageStickerRotation?: number;
   extraEmojiStickers?: Array<{
     text: string;
     position: { x: number; y: number };
@@ -316,6 +336,7 @@ export interface CreateReelInput {
   music?: SelectedMusicClip;
   hashtags?: string[];
   mentions?: string[];
+  taggedUsers?: TaggedUserInput[];
   location?: string;
 }
 

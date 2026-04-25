@@ -6,6 +6,7 @@ import {
   FlatList,
   ImageBackground,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -20,7 +21,9 @@ import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
 import { createSound } from "react-native-nitro-sound";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../../components/AppBottomDock";
 import CommentThreadSheet from "../../features/social/components/CommentThreadSheet";
 import ShareTargetsList, { ShareTarget } from "../../features/social/components/ShareTargetsList";
 import SocialVideo from "../../features/social/components/SocialVideo";
@@ -70,6 +73,7 @@ const formatSwipeMusicLabel = (music?: Swipe["music"]): string => {
 };
 
 function SwipesScreen({ navigation, route }: any) {
+  const insets = useSafeAreaInsets();
   const [viewportHeight, setViewportHeight] = useState(height);
   const [swipes, setSwipes] = useState<Swipe[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +99,8 @@ function SwipesScreen({ navigation, route }: any) {
   const swipeMusicPlayerRef = useRef(createSound());
   const swipeMusicTrackKeyRef = useRef("");
   const swipeMusicEndMsRef = useRef(0);
+  const swipeMusicStartMsRef = useRef(0);
+  const swipeMusicShouldLoopRef = useRef(false);
   const swipeTapRef = useRef<{ id: string; time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     id: "",
     time: 0,
@@ -110,6 +116,15 @@ function SwipesScreen({ navigation, route }: any) {
     ? `${activeSwipe.id}:${activeSwipeMusicUrl}:${activeSwipeMusicStartMs}:${activeSwipeMusicDurationMs}`
     : "";
   const isSwipePlaybackEnabled = isSwipeSoundEnabled && !activeSheet && isScreenFocused;
+  const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
+    + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
+
+  useEffect(() => {
+    swipeMusicStartMsRef.current = activeSwipeMusicStartMs;
+    swipeMusicEndMsRef.current =
+      activeSwipeMusicDurationMs > 0 ? activeSwipeMusicStartMs + activeSwipeMusicDurationMs : 0;
+    swipeMusicShouldLoopRef.current = !!activeSwipeMusicUrl && isSwipePlaybackEnabled;
+  }, [activeSwipeMusicDurationMs, activeSwipeMusicStartMs, activeSwipeMusicUrl, isSwipePlaybackEnabled]);
 
   const isBusy = (type: "like" | "save" | "share", swipeId: string): boolean =>
     !!busyActions[`${type}_${swipeId}`];
@@ -555,15 +570,21 @@ function SwipesScreen({ navigation, route }: any) {
     player.setSubscriptionDuration(0.1);
     player.addPlayBackListener((event: any) => {
       const playbackEndMs = swipeMusicEndMsRef.current;
+      const playbackStartMs = swipeMusicStartMsRef.current;
       const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
 
       if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
-        swipeMusicEndMsRef.current = 0;
-        player.pausePlayer().catch(() => undefined);
+        if (swipeMusicShouldLoopRef.current) {
+          player.seekToPlayer(playbackStartMs).then(() => player.resumePlayer()).catch(() => undefined);
+        } else {
+          player.pausePlayer().catch(() => undefined);
+        }
       }
     });
     player.addPlaybackEndListener(() => {
-      swipeMusicEndMsRef.current = 0;
+      if (swipeMusicShouldLoopRef.current) {
+        player.seekToPlayer(swipeMusicStartMsRef.current).then(() => player.resumePlayer()).catch(() => undefined);
+      }
     });
 
     return () => {
@@ -618,9 +639,6 @@ function SwipesScreen({ navigation, route }: any) {
       }
 
       swipeMusicTrackKeyRef.current = activeSwipeMusicTrackKey;
-      swipeMusicEndMsRef.current =
-        activeSwipeMusicDurationMs > 0 ? activeSwipeMusicStartMs + activeSwipeMusicDurationMs : 0;
-
       await player.startPlayer(activeSwipeMusicUrl);
       await player.seekToPlayer(activeSwipeMusicStartMs);
       await player.setVolume(1);
@@ -657,7 +675,15 @@ function SwipesScreen({ navigation, route }: any) {
             paused={!isActive || !!activeSheet || !isScreenFocused}
             muted={!isSwipePlaybackEnabled || hasAttachedMusic}
             repeat
+            contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
           />
+          {item.media.sensitiveContent?.isSensitive ? (
+            <View style={styles.sensitiveBadge}>
+              <Text style={styles.sensitiveBadgeText}>
+                {item.media.sensitiveContent.label ? `${item.media.sensitiveContent.label} sensitive content` : "Sensitive content"}
+              </Text>
+            </View>
+          ) : null}
           {likeBurstSwipeId === item.id ? (
             <View pointerEvents="none" style={styles.likeBurstOverlay}>
               <Icon name="heart" size={92} color="rgba(255,255,255,0.92)" />
@@ -674,7 +700,7 @@ function SwipesScreen({ navigation, route }: any) {
         </Pressable>
         <LinearGradient colors={["rgba(0,0,0,0.74)", "rgba(0,0,0,0.12)", "transparent"]} style={styles.topGradient} />
         <LinearGradient colors={["transparent", "rgba(0,0,0,0.42)", "rgba(0,0,0,0.88)"]} style={styles.bottomGradient} />
-        <View style={styles.overlay}>
+        <View style={[styles.overlay, { paddingBottom: bottomDockPadding + 12 }]}>
           <View style={styles.topBar}>
             <Text style={styles.screenTitle}>Swipes</Text>
             <TouchableOpacity style={styles.createButton} onPress={() => navigation.navigate("Create", { initialTab: "swipe" })}>
@@ -771,9 +797,9 @@ function SwipesScreen({ navigation, route }: any) {
 
   return (
     <View style={styles.container}>
-        <FlatList
-          ref={swipeListRef}
-          data={swipes}
+      <FlatList
+        ref={swipeListRef}
+        data={swipes}
         keyExtractor={(item) => item.id}
         renderItem={renderSwipe}
         onLayout={onListLayout}
@@ -810,6 +836,7 @@ function SwipesScreen({ navigation, route }: any) {
           }
         }}
       />
+      <AppBottomDock navigation={navigation} activeRouteName="Swipes" />
 
       <Modal visible={!!activeSheet} transparent animationType="slide" onRequestClose={closeSheet}>
         <Pressable style={styles.sheetBackdrop} onPress={closeSheet} />
@@ -1041,6 +1068,21 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 11.5,
     fontWeight: "800",
+  },
+  sensitiveBadge: {
+    position: "absolute",
+    left: 16,
+    bottom: 56,
+    backgroundColor: "rgba(15,23,42,0.82)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  sensitiveBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "capitalize",
   },
   topGradient: { ...StyleSheet.absoluteFillObject, bottom: undefined, height: 240 },
   bottomGradient: { ...StyleSheet.absoluteFillObject, top: undefined, height: 360 },

@@ -27,6 +27,7 @@ import {
   fetchChatConversationDetails,
   promoteGroupChatAdmin,
   removeGroupChatMember,
+  sendChatMessage,
   transferGroupChatOwnership,
   updateConversationWallpaper,
   updateGroupChatConversation,
@@ -283,6 +284,27 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
     () => new Set(Array.isArray(conversation?.groupAdmins) ? conversation.groupAdmins.map((entry) => String(entry)) : []),
     [conversation]
   );
+  const actingUserLabel = useMemo(() => {
+    const currentMember = members.find((member) => String(member._id) === String(currentUserId || ""));
+    return currentMember?.username || currentMember?.name || "Admin";
+  }, [currentUserId, members]);
+
+  const sendGroupSystemMessage = useCallback(async (text: string) => {
+    const messageText = String(text || "").trim();
+    if (!conversationId || !messageText) {
+      return;
+    }
+
+    try {
+      await sendChatMessage({
+        conversationId,
+        text: messageText,
+        messageType: "system",
+      });
+    } catch (error) {
+      console.log("group system message error:", error);
+    }
+  }, [conversationId]);
 
   const openAddMembers = useCallback(async () => {
     if (availableMemberSlots <= 0) {
@@ -336,10 +358,16 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
 
     try {
       setSavingMembers(true);
+      const addedMembers = candidateUsers
+        .filter((candidate) => selectedUsers.includes(candidate._id))
+        .map((candidate) => candidate.username || candidate.name || "member");
       await addGroupChatMembers({
         conversationId,
         memberIds: selectedUsers,
       });
+      if (addedMembers.length) {
+        await sendGroupSystemMessage(`${actingUserLabel} added ${addedMembers.join(", ")}`);
+      }
       setAddMembersVisible(false);
       setCandidateUsers([]);
       setSelectedUsers([]);
@@ -349,7 +377,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
     } finally {
       setSavingMembers(false);
     }
-  }, [availableMemberSlots, conversationId, loadConversation, selectedUsers]);
+  }, [actingUserLabel, availableMemberSlots, candidateUsers, conversationId, loadConversation, selectedUsers, sendGroupSystemMessage]);
 
   const submitGroupName = useCallback(async () => {
     if (!groupNameDraft.trim()) {
@@ -359,10 +387,14 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
 
     try {
       setSavingName(true);
+      const nextGroupName = groupNameDraft.trim();
       await updateGroupChatConversation({
         conversationId,
-        groupName: groupNameDraft.trim(),
+        groupName: nextGroupName,
       });
+      if (nextGroupName && nextGroupName !== String(conversation?.groupName || "").trim()) {
+        await sendGroupSystemMessage(`${actingUserLabel} changed group name to ${nextGroupName}`);
+      }
       await loadConversation();
       setEditingName(false);
     } catch (error) {
@@ -370,11 +402,13 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
     } finally {
       setSavingName(false);
     }
-  }, [conversationId, groupNameDraft, loadConversation]);
+  }, [actingUserLabel, conversation?.groupName, conversationId, groupNameDraft, loadConversation, sendGroupSystemMessage]);
 
   const submitGroupMeta = useCallback(async () => {
     try {
       setSavingMeta(true);
+      const previousPermission = conversation?.groupMessagePermission || "everyone";
+      const previousVisibility = conversation?.groupVisibility || "private";
       await updateGroupChatConversation({
         conversationId,
         groupVisibility: groupVisibilityDraft,
@@ -385,13 +419,18 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
           .map((entry) => entry.trim())
           .filter(Boolean),
       });
+      if (previousPermission !== groupMessagePermissionDraft || previousVisibility !== groupVisibilityDraft) {
+        const scopeLabel = groupVisibilityDraft === "public" ? "channel" : "group";
+        const permissionLabel = groupMessagePermissionDraft === "admins" ? "admins only" : "everyone";
+        await sendGroupSystemMessage(`${actingUserLabel} updated ${scopeLabel} permissions to ${permissionLabel}`);
+      }
       await loadConversation();
     } catch (error) {
       Alert.alert("Unable to update group", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setSavingMeta(false);
     }
-  }, [conversationId, groupDescriptionDraft, groupLinksDraft, groupMessagePermissionDraft, groupVisibilityDraft, loadConversation]);
+  }, [actingUserLabel, conversation?.groupMessagePermission, conversation?.groupVisibility, conversationId, groupDescriptionDraft, groupLinksDraft, groupMessagePermissionDraft, groupVisibilityDraft, loadConversation, sendGroupSystemMessage]);
 
   const handleThemeChanged = useCallback((themeId: string) => {
     setCurrentTheme(themeId);
@@ -412,6 +451,11 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
       const nextWallpaper = String(response?.wallpaperUrl || "");
       setChatWallpaper(nextWallpaper);
       setConversation((prev) => prev ? { ...prev, chatWallpaper: nextWallpaper } : prev);
+      await sendGroupSystemMessage(
+        wallpaperUrl
+          ? `${actingUserLabel} changed wallpaper`
+          : `${actingUserLabel} removed wallpaper`,
+      );
       Alert.alert(
         wallpaperUrl ? "Wallpaper updated" : "Wallpaper removed",
         wallpaperUrl ? "The group chat wallpaper is ready." : "The group chat is back to the default background."
@@ -421,7 +465,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
     } finally {
       setSavingWallpaper(false);
     }
-  }, [conversationId]);
+  }, [actingUserLabel, conversationId, sendGroupSystemMessage]);
 
   const pickWallpaper = useCallback(async () => {
     try {
@@ -455,13 +499,14 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
       const nextWallpaper = String(response?.wallpaperUrl || uploadedUrl || "");
       setChatWallpaper(nextWallpaper);
       setConversation((prev) => prev ? { ...prev, chatWallpaper: nextWallpaper } : prev);
+      await sendGroupSystemMessage(`${actingUserLabel} changed wallpaper`);
       Alert.alert("Wallpaper updated", "The group chat wallpaper is ready.");
     } catch (error) {
       Alert.alert("Unable to update wallpaper", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setSavingWallpaper(false);
     }
-  }, [conversationId]);
+  }, [actingUserLabel, conversationId, sendGroupSystemMessage]);
 
   const toggleMuteState = useCallback(async () => {
     if (!currentUserId || !conversationId) {
@@ -555,13 +600,14 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
         conversationId,
         groupAvatar,
       });
+      await sendGroupSystemMessage(`${actingUserLabel} changed group icon`);
       await loadConversation();
     } catch (error) {
       Alert.alert("Unable to update photo", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setSavingAvatar(false);
     }
-  }, [conversationId, loadConversation]);
+  }, [actingUserLabel, conversationId, loadConversation, sendGroupSystemMessage]);
 
   const handleRemoveMember = useCallback((member: ChatUser) => {
     Alert.alert(
@@ -578,6 +624,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
                 conversationId,
                 memberId: member._id,
               });
+              await sendGroupSystemMessage(`${actingUserLabel} removed ${member?.username || member?.name || "member"}`);
               await loadConversation();
             } catch (error) {
               Alert.alert("Unable to remove member", getReadableApiErrorMessage(error, "Please try again."));
@@ -586,7 +633,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
         },
       ]
     );
-  }, [conversationId, loadConversation]);
+  }, [actingUserLabel, conversationId, loadConversation, sendGroupSystemMessage]);
 
   const handleLeaveGroup = useCallback(() => {
     Alert.alert(

@@ -2,8 +2,11 @@ import { Asset, CameraOptions, ImageLibraryOptions, launchCamera, launchImageLib
 
 import { API } from "../../api/api";
 import { getReadableApiErrorMessage, isModerationBlockedError } from "../../api/networkErrors";
-import { checkChatMediaModeration } from "../../utils/chatApi";
-import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../../utils/permissions";
+import {
+  ensureCameraPermission,
+  ensureMicrophonePermission,
+  resolveCameraCaptureMediaType,
+} from "../../utils/permissions";
 import { MediaAsset } from "./types";
 
 export type ComposerAsset = {
@@ -17,6 +20,35 @@ export type ComposerAsset = {
   height?: number;
   durationMs?: number;
   thumbnailUrl?: string;
+};
+
+export type UploadComposerAssetsOptions = {
+  onProgress?: (progress: number) => void;
+};
+
+const mapSensitiveContent = (moderation: any) => {
+  const status = String(moderation?.status || "").trim().toLowerCase();
+  const topLabel = String(moderation?.topLabel || moderation?.reason || "").trim().toLowerCase();
+  const confidence = Number(moderation?.confidence);
+  const isSensitive =
+    moderation?.isSensitive === true
+    || status === "blocked"
+    || status === "review"
+    || topLabel === "porn"
+    || topLabel === "hentai"
+    || topLabel === "sexy"
+    || topLabel === "nudity";
+
+  if (!isSensitive) {
+    return undefined;
+  }
+
+  return {
+    isSensitive: true,
+    blur: true,
+    label: topLabel || "sensitive",
+    confidence: Number.isFinite(confidence) ? confidence : undefined,
+  };
 };
 
 const HTTP_URL_PATTERN = /^https?:\/\//i;
@@ -72,17 +104,7 @@ const runComposerModerationPrecheck = async (asset: ComposerAsset): Promise<void
   if (asset.source !== "local") {
     return;
   }
-
-  const messageType = asset.mediaType === "video" ? "video" : "image";
-
-  await checkChatMediaModeration({
-    file: {
-      uri: asset.uri,
-      name: sanitizeFileName(asset.fileName, messageType === "video" ? "upload.mp4" : "upload.jpg"),
-      type: asset.mimeType || (messageType === "video" ? "video/mp4" : "image/jpeg"),
-    },
-    messageType,
-  });
+  return;
 };
 
 export const createRemoteComposerAsset = (
@@ -125,6 +147,16 @@ export const captureComposerAssets = async (options: CameraOptions): Promise<Com
     return [];
   }
 
+  if (resolvedMediaType === "video") {
+    const hasMicrophonePermission = await ensureMicrophonePermission(
+      "Allow Aline2 to use your microphone when recording videos.",
+    );
+
+    if (!hasMicrophonePermission) {
+      throw new Error("Microphone permission is required to record videos.");
+    }
+  }
+
   const result = await launchCamera({
     ...options,
     mediaType: resolvedMediaType,
@@ -141,13 +173,21 @@ export const captureComposerAssets = async (options: CameraOptions): Promise<Com
   return (result.assets || []).map(normalizeAsset);
 };
 
-const uploadSingleImage = async (asset: ComposerAsset): Promise<MediaAsset> => {
+const uploadSingleImage = async (
+  asset: ComposerAsset,
+  onProgress?: UploadComposerAssetsOptions["onProgress"],
+): Promise<MediaAsset> => {
   try {
     const body = new FormData();
     body.append("image", toFormDataFile(asset) as never);
 
     const res = await API.post("/upload/image", body, {
       headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (event) => {
+        if (typeof event?.total === "number" && event.total > 0) {
+          onProgress?.(Math.max(0, Math.min(1, event.loaded / event.total)));
+        }
+      },
     });
 
     if (!res?.data?.url) {
@@ -160,6 +200,7 @@ const uploadSingleImage = async (asset: ComposerAsset): Promise<MediaAsset> => {
       url: res.data.url,
       width: asset.width,
       height: asset.height,
+      sensitiveContent: mapSensitiveContent(res?.data?.moderation),
     };
   } catch (error) {
     if (isModerationBlockedError(error)) {
@@ -169,7 +210,10 @@ const uploadSingleImage = async (asset: ComposerAsset): Promise<MediaAsset> => {
   }
 };
 
-const uploadMultipleImages = async (assets: ComposerAsset[]): Promise<MediaAsset[]> => {
+const uploadMultipleImages = async (
+  assets: ComposerAsset[],
+  onProgress?: UploadComposerAssetsOptions["onProgress"],
+): Promise<MediaAsset[]> => {
   try {
     const body = new FormData();
     assets.forEach((asset) => {
@@ -178,6 +222,11 @@ const uploadMultipleImages = async (assets: ComposerAsset[]): Promise<MediaAsset
 
     const res = await API.post("/upload/images", body, {
       headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (event) => {
+        if (typeof event?.total === "number" && event.total > 0) {
+          onProgress?.(Math.max(0, Math.min(1, event.loaded / event.total)));
+        }
+      },
     });
 
     const uploaded = Array.isArray(res?.data?.urls) ? res.data.urls : [];
@@ -195,6 +244,7 @@ const uploadMultipleImages = async (assets: ComposerAsset[]): Promise<MediaAsset
       url: uploaded[index].url,
       width: asset.width,
       height: asset.height,
+      sensitiveContent: mapSensitiveContent(uploaded[index]?.moderation),
     }));
   } catch (error) {
     if (isModerationBlockedError(error)) {
@@ -204,7 +254,10 @@ const uploadMultipleImages = async (assets: ComposerAsset[]): Promise<MediaAsset
   }
 };
 
-const uploadSingleVideo = async (asset: ComposerAsset): Promise<MediaAsset> => {
+const uploadSingleVideo = async (
+  asset: ComposerAsset,
+  onProgress?: UploadComposerAssetsOptions["onProgress"],
+): Promise<MediaAsset> => {
   try {
     const body = new FormData();
     body.append("video", toFormDataFile(asset) as never);
@@ -212,6 +265,11 @@ const uploadSingleVideo = async (asset: ComposerAsset): Promise<MediaAsset> => {
     const res = await API.post("/upload/video", body, {
       headers: { "Content-Type": "multipart/form-data" },
       timeout: 120000,
+      onUploadProgress: (event) => {
+        if (typeof event?.total === "number" && event.total > 0) {
+          onProgress?.(Math.max(0, Math.min(1, event.loaded / event.total)));
+        }
+      },
     });
 
     if (!res?.data?.url) {
@@ -226,6 +284,7 @@ const uploadSingleVideo = async (asset: ComposerAsset): Promise<MediaAsset> => {
       durationMs: typeof res?.data?.duration === "number" ? res.data.duration * 1000 : asset.durationMs,
       width: typeof res?.data?.width === "number" ? res.data.width : asset.width,
       height: typeof res?.data?.height === "number" ? res.data.height : asset.height,
+      sensitiveContent: mapSensitiveContent(res?.data?.moderation),
     };
   } catch (error) {
     if (isModerationBlockedError(error)) {
@@ -235,15 +294,23 @@ const uploadSingleVideo = async (asset: ComposerAsset): Promise<MediaAsset> => {
   }
 };
 
-export const uploadComposerAssets = async (assets: ComposerAsset[]): Promise<MediaAsset[]> => {
+export const uploadComposerAssets = async (
+  assets: ComposerAsset[],
+  options: UploadComposerAssetsOptions = {},
+): Promise<MediaAsset[]> => {
   if (!assets.length) {
     return [];
   }
+
+  const reportProgress = (value: number) => {
+    options.onProgress?.(Math.max(0, Math.min(1, value)));
+  };
 
   const remoteAssets = assets.filter((asset) => asset.source === "remote").map(toRemoteMediaAsset);
   const localAssets = assets.filter((asset) => asset.source === "local");
 
   if (!localAssets.length) {
+    reportProgress(1);
     return remoteAssets;
   }
 
@@ -265,12 +332,13 @@ export const uploadComposerAssets = async (assets: ComposerAsset[]): Promise<Med
   let uploadedLocalAssets: MediaAsset[] = [];
 
   if (mediaType === "image" && localAssets.length > 1) {
-    uploadedLocalAssets = await uploadMultipleImages(localAssets);
+    uploadedLocalAssets = await uploadMultipleImages(localAssets, reportProgress);
   } else if (mediaType === "image") {
-    uploadedLocalAssets = [await uploadSingleImage(firstLocalAsset)];
+    uploadedLocalAssets = [await uploadSingleImage(firstLocalAsset, reportProgress)];
   } else {
-    uploadedLocalAssets = [await uploadSingleVideo(firstLocalAsset)];
+    uploadedLocalAssets = [await uploadSingleVideo(firstLocalAsset, reportProgress)];
   }
 
+  reportProgress(1);
   return [...remoteAssets, ...uploadedLocalAssets];
 };

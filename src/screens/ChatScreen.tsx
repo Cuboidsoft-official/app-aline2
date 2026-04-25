@@ -142,6 +142,7 @@ interface GroupMeta {
   groupName: string;
   groupAvatar: string;
   memberCount: number;
+  groupVisibility: "private" | "public";
   groupMessagePermission: "everyone" | "admins";
   isGroupAdmin: boolean;
 }
@@ -239,6 +240,9 @@ const parseLocationMessage = (text: string | undefined | null): LocationPayload 
 
   return { label, url };
 };
+
+const normalizeGroupVisibility = (value: any, isPublic = false): "private" | "public" =>
+  isPublic || String(value || "").trim().toLowerCase() === "public" ? "public" : "private";
 
 const getDocumentPickerMessage = (error: any): string => {
   if (!isErrorWithCode(error)) {
@@ -532,6 +536,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     groupName: groupName || "Group chat",
     groupAvatar: groupAvatar || "",
     memberCount: Number(memberCount || 0),
+    groupVisibility: normalizeGroupVisibility(groupConversation?.groupVisibility, Boolean(groupConversation?.isPublicGroup) || String(groupConversation?.type || "").trim().toLowerCase() === "channel"),
     groupMessagePermission: (groupConversation?.groupMessagePermission || "everyone") as "everyone" | "admins",
     isGroupAdmin: Boolean(groupConversation?.isGroupOwner || groupConversation?.isGroupAdmin),
   });
@@ -660,6 +665,7 @@ const ChatScreen = ({ navigation, route }: any) => {
           groupName: nextConversation?.groupName || "Group chat",
           groupAvatar: nextConversation?.groupAvatar || "",
           memberCount: Number(nextConversation?.memberCount || nextConversation?.members?.length || 0),
+          groupVisibility: normalizeGroupVisibility(nextConversation?.groupVisibility, Boolean(nextConversation?.isPublicGroup) || String(nextConversation?.type || "").trim().toLowerCase() === "channel"),
           groupMessagePermission: (nextConversation?.groupMessagePermission || "everyone") as "everyone" | "admins",
           isGroupAdmin: Boolean(nextConversation?.isGroupOwner || nextConversation?.isGroupAdmin),
         };
@@ -870,10 +876,11 @@ const ChatScreen = ({ navigation, route }: any) => {
       groupName: groupName || "Group chat",
       groupAvatar: groupAvatar || "",
       memberCount: Number(memberCount || 0),
+      groupVisibility: normalizeGroupVisibility(groupConversation?.groupVisibility, Boolean(groupConversation?.isPublicGroup) || String(groupConversation?.type || "").trim().toLowerCase() === "channel"),
       groupMessagePermission: (groupConversation?.groupMessagePermission || "everyone") as "everyone" | "admins",
       isGroupAdmin: Boolean(groupConversation?.isGroupOwner || groupConversation?.isGroupAdmin),
     });
-  }, [groupAvatar, groupConversation?.groupMessagePermission, groupConversation?.isGroupAdmin, groupConversation?.isGroupOwner, groupName, memberCount]);
+  }, [groupAvatar, groupConversation?.groupMessagePermission, groupConversation?.groupVisibility, groupConversation?.isGroupAdmin, groupConversation?.isGroupOwner, groupConversation?.isPublicGroup, groupConversation?.type, groupName, memberCount]);
 
   useEffect(() => {
     let mounted = true;
@@ -1117,12 +1124,13 @@ const ChatScreen = ({ navigation, route }: any) => {
   // ─── Message actions ──────────────────────────────────────────────────────
 
   const submitMessage = useCallback(async ({ text: nextText, file, mediaUrl, messageType, duration, replyToMessageId, replyToMessage }: SubmitMessageParams) => {
+    const isChannelConversation = isGroupConversation && groupMeta.groupVisibility === "public";
     if (
       isGroupConversation
       && groupMeta.groupMessagePermission === "admins"
       && !groupMeta.isGroupAdmin
     ) {
-      throw new Error("Only admins can send messages in this group.");
+      throw new Error(isChannelConversation ? "Only admins can send messages in this channel." : "Only admins can send messages in this group.");
     }
 
     const resolvedConversationId = await ensureConversation();
@@ -1152,7 +1160,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       mergeMessage(mergedReplyMessage);
       setReplyingToMessage(null);
     }
-  }, [ensureConversation, groupMeta.groupMessagePermission, groupMeta.isGroupAdmin, isGroupConversation, mergeMessage]);
+  }, [ensureConversation, groupMeta.groupMessagePermission, groupMeta.groupVisibility, groupMeta.isGroupAdmin, isGroupConversation, mergeMessage]);
 
   const replyingToMessageId = useMemo(() => getMessageIdentity(replyingToMessage), [replyingToMessage]);
 
@@ -1224,13 +1232,17 @@ const ChatScreen = ({ navigation, route }: any) => {
   const wideContentBubbleMaxWidth = width < 360 ? "86%" : width < 430 ? "82%" : "78%";
   const callEventBubbleWidth = Math.min(Math.max(Math.round(width * 0.52), 164), 216);
   const mediaBubbleWidth = Math.min(width * 0.56, 192);
+  const isChannelConversation = isGroupConversation && groupMeta.groupVisibility === "public";
   const canComposeGroupMessage = !isGroupConversation
     || groupMeta.groupMessagePermission !== "admins"
     || groupMeta.isGroupAdmin;
+  const hideChannelComposer = isChannelConversation && !canComposeGroupMessage;
   const groupComposeLockedText = isGroupConversation && !canComposeGroupMessage
-    ? "Only admins can send messages in this group."
+    ? isChannelConversation
+      ? "Only admins can send messages in this channel."
+      : "Only admins can send messages in this group."
     : "";
-  const chatHeroEyebrow = isGroupConversation ? "Group conversation" : "Direct conversation";
+  const chatHeroEyebrow = isChannelConversation ? "Channel" : isGroupConversation ? "Group conversation" : "Direct conversation";
   const chatHeroTitle = isGroupConversation
     ? groupMeta.groupName || "Group chat"
     : user?.username || user?.name || "Conversation";
@@ -1934,6 +1946,22 @@ const ChatScreen = ({ navigation, route }: any) => {
     const replyPreview = buildReplyPreview(repliedMessage);
     const isHighlighted = getMessageIdentity(item) === highlightedMessageId;
     const messageTimeLabel = formatMessageTime(item?.createdAt);
+    if (isSystemMessage) {
+      return (
+        <View style={styles.systemMessageRow}>
+          <View style={[styles.systemMessagePill, { backgroundColor: alpha(colors.surface, "E8"), borderColor: alpha(colors.border, "86") }]}>
+            <Text style={[styles.systemMessageText, { color: colors.mutedText }]}>
+              {textValue || "System update"}
+            </Text>
+            {messageTimeLabel ? (
+              <Text style={[styles.systemMessageTime, { color: colors.placeholder }]}>
+                {messageTimeLabel}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      );
+    }
     const isEmojiOnly = !locationPayload && !sharedContent && !callEvent && !attachment?.url && isEmojiOnlyText(textValue);
     const hasImageBubble = isImageMessage(item) && attachment?.url;
     const hasVoiceBubble = (isAudioMessage(item) || item?.messageType === "voice") && attachment?.url;
@@ -2803,22 +2831,24 @@ const ChatScreen = ({ navigation, route }: any) => {
             },
           ]}
         >
-          <TouchableOpacity
-            style={[
-              styles.composerActionButton,
-              {
-                backgroundColor: alpha(colors.surface, "C8"),
-                borderColor: alpha(colors.border, "78"),
-                width: Math.max(34, chatMetrics.headerAction - 2),
-                height: Math.max(34, chatMetrics.headerAction - 2),
-                borderRadius: Math.max(34, chatMetrics.headerAction - 2) / 2,
-              },
-            ]}
-            onPress={() => setShowTools(true)}
-            disabled={uploading || !canComposeGroupMessage}
-          >
-            <Icon name="add" size={20} color={colors.primary} />
-          </TouchableOpacity>
+          {!hideChannelComposer ? (
+            <TouchableOpacity
+              style={[
+                styles.composerActionButton,
+                {
+                  backgroundColor: alpha(colors.surface, "C8"),
+                  borderColor: alpha(colors.border, "78"),
+                  width: Math.max(34, chatMetrics.headerAction - 2),
+                  height: Math.max(34, chatMetrics.headerAction - 2),
+                  borderRadius: Math.max(34, chatMetrics.headerAction - 2) / 2,
+                },
+              ]}
+              onPress={() => setShowTools(true)}
+              disabled={uploading || !canComposeGroupMessage}
+            >
+              <Icon name="add" size={20} color={colors.primary} />
+            </TouchableOpacity>
+          ) : null}
 
           <View style={[styles.inputBox, { backgroundColor: alpha(colors.surface, "D8"), borderColor: alpha(colors.border, "7A") }]}>
             {replyingToPreview ? (
@@ -2904,72 +2934,76 @@ const ChatScreen = ({ navigation, route }: any) => {
                 </Text>
               </View>
             ) : null}
-            <View style={styles.composerRow}>
-              <TextInput
-                ref={messageInputRef}
-                placeholder={groupComposeLockedText ? "Only admins can message" : uploading ? "Uploading attachment..." : pendingAttachment ? "Add a caption (optional)" : pendingVoiceNote ? "Voice note ready to send" : "Message"}
-                placeholderTextColor={colors.placeholder}
-                style={[styles.input, { color: colors.text, fontSize: chatMetrics.bodyFontSize, lineHeight: chatMetrics.bodyLineHeight, minHeight: chatMetrics.headerAction }]}
-                value={text}
-                onChangeText={handleTextChange}
-                editable={!sending && !uploading && canComposeGroupMessage}
-              />
+            {!hideChannelComposer ? (
+              <View style={styles.composerRow}>
+                <TextInput
+                  ref={messageInputRef}
+                  placeholder={groupComposeLockedText ? "Only admins can message" : uploading ? "Uploading attachment..." : pendingAttachment ? "Add a caption (optional)" : pendingVoiceNote ? "Voice note ready to send" : "Message"}
+                  placeholderTextColor={colors.placeholder}
+                  style={[styles.input, { color: colors.text, fontSize: chatMetrics.bodyFontSize, lineHeight: chatMetrics.bodyLineHeight, minHeight: chatMetrics.headerAction }]}
+                  value={text}
+                  onChangeText={handleTextChange}
+                  editable={!sending && !uploading && canComposeGroupMessage}
+                />
 
-              <View style={styles.inlineActions}>
-                <TouchableOpacity
-                  style={[styles.inlineActionIcon, styles.gifActionPill]}
-                  onPress={() => {
-                    setStickerPickerMode("gifs");
-                    setShowStickerPicker(true);
-                  }}
-                  disabled={uploading || !canComposeGroupMessage}
-                >
-                  <Text style={styles.gifActionText}>GIF</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.inlineActionIcon}
-                  onPress={() => {
-                    setStickerPickerMode("emoji");
-                    setShowStickerPicker(true);
-                  }}
-                  disabled={uploading || !canComposeGroupMessage}
-                >
-                  <Icon name="happy-outline" size={19} color={colors.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.inlineActionIcon}
-                  onPress={() => {
-                    sendCameraAttachment().catch(() => {});
-                  }}
-                  disabled={uploading || !canComposeGroupMessage}
-                >
-                  <Icon name="camera-outline" size={18} color={colors.primary} />
-                </TouchableOpacity>
+                <View style={styles.inlineActions}>
+                  <TouchableOpacity
+                    style={[styles.inlineActionIcon, styles.gifActionPill]}
+                    onPress={() => {
+                      setStickerPickerMode("gifs");
+                      setShowStickerPicker(true);
+                    }}
+                    disabled={uploading || !canComposeGroupMessage}
+                  >
+                    <Text style={styles.gifActionText}>GIF</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.inlineActionIcon}
+                    onPress={() => {
+                      setStickerPickerMode("emoji");
+                      setShowStickerPicker(true);
+                    }}
+                    disabled={uploading || !canComposeGroupMessage}
+                  >
+                    <Icon name="happy-outline" size={19} color={colors.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.inlineActionIcon}
+                    onPress={() => {
+                      sendCameraAttachment().catch(() => {});
+                    }}
+                    disabled={uploading || !canComposeGroupMessage}
+                  >
+                    <Icon name="camera-outline" size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            ) : null}
           </View>
 
-          <View style={styles.composerTrailingAction}>
-            {uploading ? (
-              <ActivityIndicator color={colors.primary} />
-            ) : text.length > 0 || pendingAttachment || pendingVoiceNote ? (
-              <TouchableOpacity
-                style={[styles.sendBtn, { backgroundColor: colors.primary }]}
-                onPress={pendingAttachment ? sendPendingAttachment : pendingVoiceNote ? sendPendingVoiceMessage : sendTextMessage}
-                disabled={sending || !canComposeGroupMessage}
-              >
-                <Icon name="send" size={20} color="#fff" />
-              </TouchableOpacity>
-            ) : (
-              <VoiceRecorderButton
-                color={primaryThemeColor}
-                disabled={uploading || !canComposeGroupMessage}
-                onSend={(voiceFile) => {
-                  sendVoiceMessage(voiceFile).catch(() => {});
-                }}
-              />
-            )}
-          </View>
+          {!hideChannelComposer ? (
+            <View style={styles.composerTrailingAction}>
+              {uploading ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : text.length > 0 || pendingAttachment || pendingVoiceNote ? (
+                <TouchableOpacity
+                  style={[styles.sendBtn, { backgroundColor: colors.primary }]}
+                  onPress={pendingAttachment ? sendPendingAttachment : pendingVoiceNote ? sendPendingVoiceMessage : sendTextMessage}
+                  disabled={sending || !canComposeGroupMessage}
+                >
+                  <Icon name="send" size={20} color="#fff" />
+                </TouchableOpacity>
+              ) : (
+                <VoiceRecorderButton
+                  color={primaryThemeColor}
+                  disabled={uploading || !canComposeGroupMessage}
+                  onSend={(voiceFile) => {
+                    sendVoiceMessage(voiceFile).catch(() => {});
+                  }}
+                />
+              )}
+            </View>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
 
@@ -3268,6 +3302,32 @@ const styles = StyleSheet.create({
     width: "100%",
     marginVertical: 1.5,
     alignItems: "flex-end",
+  },
+  systemMessageRow: {
+    width: "100%",
+    alignItems: "center",
+    marginVertical: 8,
+    paddingHorizontal: 20,
+  },
+  systemMessagePill: {
+    maxWidth: "92%",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  systemMessageText: {
+    textAlign: "center",
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: appFonts.medium,
+  },
+  systemMessageTime: {
+    marginTop: 3,
+    fontSize: 10,
+    lineHeight: 14,
+    fontFamily: appFonts.regular,
   },
   groupSenderAvatarWrap: {
     marginRight: 8,

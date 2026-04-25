@@ -101,6 +101,8 @@ function StoryViewerScreen({ route, navigation }: any) {
   const storyMusicPlayerRef = useRef(createSound());
   const storyMusicTrackKeyRef = useRef("");
   const storyMusicEndMsRef = useRef(0);
+  const storyMusicStartMsRef = useRef(0);
+  const storyMusicShouldLoopRef = useRef(false);
   const storyTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     time: 0,
     timeout: null,
@@ -200,20 +202,32 @@ function StoryViewerScreen({ route, navigation }: any) {
   }, [currentStory, paused, storyDuration]);
 
   useEffect(() => {
+    storyMusicStartMsRef.current = storyMusicStartMs;
+    storyMusicEndMsRef.current = storyMusicDurationMs > 0 ? storyMusicStartMs + storyMusicDurationMs : 0;
+    storyMusicShouldLoopRef.current = !!storyMusicUrl && isMusicEnabled && !paused;
+  }, [isMusicEnabled, paused, storyMusicDurationMs, storyMusicStartMs, storyMusicUrl]);
+
+  useEffect(() => {
     const player = storyMusicPlayerRef.current;
 
     player.setSubscriptionDuration(0.1);
     player.addPlayBackListener((event: any) => {
       const playbackEndMs = storyMusicEndMsRef.current;
+      const playbackStartMs = storyMusicStartMsRef.current;
       const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
 
       if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
-        storyMusicEndMsRef.current = 0;
-        player.pausePlayer().catch(() => undefined);
+        if (storyMusicShouldLoopRef.current) {
+          player.seekToPlayer(playbackStartMs).then(() => player.resumePlayer()).catch(() => undefined);
+        } else {
+          player.pausePlayer().catch(() => undefined);
+        }
       }
     });
     player.addPlaybackEndListener(() => {
-      storyMusicEndMsRef.current = 0;
+      if (storyMusicShouldLoopRef.current) {
+        player.seekToPlayer(storyMusicStartMsRef.current).then(() => player.resumePlayer()).catch(() => undefined);
+      }
     });
 
     return () => {
@@ -277,9 +291,6 @@ function StoryViewerScreen({ route, navigation }: any) {
       }
 
       storyMusicTrackKeyRef.current = storyMusicTrackKey;
-      storyMusicEndMsRef.current =
-        storyMusicDurationMs > 0 ? storyMusicStartMs + storyMusicDurationMs : 0;
-
       await player.startPlayer(storyMusicUrl);
       await player.seekToPlayer(storyMusicStartMs);
       await player.setVolume(1);
@@ -580,25 +591,45 @@ function StoryViewerScreen({ route, navigation }: any) {
       }
 
       return (
-        <SocialVideo
-          uri={normalizeMediaUrl(currentStory.media?.url)}
-          posterUri={normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url)}
-          style={styles.storyImage}
-          paused={paused}
-          muted={!!currentStory.music?.previewUrl && isMusicEnabled}
-          onEnd={next}
-        />
+        <View style={styles.storyImage}>
+          <SocialVideo
+            uri={normalizeMediaUrl(currentStory.media?.url)}
+            posterUri={normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url)}
+            style={styles.storyImage}
+            paused={paused}
+            muted={!!currentStory.music?.previewUrl}
+            onEnd={next}
+            contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}
+          />
+          {currentStory.media?.sensitiveContent?.isSensitive ? (
+            <View style={styles.sensitiveBadge}>
+              <Text style={styles.sensitiveBadgeText}>
+                {currentStory.media.sensitiveContent.label ? `${currentStory.media.sensitiveContent.label} sensitive content` : "Sensitive content"}
+              </Text>
+            </View>
+          ) : null}
+        </View>
       );
     }
 
     const imageUri = normalizeMediaUrl(currentStory.media?.url || currentStory.media?.thumbnailUrl);
     const previewUri = normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url);
     return imageUri ? (
-      <ProgressiveImage
-        uri={imageUri}
-        previewUri={previewUri}
-        style={styles.storyImage}
-      />
+      <View style={styles.storyImage}>
+        <ProgressiveImage
+          uri={imageUri}
+          previewUri={previewUri}
+          style={styles.storyImage}
+          contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}
+        />
+        {currentStory.media?.sensitiveContent?.isSensitive ? (
+          <View style={styles.sensitiveBadge}>
+            <Text style={styles.sensitiveBadgeText}>
+              {currentStory.media.sensitiveContent.label ? `${currentStory.media.sensitiveContent.label} sensitive content` : "Sensitive content"}
+            </Text>
+          </View>
+        ) : null}
+      </View>
     ) : (
       <View style={[styles.storyImage, styles.storyFallback]} />
     );
@@ -671,6 +702,14 @@ function StoryViewerScreen({ route, navigation }: any) {
                 >
                   {sticker.text}
                 </Text>
+              </View>
+            );
+          }
+
+          if (sticker.type === "image" && sticker.mediaUrl) {
+            return (
+              <View key={sticker.id} style={[styles.floatingImageSticker, baseStyle]}>
+                <Image source={{ uri: sticker.mediaUrl }} style={styles.floatingImageAsset} resizeMode="contain" />
               </View>
             );
           }
@@ -1035,6 +1074,21 @@ const styles = StyleSheet.create({
   unavailableButtonText: { color: "#fff", fontWeight: "700" },
   storyImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   storyFallback: { backgroundColor: "#111827" },
+  sensitiveBadge: {
+    position: "absolute",
+    left: 16,
+    bottom: 18,
+    backgroundColor: "rgba(15,23,42,0.82)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  sensitiveBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "capitalize",
+  },
   topFade: { ...StyleSheet.absoluteFillObject, height: 220 },
   bottomFade: { ...StyleSheet.absoluteFillObject, top: undefined, height: 340, bottom: 0 },
   textStoryWrap: {
@@ -1063,6 +1117,15 @@ const styles = StyleSheet.create({
     position: "absolute",
     alignItems: "center",
     justifyContent: "center",
+  },
+  floatingImageSticker: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  floatingImageAsset: {
+    width: "100%",
+    height: "100%",
   },
   floatingEmojiText: {
     fontSize: 34,

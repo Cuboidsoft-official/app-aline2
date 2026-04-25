@@ -30,6 +30,7 @@ import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import SocialVideo from "../features/social/components/SocialVideo";
 import { socialApi } from "../features/social/socialApi";
 import { CommentAudioFile, FeedResponse, Post, Story } from "../features/social/types";
+import { dismissPublishQueueTask, getPublishQueueSnapshot, PublishQueueTask, subscribePublishQueue } from "../features/social/publishQueue";
 import { toUserSafeMessage } from "../features/social/validation";
 import { API } from "../api/api";
 import { getStoredUser } from "../utils/authSession";
@@ -128,6 +129,18 @@ const getPostAspectRatio = (post: Post): number => {
   return Math.min(1.91, Math.max(0.8, assetRatio || 1));
 };
 
+const getImageResizeMode = (
+  asset: Post["media"][number] | undefined,
+  frameAspectRatio: number,
+): "contain" | "cover" => {
+  const assetRatio =
+    asset?.width && asset?.height
+      ? asset.width / Math.max(1, asset.height)
+      : frameAspectRatio;
+
+  return Math.abs(assetRatio - frameAspectRatio) > 0.12 ? "contain" : "cover";
+};
+
 const hashFeedKey = (value: string): number => {
   let hash = 0;
   const source = String(value || "");
@@ -194,10 +207,13 @@ function FeedScreen({ navigation }: any) {
   const [likeBurstPostId, setLikeBurstPostId] = useState("");
   const [isVideoSoundEnabled, setIsVideoSoundEnabled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [publishTasks, setPublishTasks] = useState<PublishQueueTask[]>(() => getPublishQueueSnapshot());
   const slideAnim = useRef(new Animated.Value(0)).current;
   const postMusicPlayerRef = useRef(createSound());
   const postMusicTrackKeyRef = useRef("");
   const postMusicEndMsRef = useRef(0);
+  const postMusicStartMsRef = useRef(0);
+  const postMusicShouldLoopRef = useRef(false);
   const postTapRef = useRef<{ id: string; time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     id: "",
     time: 0,
@@ -234,12 +250,29 @@ function FeedScreen({ navigation }: any) {
     () => feed.posts.find((item) => item.id === activePostId) || null,
     [activePostId, feed.posts],
   );
+  const activePublishTask = publishTasks[0] || null;
+  const completedPublishTaskIdsRef = useRef<Set<string>>(new Set());
   const activePostMusicUrl = normalizeMediaUrl(activePost?.music?.previewUrl || "");
   const activePostMusicStartMs = Math.max(0, Number(activePost?.music?.startTime || 0) * 1000);
   const activePostMusicDurationMs = Math.max(0, Number(activePost?.music?.duration || 0) * 1000);
   const activePostMusicTrackKey = activePost
     ? `${activePost.id}:${activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
     : "";
+
+  useEffect(() => {
+    const isMuted = !activePostId || !!mutedPostIds[activePostId];
+    postMusicStartMsRef.current = activePostMusicStartMs;
+    postMusicEndMsRef.current =
+      activePostMusicDurationMs > 0 ? activePostMusicStartMs + activePostMusicDurationMs : 0;
+    postMusicShouldLoopRef.current = !!activePostMusicUrl && !isMuted && !activeSheet;
+  }, [
+    activePostId,
+    activePostMusicDurationMs,
+    activePostMusicStartMs,
+    activePostMusicUrl,
+    activeSheet,
+    mutedPostIds,
+  ]);
 
   const readSellerAccount = useCallback(async (): Promise<SellerAccountSummary | null> => {
     try {
@@ -388,6 +421,23 @@ function FeedScreen({ navigation }: any) {
   );
 
   useEffect(() => {
+    return subscribePublishQueue(setPublishTasks);
+  }, []);
+
+  useEffect(() => {
+    const completedTask = publishTasks.find(
+      (task) => task.status === "success" && !completedPublishTaskIdsRef.current.has(task.id),
+    );
+
+    if (!completedTask) {
+      return;
+    }
+
+    completedPublishTaskIdsRef.current.add(completedTask.id);
+    loadFeed().catch(() => undefined);
+  }, [loadFeed, publishTasks]);
+
+  useEffect(() => {
     connectSocket().catch((error) => {
       console.log("feed socket connect error:", error);
     });
@@ -423,15 +473,21 @@ function FeedScreen({ navigation }: any) {
     player.setSubscriptionDuration(0.1);
     player.addPlayBackListener((event: any) => {
       const playbackEndMs = postMusicEndMsRef.current;
+      const playbackStartMs = postMusicStartMsRef.current;
       const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
 
       if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
-        postMusicEndMsRef.current = 0;
-        player.pausePlayer().catch(() => undefined);
+        if (postMusicShouldLoopRef.current) {
+          player.seekToPlayer(playbackStartMs).then(() => player.resumePlayer()).catch(() => undefined);
+        } else {
+          player.pausePlayer().catch(() => undefined);
+        }
       }
     });
     player.addPlaybackEndListener(() => {
-      postMusicEndMsRef.current = 0;
+      if (postMusicShouldLoopRef.current) {
+        player.seekToPlayer(postMusicStartMsRef.current).then(() => player.resumePlayer()).catch(() => undefined);
+      }
     });
 
     return () => {
@@ -491,9 +547,6 @@ function FeedScreen({ navigation }: any) {
       }
 
       postMusicTrackKeyRef.current = activePostMusicTrackKey;
-      postMusicEndMsRef.current =
-        activePostMusicDurationMs > 0 ? activePostMusicStartMs + activePostMusicDurationMs : 0;
-
       await player.startPlayer(activePostMusicUrl);
       await player.seekToPlayer(activePostMusicStartMs);
       await player.setVolume(1);
@@ -694,6 +747,67 @@ function FeedScreen({ navigation }: any) {
 
     navigation.navigate("ProfilePreviewScreen", { userId: normalizedUserId });
   }, [currentUser?.id, navigation]);
+
+  const openHashtagResults = useCallback((tag: string) => {
+    const normalizedTag = String(tag || "").replace(/^#/, "").trim();
+    if (!normalizedTag) {
+      return;
+    }
+
+    navigation.navigate("HashtagResultsScreen", { hashtag: normalizedTag });
+  }, [navigation]);
+
+  const openLocationSearch = useCallback((location: string) => {
+    const normalizedLocation = String(location || "").trim();
+    if (!normalizedLocation) {
+      return;
+    }
+
+    navigation.navigate("Search", { initialQuery: normalizedLocation });
+  }, [navigation]);
+
+  const renderPostMetaChips = useCallback((item: Post, paddingHorizontal: number) => {
+    const musicLabel = formatPostMusicLabel(item.music);
+    const chips = [
+      item.location
+        ? (
+          <TouchableOpacity key={`location_${item.id}`} style={styles.metaChip} onPress={() => openLocationSearch(item.location || "")}>
+            <Icon name="location-outline" size={12} color={colors.mutedText} />
+            <Text style={[styles.metaChipText, { color: colors.text }]} numberOfLines={1}>
+              {item.location}
+            </Text>
+          </TouchableOpacity>
+        )
+        : null,
+      musicLabel
+        ? (
+          <TouchableOpacity key={`music_${item.id}`} style={styles.metaChip} onPress={() => navigation.navigate("PostDetail", { postId: item.id })}>
+            <Icon name="musical-notes-outline" size={12} color={colors.mutedText} />
+            <Text style={[styles.metaChipText, { color: colors.text }]} numberOfLines={1}>
+              {musicLabel}
+            </Text>
+          </TouchableOpacity>
+        )
+        : null,
+      ...item.hashtags.slice(0, 3).map((tag) => (
+        <TouchableOpacity key={`tag_${item.id}_${tag}`} style={styles.metaChip} onPress={() => openHashtagResults(tag)}>
+          <Text style={[styles.metaChipText, { color: FEED_ACCENT }]} numberOfLines={1}>
+            #{tag}
+          </Text>
+        </TouchableOpacity>
+      )),
+    ].filter(Boolean);
+
+    if (!chips.length) {
+      return null;
+    }
+
+    return (
+      <View style={[styles.metaChipRow, { paddingHorizontal }]}>
+        {chips}
+      </View>
+    );
+  }, [colors.mutedText, colors.text, navigation, openHashtagResults, openLocationSearch]);
 
   const getFeedRelationship = useCallback((postUser: Post["user"]) => {
     const viewerId = String(currentUser?.id || "");
@@ -979,9 +1093,15 @@ function FeedScreen({ navigation }: any) {
 
   const renderPostMedia = (post: Post) => {
     const mediaHeight = getPostMediaHeight(post);
+    const frameAspectRatio = postMediaWidth / Math.max(1, mediaHeight);
     const currentCarouselIndex = carouselIndexByPostId[post.id] || 0;
     const hasAttachedMusic = !!post.music?.previewUrl;
     const isMuted = !!mutedPostIds[post.id];
+    const renderSensitiveBadge = (label?: string) => (
+      <View pointerEvents="none" style={styles.sensitiveBadge}>
+        <Text style={styles.sensitiveBadgeText}>{label ? `${label} sensitive content` : "Sensitive content"}</Text>
+      </View>
+    );
 
     if (post.type !== "carousel") {
       const primaryMedia = post.media[0];
@@ -991,29 +1111,46 @@ function FeedScreen({ navigation }: any) {
 
       if (primaryMedia?.mediaType === "video") {
         return (
-          <SocialVideo
-            uri={normalizeMediaUrl(primaryMedia.url)}
-            posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || primaryMedia.url)}
-            style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-            muted={isMuted || hasAttachedMusic}
-            repeat
-          />
+          <View>
+            <SocialVideo
+              uri={normalizeMediaUrl(primaryMedia.url)}
+              posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || primaryMedia.url)}
+              style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
+              muted={isMuted || hasAttachedMusic}
+              repeat
+              contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
+            />
+            {primaryMedia.sensitiveContent?.isSensitive ? renderSensitiveBadge(primaryMedia.sensitiveContent.label) : null}
+          </View>
         );
       }
 
+      const imageResizeMode = getImageResizeMode(primaryMedia, frameAspectRatio);
       const rawImage = (
-        <ProgressiveImage
-          uri={normalizeMediaUrl(primaryMedia?.url)}
-          previewUri={normalizeMediaUrl(primaryMedia?.thumbnailUrl || primaryMedia?.url)}
-          style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-          resizeMode="cover"
-        />
+        <View>
+          <ProgressiveImage
+            uri={normalizeMediaUrl(primaryMedia?.url)}
+            previewUri={normalizeMediaUrl(primaryMedia?.thumbnailUrl || primaryMedia?.url)}
+            style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
+            resizeMode={imageResizeMode}
+            contentBlurRadius={primaryMedia?.sensitiveContent?.isSensitive ? 22 : 0}
+          />
+          {primaryMedia?.sensitiveContent?.isSensitive ? renderSensitiveBadge(primaryMedia.sensitiveContent.label) : null}
+        </View>
       );
 
-      if (post.filterPreset && ColorMatrix) {
+      if (post.filterPreset && ColorMatrix && !primaryMedia?.sensitiveContent?.isSensitive) {
         const activeFilter = PHOTO_FILTER_LIST.find((f) => f.id === post.filterPreset);
         if (activeFilter && activeFilter.matrix) {
-          return <ColorMatrix matrix={activeFilter.matrix}>{rawImage}</ColorMatrix>;
+          return (
+            <ColorMatrix matrix={activeFilter.matrix}>
+              <Image
+                source={{ uri: normalizeMediaUrl(primaryMedia?.url) }}
+                style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
+                resizeMode={imageResizeMode}
+              />
+            </ColorMatrix>
+          );
         }
       }
 
@@ -1035,32 +1172,45 @@ function FeedScreen({ navigation }: any) {
         >
           {post.media.map((asset) => (
             asset.mediaType === "video" ? (
-              <SocialVideo
-                key={asset.id}
-                uri={normalizeMediaUrl(asset.url)}
-                posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
-                style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-                muted={isMuted || hasAttachedMusic}
-                repeat
-              />
+              <View key={asset.id}>
+                <SocialVideo
+                  uri={normalizeMediaUrl(asset.url)}
+                  posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
+                  style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
+                  muted={isMuted || hasAttachedMusic}
+                  repeat
+                  contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+                />
+                {asset.sensitiveContent?.isSensitive ? renderSensitiveBadge(asset.sensitiveContent.label) : null}
+              </View>
             ) : (
               (() => {
+                const imageResizeMode = getImageResizeMode(asset, frameAspectRatio);
                 const rawImage = (
-                  <ProgressiveImage
-                    key={asset.id}
-                    uri={normalizeMediaUrl(asset.url)}
-                    previewUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
-                    style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-                    resizeMode="cover"
-                  />
+                  <View key={asset.id}>
+                    <ProgressiveImage
+                      uri={normalizeMediaUrl(asset.url)}
+                      previewUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
+                      style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
+                      resizeMode={imageResizeMode}
+                      contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+                    />
+                    {asset.sensitiveContent?.isSensitive ? renderSensitiveBadge(asset.sensitiveContent.label) : null}
+                  </View>
                 );
 
-                if (post.filterPreset && ColorMatrix) {
+                if (post.filterPreset && ColorMatrix && !asset.sensitiveContent?.isSensitive) {
                   const activeFilter = PHOTO_FILTER_LIST.find((f) => f.id === post.filterPreset);
                   if (activeFilter && activeFilter.matrix) {
                     return (
                       <View key={asset.id}>
-                        <ColorMatrix matrix={activeFilter.matrix}>{rawImage}</ColorMatrix>
+                        <ColorMatrix matrix={activeFilter.matrix}>
+                          <Image
+                            source={{ uri: normalizeMediaUrl(asset.url) }}
+                            style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
+                            resizeMode={imageResizeMode}
+                          />
+                        </ColorMatrix>
                       </View>
                     );
                   }
@@ -1398,19 +1548,16 @@ function FeedScreen({ navigation }: any) {
           {item.caption}
         </Text>
 
-        {item.hashtags.length ? (
-          <Text style={[styles.tagLine, { paddingHorizontal: postBodyInset, color: FEED_ACCENT }]}>
-            {item.hashtags.map((tag) => `#${tag}`).join(" ")}
-          </Text>
-        ) : null}
-
         {item.mentions.length ? (
           <Text style={[styles.tagLineMuted, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
             {item.mentions.map((mention) => `@${mention}`).join(" ")}
           </Text>
         ) : null}
 
-        <Text style={[styles.metaLine, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>{metaLine}</Text>
+        {renderPostMetaChips(item, postBodyInset)}
+        <Text style={[styles.metaLine, { paddingHorizontal: postBodyInset, color: colors.mutedText }]} numberOfLines={1}>
+          {metaLine}
+        </Text>
 
         {item.collaboratorIds.length ? (
           <Text style={[styles.collabLine, { color: colors.text }]}>Collab post • {item.collaboratorIds.length} collaborators</Text>
@@ -1505,7 +1652,7 @@ function FeedScreen({ navigation }: any) {
                 ) : null}
               </View>
               <Text style={[styles.postTime, { color: colors.mutedText }]}>
-                {item.location ? `${item.location} • ` : ""}{formatAgo(item.createdAt)}
+                {formatAgo(item.createdAt)}
               </Text>
             </View>
           </TouchableOpacity>
@@ -1674,20 +1821,17 @@ function FeedScreen({ navigation }: any) {
           {item.caption}
         </Text>
 
-        {item.hashtags.length ? (
-          <Text style={[styles.tagLine, { paddingHorizontal: postBodyInset, color: FEED_ACCENT }]}>
-            {item.hashtags.map((tag) => `#${tag}`).join(" ")}
-          </Text>
-        ) : null}
-
         {item.mentions.length ? (
           <Text style={[styles.tagLineMuted, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
             {item.mentions.map((mention) => `@${mention}`).join(" ")}
           </Text>
         ) : null}
 
+        {renderPostMetaChips(item, postBodyInset)}
         {metaLine ? (
-          <Text style={[styles.metaLine, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>{metaLine}</Text>
+          <Text style={[styles.metaLine, { paddingHorizontal: postBodyInset, color: colors.mutedText }]} numberOfLines={1}>
+            {metaLine}
+          </Text>
         ) : null}
 
         {item.collaboratorIds.length ? (
@@ -1756,6 +1900,82 @@ function FeedScreen({ navigation }: any) {
 
     return (
       <>
+        {activePublishTask ? (
+          <View
+            style={[
+              styles.publishQueueCard,
+              {
+                marginHorizontal: feedHorizontalInset,
+                backgroundColor: colors.card,
+                borderColor:
+                  activePublishTask.status === "failed"
+                    ? "rgba(239,68,68,0.28)"
+                    : feedAccentBorder,
+              },
+            ]}
+          >
+            <View style={styles.publishQueueTopRow}>
+              <View style={styles.publishQueueCopy}>
+                <Text style={[styles.publishQueueTitle, { color: colors.text }]}>
+                  {activePublishTask.label}
+                </Text>
+                <Text
+                  style={[
+                    styles.publishQueueMessage,
+                    {
+                      color:
+                        activePublishTask.status === "failed"
+                          ? (isDarkMode ? "#FCA5A5" : "#B91C1C")
+                          : colors.mutedText,
+                    },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {activePublishTask.message}
+                </Text>
+              </View>
+              {activePublishTask.status === "failed" ? (
+                <TouchableOpacity
+                  style={[styles.publishQueueDismiss, { borderColor: colors.border }]}
+                  onPress={() => dismissPublishQueueTask(activePublishTask.id)}
+                >
+                  <Icon name="close" size={16} color={colors.text} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <View style={[styles.publishQueueTrack, { backgroundColor: isDarkMode ? "rgba(255,255,255,0.12)" : "#E5E7EB" }]}>
+              {activePublishTask.status === "failed" ? (
+                <View
+                  style={[
+                    styles.publishQueueFill,
+                    {
+                      width: `${Math.max(8, Math.round(activePublishTask.progress * 100))}%`,
+                      backgroundColor: "#EF4444",
+                    },
+                  ]}
+                />
+              ) : (
+                <LinearGradient
+                  colors={
+                    activePublishTask.status === "success"
+                      ? ["#EF4444", "#C026D3", "#10B981"]
+                      : ["#EF4444", feedAccent, "#7C3AED"]
+                  }
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={[
+                    styles.publishQueueFill,
+                    styles.publishQueueGradientFill,
+                    {
+                      width: `${Math.max(8, Math.round(activePublishTask.progress * 100))}%`,
+                    },
+                  ]}
+                />
+              )}
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.topBar}>
           <View
             style={[
@@ -1945,6 +2165,11 @@ function FeedScreen({ navigation }: any) {
           ListHeaderComponent={renderHeader}
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={Platform.OS === "android"}
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          updateCellsBatchingPeriod={32}
+          windowSize={5}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -2569,6 +2794,53 @@ const styles = StyleSheet.create({
     marginLeft: 3,
   },
   storyName: { marginTop: 7, fontSize: 12.5, color: "#272727", fontWeight: "700" },
+  publishQueueCard: {
+    marginTop: 8,
+    marginBottom: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  publishQueueTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  publishQueueCopy: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  publishQueueTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  publishQueueMessage: {
+    marginTop: 4,
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+  publishQueueDismiss: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  publishQueueTrack: {
+    marginTop: 10,
+    height: 4,
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  publishQueueFill: {
+    height: "100%",
+    borderRadius: 999,
+  },
+  publishQueueGradientFill: {
+    minWidth: 18,
+  },
   postCard: {
     marginHorizontal: 14,
     marginBottom: 14,
@@ -2620,6 +2892,21 @@ const styles = StyleSheet.create({
   carouselIndicatorDotActive: {
     width: 18,
     backgroundColor: "#fff",
+  },
+  sensitiveBadge: {
+    position: "absolute",
+    left: 12,
+    bottom: 12,
+    backgroundColor: "rgba(15,23,42,0.78)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  sensitiveBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "capitalize",
   },
   mediaFallback: { backgroundColor: "#0f172a" },
   postImage: { height: 360 },
@@ -2701,14 +2988,35 @@ const styles = StyleSheet.create({
   },
   trailingActions: { marginLeft: "auto", flexDirection: "row", alignItems: "center" },
   trailingActionButton: { marginRight: 0, marginLeft: 8 },
-  likesText: { fontWeight: "700", color: "#121212", fontSize: 15, paddingHorizontal: 18 },
-  caption: { fontSize: 15.5, color: "#131313", paddingHorizontal: 18, paddingTop: 7, lineHeight: 23 },
+  likesText: { fontWeight: "700", color: "#121212", fontSize: 14, paddingHorizontal: 18 },
+  caption: { fontSize: 14, color: "#131313", paddingHorizontal: 18, paddingTop: 7, lineHeight: 21 },
   captionUser: { fontWeight: "700" },
-  tagLine: { color: FEED_ACCENT, fontSize: 13.5, paddingHorizontal: 18, paddingTop: 7, fontWeight: "700" },
-  tagLineMuted: { color: "#5a5a5a", fontSize: 13, paddingHorizontal: 18, paddingTop: 4 },
-  metaLine: { color: "#646464", fontSize: 13, paddingHorizontal: 18, paddingTop: 7 },
-  collabLine: { color: "#2f2f2f", fontSize: 13, paddingHorizontal: 18, paddingTop: 5, fontWeight: "600" },
-  commentCount: { color: "#787878", fontSize: 13, paddingHorizontal: 18, paddingTop: 9 },
+  tagLine: { color: FEED_ACCENT, fontSize: 12.5, paddingHorizontal: 18, paddingTop: 7, fontWeight: "700" },
+  tagLineMuted: { color: "#5a5a5a", fontSize: 12, paddingHorizontal: 18, paddingTop: 4 },
+  metaChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingTop: 7,
+  },
+  metaChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: "100%",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "rgba(155,77,255,0.08)",
+  },
+  metaChipText: {
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  metaLine: { color: "#646464", fontSize: 12, paddingHorizontal: 18, paddingTop: 7 },
+  collabLine: { color: "#2f2f2f", fontSize: 12, paddingHorizontal: 18, paddingTop: 5, fontWeight: "600" },
+  commentCount: { color: "#787878", fontSize: 12, paddingHorizontal: 18, paddingTop: 9 },
   commentComposer: {
     flexDirection: "row",
     alignItems: "center",

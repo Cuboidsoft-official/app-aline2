@@ -99,9 +99,18 @@ interface ForwardTarget {
   userId?: string;
 }
 
+interface AssistantInboxItem {
+  _id: string;
+  itemType: "assistant";
+  title: string;
+  subtitle: string;
+  meta: string;
+}
+
 type ChatTab = "regular" | "seller" | "group";
 const MAX_GROUP_MEMBERS = 100;
 const MAIN_TAB_ROUTES = ["Feed", "SwipesLauncher", "Create", "Chats", "ProfileView"];
+const AI_ASSISTANT_ROW_ID = "assistant:inbox";
 
 const hasMainTabParent = (navigation: any) => {
   let currentNavigation = navigation;
@@ -1264,28 +1273,88 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     );
   };
 
+  const renderAssistantConversation = ({ item }: { item: AssistantInboxItem }) => (
+    <TouchableOpacity
+      style={[
+        styles.chatCard,
+        styles.assistantChatCard,
+        {
+          borderColor: accentBorder,
+          backgroundColor: colors.card,
+        },
+      ]}
+      onPress={() => setShowAssistant(true)}
+    >
+      <View style={[styles.assistantAvatarCard, { backgroundColor: accentSoft, borderColor: accentBorder }]}>
+        <Icon name="sparkles" size={20} color={accentColor} />
+      </View>
+
+      <View style={styles.chatInfo}>
+        <View style={styles.chatPrimaryRow}>
+          <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <View style={[styles.assistantMetaPill, { backgroundColor: accentSoft, borderColor: accentBorder }]}>
+            <Text style={[styles.assistantMetaPillText, { color: accentColor }]} numberOfLines={1}>
+              {item.meta}
+            </Text>
+          </View>
+        </View>
+
+        <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={2}>
+          {item.subtitle}
+        </Text>
+      </View>
+
+      <View style={[styles.chatMeta, styles.assistantChatMeta]}>
+        <Icon name="sparkles-outline" size={17} color={accentColor} />
+        <Icon name="chevron-forward-outline" size={18} color={colors.mutedText} />
+      </View>
+    </TouchableOpacity>
+  );
+
+  const assistantListItem = useMemo<AssistantInboxItem>(
+    () => ({
+      _id: AI_ASSISTANT_ROW_ID,
+      itemType: "assistant",
+      title: "AI Assistant",
+      subtitle: "Ask about chats, stories, posts, seller flow, or app issues.",
+      meta: "Aline2 AI",
+    }),
+    [],
+  );
+  const directInboxItems = useMemo<(Conversation | AssistantInboxItem)[]>(
+    () => [assistantListItem, ...orderedRegularConversations],
+    [assistantListItem, orderedRegularConversations],
+  );
   const listData = activeTab === "seller"
     ? orderedSellerConversations
     : activeTab === "group"
       ? orderedGroupConversations
       : isForwardMode
         ? orderedUsers
-        : orderedRegularConversations;
+        : directInboxItems;
+  const assistantContextItems = activeTab === "regular" && !isForwardMode
+    ? orderedRegularConversations
+    : listData;
   const renderListItem = activeTab === "seller"
     ? renderSellerConversation
     : activeTab === "group"
       ? renderGroupConversation
       : isForwardMode
         ? renderChat
-        : renderRegularConversation;
-  const keyExtractor = (item: ChatUser | Conversation) => item._id;
+        : ({ item }: { item: Conversation | AssistantInboxItem }) =>
+            "itemType" in item && item.itemType === "assistant"
+              ? renderAssistantConversation({ item })
+              : renderRegularConversation({ item: item as Conversation });
+  const keyExtractor = (item: ChatUser | Conversation | AssistantInboxItem) => item._id;
   const assistantScope = activeTab === "seller"
     ? "Seller chats inbox support"
     : activeTab === "group"
       ? "Channels inbox support"
       : "Direct chats inbox support";
   const assistantScopeHint = headerSubtitle;
-  const assistantConversationSummary = `Visible chats in this tab: ${listData.length}. Forward mode: ${isForwardMode ? "on" : "off"}.`;
+  const assistantConversationSummary = `Visible chats in this tab: ${assistantContextItems.length}. Forward mode: ${isForwardMode ? "on" : "off"}.`;
   const assistantSuggestedPrompts = activeTab === "seller"
     ? ["Explain the seller chat flow", "Where do appointments appear?", "Fix the seller inbox issue"]
     : activeTab === "group"
@@ -1293,7 +1362,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       : ["Fix a direct chat issue", "Explain the message inbox", "Help with search or unread filters"];
   const assistantRecentMessages = useMemo(
     () =>
-      listData.slice(0, 5).map((item) => {
+      assistantContextItems.slice(0, 5).map((item) => {
         if ("conversationType" in item) {
           const label = item?.groupName || item?.otherUser?.username || item?.otherUser?.name || item?.sellerUser?.username || "Chat";
           return `${label}: ${getConversationPreview(item) || "No recent preview"}`;
@@ -1302,7 +1371,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         const chatUser = item as ChatUser;
         return `${chatUser?.username || chatUser?.name || "User"}: chat ready to open`;
       }),
-    [listData],
+    [assistantContextItems],
   );
 
   if (loading) {
@@ -1960,6 +2029,10 @@ const styles = StyleSheet.create({
   chatCardSelected: {
     transform: [{ scale: 0.995 }],
   },
+  assistantChatCard: {
+    paddingVertical: 12,
+    borderWidth: 1,
+  },
   chatCardDisabled: {
     opacity: 0.72,
   },
@@ -1978,6 +2051,15 @@ const styles = StyleSheet.create({
     borderRadius: 23,
     justifyContent: "center",
     alignItems: "center",
+    marginRight: 12,
+  },
+  assistantAvatarCard: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: 12,
   },
   onlineDot: {
@@ -2016,6 +2098,22 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: appFonts.semibold,
     fontWeight: "700",
+  },
+  assistantMetaPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    flexShrink: 0,
+  },
+  assistantMetaPillText: {
+    fontSize: 10,
+    fontFamily: appFonts.semibold,
+    fontWeight: "700",
+  },
+  assistantChatMeta: {
+    justifyContent: "center",
+    gap: 8,
   },
   chatMeta: {
     alignItems: "flex-end",

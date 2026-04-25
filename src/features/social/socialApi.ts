@@ -257,6 +257,17 @@ const buildMusicRequestPayload = (music: any) =>
     }
     : {};
 
+const mapTaggedUsersForRequest = (taggedUsers: any[] | undefined) =>
+  (taggedUsers || []).map((entry) => ({
+    user: entry.user,
+    username: entry.username,
+    position: {
+      x: typeof entry?.position?.x === "number" ? entry.position.x : 0.5,
+      y: typeof entry?.position?.y === "number" ? entry.position.y : 0.5,
+    },
+    mediaIndex: typeof entry?.mediaIndex === "number" ? entry.mediaIndex : 0,
+  }));
+
 const buildStoryMusicSticker = (music: any) => {
   const label = formatMusicLabel(music);
 
@@ -523,6 +534,19 @@ class RemoteSocialApi implements SocialApi {
             : undefined,
       width: item?.width,
       height: item?.height,
+      sensitiveContent: item?.sensitiveContent?.isSensitive || item?.mediaSensitivity?.isSensitive
+        ? {
+            isSensitive: true,
+            blur: item?.sensitiveContent?.blur !== false && item?.mediaSensitivity?.blur !== false,
+            label: item?.sensitiveContent?.label || item?.mediaSensitivity?.label,
+            confidence:
+              typeof item?.sensitiveContent?.confidence === "number"
+                ? item.sensitiveContent.confidence
+                : typeof item?.mediaSensitivity?.confidence === "number"
+                  ? item.mediaSensitivity.confidence
+                  : undefined,
+          }
+        : undefined,
     };
   }
 
@@ -633,6 +657,7 @@ class RemoteSocialApi implements SocialApi {
         url: story.mediaUrl,
         thumbnailUrl: story.thumbnailUrl,
         duration: story.duration,
+        mediaSensitivity: story.mediaSensitivity,
       }, 0, "story_media") : undefined,
       text: storyType === "text" ? story?.caption || "" : undefined,
       backgroundColor: typeof story?.backgroundColor === "string" ? story.backgroundColor : undefined,
@@ -669,16 +694,31 @@ class RemoteSocialApi implements SocialApi {
       linkUrl: typeof story?.linkUrl === "string" ? story.linkUrl : undefined,
       location: locationSticker?.text || undefined,
       stickers: stickers
-        .filter((item: any) => (item?.type === "text" || item?.type === "emoji") && item?.text)
+        .filter((item: any) => ((item?.type === "text" || item?.type === "emoji") && item?.text) || (item?.type === "gif" && item?.mediaUrl))
         .map((item: any, index: number) => ({
           id: this.getId(item) || `${this.getId(story)}_story_sticker_${index}`,
-          type: item.type,
-          text: item.text,
+          type: item?.type === "gif" ? "image" : item.type,
+          text: item.text || "",
+          mediaUrl: typeof item?.mediaUrl === "string" ? item.mediaUrl : undefined,
           position: {
             x: typeof item?.position?.x === "number" ? item.position.x : 0.18,
             y: typeof item?.position?.y === "number" ? item.position.y : 0.22 + index * 0.12,
-            width: typeof item?.position?.width === "number" ? item.position.width : item?.type === "emoji" ? 0.18 : 0.56,
-            height: typeof item?.position?.height === "number" ? item.position.height : item?.type === "emoji" ? 0.14 : 0.12,
+            width:
+              typeof item?.position?.width === "number"
+                ? item.position.width
+                : item?.type === "emoji"
+                  ? 0.18
+                  : item?.type === "gif"
+                    ? 0.28
+                    : 0.56,
+            height:
+              typeof item?.position?.height === "number"
+                ? item.position.height
+                : item?.type === "emoji"
+                  ? 0.14
+                  : item?.type === "gif"
+                    ? 0.2
+                    : 0.12,
             rotation: typeof item?.position?.rotation === "number" ? item.position.rotation : 0,
             scale: typeof item?.position?.scale === "number" ? item.position.scale : 1,
           },
@@ -1802,6 +1842,7 @@ class RemoteSocialApi implements SocialApi {
         width: asset.width,
         height: asset.height,
         order: index,
+        sensitiveContent: asset.sensitiveContent,
       })),
       // Video posts are still regular feed posts; only the dedicated swipe flow should create reels.
       postType: "post",
@@ -1825,7 +1866,10 @@ class RemoteSocialApi implements SocialApi {
       collaborators: payload.collaboratorIds || [],
       hashtags: payload.hashtags,
       mentions: payload.mentions,
+      taggedUsers: mapTaggedUsersForRequest(payload.taggedUsers),
       ...buildMusicRequestPayload(payload.music),
+    }, {
+      timeout: 120000,
     });
 
     const post = this.mapPost(res?.data?.post);
@@ -1928,6 +1972,21 @@ class RemoteSocialApi implements SocialApi {
       });
     }
 
+    if (payload.customImageStickerUrl) {
+      stickers.push({
+        type: "gif",
+        text: payload.customImageStickerLabel || "Sticker",
+        mediaUrl: payload.customImageStickerUrl,
+        position: resolveStoryStickerPosition(
+          payload.customImageStickerPosition,
+          undefined,
+          "emoji",
+          payload.customImageStickerScale,
+          payload.customImageStickerRotation,
+        ),
+      });
+    }
+
     (payload.extraEmojiStickers || []).slice(0, 8).forEach((sticker) => {
       stickers.push({
         type: "emoji",
@@ -1993,6 +2052,7 @@ class RemoteSocialApi implements SocialApi {
       mediaUrl: payload.media?.url,
       thumbnailUrl: payload.media?.thumbnailUrl,
       duration: payload.media?.durationMs ? Math.ceil(payload.media.durationMs / 1000) : undefined,
+      mediaSensitivity: payload.media?.sensitiveContent,
       caption: payload.text,
       backgroundColor: payload.backgroundColor,
       filterPreset: payload.filterPreset || "none",
@@ -2005,6 +2065,8 @@ class RemoteSocialApi implements SocialApi {
       allowReplies: payload.allowReplies,
       allowSharing: payload.allowSharing,
       ...buildMusicRequestPayload(payload.music),
+    }, {
+      timeout: 120000,
     });
 
     const story = this.mapStory(res?.data?.story);
@@ -2029,13 +2091,17 @@ class RemoteSocialApi implements SocialApi {
           width: payload.media.width,
           height: payload.media.height,
           order: 0,
+          sensitiveContent: payload.media.sensitiveContent,
         },
       ],
       postType: "reel",
       location: payload.location ? { name: payload.location } : undefined,
       hashtags: payload.hashtags,
       mentions: payload.mentions,
+      taggedUsers: mapTaggedUsersForRequest(payload.taggedUsers),
       ...buildMusicRequestPayload(payload.music),
+    }, {
+      timeout: 120000,
     });
 
     const reel = this.mapReel(res?.data?.post);

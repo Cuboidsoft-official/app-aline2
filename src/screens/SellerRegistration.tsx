@@ -30,6 +30,7 @@ import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { uploadDocumentAsset, uploadImageAsset } from "../utils/uploadMedia";
 import { DEFAULT_AVATAR_URL, DEFAULT_COVER_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { ensureCameraPermission } from "../utils/permissions";
 
 const DEFAULT_COVER = DEFAULT_COVER_URL;
 const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
@@ -200,6 +201,8 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [faceCheckPreview, setFaceCheckPreview] = useState<string | null>(null);
   const [faceCheckDoc, setFaceCheckDoc] = useState<ImageFile | null>(null);
   const [faceChecked, setFaceChecked] = useState(false);
+  const [faceCaptureLoading, setFaceCaptureLoading] = useState(false);
+  const [faceCaptureError, setFaceCaptureError] = useState("");
 
   const [serviceName, setServiceName] = useState("");
   const [serviceDurationMinutes, setServiceDurationMinutes] = useState("15");
@@ -319,27 +322,64 @@ const SellerRegistration = ({ navigation, route }: any) => {
     });
   };
 
-  const captureFaceCheck = () => {
-    launchCamera({ mediaType: "photo", cameraType: "front" }, response => {
-      if (response?.didCancel) return;
+  const captureFaceCheck = useCallback(async () => {
+    try {
+      setFaceCaptureLoading(true);
+      setFaceCaptureError("");
+
+      const hasPermission = await ensureCameraPermission(
+        "Allow Aline2 to use your camera for your seller verification selfie.",
+      );
+
+      if (!hasPermission) {
+        const message = "Camera permission is required to take your verification selfie.";
+        setFaceCaptureError(message);
+        Alert.alert("Camera permission needed", message);
+        return;
+      }
+
+      const response = await launchCamera({
+        mediaType: "photo",
+        cameraType: "front",
+        saveToPhotos: false,
+        quality: 0.9,
+      });
+
+      if (response?.didCancel) {
+        return;
+      }
 
       if (response?.errorCode) {
-        Alert.alert("Error", "Face check failed");
+        const message = response.errorMessage || "Could not open the selfie camera right now.";
+        setFaceCaptureError(message);
+        Alert.alert("Face check failed", message);
         return;
       }
 
       const asset = response.assets?.[0];
-      if (asset?.uri) {
-        setFaceCheckPreview(asset.uri);
-        setFaceCheckDoc({
-          uri: asset.uri,
-          name: asset.fileName || `face_check_${Date.now()}.jpg`,
-          type: asset.type,
-        });
-        setFaceChecked(true);
+      if (!asset?.uri) {
+        const message = "The camera did not return a usable selfie image.";
+        setFaceCaptureError(message);
+        Alert.alert("Face check failed", message);
+        return;
       }
-    });
-  };
+
+      setFaceCheckPreview(asset.uri);
+      setFaceCheckDoc({
+        uri: asset.uri,
+        name: asset.fileName || `face_check_${Date.now()}.jpg`,
+        type: asset.type,
+      });
+      setFaceChecked(true);
+      setFaceCaptureError("");
+    } catch (error) {
+      const message = getReadableApiErrorMessage(error, "Could not open the selfie camera right now.");
+      setFaceCaptureError(message);
+      Alert.alert("Face check failed", message);
+    } finally {
+      setFaceCaptureLoading(false);
+    }
+  }, []);
 
   const normalizePickedDocument = useCallback(async (file: DocumentPickerResponse): Promise<DocumentFile> => {
     const fileName = file.name || `document_${Date.now()}`;
@@ -1015,6 +1055,38 @@ const SellerRegistration = ({ navigation, route }: any) => {
     }
 
     if (step === 5) {
+      const faceCardBorderColor = faceCaptureError
+        ? "#FCA5A5"
+        : faceChecked
+          ? "#86EFAC"
+          : colors.border;
+      const faceStatusBackground = faceCaptureError
+        ? "#FEF2F2"
+        : faceChecked
+          ? "#ECFDF3"
+          : colors.surface;
+      const faceStatusIconBackground = faceChecked
+        ? "rgba(22,163,74,0.12)"
+        : faceCaptureError
+          ? "rgba(220,38,38,0.10)"
+          : "rgba(123,77,255,0.12)";
+      const faceStatusIconColor = faceCaptureError
+        ? "#DC2626"
+        : faceChecked
+          ? "#16A34A"
+          : colors.primary;
+      const faceStatusLabel = faceCaptureError
+        ? "Needs attention"
+        : faceChecked
+          ? "Selfie added"
+          : "Optional step";
+      const faceStatusText = faceCaptureError
+        ? faceCaptureError
+        : faceChecked
+          ? "Retake if your face is blurry or not centered."
+          : "Use the front camera in good light for the smoothest verification review.";
+      const faceStatusTextColor = faceCaptureError ? "#B91C1C" : colors.mutedText;
+
       return (
         <>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Face check</Text>
@@ -1022,17 +1094,73 @@ const SellerRegistration = ({ navigation, route }: any) => {
             Take a clear selfie for verification. This step is optional for now, and you can continue without a selfie while testing later screens.
           </Text>
 
-          <TouchableOpacity style={[styles.faceCard, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={captureFaceCheck} activeOpacity={0.9}>
+          <View style={[styles.faceStatusCard, { backgroundColor: faceStatusBackground }]}>
+            <View style={styles.faceStatusRow}>
+              <View style={[styles.faceStatusIconWrap, { backgroundColor: faceStatusIconBackground }]}>
+                <Icon
+                  name={faceCaptureError ? "alert-circle-outline" : faceChecked ? "checkmark-circle-outline" : "camera-outline"}
+                  size={18}
+                  color={faceStatusIconColor}
+                />
+              </View>
+              <View style={styles.faceStatusCopy}>
+                <Text style={[styles.faceStatusTitle, { color: colors.text }]}>{faceStatusLabel}</Text>
+                <Text style={[styles.faceStatusBody, { color: faceStatusTextColor }]}>
+                  {faceStatusText}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.faceCard, { backgroundColor: colors.card, borderColor: faceCardBorderColor }]}
+            onPress={captureFaceCheck}
+            activeOpacity={0.9}
+            disabled={faceCaptureLoading}
+          >
             {faceCheckPreview ? (
-              <Image source={{ uri: faceCheckPreview }} style={styles.facePreview} />
+              <View>
+                <Image source={{ uri: faceCheckPreview }} style={styles.facePreview} />
+                <View style={styles.facePreviewBadge}>
+                  <Icon name="camera-reverse-outline" size={14} color="#fff" />
+                  <Text style={styles.facePreviewBadgeText}>Tap to retake</Text>
+                </View>
+              </View>
             ) : (
               <View style={styles.facePlaceholder}>
-                <Icon name="scan-outline" size={44} color={colors.primary} />
-                <Text style={[styles.faceTitle, { color: colors.text }]}>Take selfie</Text>
-                <Text style={[styles.faceBody, { color: colors.mutedText }]}>Front camera, clean light, clear face.</Text>
+                {faceCaptureLoading ? (
+                  <>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                    <Text style={[styles.faceTitle, { color: colors.text }]}>Opening camera</Text>
+                    <Text style={[styles.faceBody, { color: colors.mutedText }]}>Getting your front camera ready.</Text>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="scan-outline" size={44} color={colors.primary} />
+                    <Text style={[styles.faceTitle, { color: colors.text }]}>Take selfie</Text>
+                    <Text style={[styles.faceBody, { color: colors.mutedText }]}>Front camera, clean light, clear face.</Text>
+                  </>
+                )}
               </View>
             )}
           </TouchableOpacity>
+
+          <View style={styles.faceActionRow}>
+            <TouchableOpacity
+              style={[styles.faceActionButton, { backgroundColor: colors.primary }, faceCaptureLoading && styles.buttonDisabled]}
+              onPress={captureFaceCheck}
+              disabled={faceCaptureLoading}
+            >
+              {faceCaptureLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Icon name={faceCheckPreview ? "refresh-outline" : "camera-outline"} size={16} color="#fff" />
+                  <Text style={styles.faceActionButtonText}>{faceCheckPreview ? "Retake selfie" : "Open camera"}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
         </>
       );
     }
@@ -1323,6 +1451,26 @@ const styles = StyleSheet.create({
   },
   checkButtonDone: { backgroundColor: "#118B50" },
   checkButtonText: { color: "#fff", fontWeight: "800", marginLeft: 8 },
+  faceStatusCard: {
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+  },
+  faceStatusRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  faceStatusIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  faceStatusCopy: { flex: 1 },
+  faceStatusTitle: { fontSize: 14, fontWeight: "900" },
+  faceStatusBody: { marginTop: 3, fontSize: 12, lineHeight: 18 },
   faceCard: {
     minHeight: 280,
     borderWidth: StyleSheet.hairlineWidth,
@@ -1330,9 +1478,43 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   facePreview: { width: "100%", height: 320 },
+  facePreviewBadge: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(15,23,42,0.74)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  facePreviewBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
+    marginLeft: 6,
+  },
   facePlaceholder: { minHeight: 280, alignItems: "center", justifyContent: "center", padding: 20 },
   faceTitle: { marginTop: 10, fontSize: 18, fontWeight: "900" },
   faceBody: { marginTop: 4, fontSize: 13, textAlign: "center", lineHeight: 18 },
+  faceActionRow: {
+    marginTop: 12,
+    flexDirection: "row",
+  },
+  faceActionButton: {
+    minHeight: 46,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+  },
+  faceActionButtonText: {
+    color: "#fff",
+    fontWeight: "800",
+    marginLeft: 8,
+  },
   rateCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 14, marginBottom: 2 },
   rateLabel: { fontSize: 12, fontWeight: "800" },
   rateValue: { marginTop: 4, fontSize: 30, fontWeight: "900" },

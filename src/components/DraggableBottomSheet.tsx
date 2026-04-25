@@ -8,6 +8,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import LinearGradient from "react-native-linear-gradient";
 
 import { useAppTheme } from "../theme/AppThemeContext";
 
@@ -115,7 +116,25 @@ function DraggableBottomSheet({
             },
           ]}
         >
-          <View style={styles.handleArea} {...panResponder.panHandlers}>
+          <LinearGradient
+            pointerEvents="none"
+            colors={
+              isDarkMode
+                ? ["rgba(59,130,246,0.16)", "rgba(15,23,42,0.04)", "transparent"]
+                : ["rgba(168,85,247,0.12)", "rgba(255,255,255,0.04)", "transparent"]
+            }
+            style={styles.sheetGlow}
+          />
+          <View
+            style={[
+              styles.handleArea,
+              {
+                backgroundColor: isDarkMode ? "rgba(15,23,42,0.92)" : "rgba(248,250,252,0.96)",
+                borderBottomColor: colors.border,
+              },
+            ]}
+            {...panResponder.panHandlers}
+          >
             <View style={[styles.handle, { backgroundColor: isDarkMode ? "#475569" : "#cbd5e1" }]} />
           </View>
           <View style={styles.content}>{children}</View>
@@ -128,7 +147,7 @@ function DraggableBottomSheet({
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(2,6,23,0.58)",
+    backgroundColor: "rgba(2,6,23,0.66)",
   },
   root: {
     ...StyleSheet.absoluteFillObject,
@@ -136,23 +155,31 @@ const styles = StyleSheet.create({
   },
   sheetWrap: {
     marginTop: "auto",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    marginHorizontal: 10,
+    marginBottom: 10,
+    borderRadius: 28,
     borderWidth: StyleSheet.hairlineWidth,
     shadowOpacity: 0.24,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: -6 },
-    elevation: 14,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: -8 },
+    elevation: 18,
+    overflow: "hidden",
   },
   handleArea: {
-    paddingTop: 10,
-    paddingBottom: 8,
+    paddingTop: 12,
+    paddingBottom: 10,
     alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   handle: {
-    width: 44,
-    height: 5,
+    width: 52,
+    height: 6,
     borderRadius: 999,
+  },
+  sheetGlow: {
+    ...StyleSheet.absoluteFillObject,
+    top: 0,
+    height: 92,
   },
   content: {
     flex: 1,
