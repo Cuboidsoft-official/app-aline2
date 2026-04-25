@@ -322,6 +322,72 @@ const dedupeMessages = (items: any[]): any[] => {
   });
 };
 
+const buildMessageSignature = (message: any): string => {
+  const attachment = getMessageAttachment(message);
+  const replyId =
+    String(message?.replyToMessageId || "").trim()
+    || getMessageIdentity(getMessageReply(message))
+    || "";
+
+  return [
+    String(message?.messageType || "text").trim().toLowerCase(),
+    String(getMessageText(message) || "").trim(),
+    normalizeMediaUrl(message?.mediaUrl || attachment?.url || ""),
+    String(attachment?.fileName || "").trim(),
+    Number(message?.duration || 0),
+    replyId,
+  ].join("::");
+};
+
+const buildOptimisticMessage = ({
+  optimisticId,
+  currentUserId,
+  text,
+  file,
+  mediaUrl,
+  messageType,
+  duration,
+  replyToMessageId,
+  replyToMessage,
+}: {
+  optimisticId: string;
+  currentUserId: string;
+  text?: string;
+  file?: { uri: string; name: string; type: string };
+  mediaUrl?: string;
+  messageType?: string;
+  duration?: number;
+  replyToMessageId?: string;
+  replyToMessage?: ChatMessage | null;
+}): ChatMessage => {
+  const resolvedMessageType = String(
+    messageType
+    || (file?.type?.startsWith("video/") ? "video" : file?.type?.startsWith("image/") ? "image" : file ? "document" : "text")
+  ).trim().toLowerCase() || "text";
+
+  return {
+    localId: optimisticId,
+    optimisticId,
+    text: String(text || "").trim(),
+    messageType: resolvedMessageType,
+    mediaUrl: mediaUrl || file?.uri || "",
+    attachment: file
+      ? {
+          url: file.uri,
+          fileName: file.name,
+          thumbnailUrl: file.uri,
+        }
+      : undefined,
+    duration,
+    sender: { _id: currentUserId },
+    createdAt: new Date().toISOString(),
+    replyToMessageId,
+    replyToMessage: replyToMessage || null,
+    replyTo: replyToMessage || replyToMessageId || null,
+    _optimistic: true,
+  };
+};
+
 const formatLastSeenStatus = (value?: string): string => {
   if (!value) {
     return "Away";
@@ -559,6 +625,12 @@ const ChatScreen = ({ navigation, route }: any) => {
   const messageInputRef = useRef<TextInput | null>(null);
   const replyHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingFocusMessageIdRef = useRef("");
+  const latestAutoScrollMessageIdRef = useRef("");
+  const scrollToLatestMessage = useCallback((animated = true) => {
+    requestAnimationFrame(() => {
+      messageListRef.current?.scrollToEnd?.({ animated });
+    });
+  }, []);
 
   useEffect(() => () => {
     if (replyHighlightTimeoutRef.current) {
@@ -589,14 +661,44 @@ const ChatScreen = ({ navigation, route }: any) => {
 
     setMessages((prev) => {
       const nextIdentity = getMessageIdentity(normalizedMessage);
-      const exists = nextIdentity
-        ? prev.some((item) => getMessageIdentity(item) === nextIdentity)
-        : false;
-      if (exists) {
-        return prev;
+      const nextSignature = buildMessageSignature(normalizedMessage);
+      let hasChanged = false;
+
+      const mergedItems = prev.map((item) => {
+        const itemIdentity = getMessageIdentity(item);
+        if (nextIdentity && itemIdentity === nextIdentity) {
+          hasChanged = true;
+          return { ...item, ...normalizedMessage, _optimistic: false };
+        }
+
+        if (
+          !hasChanged
+          && item?._optimistic
+          && String(getMessageSenderId(item) || "") === String(currentUserId || "")
+          && buildMessageSignature(item) === nextSignature
+        ) {
+          hasChanged = true;
+          return { ...normalizedMessage, _optimistic: false };
+        }
+
+        return item;
+      });
+
+      if (hasChanged) {
+        return dedupeMessages(mergedItems);
       }
-      return [...prev, normalizedMessage];
+
+      return [...prev, { ...normalizedMessage, _optimistic: false }];
     });
+  }, [currentUserId]);
+
+  const removeLocalMessage = useCallback((messageId: string) => {
+    const normalizedMessageId = String(messageId || "").trim();
+    if (!normalizedMessageId) {
+      return;
+    }
+
+    setMessages((prev) => prev.filter((item) => getMessageIdentity(item) !== normalizedMessageId));
   }, []);
 
   const applyMessageSeen = useCallback((payload: any) => {
@@ -1149,29 +1251,51 @@ const ChatScreen = ({ navigation, route }: any) => {
       throw new Error("Unable to start this conversation right now.");
     }
 
-    const res = await sendChatMessage({
-      conversationId: resolvedConversationId,
-      text: nextText,
-      file,
-      mediaUrl,
-      messageType,
-      duration,
-      replyToMessageId,
-    });
+    const optimisticId = `local:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    mergeMessage(
+      buildOptimisticMessage({
+        optimisticId,
+        currentUserId,
+        text: nextText,
+        file,
+        mediaUrl,
+        messageType,
+        duration,
+        replyToMessageId,
+        replyToMessage,
+      }),
+    );
+    setReplyingToMessage(null);
+    scrollToLatestMessage(false);
 
-    if (res?.message) {
-      const mergedReplyMessage = replyToMessage
-        ? {
-          ...res.message,
-          replyToMessageId: res.message?.replyToMessageId || replyToMessageId,
-          replyToMessage: res.message?.replyToMessage || replyToMessage,
-        }
-        : res.message;
+    try {
+      const res = await sendChatMessage({
+        conversationId: resolvedConversationId,
+        text: nextText,
+        file,
+        mediaUrl,
+        messageType,
+        duration,
+        replyToMessageId,
+      });
 
-      mergeMessage(mergedReplyMessage);
-      setReplyingToMessage(null);
+      if (res?.message) {
+        const mergedReplyMessage = replyToMessage
+          ? {
+              ...res.message,
+              replyToMessageId: res.message?.replyToMessageId || replyToMessageId,
+              replyToMessage: res.message?.replyToMessage || replyToMessage,
+            }
+          : res.message;
+
+        mergeMessage(mergedReplyMessage);
+      }
+    } catch (error) {
+      removeLocalMessage(optimisticId);
+      setReplyingToMessage(replyToMessage || null);
+      throw error;
     }
-  }, [ensureConversation, groupMeta.groupMessagePermission, groupMeta.groupVisibility, groupMeta.isGroupAdmin, isGroupConversation, mergeMessage]);
+  }, [currentUserId, ensureConversation, groupMeta.groupMessagePermission, groupMeta.groupVisibility, groupMeta.isGroupAdmin, isGroupConversation, mergeMessage, removeLocalMessage, scrollToLatestMessage]);
 
   const replyingToMessageId = useMemo(() => getMessageIdentity(replyingToMessage), [replyingToMessage]);
 
@@ -1180,15 +1304,17 @@ const ChatScreen = ({ navigation, route }: any) => {
       return;
     }
 
+    const trimmedText = text.trim();
     try {
       setSending(true);
+      setText("");
       await submitMessage({
-        text: text.trim(),
+        text: trimmedText,
         replyToMessageId: replyingToMessageId,
         replyToMessage: replyingToMessage,
       });
-      setText("");
     } catch (err: any) {
+      setText(trimmedText);
       console.log("Send message error:", err?.response?.data || err);
       Alert.alert("Error", getReadableApiErrorMessage(err, "Failed to send message"));
     } finally {
@@ -1444,6 +1570,21 @@ const ChatScreen = ({ navigation, route }: any) => {
       }
     }, 120);
   }, [messageIndexMap, scrollToMessageIndex]);
+
+  useEffect(() => {
+    if (!messages.length || loadingMore) {
+      return;
+    }
+
+    const latestMessageId = getMessageIdentity(messages[messages.length - 1]);
+    if (!latestMessageId || latestAutoScrollMessageIdRef.current === latestMessageId) {
+      return;
+    }
+
+    const shouldAnimate = latestAutoScrollMessageIdRef.current !== "";
+    latestAutoScrollMessageIdRef.current = latestMessageId;
+    scrollToLatestMessage(shouldAnimate);
+  }, [loadingMore, messages, scrollToLatestMessage]);
 
   const queueAttachmentPreview = useCallback((assetsInput: any[] | any) => {
     const assets = Array.isArray(assetsInput) ? assetsInput : [assetsInput];
@@ -1828,6 +1969,12 @@ const ChatScreen = ({ navigation, route }: any) => {
       return;
     }
 
+    applyMessageReaction({
+      messageId,
+      userId: currentUserId,
+      emoji,
+    });
+
     reactToChatMessage(messageId, emoji)
       .then((response: any) => {
         applyMessageReaction({
@@ -1928,9 +2075,10 @@ const ChatScreen = ({ navigation, route }: any) => {
   const startReplyToMessage = useCallback((message: ChatMessage) => {
     setReplyingToMessage(message);
     requestAnimationFrame(() => {
+      scrollToLatestMessage(false);
       messageInputRef.current?.focus();
     });
-  }, []);
+  }, [scrollToLatestMessage]);
 
   // ─── Render message ───────────────────────────────────────────────────────
 
@@ -2015,11 +2163,11 @@ const ChatScreen = ({ navigation, route }: any) => {
         ref={(instance) => {
           swipeableRef = instance;
         }}
-        friction={2}
+        friction={1.4}
         overshootLeft={false}
         overshootRight={false}
-        leftThreshold={30}
-        rightThreshold={30}
+        leftThreshold={18}
+        rightThreshold={18}
         renderLeftActions={isMine ? undefined : () => (
           <View style={styles.swipeReplyAction}>
             <Icon name="return-up-back-outline" size={18} color="#fff" />
@@ -2607,12 +2755,15 @@ const ChatScreen = ({ navigation, route }: any) => {
           <FlatList
             ref={messageListRef}
             data={messages}
-            extraData={messages}
             keyExtractor={(item) => getMessageRenderKey(item)}
             renderItem={renderMessage}
             onScrollToIndexFailed={handleScrollToIndexFailed}
             contentContainerStyle={[styles.listContent, { paddingHorizontal: Math.max(8, chatMetrics.listPadding - 3), paddingTop: chatMetrics.listPadding, paddingBottom: Math.max(20, 12 + insets.bottom) }]}
             showsVerticalScrollIndicator={false}
+            removeClippedSubviews={Platform.OS === "android"}
+            initialNumToRender={18}
+            maxToRenderPerBatch={12}
+            windowSize={7}
             keyboardShouldPersistTaps="handled"
             refreshControl={
               <RefreshControl

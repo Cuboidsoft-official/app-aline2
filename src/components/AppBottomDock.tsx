@@ -9,6 +9,18 @@ import ProfileTabAvatar from "./ProfileTabAvatar";
 
 export const APP_BOTTOM_DOCK_BASE_HEIGHT = Platform.OS === "ios" ? 78 : 70;
 
+export const getAppBottomDockBottomPadding = (bottomInset = 0) => {
+  const normalizedInset = Math.max(0, Number(bottomInset) || 0);
+  if (normalizedInset > 0) {
+    return normalizedInset + (Platform.OS === "ios" ? 8 : 4);
+  }
+
+  return Platform.OS === "ios" ? 12 : 8;
+};
+
+export const getAppBottomDockHeight = (bottomInset = 0) =>
+  APP_BOTTOM_DOCK_BASE_HEIGHT + getAppBottomDockBottomPadding(bottomInset);
+
 const bottomNavItems = [
   {
     key: "Feed",
@@ -50,8 +62,8 @@ type AppBottomDockProps = {
 function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
   const { colors, isDarkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const bottomPadding = Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
-  const dockHeight = APP_BOTTOM_DOCK_BASE_HEIGHT + bottomPadding;
+  const bottomPadding = getAppBottomDockBottomPadding(insets.bottom);
+  const dockHeight = getAppBottomDockHeight(insets.bottom);
   const surfaceColor = isDarkMode ? "#08111F" : colors.card;
   const activeTintColor = colors.primary;
   const labelFontSize = Platform.OS === "ios" ? 9.5 : 9;
@@ -175,7 +187,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 60,
-    paddingBottom: Platform.OS === "android" ? 4 : 0,
     elevation: 60,
   },
   surface: {

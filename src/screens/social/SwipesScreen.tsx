@@ -30,6 +30,7 @@ import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, Swipe, SwipeComment } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
+import { startAudioPlaybackFromSources } from "../../utils/audioPlayback";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { shouldShowVerifiedBadge } from "../../utils/verificationBadges";
 import { buildSharedPostMessage } from "../../utils/chatPresentation";
@@ -109,7 +110,8 @@ function SwipesScreen({ navigation, route }: any) {
   const swipeListRef = useRef<FlatList<Swipe> | null>(null);
 
   const activeSwipe = swipes[activeSwipeIndex] || null;
-  const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipe?.music?.previewUrl || "");
+  const activeSwipeRawMusicUrl = String(activeSwipe?.music?.previewUrl || "").trim();
+  const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipeRawMusicUrl);
   const activeSwipeMusicStartMs = Math.max(0, Number(activeSwipe?.music?.startTime || 0) * 1000);
   const activeSwipeMusicDurationMs = Math.max(0, Number(activeSwipe?.music?.duration || 0) * 1000);
   const activeSwipeMusicTrackKey = activeSwipe
@@ -118,6 +120,13 @@ function SwipesScreen({ navigation, route }: any) {
   const isSwipePlaybackEnabled = isSwipeSoundEnabled && !activeSheet && isScreenFocused;
   const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
     + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 75 }).current;
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null; isViewable?: boolean }> }) => {
+    const firstVisibleItem = viewableItems.find((entry) => entry.isViewable && typeof entry.index === "number");
+    if (typeof firstVisibleItem?.index === "number") {
+      setActiveSwipeIndex(firstVisibleItem.index);
+    }
+  }).current;
 
   useEffect(() => {
     swipeMusicStartMsRef.current = activeSwipeMusicStartMs;
@@ -639,7 +648,7 @@ function SwipesScreen({ navigation, route }: any) {
       }
 
       swipeMusicTrackKeyRef.current = activeSwipeMusicTrackKey;
-      await player.startPlayer(activeSwipeMusicUrl);
+      await startAudioPlaybackFromSources(player, activeSwipeRawMusicUrl, activeSwipeMusicUrl);
       await player.seekToPlayer(activeSwipeMusicStartMs);
       await player.setVolume(1);
     };
@@ -654,6 +663,7 @@ function SwipesScreen({ navigation, route }: any) {
     };
   }, [
     activeSwipeMusicDurationMs,
+    activeSwipeRawMusicUrl,
     activeSwipeMusicStartMs,
     activeSwipeMusicTrackKey,
     activeSwipeMusicUrl,
@@ -765,16 +775,16 @@ function SwipesScreen({ navigation, route }: any) {
                 <Text style={styles.actionText}>{formatCount(item.sharesCount)}</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionButton} onPress={() => handleSave(item.id)}>
-                <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={23} color="#fff" />
-              </TouchableOpacity>
-
               <TouchableOpacity style={styles.actionButton} onPress={() => setIsSwipeSoundEnabled((current) => !current)}>
                 <Icon
                   name={isSwipePlaybackEnabled ? "volume-high-outline" : "volume-mute-outline"}
                   size={23}
                   color="#fff"
                 />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.actionButton} onPress={() => handleSave(item.id)}>
+                <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={23} color="#fff" />
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.actionButton} onPress={() => openActionsSheet(item)}>
@@ -803,17 +813,24 @@ function SwipesScreen({ navigation, route }: any) {
         keyExtractor={(item) => item.id}
         renderItem={renderSwipe}
         onLayout={onListLayout}
+        pagingEnabled
         snapToInterval={viewportHeight}
         snapToAlignment="start"
         disableIntervalMomentum
         decelerationRate="fast"
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews={Platform.OS === "android"}
+        initialNumToRender={2}
+        maxToRenderPerBatch={2}
+        windowSize={3}
         getItemLayout={(_, index) => ({
           length: viewportHeight,
           offset: viewportHeight * index,
           index,
         })}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />}
+        viewabilityConfig={viewabilityConfig}
+        onViewableItemsChanged={onViewableItemsChanged}
         onMomentumScrollEnd={(event) => {
           const nextIndex = Math.round(
             Number(event?.nativeEvent?.contentOffset?.y || 0) / Math.max(1, viewportHeight),

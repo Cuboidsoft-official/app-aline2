@@ -302,6 +302,12 @@ const SettingsScreen = ({ navigation }: any) => {
               icon: "card-outline",
               onPress: () => navigation.navigate("Profile"),
             })}
+            {renderActionRow({
+              title: "Wallet and appointments",
+              hint: "Add money, use referral wallet, and open your booking dashboard",
+              icon: "wallet-outline",
+              onPress: () => navigation.navigate("WalletScreen"),
+            })}
             {renderSwitchRow({
               title: "Private account",
               hint: "Control who can view your profile and activity",

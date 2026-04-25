@@ -194,6 +194,10 @@ const fetchRequestData = useCallback(async () => {
       const res = await API.get("/seller/me");
 
       if (res?.data?.success) {
+        if (!res.data.seller?.onboardingCompleted) {
+          navigation.replace("SellerRegistration", { mode: "create", initialStep: 3 });
+          return;
+        }
         setSeller(res.data.seller);
         setSellerError("");
       } else {
@@ -277,6 +281,11 @@ const fetchRequestData = useCallback(async () => {
       label: "Appointments",
       value: `${recentRequests.length || 0}`,
       detail: "Recent",
+    },
+    {
+      label: "Coins",
+      value: `${Number(seller?.sellerCoins || 0)}`,
+      detail: "Credits",
     },
   ];
 
@@ -947,11 +956,12 @@ const styles = StyleSheet.create({
   },
   metricGrid: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
     marginTop: 12,
   },
   metricCard: {
-    flex: 1,
+    width: "48.5%",
     borderRadius: 20,
     borderWidth: 1,
     paddingHorizontal: 14,

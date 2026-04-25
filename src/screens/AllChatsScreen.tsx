@@ -38,7 +38,7 @@ import { getChatLayoutMetrics } from "../theme/chatUi";
 import { connectSocket, socket } from "../socket";
 import AISupportSheet from "../components/chat/AISupportSheet";
 import ChatLockModal from "../components/chat/ChatLockModal";
-import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
+import AppBottomDock, { getAppBottomDockHeight } from "../components/AppBottomDock";
 import AppAvatar from "../components/AppAvatar";
 import {
   getLockedConversationIds,
@@ -206,7 +206,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
   const { width } = useWindowDimensions();
   const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
   const isInsideTabNavigator = useMemo(() => hasMainTabParent(navigation), [navigation]);
-  const bottomDockOffset = isInsideTabNavigator ? 0 : APP_BOTTOM_DOCK_BASE_HEIGHT + Math.max(insets.bottom, 10);
+  const bottomDockOffset = isInsideTabNavigator ? 0 : getAppBottomDockHeight(insets.bottom);
   const accentColor = colors.primary;
   const accentSoft = alpha(accentColor, isDarkMode ? "22" : "14");
   const accentBorder = alpha(accentColor, isDarkMode ? "52" : "32");
@@ -1566,6 +1566,10 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         keyExtractor={keyExtractor}
         renderItem={renderListItem}
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews
+        initialNumToRender={12}
+        maxToRenderPerBatch={10}
+        windowSize={6}
         contentContainerStyle={[
           styles.listContent,
           {

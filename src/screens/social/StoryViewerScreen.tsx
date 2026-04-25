@@ -26,6 +26,7 @@ import { toUserSafeMessage } from "../../features/social/validation";
 import { DEFAULT_AVATAR_URL } from "../../constants/defaultAssets";
 import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
 import { buildSharedStoryMessage } from "../../utils/chatPresentation";
+import { startAudioPlaybackFromSources } from "../../utils/audioPlayback";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 
 const DEFAULT_STORY_MS = 5000;
@@ -148,9 +149,13 @@ function StoryViewerScreen({ route, navigation }: any) {
   const storyDuration = useMemo(() => getStoryDuration(currentStory), [currentStory]);
   const canReplyToCurrentStory = !!currentStory && currentStory.allowReplies !== false;
   const canAccessOwnerTools = !!currentStory?.isOwner && isSyncedStoryId(currentStory?.id);
-  const storyMusicUrl = useMemo(
-    () => normalizeMediaUrl(currentStory?.music?.previewUrl || ""),
+  const storyMusicRawUrl = useMemo(
+    () => String(currentStory?.music?.previewUrl || "").trim(),
     [currentStory?.music?.previewUrl],
+  );
+  const storyMusicUrl = useMemo(
+    () => normalizeMediaUrl(storyMusicRawUrl),
+    [storyMusicRawUrl],
   );
   const storyMusicStartMs = Math.max(0, Number(currentStory?.music?.startTime || 0) * 1000);
   const storyMusicDurationMs = Math.max(0, Number(currentStory?.music?.duration || 0) * 1000);
@@ -291,7 +296,7 @@ function StoryViewerScreen({ route, navigation }: any) {
       }
 
       storyMusicTrackKeyRef.current = storyMusicTrackKey;
-      await player.startPlayer(storyMusicUrl);
+      await startAudioPlaybackFromSources(player, storyMusicRawUrl, storyMusicUrl);
       await player.seekToPlayer(storyMusicStartMs);
       await player.setVolume(1);
     };
@@ -308,6 +313,7 @@ function StoryViewerScreen({ route, navigation }: any) {
     isMusicEnabled,
     paused,
     storyMusicDurationMs,
+    storyMusicRawUrl,
     storyMusicStartMs,
     storyMusicTrackKey,
     storyMusicUrl,

@@ -36,6 +36,7 @@ import { API } from "../api/api";
 import { getStoredUser } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
+import { startAudioPlaybackFromSources } from "../utils/audioPlayback";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
@@ -252,7 +253,8 @@ function FeedScreen({ navigation }: any) {
   );
   const activePublishTask = publishTasks[0] || null;
   const completedPublishTaskIdsRef = useRef<Set<string>>(new Set());
-  const activePostMusicUrl = normalizeMediaUrl(activePost?.music?.previewUrl || "");
+  const activePostRawMusicUrl = String(activePost?.music?.previewUrl || "").trim();
+  const activePostMusicUrl = normalizeMediaUrl(activePostRawMusicUrl);
   const activePostMusicStartMs = Math.max(0, Number(activePost?.music?.startTime || 0) * 1000);
   const activePostMusicDurationMs = Math.max(0, Number(activePost?.music?.duration || 0) * 1000);
   const activePostMusicTrackKey = activePost
@@ -279,7 +281,7 @@ function FeedScreen({ navigation }: any) {
       const res = await API.get("/seller/me");
       const seller = res.data?.seller;
 
-      if (!seller) {
+      if (!seller || seller.onboardingCompleted === false) {
         return null;
       }
 
@@ -547,7 +549,7 @@ function FeedScreen({ navigation }: any) {
       }
 
       postMusicTrackKeyRef.current = activePostMusicTrackKey;
-      await player.startPlayer(activePostMusicUrl);
+      await startAudioPlaybackFromSources(player, activePostRawMusicUrl, activePostMusicUrl);
       await player.seekToPlayer(activePostMusicStartMs);
       await player.setVolume(1);
     };
@@ -563,6 +565,7 @@ function FeedScreen({ navigation }: any) {
   }, [
     activePostId,
     activePostMusicDurationMs,
+    activePostRawMusicUrl,
     activePostMusicStartMs,
     activePostMusicTrackKey,
     activePostMusicUrl,

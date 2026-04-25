@@ -1,680 +1,856 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import Clipboard from "@react-native-clipboard/clipboard";
 import { TextInput as RNTextInput } from "react-native";
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
+  ActivityIndicator,
   ScrollView,
   StatusBar,
-  ActivityIndicator
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { Alert } from "../utils/appAlert";
-
 import Icon from "react-native-vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
+import { Alert } from "../utils/appAlert";
 import { API } from "../api/api";
-import { monetizationDisabledMessage, productFlags } from "../config/productFlags";
+import { getStoredUser } from "../utils/authSession";
+import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import { formatCurrencyAmount, formatSummaryAmount } from "../utils/servicePricing";
+import { useAppTheme } from "../theme/AppThemeContext";
 
-type LedgerRequest = {
-    _id: string;
-    status?: string;
-    createdAt?: string;
-    pricing?: {
-        amount?: number;
-        currency?: string;
-    };
-    service?: {
-        serviceName?: string;
-    };
-    user?: {
-        name?: string;
-        username?: string;
-    };
+type WalletTxn = {
+  _id: string;
+  amount?: number;
+  type?: string;
+  source?: string;
+  note?: string;
 };
 
+type DepositEntry = {
+  _id: string;
+  amount?: number;
+  status?: string;
+};
+
+type LedgerRequest = {
+  _id: string;
+  status?: string;
+  pricing?: {
+    amount?: number;
+    currency?: string;
+  };
+  service?: {
+    serviceName?: string;
+  };
+  user?: {
+    name?: string;
+    username?: string;
+  };
+  seller?: {
+    sellerName?: string;
+  };
+};
+
+const TOP_UP_PRESETS = ["200", "500", "1000", "2000"];
+
 function WalletScreen({ navigation }: any) {
+  const { colors, isDarkMode } = useAppTheme();
+  const [loading, setLoading] = useState(true);
+  const [addingMoney, setAddingMoney] = useState(false);
+  const [applyingCode, setApplyingCode] = useState(false);
+  const [summary, setSummary] = useState<any>(null);
+  const [walletData, setWalletData] = useState<any>(null);
+  const [sellerWallet, setSellerWallet] = useState<any>(null);
+  const [recentRequests, setRecentRequests] = useState<LedgerRequest[]>([]);
+  const [recentTransactions, setRecentTransactions] = useState<WalletTxn[]>([]);
+  const [recentDeposits, setRecentDeposits] = useState<DepositEntry[]>([]);
+  const [referralCode, setReferralCode] = useState("");
+  const [referredByCode, setReferredByCode] = useState("");
+  const [applyCode, setApplyCode] = useState("");
+  const [topUpAmount, setTopUpAmount] = useState("500");
+  const [isSellerAccount, setIsSellerAccount] = useState(false);
 
-    const [summary, setSummary] = useState<any>(null);
-    const [recentRequests, setRecentRequests] = useState<LedgerRequest[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [walletData, setWalletData] = useState<any>(null);
-    const [referralCode, setReferralCode] = useState<string>("");
-    const [applyCode, setApplyCode] = useState("");
-    const [applyingCode, setApplyingCode] = useState(false);
+  const accent = colors.primary;
+  const bg = isDarkMode ? "#070B14" : "#F4F1FF";
+  const panel = isDarkMode ? "#0F1728" : "#FFFFFF";
+  const panelAlt = isDarkMode ? "#151F35" : "#F8F5FF";
+  const border = isDarkMode ? "rgba(255,255,255,0.08)" : "#E9E2FF";
+  const textSecondary = isDarkMode ? "#A7B4D1" : "#6B7280";
+  const white = "#FFFFFF";
 
-    useFocusEffect(
-        useCallback(() => {
-            let active = true;
+  const screenTitle = useMemo(
+    () => (isSellerAccount ? "Seller Earnings" : "Wallet & Appointments"),
+    [isSellerAccount],
+  );
 
-            const loadSummary = async () => {
-                try {
-                    setLoading(true);
-                    const [summaryRes, requestsRes, walletRes] = await Promise.all([
-                        API.get("/service-requests/summary", {
-                            params: { role: "seller" }
-                        }),
-                        API.get("/service-requests", {
-                            params: { role: "seller" }
-                        }),
-                        API.get("/wallet").catch(() => ({ data: null })),
-                    ]);
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
 
-                    if (active) {
-                        setSummary(summaryRes.data?.summary || null);
-                        setRecentRequests((requestsRes.data?.requests || []).slice(0, 8));
-                        if (walletRes.data?.wallet) {
-                            setWalletData(walletRes.data.wallet);
-                        }
-                        if (walletRes.data?.referralCode) {
-                            setReferralCode(walletRes.data.referralCode);
-                        }
-                    }
-                } catch (error) {
-                    console.log("wallet summary error:", error);
-                    if (active) {
-                        Alert.alert("Error", "Failed to load seller earnings");
-                    }
-                } finally {
-                    if (active) {
-                        setLoading(false);
-                    }
-                }
-            };
+      const storedUser = await getStoredUser();
+      const sellerAccount = String(storedUser?.category || "").toLowerCase() === "seller";
+      setIsSellerAccount(sellerAccount);
 
-            loadSummary();
+      const requestRole = sellerAccount ? "seller" : "user";
+      const [summaryRes, requestsRes, walletRes] = await Promise.all([
+        API.get("/service-requests/summary", { params: { role: requestRole } }).catch(() => ({ data: null })),
+        API.get("/service-requests", { params: { role: requestRole } }).catch(() => ({ data: null })),
+        API.get("/wallet").catch(() => ({ data: null })),
+      ]);
 
-            return () => {
-                active = false;
-            };
-        }, [])
-    );
-
-    if (!productFlags.sellerMonetizationInConsumerApp) {
-        return (
-            <ScrollView style={styles.container} contentContainerStyle={styles.readOnlyContainer} showsVerticalScrollIndicator={false}>
-                <StatusBar barStyle="light-content" backgroundColor="#ab2aeb" />
-
-                <View style={styles.header}>
-                    <View style={styles.headerRow}>
-                        <TouchableOpacity onPress={() => navigation.goBack()}>
-                            <Icon name="arrow-back" size={24} color="#fff" />
-                        </TouchableOpacity>
-
-                        <Text style={styles.title}>Business Tools</Text>
-
-                        <View style={{ width: 24 }} />
-                    </View>
-                </View>
-
-                <View style={styles.readOnlyCard}>
-                    <Icon name="lock-closed-outline" size={26} color="#ab2aeb" />
-                    <Text style={styles.readOnlyTitle}>Payments are not handled in this app</Text>
-                    <Text style={styles.readOnlyText}>{monetizationDisabledMessage}</Text>
-                </View>
-            </ScrollView>
-        );
+      setSummary(summaryRes.data?.summary || null);
+      setRecentRequests((requestsRes.data?.requests || []).slice(0, 8));
+      setWalletData(walletRes.data?.wallet || null);
+      setSellerWallet(walletRes.data?.sellerWallet || null);
+      setReferralCode(walletRes.data?.referralCode || "");
+      setReferredByCode(walletRes.data?.referredByCode || "");
+      setRecentTransactions(walletRes.data?.recentTransactions || []);
+      setRecentDeposits(walletRes.data?.recentDeposits || []);
+    } catch (error) {
+      console.log("wallet screen error:", error);
+      Alert.alert("Error", "Failed to load wallet details.");
+    } finally {
+      setLoading(false);
     }
+  }, []);
 
-    return (
-        <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-            <StatusBar barStyle="light-content" backgroundColor="#ab2aeb" />
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData]),
+  );
 
-            {/* HEADER */}
-            <View style={styles.header}>
-                <View style={styles.headerRow}>
-                    <TouchableOpacity onPress={() => navigation.goBack()}>
-                        <Icon name="arrow-back" size={24} color="#fff" />
-                    </TouchableOpacity>
+  const addMoneyToWallet = useCallback(async () => {
+    try {
+      const amount = Number(topUpAmount || 0);
+      if (!Number.isFinite(amount) || amount < 10) {
+        Alert.alert("Top-up amount", "Minimum wallet top-up is INR 10.");
+        return;
+      }
 
-                    <Text style={styles.title}>Seller Earnings</Text>
+      setAddingMoney(true);
+      const orderRes = await API.post("/wallet/deposit/order", { amount });
+      const depositId = String(orderRes.data?.deposit?._id || "");
+      const payment = orderRes.data?.payment;
 
-                    <View style={{ width: 24 }} />
-                </View>
+      if (!depositId || !payment) {
+        throw new Error("Wallet payment could not be prepared.");
+      }
 
-                {/* BALANCE */}
-                <View style={styles.balanceBox}>
-                    <Text style={styles.balanceLabel}>Awaiting Settlement</Text>
-                    {loading ? (
-                        <ActivityIndicator color="#fff" style={{ marginVertical: 8 }} />
-                    ) : (
-                        <Text style={styles.balance}>
-                            {formatSummaryAmount(
-                                {
-                                    settlementPendingAmount: summary?.settlementPendingAmount,
-                                    settlementPendingAmountByCurrency: summary?.settlementPendingAmountByCurrency,
-                                    settlementPendingDisplayCurrency: summary?.settlementPendingDisplayCurrency,
-                                    displayCurrency: summary?.displayCurrency
-                                },
-                                "settlementPending"
-                            )}
-                        </Text>
-                    )}
+      const checkoutResult = await openRazorpayCheckout(payment);
+      const verifyRes = await API.post(`/wallet/deposit/${depositId}/verify`, checkoutResult);
 
-                    <View style={styles.addMoneyBtn}>
-                        <Icon name="checkmark-circle-outline" size={18} color="#fff" />
-                        <Text style={styles.addMoneyText}>Manual settlement workflow</Text>
-                    </View>
-                </View>
+      setWalletData((prev: any) => ({
+        ...(prev || {}),
+        balance: Number(verifyRes.data?.walletBalance || 0),
+        currency: prev?.currency || "INR",
+      }));
+
+      Alert.alert("Wallet updated", `INR ${amount} added successfully.`);
+      loadData().catch(() => undefined);
+    } catch (error: any) {
+      if (error?.code === 0) {
+        Alert.alert("Payment cancelled", "Wallet top-up was not completed.");
+      } else if (error?.response?.status === 404) {
+        Alert.alert("Backend sync needed", "Wallet payment route nahi mila. Backend ko restart karo aur app ko reload karo.");
+      } else {
+        Alert.alert("Wallet top-up failed", error?.response?.data?.message || error?.message || "Please try again.");
+      }
+    } finally {
+      setAddingMoney(false);
+    }
+  }, [loadData, topUpAmount]);
+
+  const applyReferralCode = useCallback(async () => {
+    try {
+      if (!applyCode.trim()) {
+        return;
+      }
+
+      setApplyingCode(true);
+      const res = await API.post("/wallet/apply-referral", {
+        referralCode: applyCode.trim(),
+      });
+
+      if (res.data?.success) {
+        setReferredByCode(applyCode.trim().toUpperCase());
+        setApplyCode("");
+        Alert.alert("Success", "Referral code applied.");
+      }
+    } catch (error: any) {
+      Alert.alert("Error", error?.response?.data?.message || "Invalid referral code");
+    } finally {
+      setApplyingCode(false);
+    }
+  }, [applyCode]);
+
+  const cardStyle = useMemo(
+    () => [
+      styles.card,
+      {
+        backgroundColor: panel,
+        borderColor: border,
+      },
+    ],
+    [border, panel],
+  );
+
+  return (
+    <ScrollView style={[styles.container, { backgroundColor: bg }]} showsVerticalScrollIndicator={false}>
+      <StatusBar barStyle="light-content" backgroundColor={bg} />
+
+      <View style={[styles.hero, { backgroundColor: isDarkMode ? "#0B1020" : "#7B4DFF" }]}>
+        <View style={styles.headerRow}>
+          <TouchableOpacity style={[styles.headerIconButton, { backgroundColor: "rgba(255,255,255,0.12)" }]} onPress={() => navigation.goBack()}>
+            <Icon name="arrow-back" size={20} color={white} />
+          </TouchableOpacity>
+          <Text style={styles.title}>{screenTitle}</Text>
+          <View style={styles.headerIconButton} />
+        </View>
+
+        <View style={[styles.balanceHero, { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.12)" }]}>
+          <View style={styles.balanceTopRow}>
+            <View>
+              <Text style={styles.balanceLabel}>{isSellerAccount ? "Pending release" : "Wallet balance"}</Text>
+              {loading ? (
+                <ActivityIndicator color={white} style={{ marginTop: 10 }} />
+              ) : (
+                <Text style={styles.balanceValue}>
+                  {isSellerAccount
+                    ? formatSummaryAmount(
+                        {
+                          settlementPendingAmount: summary?.settlementPendingAmount,
+                          settlementPendingAmountByCurrency: summary?.settlementPendingAmountByCurrency,
+                          settlementPendingDisplayCurrency: summary?.settlementPendingDisplayCurrency,
+                          displayCurrency: summary?.displayCurrency,
+                        },
+                        "settlementPending",
+                      )
+                    : formatCurrencyAmount(walletData?.balance || 0, walletData?.currency || "INR")}
+                </Text>
+              )}
             </View>
-
-            <View style={styles.summaryStrip}>
-                <View style={styles.summaryCard}>
-                    <Text style={styles.summaryLabel}>Paid</Text>
-                    <Text style={styles.summaryValue}>{summary?.paid || 0}</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                    <Text style={styles.summaryLabel}>Confirmed</Text>
-                    <Text style={styles.summaryValue}>{summary?.confirmed || summary?.accepted || 0}</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                    <Text style={styles.summaryLabel}>Completed</Text>
-                    <Text style={styles.summaryValue}>{summary?.completed || 0}</Text>
-                </View>
+            <View style={[styles.heroIconOrb, { backgroundColor: "rgba(255,255,255,0.12)" }]}>
+              <Icon name={isSellerAccount ? "cash-outline" : "wallet-outline"} size={24} color={white} />
             </View>
+          </View>
 
-            <Text style={styles.sectionTitle}>Settlement status</Text>
-            <View style={styles.infoBox}>
-                <Text style={styles.infoText}>Customer payments are captured during booking checkout and tracked against each appointment.</Text>
-                <Text style={[styles.infoText, styles.infoTextSecondary]}>Seller payouts are still reviewed and settled manually for this launch, so this screen shows earnings and settlement exposure instead of fake withdrawal controls.</Text>
+          <View style={styles.balanceBadgeRow}>
+            <View style={styles.balanceBadge}>
+              <Icon name={isSellerAccount ? "time-outline" : "flash-outline"} size={14} color={white} />
+              <Text style={styles.balanceBadgeText}>
+                {isSellerAccount ? "2-day hold and payout release" : "Razorpay instant top-up"}
+              </Text>
             </View>
+          </View>
+        </View>
+      </View>
 
-            <View style={styles.summaryStrip}>
-                <View style={styles.summaryCard}>
-                    <Text style={styles.summaryLabel}>Gross Paid</Text>
-                    <Text style={styles.summaryValue}>{formatSummaryAmount(summary, "paid")}</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                    <Text style={styles.summaryLabel}>Completed</Text>
-                    <Text style={styles.summaryValue}>{formatSummaryAmount(summary, "completed")}</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                    <Text style={styles.summaryLabel}>Refund Review</Text>
-                    <Text style={styles.summaryValue}>{summary?.refund_needed || 0}</Text>
-                </View>
+      <View style={styles.content}>
+        <View style={styles.statRow}>
+          {[
+            {
+              icon: isSellerAccount ? "calendar-outline" : "bag-handle-outline",
+              label: isSellerAccount ? "Appointments" : "Bookings",
+              value: String(summary?.total || 0),
+            },
+            {
+              icon: "checkmark-circle-outline",
+              label: isSellerAccount ? "Confirmed" : "Paid",
+              value: String(summary?.confirmed || summary?.paid || 0),
+            },
+            {
+              icon: isSellerAccount ? "trending-up-outline" : "card-outline",
+              label: isSellerAccount ? "Completed" : "Balance",
+              value: isSellerAccount
+                ? String(summary?.completed || 0)
+                : formatCurrencyAmount(walletData?.balance || 0, walletData?.currency || "INR"),
+            },
+          ].map((item) => (
+            <View key={item.label} style={[styles.statCard, { backgroundColor: panelAlt, borderColor: border }]}>
+              <View style={[styles.statIconWrap, { backgroundColor: `${accent}18` }]}>
+                <Icon name={item.icon} size={16} color={accent} />
+              </View>
+              <Text style={[styles.statLabel, { color: textSecondary }]}>{item.label}</Text>
+              <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={2}>
+                {item.value}
+              </Text>
             </View>
+          ))}
+        </View>
 
-            {/* REFERRAL CODE CARD */}
-            {!!referralCode && (
-                <View style={styles.referralCard}>
-                    <View style={styles.referralLeft}>
-                        <Icon name="gift-outline" size={22} color="#7B4DFF" />
-                        <View style={{ marginLeft: 10, flex: 1 }}>
-                            <Text style={styles.referralLabel}>Your Referral Code</Text>
-                            <Text style={styles.referralCodeText}>{referralCode}</Text>
-                        </View>
-                    </View>
+        {!isSellerAccount ? (
+          <>
+            <View style={cardStyle}>
+              <View style={styles.sectionHeaderRow}>
+                <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+                  <Icon name="add-circle-outline" size={18} color={accent} />
+                </View>
+                <View style={styles.sectionHeaderCopy}>
+                  <Text style={[styles.cardTitle, { color: colors.text }]}>Add Money</Text>
+                  <Text style={[styles.cardText, { color: textSecondary }]}>Top up wallet, then book sellers without breaking the flow.</Text>
+                </View>
+              </View>
+
+              <View style={styles.presetRow}>
+                {TOP_UP_PRESETS.map((preset) => {
+                  const active = topUpAmount === preset;
+                  return (
                     <TouchableOpacity
-                        style={styles.copyBtn}
-                        onPress={() => {
-                            Clipboard.setString(referralCode);
-                            Alert.alert("Copied!", "Referral code copied to clipboard");
-                        }}
+                      key={preset}
+                      style={[
+                        styles.presetChip,
+                        {
+                          backgroundColor: active ? accent : panelAlt,
+                          borderColor: active ? accent : border,
+                        },
+                      ]}
+                      onPress={() => setTopUpAmount(preset)}
                     >
-                        <Icon name="copy-outline" size={18} color="#fff" />
-                        <Text style={styles.copyBtnText}>Copy</Text>
+                      <Text style={[styles.presetChipText, { color: active ? white : colors.text }]}>INR {preset}</Text>
                     </TouchableOpacity>
-                </View>
-            )}
+                  );
+                })}
+              </View>
 
-            {/* WALLET BALANCE CARD */}
-            {walletData && (
-                <View style={styles.walletBalanceCard}>
-                    <Text style={styles.walletBalanceLabel}>Wallet Balance</Text>
-                    <Text style={styles.walletBalanceAmount}>
-                        {formatCurrencyAmount(walletData.balance || 0, walletData.currency || "INR")}
-                    </Text>
-                    <View style={styles.walletRow}>
-                        <View style={styles.walletStat}>
-                            <Text style={styles.walletStatLabel}>Total Earned</Text>
-                            <Text style={styles.walletStatValue}>
-                                {formatCurrencyAmount(walletData.totalEarned || 0, walletData.currency || "INR")}
-                            </Text>
-                        </View>
-                        <View style={styles.walletStat}>
-                            <Text style={styles.walletStatLabel}>Withdrawn</Text>
-                            <Text style={styles.walletStatValue}>
-                                {formatCurrencyAmount(walletData.totalWithdrawn || 0, walletData.currency || "INR")}
-                            </Text>
-                        </View>
-                        <View style={styles.walletStat}>
-                            <Text style={styles.walletStatLabel}>Referral</Text>
-                            <Text style={styles.walletStatValue}>
-                                {formatCurrencyAmount(walletData.referralEarnings || 0, walletData.currency || "INR")}
-                            </Text>
-                        </View>
-                    </View>
+              <View style={[styles.amountField, { backgroundColor: panelAlt, borderColor: border }]}>
+                <Icon name="logo-usd" size={18} color={accent} />
+                <RNTextInput
+                  style={[styles.amountInput, { color: colors.text }]}
+                  placeholder="Enter amount"
+                  placeholderTextColor={textSecondary}
+                  value={topUpAmount}
+                  onChangeText={setTopUpAmount}
+                  keyboardType="numeric"
+                />
+              </View>
 
-                    {/* Withdrawal button */}
-                    {walletData.withdrawalsEnabled && walletData.balance >= 100 && (
-                        <TouchableOpacity
-                            style={styles.withdrawBtn}
-                            onPress={() => {
-                                Alert.prompt(
-                                    "Request Withdrawal",
-                                    `Available: ${formatCurrencyAmount(walletData.balance, walletData.currency || "INR")}\nMinimum: ₹100`,
-                                    async (value) => {
-                                        if (!value) return;
-                                        try {
-                                            const res = await API.post("/wallet/withdraw", { amount: Number(value) });
-                                            if (res.data?.success) {
-                                                Alert.alert("Success", res.data.message);
-                                                setWalletData((prev: any) => ({
-                                                    ...prev,
-                                                    balance: res.data.withdrawal.balanceAfter,
-                                                    totalWithdrawn: (prev?.totalWithdrawn || 0) + Number(value),
-                                                }));
-                                            }
-                                        } catch (err: any) {
-                                            Alert.alert("Error", err?.response?.data?.message || "Withdrawal failed");
-                                        }
-                                    },
-                                    "plain-text",
-                                    "",
-                                    "numeric"
-                                );
-                            }}
-                        >
-                            <Icon name="arrow-down-circle-outline" size={18} color="#fff" />
-                            <Text style={styles.withdrawBtnText}>Request Withdrawal</Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
-            )}
-
-            {/* APPLY REFERRAL CODE */}
-            {!referralCode && (
-                <View style={styles.referralCard}>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.referralLabel}>Have a referral code?</Text>
-                        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-                            <RNTextInput
-                                style={styles.referralInput}
-                                placeholder="Enter code"
-                                placeholderTextColor="#9CA3AF"
-                                value={applyCode}
-                                onChangeText={setApplyCode}
-                                autoCapitalize="characters"
-                            />
-                            <TouchableOpacity
-                                style={[styles.copyBtn, applyingCode && { opacity: 0.5 }]}
-                                disabled={applyingCode || !applyCode.trim()}
-                                onPress={async () => {
-                                    try {
-                                        setApplyingCode(true);
-                                        const res = await API.post("/wallet/apply-referral", { referralCode: applyCode.trim() });
-                                        if (res.data?.success) {
-                                            Alert.alert("Success", "Referral code applied!");
-                                            setApplyCode("");
-                                        }
-                                    } catch (err: any) {
-                                        Alert.alert("Error", err?.response?.data?.message || "Invalid code");
-                                    } finally {
-                                        setApplyingCode(false);
-                                    }
-                                }}
-                            >
-                                <Text style={styles.copyBtnText}>{applyingCode ? "..." : "Apply"}</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                    <TouchableOpacity
-                        style={[styles.copyBtn, { marginLeft: 8, backgroundColor: "#10B981" }]}
-                        onPress={async () => {
-                            try {
-                                const res = await API.post("/wallet/referral-code");
-                                if (res.data?.referralCode) {
-                                    setReferralCode(res.data.referralCode);
-                                    Alert.alert("Generated!", `Your code: ${res.data.referralCode}`);
-                                }
-                            } catch (err: any) {
-                                Alert.alert("Error", err?.response?.data?.message || "Failed to generate");
-                            }
-                        }}
-                    >
-                        <Icon name="sparkles-outline" size={16} color="#fff" />
-                        <Text style={styles.copyBtnText}>Get Code</Text>
-                    </TouchableOpacity>
-                </View>
-            )}
-
-            <Text style={styles.sectionTitle}>Recent transactions</Text>
-            <View style={styles.infoBox}>
-                {recentRequests.length ? (
-                    recentRequests.map((request) => (
-                        <View key={request._id} style={styles.transactionRow}>
-                            <View style={styles.transactionMeta}>
-                                <Text style={styles.transactionTitle}>{request.service?.serviceName || "Appointment"}</Text>
-                                <Text style={styles.transactionSubtitle}>
-                                    {request.user?.name || request.user?.username || "Customer"} • {String(request.status || "").replace(/_/g, " ")}
-                                </Text>
-                            </View>
-                            <Text style={styles.transactionAmount}>
-                                {formatCurrencyAmount(request.pricing?.amount || 0, request.pricing?.currency || "INR")}
-                            </Text>
-                        </View>
-                    ))
-                ) : (
-                    <Text style={styles.infoText}>Paid and confirmed seller bookings will appear here as they move through completion and settlement review.</Text>
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: accent }, addingMoney && styles.buttonDisabled]}
+                onPress={addMoneyToWallet}
+                disabled={addingMoney}
+              >
+                {addingMoney ? <ActivityIndicator color={white} /> : (
+                  <>
+                    <Icon name="flash-outline" size={18} color={white} />
+                    <Text style={styles.primaryButtonText}>Add Money with Razorpay</Text>
+                  </>
                 )}
+              </TouchableOpacity>
             </View>
 
-        </ScrollView>
-    );
+            <View style={cardStyle}>
+              <View style={styles.sectionHeaderRow}>
+                <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+                  <Icon name="calendar-outline" size={18} color={accent} />
+                </View>
+                <View style={styles.sectionHeaderCopy}>
+                  <Text style={[styles.cardTitle, { color: colors.text }]}>Appointments</Text>
+                  <Text style={[styles.cardText, { color: textSecondary }]}>Find sellers, chat with them, and manage paid bookings.</Text>
+                </View>
+              </View>
+
+              <View style={styles.quickActionRow}>
+                <TouchableOpacity style={[styles.quickActionCard, { backgroundColor: panelAlt, borderColor: border }]} onPress={() => navigation.navigate("Search")}>
+                  <Icon name="search-outline" size={18} color={accent} />
+                  <Text style={[styles.quickActionText, { color: colors.text }]}>Find Sellers</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.quickActionCard, { backgroundColor: panelAlt, borderColor: border }]} onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "user" })}>
+                  <Icon name="receipt-outline" size={18} color={accent} />
+                  <Text style={[styles.quickActionText, { color: colors.text }]}>My Bookings</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
+        ) : (
+          <View style={cardStyle}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+                <Icon name="cash-outline" size={18} color={accent} />
+              </View>
+              <View style={styles.sectionHeaderCopy}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Seller Settlement</Text>
+                <Text style={[styles.cardText, { color: textSecondary }]}>Paid appointments hold in pending earnings first, then release to total earnings.</Text>
+              </View>
+            </View>
+
+            <View style={styles.metricRow}>
+              <View style={[styles.metricBox, { backgroundColor: panelAlt, borderColor: border }]}>
+                <Text style={[styles.metricLabel, { color: textSecondary }]}>Pending earnings</Text>
+                <Text style={[styles.metricValue, { color: colors.text }]}>{formatCurrencyAmount(sellerWallet?.balance || 0, sellerWallet?.currency || "INR")}</Text>
+              </View>
+              <View style={[styles.metricBox, { backgroundColor: panelAlt, borderColor: border }]}>
+                <Text style={[styles.metricLabel, { color: textSecondary }]}>Total earnings</Text>
+                <Text style={[styles.metricValue, { color: colors.text }]}>{formatCurrencyAmount(sellerWallet?.totalEarned || 0, sellerWallet?.currency || "INR")}</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        <View style={cardStyle}>
+          <View style={styles.sectionHeaderRow}>
+            <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+              <Icon name="gift-outline" size={18} color={accent} />
+            </View>
+            <View style={styles.sectionHeaderCopy}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Referral Wallet</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Use your code, apply another code, and keep wallet rewards in view.</Text>
+            </View>
+          </View>
+
+          {!!referralCode && (
+            <View style={[styles.referralCodeCard, { backgroundColor: panelAlt, borderColor: border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.referralLabel, { color: textSecondary }]}>Your referral code</Text>
+                <Text style={[styles.referralCode, { color: colors.text }]}>{referralCode}</Text>
+              </View>
+              <TouchableOpacity style={[styles.copyButton, { backgroundColor: accent }]} onPress={() => {
+                Clipboard.setString(referralCode);
+                Alert.alert("Copied", "Referral code copied to clipboard.");
+              }}>
+                <Icon name="copy-outline" size={16} color={white} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {referredByCode ? (
+            <View style={[styles.appliedRow, { backgroundColor: panelAlt, borderColor: border }]}>
+              <Icon name="checkmark-circle-outline" size={18} color="#22C55E" />
+              <Text style={styles.appliedCodeText}>Applied code: {referredByCode}</Text>
+            </View>
+          ) : (
+            <View style={styles.applyRow}>
+              <View style={[styles.referralField, { backgroundColor: panelAlt, borderColor: border }]}>
+                <Icon name="ticket-outline" size={18} color={accent} />
+                <RNTextInput
+                  style={[styles.referralInput, { color: colors.text }]}
+                  placeholder="Enter referral code"
+                  placeholderTextColor={textSecondary}
+                  value={applyCode}
+                  onChangeText={setApplyCode}
+                  autoCapitalize="characters"
+                />
+              </View>
+              <TouchableOpacity
+                style={[styles.applyButton, { backgroundColor: accent }, applyingCode && styles.buttonDisabled]}
+                onPress={applyReferralCode}
+                disabled={applyingCode || !applyCode.trim()}
+              >
+                <Text style={styles.applyButtonText}>{applyingCode ? "..." : "Apply"}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        <View style={cardStyle}>
+          <View style={styles.sectionHeaderRow}>
+            <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+              <Icon name="swap-horizontal-outline" size={18} color={accent} />
+            </View>
+            <View style={styles.sectionHeaderCopy}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Recent Wallet Activity</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Top-ups, referral credits, and balance movement.</Text>
+            </View>
+          </View>
+          {recentTransactions.length ? recentTransactions.map((entry) => (
+            <View key={entry._id} style={[styles.listRow, { borderBottomColor: border }]}>
+              <View style={[styles.listIconWrap, { backgroundColor: panelAlt }]}>
+                <Icon name={entry.type === "debit" ? "arrow-down-outline" : "arrow-up-outline"} size={16} color={entry.type === "debit" ? "#F97316" : "#22C55E"} />
+              </View>
+              <View style={styles.listCopy}>
+                <Text style={[styles.listTitle, { color: colors.text }]}>{entry.note || entry.source || "Wallet activity"}</Text>
+                <Text style={[styles.listMeta, { color: textSecondary }]}>{String(entry.type || "credit").toUpperCase()}</Text>
+              </View>
+              <Text style={[styles.listAmount, { color: entry.type === "debit" ? "#F97316" : "#22C55E" }]}>
+                {entry.type === "debit" ? "-" : "+"}{formatCurrencyAmount(entry.amount || 0, walletData?.currency || "INR")}
+              </Text>
+            </View>
+          )) : <Text style={[styles.emptyText, { color: textSecondary }]}>Wallet credits, referrals, and top-ups will appear here.</Text>}
+        </View>
+
+        {!isSellerAccount && (
+          <View style={cardStyle}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+                <Icon name="card-outline" size={18} color={accent} />
+              </View>
+              <View style={styles.sectionHeaderCopy}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Recent Top-Ups</Text>
+                <Text style={[styles.cardText, { color: textSecondary }]}>Successful and pending Razorpay wallet loads.</Text>
+              </View>
+            </View>
+            {recentDeposits.length ? recentDeposits.map((entry) => (
+              <View key={entry._id} style={[styles.listRow, { borderBottomColor: border }]}>
+                <View style={[styles.listIconWrap, { backgroundColor: panelAlt }]}>
+                  <Icon name="card-outline" size={16} color={accent} />
+                </View>
+                <View style={styles.listCopy}>
+                  <Text style={[styles.listTitle, { color: colors.text }]}>Wallet top-up</Text>
+                  <Text style={[styles.listMeta, { color: textSecondary }]}>{String(entry.status || "pending").replace(/_/g, " ")}</Text>
+                </View>
+                <Text style={[styles.listAmount, { color: colors.text }]}>{formatCurrencyAmount(entry.amount || 0, "INR")}</Text>
+              </View>
+            )) : <Text style={[styles.emptyText, { color: textSecondary }]}>Your successful and pending top-ups will show here.</Text>}
+          </View>
+        )}
+
+        <View style={[cardStyle, { marginBottom: 28 }]}>
+          <View style={styles.sectionHeaderRow}>
+            <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+              <Icon name="calendar-clear-outline" size={18} color={accent} />
+            </View>
+            <View style={styles.sectionHeaderCopy}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Recent Appointments</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Latest booking and payout-linked activity.</Text>
+            </View>
+          </View>
+          {recentRequests.length ? recentRequests.map((request) => (
+            <View key={request._id} style={[styles.listRow, { borderBottomColor: border }]}>
+              <View style={[styles.listIconWrap, { backgroundColor: panelAlt }]}>
+                <Icon name="calendar-outline" size={16} color={accent} />
+              </View>
+              <View style={styles.listCopy}>
+                <Text style={[styles.listTitle, { color: colors.text }]}>{request.service?.serviceName || "Appointment"}</Text>
+                <Text style={[styles.listMeta, { color: textSecondary }]}>
+                  {isSellerAccount
+                    ? request.user?.name || request.user?.username || "Customer"
+                    : request.seller?.sellerName || "Seller"}{" "}
+                  • {String(request.status || "").replace(/_/g, " ")}
+                </Text>
+              </View>
+              <Text style={[styles.listAmount, { color: colors.text }]}>
+                {formatCurrencyAmount(request.pricing?.amount || 0, request.pricing?.currency || "INR")}
+              </Text>
+            </View>
+          )) : <Text style={[styles.emptyText, { color: textSecondary }]}>Appointments and booking payments will appear here.</Text>}
+        </View>
+      </View>
+    </ScrollView>
+  );
 }
 
 export default WalletScreen;
 
 const styles = StyleSheet.create({
-
-    container: {
-        flex: 1,
-        backgroundColor: "#f8f5ff",
-    },
-    readOnlyContainer: {
-        paddingBottom: 32,
-    },
-
-    /* HEADER */
-    header: {
-        backgroundColor: "#ab2aeb",
-        paddingTop: 50,
-        paddingBottom: 30,
-        paddingHorizontal: 20,
-        borderBottomLeftRadius: 25,
-        borderBottomRightRadius: 25,
-    },
-
-    headerRow: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-    },
-
-    title: {
-        color: "#fff",
-        fontSize: 20,
-        fontWeight: "bold",
-    },
-
-    /* BALANCE BOX */
-    balanceBox: {
-        marginTop: 25,
-        backgroundColor: "rgba(255,255,255,0.15)",
-        padding: 20,
-        borderRadius: 15,
-        alignItems: "center",
-    },
-
-    balanceLabel: {
-        color: "#eee",
-        fontSize: 13,
-    },
-
-    balance: {
-        fontSize: 30,
-        fontWeight: "bold",
-        color: "#fff",
-        marginVertical: 8,
-    },
-
-    addMoneyBtn: {
-        flexDirection: "row",
-        backgroundColor: "#fff",
-        paddingVertical: 8,
-        paddingHorizontal: 18,
-        borderRadius: 25,
-        alignItems: "center",
-    },
-
-    addMoneyText: {
-        color: "#ab2aeb",
-        marginLeft: 5,
-        fontWeight: "bold",
-    },
-
-    /* SECTION */
-    sectionTitle: {
-        marginLeft: 20,
-        marginTop: 20,
-        fontWeight: "bold",
-        color: "#555",
-        fontSize: 15,
-    },
-    summaryStrip: {
-        flexDirection: "row",
-        marginHorizontal: 15,
-        marginTop: 18
-    },
-    summaryCard: {
-        flex: 1,
-        backgroundColor: "#fff",
-        padding: 14,
-        borderRadius: 14,
-        marginHorizontal: 5,
-        alignItems: "center"
-    },
-    summaryLabel: {
-        color: "#666",
-        fontSize: 12
-    },
-    summaryValue: {
-        color: "#ab2aeb",
-        fontWeight: "700",
-        fontSize: 18,
-        marginTop: 6
-    },
-
-    /* PAYMENT CARD */
-    paymentCard: {
-        backgroundColor: "#fff",
-        marginHorizontal: 15,
-        marginTop: 12,
-        padding: 16,
-        borderRadius: 14,
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        elevation: 3,
-    },
-
-    left: {
-        flexDirection: "row",
-        alignItems: "center",
-    },
-
-    paymentIcon: {
-        width: 35,
-        height: 35,
-        marginRight: 12,
-    },
-
-    paymentText: {
-        fontSize: 16,
-        fontWeight: "500",
-    },
-
-    infoBox: {
-        backgroundColor: "#fff",
-        marginHorizontal: 15,
-        marginTop: 12,
-        padding: 16,
-        borderRadius: 14
-    },
-    infoText: {
-        color: "#444",
-        lineHeight: 20
-    },
-    infoTextSecondary: {
-        marginTop: 8,
-        color: "#777"
-    },
-    transactionRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: "#F1F1F4"
-    },
-    transactionMeta: {
-        flex: 1,
-        paddingRight: 12
-    },
-    transactionTitle: {
-        color: "#1F2937",
-        fontWeight: "700"
-    },
-    transactionSubtitle: {
-        marginTop: 4,
-        color: "#6B7280",
-        textTransform: "capitalize"
-    },
-    transactionAmount: {
-        color: "#7C3AED",
-        fontWeight: "700"
-    },
-    readOnlyCard: {
-        marginHorizontal: 20,
-        marginTop: 24,
-        padding: 20,
-        borderRadius: 18,
-        backgroundColor: "#fff",
-        borderWidth: 1,
-        borderColor: "#E9D5FF"
-    },
-    readOnlyTitle: {
-        marginTop: 12,
-        color: "#111827",
-        fontSize: 18,
-        fontWeight: "bold"
-    },
-    readOnlyText: {
-        marginTop: 8,
-        color: "#4B5563",
-        lineHeight: 21
-    },
-
-    // Referral Code Card
-    referralCard: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        backgroundColor: "#F5F3FF",
-        marginHorizontal: 16,
-        marginTop: 16,
-        padding: 16,
-        borderRadius: 14,
-        borderWidth: 1,
-        borderColor: "#E9D5FF",
-    },
-    referralLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        flex: 1,
-    },
-    referralLabel: {
-        fontSize: 12,
-        color: "#6B7280",
-    },
-    referralCodeText: {
-        fontSize: 18,
-        fontWeight: "800",
-        color: "#7B4DFF",
-        letterSpacing: 2,
-        marginTop: 2,
-    },
-    copyBtn: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#7B4DFF",
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 10,
-        gap: 4,
-    },
-    copyBtnText: {
-        color: "#fff",
-        fontWeight: "600",
-        fontSize: 13,
-    },
-
-    // Wallet Balance Card
-    walletBalanceCard: {
-        backgroundColor: "#fff",
-        marginHorizontal: 16,
-        marginTop: 16,
-        padding: 16,
-        borderRadius: 14,
-        borderWidth: 1,
-        borderColor: "#E5E7EB",
-    },
-    walletBalanceLabel: {
-        fontSize: 13,
-        color: "#6B7280",
-        fontWeight: "600",
-    },
-    walletBalanceAmount: {
-        fontSize: 28,
-        fontWeight: "800",
-        color: "#111827",
-        marginTop: 4,
-    },
-    walletRow: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        marginTop: 14,
-        paddingTop: 14,
-        borderTopWidth: 1,
-        borderTopColor: "#F3F4F6",
-    },
-    walletStat: {
-        alignItems: "center",
-        flex: 1,
-    },
-    walletStatLabel: {
-        fontSize: 11,
-        color: "#9CA3AF",
-        fontWeight: "600",
-    },
-    walletStatValue: {
-        fontSize: 14,
-        fontWeight: "700",
-        color: "#374151",
-        marginTop: 2,
-    },
-
-    // Withdrawal button
-    withdrawBtn: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "#7B4DFF",
-        marginTop: 14,
-        paddingVertical: 12,
-        borderRadius: 10,
-        gap: 6,
-    },
-    withdrawBtnText: {
-        color: "#fff",
-        fontWeight: "700",
-        fontSize: 14,
-    },
-
-    // Referral input
-    referralInput: {
-        flex: 1,
-        borderWidth: 1,
-        borderColor: "#D1D5DB",
-        borderRadius: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        fontSize: 15,
-        fontWeight: "600",
-        color: "#111827",
-        marginRight: 8,
-        letterSpacing: 1,
-    },
+  container: { flex: 1 },
+  hero: {
+    paddingTop: 50,
+    paddingHorizontal: 18,
+    paddingBottom: 22,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerIconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  balanceHero: {
+    marginTop: 18,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 18,
+  },
+  balanceTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  heroIconOrb: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  balanceLabel: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 13,
+  },
+  balanceValue: {
+    marginTop: 8,
+    color: "#fff",
+    fontSize: 30,
+    fontWeight: "900",
+  },
+  balanceBadgeRow: {
+    marginTop: 14,
+    flexDirection: "row",
+  },
+  balanceBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  balanceBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    marginLeft: 6,
+  },
+  content: {
+    paddingHorizontal: 14,
+    paddingTop: 16,
+  },
+  statRow: {
+    flexDirection: "row",
+    marginBottom: 16,
+  },
+  statCard: {
+    flex: 1,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    marginHorizontal: 4,
+  },
+  statIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statLabel: {
+    marginTop: 10,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  statValue: {
+    marginTop: 6,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  card: {
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 16,
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 14,
+  },
+  sectionIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  sectionHeaderCopy: {
+    flex: 1,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  cardText: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  presetRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginBottom: 8,
+  },
+  presetChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  presetChipText: {
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  amountField: {
+    borderWidth: 1,
+    borderRadius: 16,
+    minHeight: 50,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  amountInput: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  primaryButton: {
+    marginTop: 14,
+    minHeight: 50,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+  },
+  primaryButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+    marginLeft: 8,
+  },
+  quickActionRow: {
+    flexDirection: "row",
+  },
+  quickActionCard: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 18,
+    minHeight: 88,
+    padding: 14,
+    marginRight: 8,
+    justifyContent: "space-between",
+  },
+  quickActionText: {
+    marginTop: 16,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  metricRow: {
+    flexDirection: "row",
+  },
+  metricBox: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginRight: 8,
+  },
+  metricLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  metricValue: {
+    marginTop: 8,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  referralCodeCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  referralLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  referralCode: {
+    marginTop: 4,
+    fontSize: 20,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  copyButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  appliedRow: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  appliedCodeText: {
+    marginLeft: 8,
+    color: "#22C55E",
+    fontWeight: "700",
+  },
+  applyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  referralField: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 16,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 8,
+  },
+  referralInput: {
+    flex: 1,
+    marginLeft: 10,
+    fontWeight: "700",
+  },
+  applyButton: {
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  applyButtonText: {
+    color: "#fff",
+    fontWeight: "800",
+  },
+  listRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+  },
+  listIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  listCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  listTitle: {
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  listMeta: {
+    marginTop: 3,
+    fontSize: 12.5,
+    textTransform: "capitalize",
+  },
+  listAmount: {
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  emptyText: {
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
 });

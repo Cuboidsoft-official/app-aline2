@@ -31,6 +31,8 @@ import { uploadDocumentAsset, uploadImageAsset } from "../utils/uploadMedia";
 import { DEFAULT_AVATAR_URL, DEFAULT_COVER_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { ensureCameraPermission } from "../utils/permissions";
+import { openRazorpayCheckout } from "../utils/razorpayCheckout";
+import { getStoredRefreshToken, getStoredSessionMeta, getStoredToken, getStoredUser, setStoredSession } from "../utils/authSession";
 
 const DEFAULT_COVER = DEFAULT_COVER_URL;
 const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
@@ -49,18 +51,46 @@ const SPECIALIZATION_OPTIONS = [
 
 const PLAN_OPTIONS = [
   {
-    key: "starter",
-    title: "Starter",
+    key: "PLAN_100",
+    title: "INR 100",
     amount: 100,
     maxHourlyRate: 1000,
-    description: "Good for new sellers. Max rate INR 1000 per hour.",
+    description: "Plan limit INR 1000.",
   },
   {
-    key: "premium",
-    title: "Premium",
-    amount: 1000,
-    maxHourlyRate: 10000,
-    description: "For advanced sellers. Max rate INR 10000 per hour.",
+    key: "PLAN_200",
+    title: "INR 200",
+    amount: 200,
+    maxHourlyRate: 2000,
+    description: "Plan limit INR 2000.",
+  },
+  {
+    key: "PLAN_300",
+    title: "INR 300",
+    amount: 300,
+    maxHourlyRate: 3000,
+    description: "Plan limit INR 3000.",
+  },
+  {
+    key: "PLAN_400",
+    title: "INR 400",
+    amount: 400,
+    maxHourlyRate: 4000,
+    description: "Plan limit INR 4000.",
+  },
+  {
+    key: "PLAN_600",
+    title: "INR 600",
+    amount: 600,
+    maxHourlyRate: 6000,
+    description: "Plan limit INR 6000.",
+  },
+  {
+    key: "PLAN_6000",
+    title: "INR 6000",
+    amount: 6000,
+    maxHourlyRate: 999999,
+    description: "Unlimited pricing plan.",
   },
 ] as const;
 
@@ -102,6 +132,7 @@ type SellerProfileResponse = {
   sellerName?: string;
   specialization?: string;
   bio?: string;
+  referralCodeUsed?: string;
   experience?: string;
   degree?: string;
   certificateType?: string;
@@ -113,6 +144,13 @@ type SellerProfileResponse = {
   bankIfsc?: string;
   bankName?: string;
   premiumPlan?: PlanKey;
+  subscriptionPlan?: {
+    code?: PlanKey;
+    amount?: number;
+    maxServiceLimit?: number;
+    isUnlimited?: boolean;
+  };
+  onboardingCompleted?: boolean;
   onboardingServiceName?: string;
   onboardingServiceDurationMinutes?: number | string;
   onboardingServiceRate?: number | string;
@@ -165,7 +203,9 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [initializing, setInitializing] = useState(mode === "edit");
   const [errorMessage, setErrorMessage] = useState("");
   const [activeDropdown, setActiveDropdown] = useState<DropdownField | null>(null);
-  const [paymentPreviewSeen, setPaymentPreviewSeen] = useState(false);
+  const [paymentVerified, setPaymentVerified] = useState(mode === "edit");
+  const [subscriptionId, setSubscriptionId] = useState("");
+  const [subscriptionProcessing, setSubscriptionProcessing] = useState(false);
 
   const [name, setName] = useState("");
   const [specialization, setSpecialization] = useState("");
@@ -177,7 +217,8 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [avatarFile, setAvatarFile] = useState<ImageFile | null>(null);
   const [coverFile, setCoverFile] = useState<ImageFile | null>(null);
 
-  const [premiumPlan, setPremiumPlan] = useState<PlanKey>("starter");
+  const [premiumPlan, setPremiumPlan] = useState<PlanKey>("PLAN_100");
+  const [referralCode, setReferralCode] = useState("");
 
   const [experience, setExperience] = useState("");
   const [degree, setDegree] = useState("");
@@ -231,9 +272,12 @@ const SellerRegistration = ({ navigation, route }: any) => {
         : "",
     );
     setBio(seller?.bio || "");
+    setReferralCode(String(seller?.referralCodeUsed || "").trim().toUpperCase());
     setAvatar(seller?.profilePic || null);
     setCover(seller?.coverPic || null);
-    setPremiumPlan(seller?.premiumPlan || "starter");
+    setPremiumPlan(seller?.subscriptionPlan?.code || seller?.premiumPlan || "PLAN_100");
+    setPaymentVerified(Boolean(seller?.subscriptionPlan?.code));
+    setSubscriptionId("");
     setExperience(seller?.experience || "");
     setDegree(seller?.degree || "");
     setCertificateType(seller?.certificateType || "");
@@ -264,15 +308,13 @@ const SellerRegistration = ({ navigation, route }: any) => {
   }, [requestedInitialStep]);
 
   useEffect(() => {
-    if (mode !== "edit") {
-      return;
-    }
-
     let active = true;
 
     const loadSellerProfile = async () => {
       try {
-        setInitializing(true);
+        if (mode === "edit") {
+          setInitializing(true);
+        }
         const res = await API.get("/seller/me");
 
         if (active && res?.data?.seller) {
@@ -281,11 +323,12 @@ const SellerRegistration = ({ navigation, route }: any) => {
         }
       } catch (error: any) {
         console.log("seller edit load error:", error?.response?.data || error?.message);
-        if (active) {
+        const statusCode = Number(error?.response?.status || 0);
+        if (active && !(mode === "create" && statusCode === 404)) {
           setErrorMessage(getReadableApiErrorMessage(error, "Failed to load seller profile."));
         }
       } finally {
-        if (active) {
+        if (active && mode === "edit") {
           setInitializing(false);
         }
       }
@@ -570,8 +613,8 @@ const SellerRegistration = ({ navigation, route }: any) => {
         Alert.alert("Validation", "Please add description.");
         return false;
       }
-      if (!paymentPreviewSeen) {
-        Alert.alert("Payment", "Tap the sample payment button once to review the default Razorpay flow.");
+      if (!paymentVerified) {
+        Alert.alert("Payment", "Complete the subscription payment to continue.");
         return false;
       }
     }
@@ -635,13 +678,96 @@ const SellerRegistration = ({ navigation, route }: any) => {
     setStep((prev) => Math.min(TOTAL_STEPS, prev + 1));
   };
 
-  const openSamplePaymentAlert = useCallback(() => {
-    setPaymentPreviewSeen(true);
-    Alert.alert(
-      "Sample payment flow",
-        `Default plan: ${selectedPlan.title}\nAmount: INR ${selectedPlan.amount}\n\nIn the next phase, Razorpay checkout will open here. This placeholder alert is only for flow review right now.`,
-    );
-  }, [selectedPlan.amount, selectedPlan.title]);
+  const syncSessionCategory = useCallback(async () => {
+    const [token, refreshToken, session, storedUser] = await Promise.all([
+      getStoredToken(),
+      getStoredRefreshToken(),
+      getStoredSessionMeta(),
+      getStoredUser(),
+    ]);
+
+    if (!token) {
+      return;
+    }
+
+    await setStoredSession({
+      accessToken: token,
+      refreshToken: refreshToken || undefined,
+      session: session || undefined,
+      user: {
+        ...(storedUser || {}),
+        category: "Seller",
+        name: name.trim() || storedUser?.name || "",
+        profilePic: avatar || storedUser?.profilePic || "",
+        coverPic: cover || storedUser?.coverPic || "",
+      },
+    });
+  }, [avatar, cover, name]);
+
+  const startSubscriptionPayment = useCallback(async () => {
+    try {
+      if (!name.trim()) {
+        Alert.alert("Seller name", "Enter seller name before plan payment.");
+        return;
+      }
+
+      if (!specializationValue) {
+        Alert.alert("Specialization", "Select specialization before plan payment.");
+        return;
+      }
+
+      if (!bio.trim()) {
+        Alert.alert("Description", "Add a seller description before payment.");
+        return;
+      }
+
+      setSubscriptionProcessing(true);
+
+      const orderRes = await API.post("/seller/subscription/order", {
+        planCode: premiumPlan,
+        sellerName: name.trim(),
+        specialization: specializationValue,
+        bio: bio.trim(),
+        referralCode: referralCode.trim().toUpperCase(),
+      });
+
+      const nextSubscriptionId = String(
+        orderRes?.data?.subscription?._id || orderRes?.data?.payment?.subscriptionId || "",
+      );
+      const paymentPayload = orderRes?.data?.payment;
+
+      if (!paymentPayload || !nextSubscriptionId) {
+        throw new Error("Subscription payment could not be prepared.");
+      }
+
+      const checkoutResult = await openRazorpayCheckout({
+        ...paymentPayload,
+        name: "Aline2 Seller Plan",
+        description: `${selectedPlan.title} subscription`,
+      });
+
+      await API.post(`/seller/subscription/${nextSubscriptionId}/verify`, checkoutResult);
+
+      setSubscriptionId(nextSubscriptionId);
+      setPaymentVerified(true);
+      setErrorMessage("");
+      Alert.alert("Payment successful", "Subscription activated. Next step is open now.");
+      setStep((prev) => Math.min(TOTAL_STEPS, Math.max(prev + 1, 3)));
+    } catch (error: any) {
+      setPaymentVerified(false);
+      setSubscriptionId("");
+      setStep((prev) => Math.min(prev, 2));
+      if (error?.code === 0) {
+        Alert.alert("Payment cancelled", "Subscription payment was not completed.");
+      } else {
+        const nextMessage = getReadableApiErrorMessage(error, "Subscription payment failed");
+        setErrorMessage(nextMessage);
+        Alert.alert("Payment failed", nextMessage);
+      }
+    } finally {
+      setSubscriptionProcessing(false);
+    }
+  }, [bio, name, premiumPlan, selectedPlan.title, specializationValue]);
 
   const submitSellerRegistration = async () => {
     try {
@@ -674,6 +800,8 @@ const SellerRegistration = ({ navigation, route }: any) => {
         specialization: specializationValue,
         bio: bio.trim(),
         premiumPlan,
+        subscriptionPlanCode: premiumPlan,
+        subscriptionId,
         premiumPlanAmount: selectedPlan.amount,
         maxHourlyRate: selectedPlan.maxHourlyRate,
         experience,
@@ -686,6 +814,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
         bankAccountNumber: bankAccountNumber.trim(),
         bankIfsc: bankIfsc.trim().toUpperCase(),
         bankName: bankName.trim(),
+        referralCode: referralCode.trim().toUpperCase(),
         degreeDoc: uploadedDegreeDoc,
         licenseDoc: uploadedLicenseDoc,
         aadhaarDoc: uploadedAadhaarDoc,
@@ -709,6 +838,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
       if (res?.data?.success) {
         setErrorMessage("");
+        await syncSessionCategory();
         Alert.alert("Success", mode === "edit" ? "Seller profile updated." : "Seller profile ready.");
         navigation.replace("SellerDashboardScreen");
       } else {
@@ -915,8 +1045,8 @@ const SellerRegistration = ({ navigation, route }: any) => {
     if (step === 2) {
       return (
         <>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Payments</Text>
-          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Select a premium plan and add seller description.</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Subscription</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Choose your plan, complete Razorpay payment, and we will instantly unlock the next step.</Text>
 
           <Text style={[styles.label, { color: colors.text }]}>Description</Text>
           <TextInput
@@ -926,6 +1056,16 @@ const SellerRegistration = ({ navigation, route }: any) => {
             onChangeText={setBio}
             placeholder="Describe your profile, audience, and service style."
             placeholderTextColor={colors.placeholder}
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>Referral code (optional)</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={referralCode}
+            onChangeText={(text) => setReferralCode(text.toUpperCase())}
+            placeholder="Enter shared referral code"
+            placeholderTextColor={colors.placeholder}
+            autoCapitalize="characters"
           />
 
           <View style={styles.planGrid}>
@@ -939,7 +1079,13 @@ const SellerRegistration = ({ navigation, route }: any) => {
                     styles.planCard,
                     { backgroundColor: colors.card, borderColor: selected ? colors.primary : colors.border },
                   ]}
-                  onPress={() => setPremiumPlan(plan.key)}
+                  onPress={() => {
+                    if (plan.key !== premiumPlan) {
+                      setPremiumPlan(plan.key);
+                      setPaymentVerified(false);
+                      setSubscriptionId("");
+                    }
+                  }}
                   activeOpacity={0.9}
                 >
                   <View style={styles.planTop}>
@@ -958,21 +1104,30 @@ const SellerRegistration = ({ navigation, route }: any) => {
                 <Icon name="card-outline" size={18} color={colors.primary} />
               </View>
               <View style={styles.paymentPreviewCopy}>
-                <Text style={[styles.paymentPreviewTitle, { color: colors.text }]}>Default payment placeholder</Text>
+                <Text style={[styles.paymentPreviewTitle, { color: colors.text }]}>Razorpay subscription checkout</Text>
                 <Text style={[styles.paymentPreviewBody, { color: colors.mutedText }]}>
-            A sample alert appears here for flow review. In the next build, this button will open Razorpay checkout.
+                  Pay INR {selectedPlan.amount} for the selected subscription. Only successful payment unlocks the next onboarding step.
                 </Text>
               </View>
             </View>
 
             <TouchableOpacity
-              style={[styles.paymentPreviewButton, { backgroundColor: colors.primary }]}
-              onPress={openSamplePaymentAlert}
+              style={[
+                styles.paymentPreviewButton,
+                { backgroundColor: paymentVerified ? "#118B50" : colors.primary },
+                subscriptionProcessing && styles.buttonDisabled,
+              ]}
+              onPress={startSubscriptionPayment}
+              disabled={subscriptionProcessing}
               activeOpacity={0.9}
             >
-              <Text style={styles.paymentPreviewButtonText}>
-                {paymentPreviewSeen ? "Review payment flow again" : "Open sample payment alert"}
-              </Text>
+              {subscriptionProcessing ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.paymentPreviewButtonText}>
+                  {paymentVerified ? "Payment done, change plan if needed" : `Pay INR ${selectedPlan.amount} now`}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         </>

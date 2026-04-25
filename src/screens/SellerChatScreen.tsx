@@ -251,13 +251,6 @@ type ReplyPreviewState = {
   message: ChatMessage;
 };
 
-type ManualPaymentState = {
-  requestId: string;
-  serviceName: string;
-  amountLabel: string;
-  note: string;
-};
-
 const FALLBACK_TIME_ZONE = "Asia/Kolkata";
 
 const getLocalTimeZone = () => {
@@ -509,7 +502,6 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [lockingBusy, setLockingBusy] = useState(false);
   const [pendingLockAction, setPendingLockAction] = useState<"lock" | "unlock">("unlock");
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
-  const [mockPaymentState, setMockPaymentState] = useState<ManualPaymentState | null>(null);
   const [showAssistant, setShowAssistant] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageInputRef = useRef<TextInput | null>(null);
@@ -916,7 +908,6 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       appendMessage(systemMessage);
     }
 
-    setMockPaymentState(null);
     setShowPaymentModal(false);
     setSelectedAppointmentStart("");
     setReplyingToMessage(null);
@@ -956,47 +947,6 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     );
   }, [appendMessage, selectedAppointmentStart, seller?.sellerName, serviceName]);
 
-  const completeManualTestPayment = useCallback(async () => {
-    if (!mockPaymentState?.requestId || !selectedService) {
-      return;
-    }
-
-    try {
-      setProcessingBookingPayment(true);
-      const verifyRes = await API.post(`/service-requests/${mockPaymentState.requestId}/payment/verify`, {
-        testMode: true,
-        testPaymentId: `manual_test_pay_${Date.now()}`,
-      });
-
-      await finalizeSuccessfulBooking({
-        bookedRequest: verifyRes?.data?.request,
-        systemMessage: verifyRes?.data?.systemMessage || null,
-        targetService: selectedService,
-        noteText: mockPaymentState.note,
-      });
-    } catch (error: any) {
-      console.log("seller manual payment verify error:", error?.response?.data || error);
-      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to complete the test payment."));
-    } finally {
-      setProcessingBookingPayment(false);
-    }
-  }, [finalizeSuccessfulBooking, mockPaymentState, selectedService]);
-
-  const closeManualPaymentModal = useCallback(() => {
-    const requestId = String(mockPaymentState?.requestId || "");
-    setMockPaymentState(null);
-
-    if (!requestId) {
-      return;
-    }
-
-    API.put(`/service-requests/${requestId}/status`, {
-      status: "cancelled",
-    }).catch((error) => {
-      console.log("seller manual payment cancel error:", error);
-    });
-  }, [mockPaymentState?.requestId]);
-
   const sendBookingRequest = useCallback(async () => {
     const targetService = selectedService;
 
@@ -1023,16 +973,6 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       if (!requestId || !paymentPayload) {
         throw new Error("Payment payload is missing for this booking");
-      }
-
-      if (paymentPayload?.isMock) {
-        setMockPaymentState({
-          requestId,
-          serviceName: targetService.serviceName || serviceName || "Selected service",
-          amountLabel: formatPrimaryServicePrice(targetService),
-          note: noteText,
-        });
-        return;
       }
 
       let checkoutResult;
@@ -2801,51 +2741,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => setShowPaymentModal(false)} disabled={processingBookingPayment || !!mockPaymentState}>
+            <TouchableOpacity onPress={() => setShowPaymentModal(false)} disabled={processingBookingPayment}>
               <Text style={[styles.modalCancelText, { color: sellerChatColors.muted }]}>
                 Cancel
               </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={!!mockPaymentState}
-        transparent
-        animationType="fade"
-        onRequestClose={closeManualPaymentModal}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <View style={styles.mockPaymentIconWrap}>
-              <Icon name="card-outline" size={24} color={PRIMARY} />
-            </View>
-            <Text style={styles.mockPaymentTitle}>Payment Gateway Setup Pending</Text>
-            <Text style={styles.mockPaymentText}>
-              Live checkout abhi configured nahi hai. Testing ke liye aap is demo payment modal se booking continue kar sakte ho.
-            </Text>
-            <View style={styles.mockPaymentSummary}>
-              <Text style={styles.mockPaymentSummaryLabel}>{mockPaymentState?.serviceName || "Service"}</Text>
-              <Text style={styles.mockPaymentSummaryValue}>{mockPaymentState?.amountLabel || "Quoted later"}</Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.payBtn, processingBookingPayment && styles.payBtnDisabled]}
-              onPress={() => {
-                completeManualTestPayment().catch((error) => {
-                  console.log("seller manual payment error:", error);
-                });
-              }}
-              disabled={processingBookingPayment}
-            >
-              {processingBookingPayment ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.payBtnText}>Pay & Book for Testing</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={closeManualPaymentModal} disabled={processingBookingPayment}>
-              <Text style={styles.modalCancelText}>Cancel test payment</Text>
             </TouchableOpacity>
           </View>
         </View>

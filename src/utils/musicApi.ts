@@ -192,6 +192,7 @@ export const importMusicCatalogItem = async (item: MusicCatalogItem): Promise<Mu
     artist: item.artist,
     thumbnailUrl: item.artworkUrl,
     previewUrl: item.previewUrl,
+    streamUrl: item.streamUrl,
     externalUrl: item.externalUrl,
     duration: item.duration,
   });
