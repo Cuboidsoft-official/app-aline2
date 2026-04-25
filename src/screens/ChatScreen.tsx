@@ -1035,12 +1035,21 @@ const ChatScreen = ({ navigation, route }: any) => {
       if (data?.messageId) {
         setMessages((prev) =>
           prev.map((msg) =>
-            String(msg?._id) === String(data.messageId)
+            getMessageIdentity(msg) === String(data.messageId)
               ? { ...msg, text: data.text, isEdited: true, editedAt: data.editedAt }
               : msg
           )
         );
       }
+    };
+
+    const handleMessageDeleted = (data: any) => {
+      if (!data?.messageId) {
+        return;
+      }
+
+      setMessages((prev) => prev.filter((msg) => getMessageIdentity(msg) !== String(data.messageId)));
+      setReplyingToMessage((prev) => (getMessageIdentity(prev) === String(data.messageId) ? null : prev));
     };
 
     const handleChatThemeChanged = (data: any) => {
@@ -1074,6 +1083,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     socket.on("messageSeen", handleMessageSeen);
     socket.on("messageReaction", handleMessageReaction);
     socket.on("messageEdited", handleMessageEdited);
+    socket.on("messageDeleted", handleMessageDeleted);
     socket.on("chatThemeChanged", handleChatThemeChanged);
     socket.on("chatWallpaperChanged", handleChatWallpaperChanged);
     socket.on("presence:update", handlePresenceUpdate);
@@ -1085,6 +1095,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       socket.off("messageSeen", handleMessageSeen);
       socket.off("messageReaction", handleMessageReaction);
       socket.off("messageEdited", handleMessageEdited);
+      socket.off("messageDeleted", handleMessageDeleted);
       socket.off("chatThemeChanged", handleChatThemeChanged);
       socket.off("chatWallpaperChanged", handleChatWallpaperChanged);
       socket.off("presence:update", handlePresenceUpdate);
@@ -1790,7 +1801,8 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
 
     const nextMessage = getLastIncomingUnseenMessage(messages, currentUserId);
-    if (!nextMessage?._id) {
+    const nextMessageId = getMessageIdentity(nextMessage);
+    if (!nextMessageId) {
       return;
     }
 
@@ -1798,10 +1810,10 @@ const ChatScreen = ({ navigation, route }: any) => {
       .then(() => {
         socket.emit("messageSeen", {
           conversationId: currentConversationId,
-          messageId: nextMessage._id,
+          messageId: nextMessageId,
         });
         applyMessageSeen({
-          messageId: nextMessage._id,
+          messageId: nextMessageId,
           userId: currentUserId,
           seenAt: new Date().toISOString(),
         });
@@ -2772,14 +2784,14 @@ const ChatScreen = ({ navigation, route }: any) => {
           onMessageEdited={(data: any) => {
             setMessages((prev) =>
               prev.map((msg) =>
-                String(msg?._id) === String(data.messageId)
+                getMessageIdentity(msg) === String(data.messageId)
                   ? { ...msg, text: data.text, isEdited: true, editedAt: data.editedAt }
                   : msg
               )
             );
           }}
           onMessageDeleted={(messageId: string) => {
-            setMessages((prev) => prev.filter((msg) => String(msg?._id) !== String(messageId)));
+            setMessages((prev) => prev.filter((msg) => getMessageIdentity(msg) !== String(messageId)));
           }}
         />
 

@@ -44,6 +44,15 @@ function SocialVideo({
     setVideoFailed(false);
   }, [placeholderOpacity, resolvedPosterUri, resolvedUri]);
 
+  useEffect(() => {
+    [resolvedPosterUri]
+      .filter(Boolean)
+      .filter((value) => /^https?:\/\//i.test(value))
+      .forEach((value) => {
+        Image.prefetch(value).catch(() => undefined);
+      });
+  }, [resolvedPosterUri]);
+
   if (!resolvedUri && !resolvedPosterUri) {
     return <View style={[styles.fallback, containerStyle, { backgroundColor: fallbackColor }]} />;
   }
@@ -57,6 +66,7 @@ function SocialVideo({
             style={StyleSheet.absoluteFill}
             resizeMode={resizeMode}
             blurRadius={14}
+            fadeDuration={0}
             onError={() => {
               setPosterFailed(true);
             }}
