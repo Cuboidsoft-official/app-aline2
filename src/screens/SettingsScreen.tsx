@@ -303,8 +303,8 @@ const SettingsScreen = ({ navigation }: any) => {
               onPress: () => navigation.navigate("Profile"),
             })}
             {renderActionRow({
-              title: "Wallet and appointments",
-              hint: "Add money, use referral wallet, and open your booking dashboard",
+              title: "User dashboard",
+              hint: "Recharge coins, open bookings, and manage referrals",
               icon: "wallet-outline",
               onPress: () => navigation.navigate("WalletScreen"),
             })}
@@ -365,8 +365,8 @@ const SettingsScreen = ({ navigation }: any) => {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>{sellerTitle}</Text>
             <Text style={[styles.sectionSubtitle, { color: colors.mutedText }]}>{sellerSubtitle}</Text>
             {renderActionRow({
-              title: hasSellerAccount ? "Seller dashboard" : "Become a Seller",
-              hint: hasSellerAccount ? "Orders, services, and earnings overview" : "Create your seller profile and offer services",
+              title: hasSellerAccount ? "Seller workspace" : "Become a Seller",
+              hint: hasSellerAccount ? "Orders, services, availability, and earnings" : "Create your seller profile and offer services",
               icon: hasSellerAccount ? "grid-outline" : "storefront-outline",
               onPress: () => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration"),
               accentColor: hasSellerAccount ? colors.primary : "#2C7BE5",

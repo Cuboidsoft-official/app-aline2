@@ -53,7 +53,11 @@ import {
   reactToChatMessage,
   sendChatMessage,
 } from "../utils/chatApi";
-import { startCallSession } from "../utils/callApi";
+import {
+  getExistingCallPayloadFromError,
+  isCallAlreadyActiveError,
+  startCallSession,
+} from "../utils/callApi";
 import { CHAT_THEME_LIST } from "../utils/chatThemes";
 import {
   getLastIncomingUnseenMessage,
@@ -947,6 +951,37 @@ const ChatScreen = ({ navigation, route }: any) => {
           : user?.profilePic || "",
       });
     } catch (error) {
+      const existingCallPayload = getExistingCallPayloadFromError(error);
+
+      if (isCallAlreadyActiveError(error) && existingCallPayload?.callSession?._id) {
+        const initiatorId = String(
+          existingCallPayload.callSession?.initiatedBy?._id
+          || existingCallPayload.callSession?.initiatedBy?.id
+          || existingCallPayload.callSession?.initiatedBy
+          || "",
+        ).trim();
+        const shouldOpenAsIncoming =
+          String(existingCallPayload.callSession?.status || "") === "ringing"
+          && !!initiatorId
+          && initiatorId !== String(currentUserId || "").trim();
+
+        navigation.navigate("CallScreen", {
+          callSessionId: String(existingCallPayload.callSession._id),
+          mode: shouldOpenAsIncoming ? "incoming" : "outgoing",
+          callType: String(existingCallPayload.callSession?.callType || callType) === "video" ? "video" : "audio",
+          initialCallSession: existingCallPayload.callSession,
+          initialIceServers: existingCallPayload.iceServers,
+          callRuntime: existingCallPayload.callRuntime,
+          title: isGroupConversation
+            ? groupMeta.groupName || groupName || "Group call"
+            : user?.name || user?.username || "Aline2 call",
+          avatarUrl: isGroupConversation
+            ? groupMeta.groupAvatar || groupAvatar || ""
+            : user?.profilePic || "",
+        });
+        return;
+      }
+
       Alert.alert(
         "Could not start call",
         getReadableApiErrorMessage(error, "Unable to start the call right now."),

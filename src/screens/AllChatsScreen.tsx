@@ -842,8 +842,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
 
   const renderChat = ({ item }: { item: ChatUser }) => {
     const conversation = conversationMap.get(item._id);
-    const subtitle = getConversationPreview(conversation)
-      || (activeTab === "seller" ? "Tap to start seller conversation" : "Tap to start conversation");
+    const subtitle = activeTab === "seller" ? "Seller chat" : "Direct chat";
     const forwardTarget: ForwardTarget = {
       key: `user:${activeTab === "seller" ? "seller" : "direct"}:${item._id}`,
       label: item.username || item.name || "User",
@@ -917,7 +916,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
 
   const renderRegularConversation = ({ item }: { item: Conversation }) => {
     const participant = item?.otherUser || item?.sellerUser;
-    const subtitle = getConversationPreview(item) || "Tap to open conversation";
+    const subtitle = "Direct chat";
     const timestamp = formatConversationTime(item?.updatedAt || item?.lastMessageTime);
     const isLocked = lockedConversationIds.includes(String(item?._id || ""));
     const isDeleting = deletingConversationId === String(item?._id || "");
@@ -1018,10 +1017,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       profilePic,
       hasSellerLink,
     } = getSellerConversationIdentity(item);
-    const subtitleParts = [
-      item?.service?.serviceName || "",
-      getConversationPreview(item),
-    ].filter(Boolean);
+    const subtitle = item?.service?.serviceName || "Seller chat";
     const timestamp = formatConversationTime(item?.updatedAt || item?.lastMessageTime);
     const isLocked = lockedConversationIds.includes(String(item?._id || ""));
     const isDeleting = deletingConversationId === String(item?._id || "");
@@ -1110,7 +1106,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
 
           <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={2}>
             {hasSellerLink
-              ? subtitleParts.join(" • ") || "Tap to open seller conversation"
+              ? subtitle
               : "This seller conversation is temporarily unavailable while profile details finish syncing."}
           </Text>
         </View>
@@ -1152,8 +1148,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
 
   const renderGroupConversation = ({ item }: { item: Conversation }) => {
     const title = item?.groupName || "Group chat";
-    const subtitle = getConversationPreview(item)
-      || `${item?.memberCount || item?.members?.length || 0} members`;
+    const subtitle = `${item?.memberCount || item?.members?.length || 0} members`;
     const timestamp = formatConversationTime(item?.updatedAt || item?.lastMessageTime);
     const isLocked = lockedConversationIds.includes(String(item?._id || ""));
     const isMuted = mutedConversationIds.includes(String(item?._id || ""));
@@ -1302,7 +1297,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         </View>
 
         <Text style={[styles.lastMessage, { color: colors.mutedText }]} numberOfLines={2}>
-          {item.subtitle}
+          Help and support
         </Text>
       </View>
 
@@ -1318,7 +1313,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       _id: AI_ASSISTANT_ROW_ID,
       itemType: "assistant",
       title: "AI Assistant",
-      subtitle: "Ask about chats, stories, posts, seller flow, or app issues.",
+      subtitle: "Help and support",
       meta: "Aline2 AI",
     }),
     [],
@@ -1904,6 +1899,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 4,
     paddingBottom: 8,
+    zIndex: 8,
+    elevation: 8,
   },
   header: {
     flexDirection: "row",
@@ -1961,6 +1958,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     padding: 4,
+    zIndex: 7,
+    elevation: 7,
   },
   tab: {
     flex: 1,

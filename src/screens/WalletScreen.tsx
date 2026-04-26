@@ -14,9 +14,8 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { Alert } from "../utils/appAlert";
 import { API } from "../api/api";
-import { getStoredUser } from "../utils/authSession";
 import { openRazorpayCheckout } from "../utils/razorpayCheckout";
-import { formatCurrencyAmount, formatSummaryAmount } from "../utils/servicePricing";
+import { formatCurrencyAmount } from "../utils/servicePricing";
 import { useAppTheme } from "../theme/AppThemeContext";
 
 type WalletTxn = {
@@ -54,6 +53,18 @@ type LedgerRequest = {
 
 const TOP_UP_PRESETS = ["200", "500", "1000", "2000"];
 
+const formatCoinAmount = (value: number): string => {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) {
+    return "0 coins";
+  }
+
+  return `${amount.toLocaleString("en-IN", {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })} coins`;
+};
+
 function WalletScreen({ navigation }: any) {
   const { colors, isDarkMode } = useAppTheme();
   const [loading, setLoading] = useState(true);
@@ -61,7 +72,6 @@ function WalletScreen({ navigation }: any) {
   const [applyingCode, setApplyingCode] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [walletData, setWalletData] = useState<any>(null);
-  const [sellerWallet, setSellerWallet] = useState<any>(null);
   const [recentRequests, setRecentRequests] = useState<LedgerRequest[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<WalletTxn[]>([]);
   const [recentDeposits, setRecentDeposits] = useState<DepositEntry[]>([]);
@@ -69,7 +79,6 @@ function WalletScreen({ navigation }: any) {
   const [referredByCode, setReferredByCode] = useState("");
   const [applyCode, setApplyCode] = useState("");
   const [topUpAmount, setTopUpAmount] = useState("500");
-  const [isSellerAccount, setIsSellerAccount] = useState(false);
 
   const accent = colors.primary;
   const bg = isDarkMode ? "#070B14" : "#F4F1FF";
@@ -78,31 +87,23 @@ function WalletScreen({ navigation }: any) {
   const border = isDarkMode ? "rgba(255,255,255,0.08)" : "#E9E2FF";
   const textSecondary = isDarkMode ? "#A7B4D1" : "#6B7280";
   const white = "#FFFFFF";
+  const isSellerAccount = false;
 
-  const screenTitle = useMemo(
-    () => (isSellerAccount ? "Seller Earnings" : "Wallet & Appointments"),
-    [isSellerAccount],
-  );
+  const screenTitle = useMemo(() => "User Dashboard", []);
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
 
-      const storedUser = await getStoredUser();
-      const sellerAccount = String(storedUser?.category || "").toLowerCase() === "seller";
-      setIsSellerAccount(sellerAccount);
-
-      const requestRole = sellerAccount ? "seller" : "user";
       const [summaryRes, requestsRes, walletRes] = await Promise.all([
-        API.get("/service-requests/summary", { params: { role: requestRole } }).catch(() => ({ data: null })),
-        API.get("/service-requests", { params: { role: requestRole } }).catch(() => ({ data: null })),
+        API.get("/service-requests/summary", { params: { role: "user" } }).catch(() => ({ data: null })),
+        API.get("/service-requests", { params: { role: "user" } }).catch(() => ({ data: null })),
         API.get("/wallet").catch(() => ({ data: null })),
       ]);
 
       setSummary(summaryRes.data?.summary || null);
       setRecentRequests((requestsRes.data?.requests || []).slice(0, 8));
       setWalletData(walletRes.data?.wallet || null);
-      setSellerWallet(walletRes.data?.sellerWallet || null);
       setReferralCode(walletRes.data?.referralCode || "");
       setReferredByCode(walletRes.data?.referredByCode || "");
       setRecentTransactions(walletRes.data?.recentTransactions || []);
@@ -212,35 +213,25 @@ function WalletScreen({ navigation }: any) {
         <View style={[styles.balanceHero, { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.12)" }]}>
           <View style={styles.balanceTopRow}>
             <View>
-              <Text style={styles.balanceLabel}>{isSellerAccount ? "Pending release" : "Wallet balance"}</Text>
+              <Text style={styles.balanceLabel}>Available coins</Text>
               {loading ? (
                 <ActivityIndicator color={white} style={{ marginTop: 10 }} />
               ) : (
                 <Text style={styles.balanceValue}>
-                  {isSellerAccount
-                    ? formatSummaryAmount(
-                        {
-                          settlementPendingAmount: summary?.settlementPendingAmount,
-                          settlementPendingAmountByCurrency: summary?.settlementPendingAmountByCurrency,
-                          settlementPendingDisplayCurrency: summary?.settlementPendingDisplayCurrency,
-                          displayCurrency: summary?.displayCurrency,
-                        },
-                        "settlementPending",
-                      )
-                    : formatCurrencyAmount(walletData?.balance || 0, walletData?.currency || "INR")}
+                  {formatCoinAmount(walletData?.balance || 0)}
                 </Text>
               )}
             </View>
             <View style={[styles.heroIconOrb, { backgroundColor: "rgba(255,255,255,0.12)" }]}>
-              <Icon name={isSellerAccount ? "cash-outline" : "wallet-outline"} size={24} color={white} />
+              <Icon name="wallet-outline" size={24} color={white} />
             </View>
           </View>
 
           <View style={styles.balanceBadgeRow}>
             <View style={styles.balanceBadge}>
-              <Icon name={isSellerAccount ? "time-outline" : "flash-outline"} size={14} color={white} />
+              <Icon name="flash-outline" size={14} color={white} />
               <Text style={styles.balanceBadgeText}>
-                {isSellerAccount ? "2-day hold and payout release" : "Razorpay instant top-up"}
+                Recharge with Razorpay and use coins for appointments
               </Text>
             </View>
           </View>
@@ -251,21 +242,19 @@ function WalletScreen({ navigation }: any) {
         <View style={styles.statRow}>
           {[
             {
-              icon: isSellerAccount ? "calendar-outline" : "bag-handle-outline",
-              label: isSellerAccount ? "Appointments" : "Bookings",
+              icon: "bag-handle-outline",
+              label: "Bookings",
               value: String(summary?.total || 0),
             },
             {
               icon: "checkmark-circle-outline",
-              label: isSellerAccount ? "Confirmed" : "Paid",
-              value: String(summary?.confirmed || summary?.paid || 0),
+              label: "Confirmed",
+              value: String((summary?.confirmed || 0) + (summary?.rescheduled || 0)),
             },
             {
-              icon: isSellerAccount ? "trending-up-outline" : "card-outline",
-              label: isSellerAccount ? "Completed" : "Balance",
-              value: isSellerAccount
-                ? String(summary?.completed || 0)
-                : formatCurrencyAmount(walletData?.balance || 0, walletData?.currency || "INR"),
+              icon: "card-outline",
+              label: "Coins",
+              value: formatCoinAmount(walletData?.balance || 0),
             },
           ].map((item) => (
             <View key={item.label} style={[styles.statCard, { backgroundColor: panelAlt, borderColor: border }]}>
@@ -280,113 +269,86 @@ function WalletScreen({ navigation }: any) {
           ))}
         </View>
 
-        {!isSellerAccount ? (
-          <>
-            <View style={cardStyle}>
-              <View style={styles.sectionHeaderRow}>
-                <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
-                  <Icon name="add-circle-outline" size={18} color={accent} />
-                </View>
-                <View style={styles.sectionHeaderCopy}>
-                  <Text style={[styles.cardTitle, { color: colors.text }]}>Add Money</Text>
-                  <Text style={[styles.cardText, { color: textSecondary }]}>Top up wallet, then book sellers without breaking the flow.</Text>
-                </View>
-              </View>
-
-              <View style={styles.presetRow}>
-                {TOP_UP_PRESETS.map((preset) => {
-                  const active = topUpAmount === preset;
-                  return (
-                    <TouchableOpacity
-                      key={preset}
-                      style={[
-                        styles.presetChip,
-                        {
-                          backgroundColor: active ? accent : panelAlt,
-                          borderColor: active ? accent : border,
-                        },
-                      ]}
-                      onPress={() => setTopUpAmount(preset)}
-                    >
-                      <Text style={[styles.presetChipText, { color: active ? white : colors.text }]}>INR {preset}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <View style={[styles.amountField, { backgroundColor: panelAlt, borderColor: border }]}>
-                <Icon name="logo-usd" size={18} color={accent} />
-                <RNTextInput
-                  style={[styles.amountInput, { color: colors.text }]}
-                  placeholder="Enter amount"
-                  placeholderTextColor={textSecondary}
-                  value={topUpAmount}
-                  onChangeText={setTopUpAmount}
-                  keyboardType="numeric"
-                />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.primaryButton, { backgroundColor: accent }, addingMoney && styles.buttonDisabled]}
-                onPress={addMoneyToWallet}
-                disabled={addingMoney}
-              >
-                {addingMoney ? <ActivityIndicator color={white} /> : (
-                  <>
-                    <Icon name="flash-outline" size={18} color={white} />
-                    <Text style={styles.primaryButtonText}>Add Money with Razorpay</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+        <View style={cardStyle}>
+          <View style={styles.sectionHeaderRow}>
+            <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+              <Icon name="add-circle-outline" size={18} color={accent} />
             </View>
-
-            <View style={cardStyle}>
-              <View style={styles.sectionHeaderRow}>
-                <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
-                  <Icon name="calendar-outline" size={18} color={accent} />
-                </View>
-                <View style={styles.sectionHeaderCopy}>
-                  <Text style={[styles.cardTitle, { color: colors.text }]}>Appointments</Text>
-                  <Text style={[styles.cardText, { color: textSecondary }]}>Find sellers, chat with them, and manage paid bookings.</Text>
-                </View>
-              </View>
-
-              <View style={styles.quickActionRow}>
-                <TouchableOpacity style={[styles.quickActionCard, { backgroundColor: panelAlt, borderColor: border }]} onPress={() => navigation.navigate("Search")}>
-                  <Icon name="search-outline" size={18} color={accent} />
-                  <Text style={[styles.quickActionText, { color: colors.text }]}>Find Sellers</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.quickActionCard, { backgroundColor: panelAlt, borderColor: border }]} onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "user" })}>
-                  <Icon name="receipt-outline" size={18} color={accent} />
-                  <Text style={[styles.quickActionText, { color: colors.text }]}>My Bookings</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </>
-        ) : (
-          <View style={cardStyle}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
-                <Icon name="cash-outline" size={18} color={accent} />
-              </View>
-              <View style={styles.sectionHeaderCopy}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Seller Settlement</Text>
-                <Text style={[styles.cardText, { color: textSecondary }]}>Paid appointments hold in pending earnings first, then release to total earnings.</Text>
-              </View>
-            </View>
-
-            <View style={styles.metricRow}>
-              <View style={[styles.metricBox, { backgroundColor: panelAlt, borderColor: border }]}>
-                <Text style={[styles.metricLabel, { color: textSecondary }]}>Pending earnings</Text>
-                <Text style={[styles.metricValue, { color: colors.text }]}>{formatCurrencyAmount(sellerWallet?.balance || 0, sellerWallet?.currency || "INR")}</Text>
-              </View>
-              <View style={[styles.metricBox, { backgroundColor: panelAlt, borderColor: border }]}>
-                <Text style={[styles.metricLabel, { color: textSecondary }]}>Total earnings</Text>
-                <Text style={[styles.metricValue, { color: colors.text }]}>{formatCurrencyAmount(sellerWallet?.totalEarned || 0, sellerWallet?.currency || "INR")}</Text>
-              </View>
+            <View style={styles.sectionHeaderCopy}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Recharge Coins</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Top up your dashboard balance, then use coins to book appointments faster.</Text>
             </View>
           </View>
-        )}
+
+          <View style={styles.presetRow}>
+            {TOP_UP_PRESETS.map((preset) => {
+              const active = topUpAmount === preset;
+              return (
+                <TouchableOpacity
+                  key={preset}
+                  style={[
+                    styles.presetChip,
+                    {
+                      backgroundColor: active ? accent : panelAlt,
+                      borderColor: active ? accent : border,
+                    },
+                  ]}
+                  onPress={() => setTopUpAmount(preset)}
+                >
+                  <Text style={[styles.presetChipText, { color: active ? white : colors.text }]}>INR {preset}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={[styles.amountField, { backgroundColor: panelAlt, borderColor: border }]}>
+            <Icon name="logo-usd" size={18} color={accent} />
+            <RNTextInput
+              style={[styles.amountInput, { color: colors.text }]}
+              placeholder="Enter amount"
+              placeholderTextColor={textSecondary}
+              value={topUpAmount}
+              onChangeText={setTopUpAmount}
+              keyboardType="numeric"
+            />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: accent }, addingMoney && styles.buttonDisabled]}
+            onPress={addMoneyToWallet}
+            disabled={addingMoney}
+          >
+            {addingMoney ? <ActivityIndicator color={white} /> : (
+              <>
+                <Icon name="flash-outline" size={18} color={white} />
+                <Text style={styles.primaryButtonText}>Recharge with Razorpay</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={cardStyle}>
+          <View style={styles.sectionHeaderRow}>
+            <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+              <Icon name="calendar-outline" size={18} color={accent} />
+            </View>
+            <View style={styles.sectionHeaderCopy}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Appointments</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Find sellers, manage pending payments, and use your coins on upcoming bookings.</Text>
+            </View>
+          </View>
+
+          <View style={styles.quickActionRow}>
+            <TouchableOpacity style={[styles.quickActionCard, { backgroundColor: panelAlt, borderColor: border }]} onPress={() => navigation.navigate("Search")}>
+              <Icon name="search-outline" size={18} color={accent} />
+              <Text style={[styles.quickActionText, { color: colors.text }]}>Find Sellers</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.quickActionCard, { backgroundColor: panelAlt, borderColor: border }]} onPress={() => navigation.navigate("ServiceRequestsScreen", { mode: "user" })}>
+              <Icon name="receipt-outline" size={18} color={accent} />
+              <Text style={[styles.quickActionText, { color: colors.text }]}>My Bookings</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         <View style={cardStyle}>
           <View style={styles.sectionHeaderRow}>
@@ -395,7 +357,7 @@ function WalletScreen({ navigation }: any) {
             </View>
             <View style={styles.sectionHeaderCopy}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>Referral Wallet</Text>
-              <Text style={[styles.cardText, { color: textSecondary }]}>Use your code, apply another code, and keep wallet rewards in view.</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Apply referral codes and keep your bonus coins in one place.</Text>
             </View>
           </View>
 
@@ -469,31 +431,29 @@ function WalletScreen({ navigation }: any) {
           )) : <Text style={[styles.emptyText, { color: textSecondary }]}>Wallet credits, referrals, and top-ups will appear here.</Text>}
         </View>
 
-        {!isSellerAccount && (
-          <View style={cardStyle}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
-                <Icon name="card-outline" size={18} color={accent} />
-              </View>
-              <View style={styles.sectionHeaderCopy}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Recent Top-Ups</Text>
-                <Text style={[styles.cardText, { color: textSecondary }]}>Successful and pending Razorpay wallet loads.</Text>
-              </View>
+        <View style={cardStyle}>
+          <View style={styles.sectionHeaderRow}>
+            <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+              <Icon name="card-outline" size={18} color={accent} />
             </View>
-            {recentDeposits.length ? recentDeposits.map((entry) => (
-              <View key={entry._id} style={[styles.listRow, { borderBottomColor: border }]}>
-                <View style={[styles.listIconWrap, { backgroundColor: panelAlt }]}>
-                  <Icon name="card-outline" size={16} color={accent} />
-                </View>
-                <View style={styles.listCopy}>
-                  <Text style={[styles.listTitle, { color: colors.text }]}>Wallet top-up</Text>
-                  <Text style={[styles.listMeta, { color: textSecondary }]}>{String(entry.status || "pending").replace(/_/g, " ")}</Text>
-                </View>
-                <Text style={[styles.listAmount, { color: colors.text }]}>{formatCurrencyAmount(entry.amount || 0, "INR")}</Text>
-              </View>
-            )) : <Text style={[styles.emptyText, { color: textSecondary }]}>Your successful and pending top-ups will show here.</Text>}
+            <View style={styles.sectionHeaderCopy}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Recent Recharges</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Successful and pending Razorpay dashboard top-ups.</Text>
+            </View>
           </View>
-        )}
+          {recentDeposits.length ? recentDeposits.map((entry) => (
+            <View key={entry._id} style={[styles.listRow, { borderBottomColor: border }]}>
+              <View style={[styles.listIconWrap, { backgroundColor: panelAlt }]}>
+                <Icon name="card-outline" size={16} color={accent} />
+              </View>
+              <View style={styles.listCopy}>
+                <Text style={[styles.listTitle, { color: colors.text }]}>Wallet recharge</Text>
+                <Text style={[styles.listMeta, { color: textSecondary }]}>{String(entry.status || "pending").replace(/_/g, " ")}</Text>
+              </View>
+              <Text style={[styles.listAmount, { color: colors.text }]}>{formatCurrencyAmount(entry.amount || 0, "INR")}</Text>
+            </View>
+          )) : <Text style={[styles.emptyText, { color: textSecondary }]}>Your successful and pending recharges will show here.</Text>}
+        </View>
 
         <View style={[cardStyle, { marginBottom: 28 }]}>
           <View style={styles.sectionHeaderRow}>
@@ -502,7 +462,7 @@ function WalletScreen({ navigation }: any) {
             </View>
             <View style={styles.sectionHeaderCopy}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>Recent Appointments</Text>
-              <Text style={[styles.cardText, { color: textSecondary }]}>Latest booking and payout-linked activity.</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Latest booking activity and payment status.</Text>
             </View>
           </View>
           {recentRequests.length ? recentRequests.map((request) => (

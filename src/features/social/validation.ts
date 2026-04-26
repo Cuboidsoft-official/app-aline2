@@ -176,6 +176,10 @@ const normalizeSelectedMusic = (music: SelectedMusicClip | undefined): SelectedM
     0,
     Math.min(duration - 1, Math.round(Number(music.clipStartTime || 0))),
   );
+  const clipEndTime = Math.max(
+    clipStartTime + 1,
+    Math.min(duration, Math.round(Number(music.clipEndTime || clipStartTime + clipDuration))),
+  );
 
   if (!id || !title || !duration) {
     throw new SocialValidationError("validation_error", "Choose a valid music track.");
@@ -205,6 +209,7 @@ const normalizeSelectedMusic = (music: SelectedMusicClip | undefined): SelectedM
     previewUrl,
     duration,
     clipStartTime,
+    clipEndTime,
     clipDuration,
   };
 };

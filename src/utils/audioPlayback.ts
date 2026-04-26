@@ -38,3 +38,51 @@ export const startAudioPlaybackFromSources = async (
 
   throw lastError || new Error("Unable to start playback");
 };
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+export const startManagedAudioClipPlayback = async (
+  player: any,
+  {
+    rawValue,
+    normalizedValue,
+    startPositionMs = 0,
+    volume = 1,
+    seekSettleDelayMs = 140,
+  }: {
+    rawValue: string;
+    normalizedValue: string;
+    startPositionMs?: number;
+    volume?: number;
+    seekSettleDelayMs?: number;
+  },
+): Promise<string> => {
+  const source = await startAudioPlaybackFromSources(player, rawValue, normalizedValue);
+
+  try {
+    await player.setVolume(volume);
+  } catch {
+    // noop
+  }
+
+  if (startPositionMs > 0) {
+    await wait(seekSettleDelayMs);
+
+    try {
+      await player.seekToPlayer(startPositionMs);
+    } catch {
+      await wait(seekSettleDelayMs);
+
+      try {
+        await player.seekToPlayer(startPositionMs);
+      } catch {
+        // Some remote streams reject early seeks. Let playback continue instead of failing hard.
+      }
+    }
+  }
+
+  return source;
+};

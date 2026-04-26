@@ -58,7 +58,11 @@ import {
   reactToChatMessage,
   sendChatMessage,
 } from "../utils/chatApi";
-import { startCallSession } from "../utils/callApi";
+import {
+  getExistingCallPayloadFromError,
+  isCallAlreadyActiveError,
+  startCallSession,
+} from "../utils/callApi";
 import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import {
   getLastIncomingUnseenMessage,
@@ -981,14 +985,23 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       } catch (checkoutError: any) {
         const cancellationCode = Number(checkoutError?.code);
         if (cancellationCode === 0 || /cancel/i.test(String(checkoutError?.description || checkoutError?.message || ""))) {
-          if (requestId) {
-            await API.put(`/service-requests/${requestId}/status`, {
-              status: "cancelled",
-            }).catch((statusError) => {
-              console.log("seller booking cancel after payment abort error:", statusError);
-            });
-          }
-          Alert.alert("Payment Cancelled", "An appointment is only booked after payment is completed. No booking was confirmed.");
+          setShowPaymentModal(false);
+          setSelectedAppointmentStart("");
+          setText("");
+          Alert.alert(
+            "Payment Pending",
+            "Your appointment request is saved. Complete payment later from User Dashboard > My Bookings, or recharge coins first.",
+            [
+              {
+                text: "My Bookings",
+                onPress: () => navigation.navigate("ServiceRequestsScreen", { mode: "user" }),
+              },
+              {
+                text: "Later",
+                style: "cancel",
+              },
+            ],
+          );
           return;
         }
         throw checkoutError;
@@ -1007,7 +1020,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     } finally {
       setProcessingBookingPayment(false);
     }
-  }, [ensureConversation, finalizeSuccessfulBooking, selectedAppointmentStart, selectedService, serviceName, text]);
+  }, [ensureConversation, finalizeSuccessfulBooking, navigation, selectedAppointmentStart, selectedService, serviceName, text]);
 
   const openBookingFlow = useCallback((service: SellerService) => {
     setSelectedService(service);
@@ -2153,6 +2166,33 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         avatarUrl: seller?.profilePic || "",
       });
     } catch (error) {
+      const existingCallPayload = getExistingCallPayloadFromError(error);
+
+      if (isCallAlreadyActiveError(error) && existingCallPayload?.callSession?._id) {
+        const initiatorId = String(
+          existingCallPayload.callSession?.initiatedBy?._id
+          || existingCallPayload.callSession?.initiatedBy?.id
+          || existingCallPayload.callSession?.initiatedBy
+          || "",
+        ).trim();
+        const shouldOpenAsIncoming =
+          String(existingCallPayload.callSession?.status || "") === "ringing"
+          && !!initiatorId
+          && initiatorId !== String(currentUserId || "").trim();
+
+        navigation.navigate("CallScreen", {
+          callSessionId: String(existingCallPayload.callSession._id),
+          mode: shouldOpenAsIncoming ? "incoming" : "outgoing",
+          callType: String(existingCallPayload.callSession?.callType || callType) === "video" ? "video" : "audio",
+          initialCallSession: existingCallPayload.callSession,
+          initialIceServers: existingCallPayload.iceServers,
+          callRuntime: existingCallPayload.callRuntime,
+          title: seller?.sellerName || selectedServiceLabel || "Aline2 call",
+          avatarUrl: seller?.profilePic || "",
+        });
+        return;
+      }
+
       Alert.alert(
         "Could not start call",
         getReadableApiErrorMessage(error, "Unable to start the call right now."),

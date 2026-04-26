@@ -15,13 +15,19 @@ export interface SocialUser {
 
 export interface StoryMusic {
   id?: string;
+  externalId?: string;
   trackName: string;
   artistName?: string;
   artworkUrl?: string;
   previewUrl?: string;
+  streamUrl?: string;
+  audioUrl?: string;
+  externalUrl?: string;
+  youtubeVideoId?: string;
   source?: string;
   isOriginal?: boolean;
   startTime?: number;
+  endTime?: number;
   duration?: number;
 }
 
@@ -33,12 +39,14 @@ export interface SelectedMusicClip {
   artworkUrl?: string;
   previewUrl?: string;
   streamUrl?: string;
+  audioUrl?: string;
   externalUrl?: string;
   source?: string;
   youtubeVideoId?: string;
   isOriginal?: boolean;
   duration: number;
   clipStartTime?: number;
+  clipEndTime?: number;
   clipDuration?: number;
 }
 

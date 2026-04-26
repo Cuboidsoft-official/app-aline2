@@ -224,10 +224,18 @@ const mapStoryMusicDetails = (music: any, musicConfig?: any) => {
 
   return {
     id: typeof music === "object" ? String(music?._id || music?.id || "") || undefined : undefined,
+    externalId: typeof music === "object" ? String(music?.externalId || "") || undefined : undefined,
     trackName,
     artistName,
     artworkUrl: music?.thumbnailUrl || music?.artworkUrl || undefined,
     previewUrl: music?.previewUrl || music?.audioUrl || undefined,
+    streamUrl: music?.streamUrl || music?.audioUrl || music?.previewUrl || undefined,
+    audioUrl: music?.audioUrl || music?.streamUrl || music?.previewUrl || undefined,
+    externalUrl: music?.externalUrl || undefined,
+    youtubeVideoId:
+      typeof music === "object"
+        ? String(music?.youtubeVideoId || music?.externalId || "").trim() || undefined
+        : undefined,
     source: music?.source || undefined,
     isOriginal: !!music?.isOriginal,
     startTime:
@@ -236,6 +244,12 @@ const mapStoryMusicDetails = (music: any, musicConfig?: any) => {
         : typeof music?.startTime === "number"
           ? music.startTime
           : 0,
+    endTime:
+      typeof musicConfig?.endTime === "number"
+        ? musicConfig.endTime
+        : typeof music?.endTime === "number"
+          ? music.endTime
+          : undefined,
     duration:
       typeof musicConfig?.duration === "number"
         ? musicConfig.duration
@@ -251,6 +265,7 @@ const buildMusicRequestPayload = (music: any) =>
       musicId: music.id,
       musicConfig: {
         startTime: music.clipStartTime ?? 0,
+        endTime: music.clipEndTime ?? ((music.clipStartTime ?? 0) + (music.clipDuration ?? music.duration ?? 0)),
         duration: music.clipDuration ?? music.duration,
         volume: 1,
       },

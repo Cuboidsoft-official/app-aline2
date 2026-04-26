@@ -84,6 +84,18 @@ const formatStatusLabel = (status = "") =>
     .replace(/\b\w/g, (match) => match.toUpperCase())
     .replace("Accepted", "Confirmed");
 
+const formatCoinAmount = (value: number): string => {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) {
+    return "0 coins";
+  }
+
+  return `${amount.toLocaleString("en-IN", {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })} coins`;
+};
+
 const ServiceRequestsScreen = ({ navigation, route }: any) => {
   const { colors } = useAppTheme();
   const mode = route?.params?.mode === "seller" ? "seller" : "user";
@@ -269,6 +281,23 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
     }
   }, [fetchData]);
 
+  const payWithCoins = useCallback(async (item: ServiceRequestRecord) => {
+    try {
+      setUpdatingId(item._id);
+      const paymentRes = await API.post(`/service-requests/${item._id}/payment/wallet`);
+      await fetchData();
+      Alert.alert(
+        "Coins Used",
+        `Appointment booked successfully. Remaining balance: ${formatCoinAmount(paymentRes.data?.walletBalance || 0)}.`,
+      );
+    } catch (error: any) {
+      console.log("service request wallet payment error:", error?.response?.data || error);
+      Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to pay with coins"));
+    } finally {
+      setUpdatingId("");
+    }
+  }, [fetchData]);
+
   const renderActions = (item: ServiceRequestRecord) => {
     if (mode === "seller") {
       if (item.status === "pending" || item.status === "paid") {
@@ -311,11 +340,14 @@ const ServiceRequestsScreen = ({ navigation, route }: any) => {
 
     if (mode === "user" && (item.status === "pending_payment" || item.status === "payment_failed")) {
       return (
-        <View style={styles.actionRow}>
-          <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]} onPress={() => payNow(item)} disabled={updatingId === item._id}>
-            <Text style={styles.actionBtnText}>Pay Now</Text>
+        <View style={styles.actionColumn}>
+          <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn, styles.stackedActionBtn]} onPress={() => payNow(item)} disabled={updatingId === item._id}>
+            <Text style={styles.actionBtnText}>Pay with Razorpay</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionBtn, styles.cancelBtn]} onPress={() => updateStatus(item._id, "cancelled")} disabled={updatingId === item._id}>
+          <TouchableOpacity style={[styles.actionBtn, styles.walletBtn, styles.stackedActionBtn]} onPress={() => payWithCoins(item)} disabled={updatingId === item._id}>
+            <Text style={styles.actionBtnText}>Pay with Coins</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actionBtn, styles.cancelBtn, styles.stackedActionBtn]} onPress={() => updateStatus(item._id, "cancelled")} disabled={updatingId === item._id}>
             <Text style={styles.actionBtnText}>Cancel</Text>
           </TouchableOpacity>
         </View>
@@ -573,8 +605,11 @@ const styles = StyleSheet.create({
   noteText: { marginTop: 8, color: "#444", lineHeight: 18 },
   timeText: { marginTop: 10, color: "#888", fontSize: 12 },
   actionRow: { flexDirection: "row", marginTop: 14 },
+  actionColumn: { marginTop: 14 },
   actionBtn: { marginTop: 14, borderRadius: 12, paddingVertical: 10, alignItems: "center", flex: 1 },
+  stackedActionBtn: { marginLeft: 0, marginRight: 0 },
   acceptBtn: { backgroundColor: "#2563EB", marginRight: 8 },
+  walletBtn: { backgroundColor: "#7C3AED" },
   rescheduleBtn: { backgroundColor: "#7C3AED", marginHorizontal: 4 },
   declineBtn: { backgroundColor: "#DC2626", marginLeft: 8 },
   completeBtn: { backgroundColor: "#059669" },

@@ -180,8 +180,7 @@ const ProfileScreen = ({navigation}: any) => {
   () => allPosts.filter((post) => !isReelPost(post)).length,
   [allPosts],
  );
- const hasSellerAccount = user?.category === "Seller";
- const profileName = user?.name || "User Name";
+  const profileName = user?.name || "User Name";
  const profileHandle = user?.username ? `@${user.username}` : "Complete your profile";
  const profileMeta = [user?.pronouns].filter(Boolean).join(" | ");
  const profileInitial = (profileName.trim().charAt(0) || "U").toUpperCase();
@@ -473,11 +472,11 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
     <View style={styles.quickGrid}>
      <TouchableOpacity
       style={[styles.quickAction, { borderColor: colors.border, backgroundColor: isDarkMode ? colors.surface : colors.card }]}
-      onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
+      onPress={() => navigation.navigate("WalletScreen")}
      >
-      <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={16} color={colors.text} />
+      <Icon name="wallet-outline" size={16} color={colors.text} />
       <Text style={[styles.quickActionText, { color: colors.text }]}>
-       {hasSellerAccount ? "Seller Dashboard" : "Become a Seller"}
+       User Dashboard
       </Text>
      </TouchableOpacity>
 

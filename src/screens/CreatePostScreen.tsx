@@ -20,7 +20,6 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { createSound } from "react-native-nitro-sound";
 import Icon from "react-native-vector-icons/Ionicons";
 import { trim as trimMedia } from "react-native-video-trim";
 import { RTCView, mediaDevices } from "react-native-webrtc";
@@ -53,7 +52,9 @@ import {
 import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import SocialVideo from "../features/social/components/SocialVideo";
 import { limits, parseCaptionEntities, toUserSafeMessage } from "../features/social/validation";
-import { importMusicCatalogItem } from "../utils/musicApi";
+import {
+  importMusicCatalogItem,
+} from "../utils/musicApi";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
 import { fetchEmojiStickers, fetchStickersForChat, searchStickers, type ChatSticker } from "../utils/chatStickerApi";
@@ -61,6 +62,7 @@ import { appFonts } from "../theme/designSystem";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { ensureCameraPermission } from "../utils/permissions";
 import { VIDEO_DURATION_LIMITS } from "../utils/videoTrimConfig";
+import { useYouTubeTrimPreview } from "../hooks/useYouTubeTrimPreview";
 import {
   getTrendingYouTubeMusic,
   searchYouTubeMusic,
@@ -113,7 +115,7 @@ type MusicResultItem = SelectedMusicClip & {
 
 type StoryToolPanel = "text" | "color" | "font" | "size" | "filters" | "sticker" | null;
 type StoryTextFontVariant = "bold" | "clean" | "soft";
-type MusicPreviewMode = "audio" | "youtube";
+type MusicPreviewMode = "youtube";
 
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
 const POST_ASPECTS: AspectOption[] = [
@@ -464,6 +466,37 @@ const findAspectOption = (mode: ComposerMode, aspectId: string | undefined) =>
 const buildMusicLabel = (music: SelectedMusicClip | null | undefined) =>
   [music?.title, music?.artist].filter(Boolean).join(" • ");
 
+const getMusicClipPlaybackUrl = (music: Partial<SelectedMusicClip> | null | undefined) =>
+  String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
+
+const hasPlayableMusicClip = (music: Partial<SelectedMusicClip> | null | undefined) =>
+  !!(getMusicClipPlaybackUrl(music) || extractYouTubeVideoId(music));
+
+const dedupeMusicResults = (items: MusicResultItem[]) => {
+  const seen = new Set<string>();
+  const nextItems: MusicResultItem[] = [];
+
+  items.forEach((item) => {
+    const key = String(
+      item.id
+      || item.externalId
+      || `${item.source || "music"}:${item.title || ""}:${item.artist || ""}`,
+    ).trim();
+
+    if (!key || seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    nextItems.push(item);
+  });
+
+  return nextItems;
+};
+
+const isPersistedMusicId = (value: unknown) =>
+  /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
+
 const hasTrimmedMusicSelection = (music: SelectedMusicClip | null | undefined) =>
   !!music && typeof music.clipDuration === "number" && music.clipDuration > 0;
 
@@ -565,6 +598,7 @@ function RangeSlider({
   onChange,
   accentColor,
   mutedColor,
+  showWaveform = false,
 }: {
   duration: number;
   startTime: number;
@@ -572,13 +606,62 @@ function RangeSlider({
   onChange: (nextStart: number, nextDuration: number) => void;
   accentColor: string;
   mutedColor: string;
+  showWaveform?: boolean;
 }) {
-  const [trackWidth, setTrackWidth] = useState(0);
+  const sliderScrollRef = useRef<ScrollView | null>(null);
+  const dragWindowRef = useRef({ startPx: 0, endPx: 0 });
+  const [isDraggingHandle, setIsDraggingHandle] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(0);
   const safeDuration = Math.max(1, Math.round(duration || 1));
-  const endTime = clamp(startTime + clipDuration, 1, safeDuration);
+  const normalizedClipDuration = clamp(Math.round(Number(clipDuration || 1) || 1), 1, safeDuration);
+  const endTime = clamp(startTime + normalizedClipDuration, 1, safeDuration);
+  const trackWidth = showWaveform
+    ? Math.max(viewportWidth || 0, Math.min(1920, Math.max(360, safeDuration * 18)))
+    : Math.max(viewportWidth || 0, 1);
   const selectedStart = trackWidth * (startTime / safeDuration);
   const selectedEnd = trackWidth * (endTime / safeDuration);
+  const handleVisualWidth = showWaveform ? 12 : 14;
+  const handleTouchWidth = showWaveform ? 28 : 24;
+  const maxHandleLeft = Math.max(0, trackWidth - handleVisualWidth);
+  const leftHandleLeft = clamp(selectedStart - handleVisualWidth / 2, 0, maxHandleLeft);
+  const rightHandleLeft = clamp(selectedEnd - handleVisualWidth / 2, 0, maxHandleLeft);
   const minGapPx = trackWidth > 0 ? Math.max(18, trackWidth * (1 / safeDuration)) : 0;
+  const waveformBars = useMemo(() => {
+    const count = clamp(Math.round(trackWidth / 9), 28, 96);
+
+    return Array.from({ length: count }, (_value, index) => {
+      const phase = (index / Math.max(1, count - 1)) * Math.PI * 3.6;
+      const heightFactor = clamp(
+        0.3 + Math.abs(Math.sin(phase) * 0.46 + Math.cos(phase * 0.58) * 0.22),
+        0.22,
+        1,
+      );
+
+      return {
+        id: `wave_${index}`,
+        height: 8 + heightFactor * 24,
+      };
+    });
+  }, [trackWidth]);
+
+  useEffect(() => {
+    if (
+      !showWaveform
+      || isDraggingHandle
+      || !sliderScrollRef.current
+      || !viewportWidth
+      || trackWidth <= viewportWidth
+    ) {
+      return;
+    }
+
+    const targetOffset = clamp(selectedStart - viewportWidth * 0.28, 0, Math.max(0, trackWidth - viewportWidth));
+    const timeout = setTimeout(() => {
+      sliderScrollRef.current?.scrollTo({ x: targetOffset, animated: true });
+    }, 60);
+
+    return () => clearTimeout(timeout);
+  }, [isDraggingHandle, selectedStart, showWaveform, trackWidth, viewportWidth]);
 
   const updateRange = useCallback(
     (nextStartPx: number, nextEndPx: number) => {
@@ -599,10 +682,22 @@ function RangeSlider({
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderMove: (_event, gestureState) => {
-          updateRange(selectedStart + gestureState.dx, selectedEnd);
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          dragWindowRef.current = {
+            startPx: selectedStart,
+            endPx: selectedEnd,
+          };
+          setIsDraggingHandle(true);
         },
+        onPanResponderMove: (_event, gestureState) => {
+          updateRange(dragWindowRef.current.startPx + gestureState.dx, dragWindowRef.current.endPx);
+        },
+        onPanResponderRelease: () => setIsDraggingHandle(false),
+        onPanResponderTerminate: () => setIsDraggingHandle(false),
       }),
     [selectedEnd, selectedStart, updateRange],
   );
@@ -611,10 +706,22 @@ function RangeSlider({
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderMove: (_event, gestureState) => {
-          updateRange(selectedStart, selectedEnd + gestureState.dx);
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          dragWindowRef.current = {
+            startPx: selectedStart,
+            endPx: selectedEnd,
+          };
+          setIsDraggingHandle(true);
         },
+        onPanResponderMove: (_event, gestureState) => {
+          updateRange(dragWindowRef.current.startPx, dragWindowRef.current.endPx + gestureState.dx);
+        },
+        onPanResponderRelease: () => setIsDraggingHandle(false),
+        onPanResponderTerminate: () => setIsDraggingHandle(false),
       }),
     [selectedEnd, selectedStart, updateRange],
   );
@@ -623,23 +730,132 @@ function RangeSlider({
     <View style={styles.sliderWrap}>
       <View style={styles.sliderLabelsRow}>
         <Text style={[styles.sliderLabel, { color: mutedColor }]}>Start {formatDuration(startTime)}</Text>
-        <Text style={[styles.sliderLabel, { color: mutedColor }]}>Clip {formatDuration(clipDuration)}</Text>
+        <Text style={[styles.sliderLabel, { color: mutedColor }]}>Clip {formatDuration(normalizedClipDuration)}</Text>
       </View>
       <View
-        style={[styles.sliderTrack, { backgroundColor: mutedColor }]}
+        style={styles.sliderViewport}
         onLayout={(event) => {
-          setTrackWidth(event.nativeEvent.layout.width);
+          setViewportWidth(event.nativeEvent.layout.width);
         }}
       >
-        <View style={[styles.sliderSelection, { left: selectedStart, width: Math.max(0, selectedEnd - selectedStart), backgroundColor: accentColor }]} />
-        <View
-          {...leftResponder.panHandlers}
-          style={[styles.sliderHandle, { left: Math.max(-12, selectedStart - 12), borderColor: accentColor }]}
-        />
-        <View
-          {...rightResponder.panHandlers}
-          style={[styles.sliderHandle, { left: Math.min(trackWidth - 12, selectedEnd - 12), borderColor: accentColor }]}
-        />
+        <ScrollView
+          ref={sliderScrollRef}
+          horizontal
+          nestedScrollEnabled
+          bounces={false}
+          showsHorizontalScrollIndicator={false}
+          scrollEnabled={!isDraggingHandle && showWaveform && trackWidth > viewportWidth + 8}
+          contentContainerStyle={styles.sliderScrollContent}
+        >
+          <View
+            style={[
+              styles.sliderTrackFrame,
+              {
+                width: trackWidth,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.sliderTrack,
+                showWaveform ? styles.sliderTrackWaveform : null,
+                {
+                  backgroundColor: mutedColor,
+                },
+              ]}
+            >
+              {showWaveform ? (
+                <View pointerEvents="none" style={styles.sliderWaveRow}>
+                  {waveformBars.map((bar, index) => {
+                    const centerX = trackWidth * ((index + 0.5) / Math.max(1, waveformBars.length));
+                    const selected = centerX >= selectedStart && centerX <= selectedEnd;
+
+                    return (
+                      <View
+                        key={bar.id}
+                        style={[
+                          styles.sliderWaveBar,
+                          {
+                            height: bar.height,
+                            backgroundColor: selected ? accentColor : mutedColor,
+                            opacity: selected ? 0.95 : 0.45,
+                          },
+                        ]}
+                      />
+                    );
+                  })}
+                </View>
+              ) : null}
+              <View
+                style={[
+                  styles.sliderSelection,
+                  {
+                    left: selectedStart,
+                    width: Math.max(0, selectedEnd - selectedStart),
+                    backgroundColor: accentColor,
+                    opacity: showWaveform ? 0.16 : 1,
+                  },
+                ]}
+              />
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.sliderSelectionEdge,
+                  {
+                    left: clamp(selectedStart - 1, 0, Math.max(0, trackWidth - 2)),
+                    backgroundColor: accentColor,
+                  },
+                ]}
+              />
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.sliderSelectionEdge,
+                  {
+                    left: clamp(selectedEnd - 1, 0, Math.max(0, trackWidth - 2)),
+                    backgroundColor: accentColor,
+                  },
+                ]}
+              />
+            </View>
+            <View
+              {...leftResponder.panHandlers}
+              style={[
+                styles.sliderHandleTouch,
+                showWaveform ? styles.sliderHandleTouchWaveform : null,
+                { left: clamp(leftHandleLeft - (handleTouchWidth - handleVisualWidth) / 2, 0, Math.max(0, trackWidth - handleTouchWidth)) },
+              ]}
+            >
+              <View
+                style={[
+                  styles.sliderHandle,
+                  showWaveform ? styles.sliderHandleWaveform : styles.sliderHandleDefault,
+                  { borderColor: accentColor },
+                ]}
+              >
+                <View style={[styles.sliderHandleGrip, showWaveform ? styles.sliderHandleGripWaveform : null, { backgroundColor: accentColor }]} />
+              </View>
+            </View>
+            <View
+              {...rightResponder.panHandlers}
+              style={[
+                styles.sliderHandleTouch,
+                showWaveform ? styles.sliderHandleTouchWaveform : null,
+                { left: clamp(rightHandleLeft - (handleTouchWidth - handleVisualWidth) / 2, 0, Math.max(0, trackWidth - handleTouchWidth)) },
+              ]}
+            >
+              <View
+                style={[
+                  styles.sliderHandle,
+                  showWaveform ? styles.sliderHandleWaveform : styles.sliderHandleDefault,
+                  { borderColor: accentColor },
+                ]}
+              >
+                <View style={[styles.sliderHandleGrip, showWaveform ? styles.sliderHandleGripWaveform : null, { backgroundColor: accentColor }]} />
+              </View>
+            </View>
+          </View>
+        </ScrollView>
       </View>
       <View style={styles.sliderLabelsRow}>
         <Text style={[styles.sliderHint, { color: mutedColor }]}>0:00</Text>
@@ -819,12 +1035,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [pendingMusicSelection, setPendingMusicSelection] = useState<MusicResultItem | null>(null);
   const [musicTrimStartTime, setMusicTrimStartTime] = useState(0);
   const [musicTrimDuration, setMusicTrimDuration] = useState(0);
-  const [musicPreviewMode, setMusicPreviewMode] = useState<MusicPreviewMode>("audio");
-  const [musicPreviewLoading, setMusicPreviewLoading] = useState(false);
-  const [musicPreviewPlaying, setMusicPreviewPlaying] = useState(false);
-  const [musicPreviewLoaded, setMusicPreviewLoaded] = useState(false);
-  const [musicPreviewReady, setMusicPreviewReady] = useState(false);
-  const [musicPreviewPositionMs, setMusicPreviewPositionMs] = useState(0);
+  const [musicPreviewMode, setMusicPreviewMode] = useState<MusicPreviewMode>("youtube");
   const [videoTrimStartTime, setVideoTrimStartTime] = useState(0);
   const [videoTrimDuration, setVideoTrimDuration] = useState(0);
   const [videoTrimApplying, setVideoTrimApplying] = useState(false);
@@ -871,11 +1082,6 @@ function CreatePostScreen({ navigation, route }: any) {
   const stageAnimation = useRef(new Animated.Value(1)).current;
   const tagRequestIdRef = useRef(0);
   const musicSeedLoadedRef = useRef(false);
-  const musicPreviewPlayerRef = useRef(createSound());
-  const musicPreviewEndMsRef = useRef(0);
-  const musicPreviewStartMsRef = useRef(0);
-  const youtubePreviewRef = useRef<any>(null);
-  const youtubePreviewPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const videoTrimVideoRef = useRef<any>(null);
   const launcherCameraStreamRef = useRef<any>(null);
   const launcherLongPressTriggeredRef = useRef(false);
@@ -883,6 +1089,20 @@ function CreatePostScreen({ navigation, route }: any) {
   const storyEmojiPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const storyImagePan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const lastStoryAssetUriRef = useRef("");
+  const {
+    playerRef: youtubePreviewRef,
+    isReady: musicPreviewReady,
+    isPlaying: musicPreviewPlaying,
+    isLoading: musicPreviewLoading,
+    positionMs: musicPreviewPositionMs,
+    resetPreview: resetMusicPreview,
+    seekToSeconds: seekMusicPreviewToSeconds,
+    setTrimWindow: setMusicPreviewTrimWindow,
+    togglePlayback: toggleYouTubeMusicPreview,
+    handleReady: handleMusicPreviewReady,
+    handleError: handleMusicPreviewError,
+    handleStateChange: handleMusicPreviewStateChange,
+  } = useYouTubeTrimPreview();
 
   const activeAspect = useMemo(() => findAspectOption(mode, aspectId[mode]), [aspectId, mode]);
   const videoDurationLimit = useMemo(() => VIDEO_DURATION_LIMITS[mode], [mode]);
@@ -901,41 +1121,22 @@ function CreatePostScreen({ navigation, route }: any) {
 
     return storyCreationMode === "text" ? !!storyText.trim() : !!selectedAsset;
   }, [mode, selectedAsset, storyCreationMode, storyText]);
-  const pendingMusicPreviewRaw = useMemo(
-    () => String(pendingMusicSelection?.previewUrl || pendingMusicSelection?.streamUrl || "").trim(),
-    [pendingMusicSelection?.previewUrl, pendingMusicSelection?.streamUrl],
-  );
-  const pendingMusicPreviewUrl = useMemo(
-    () => normalizeMediaUrl(pendingMusicPreviewRaw),
-    [pendingMusicPreviewRaw],
-  );
   const pendingMusicYoutubeVideoId = useMemo(
     () => extractYouTubeVideoId(pendingMusicSelection),
     [pendingMusicSelection],
   );
-  const pendingMusicExternalUrl = useMemo(() => {
-    const externalUrl = String(pendingMusicSelection?.externalUrl || "").trim();
-    if (externalUrl) {
-      return externalUrl;
-    }
-
-    return pendingMusicYoutubeVideoId ? `https://www.youtube.com/watch?v=${pendingMusicYoutubeVideoId}` : "";
-  }, [pendingMusicSelection?.externalUrl, pendingMusicYoutubeVideoId]);
   const canRenderYoutubePreview = Boolean(YoutubePlayer && pendingMusicYoutubeVideoId);
-  const canPreviewMusic = Boolean(pendingMusicPreviewUrl || canRenderYoutubePreview || pendingMusicExternalUrl);
+  const canPreviewMusic = Boolean(canRenderYoutubePreview);
   const parentRouteNames = navigation?.getParent?.()?.getState?.()?.routeNames || [];
   const isInsideTabNavigator = Array.isArray(parentRouteNames)
     && parentRouteNames.includes("Feed")
     && parentRouteNames.includes("Create");
   useEffect(() => {
-    musicPreviewStartMsRef.current = Math.max(0, musicTrimStartTime * 1000);
-  }, [musicTrimStartTime]);
-  const stopYoutubePreviewPolling = useCallback(() => {
-    if (youtubePreviewPollRef.current) {
-      clearInterval(youtubePreviewPollRef.current);
-      youtubePreviewPollRef.current = null;
-    }
-  }, []);
+    setMusicPreviewTrimWindow(
+      Math.max(0, musicTrimStartTime),
+      Math.max(musicTrimStartTime + 1, musicTrimStartTime + Math.max(1, musicTrimDuration)),
+    );
+  }, [musicTrimDuration, musicTrimStartTime, setMusicPreviewTrimWindow]);
   const storyTextThemeStyle =
     STORY_TEXT_THEMES.find((item) => item.id === storyTextTheme) || STORY_TEXT_THEMES[0];
   const storyTextFontStyle =
@@ -1535,39 +1736,25 @@ function CreatePostScreen({ navigation, route }: any) {
 
   useEffect(() => {
     if (!musicTrimSheetVisible || !pendingMusicSelection) {
-      musicPreviewEndMsRef.current = 0;
-      musicPreviewPlayerRef.current.stopPlayer().catch(() => undefined);
-      stopYoutubePreviewPolling();
-      setMusicPreviewPlaying(false);
-      setMusicPreviewLoading(false);
-      setMusicPreviewLoaded(false);
-      setMusicPreviewReady(false);
-      setMusicPreviewPositionMs(0);
+      resetMusicPreview(0, 1);
       return;
     }
 
-    musicPreviewEndMsRef.current = 0;
-    musicPreviewPlayerRef.current.stopPlayer().catch(() => undefined);
-    stopYoutubePreviewPolling();
-    setMusicPreviewPlaying(false);
-    setMusicPreviewLoading(false);
-    setMusicPreviewLoaded(false);
-    setMusicPreviewReady(false);
-    setMusicPreviewPositionMs(Math.max(0, musicTrimStartTime * 1000));
-  }, [musicTrimDuration, musicTrimSheetVisible, musicTrimStartTime, pendingMusicSelection, stopYoutubePreviewPolling]);
+    const nextEndTime = Math.min(
+      Math.max(1, Number(pendingMusicSelection.duration || 1)),
+      Math.max(musicTrimStartTime + 1, musicTrimStartTime + Math.max(1, musicTrimDuration)),
+    );
+
+    resetMusicPreview(Math.max(0, musicTrimStartTime), nextEndTime);
+  }, [musicTrimDuration, musicTrimSheetVisible, musicTrimStartTime, pendingMusicSelection, resetMusicPreview]);
 
   useEffect(() => {
-    if (!musicTrimSheetVisible || !musicPreviewLoaded) {
+    if (!musicTrimSheetVisible || !musicPreviewReady) {
       return;
     }
 
-    if (musicPreviewMode === "audio") {
-      musicPreviewPlayerRef.current.seekToPlayer(Math.max(0, musicTrimStartTime * 1000)).catch(() => undefined);
-    } else if (musicPreviewMode === "youtube" && musicPreviewReady) {
-      youtubePreviewRef.current?.seekTo?.(Math.max(0, musicTrimStartTime), true);
-    }
-    setMusicPreviewPositionMs(musicTrimStartTime * 1000);
-  }, [musicPreviewLoaded, musicPreviewMode, musicPreviewReady, musicTrimSheetVisible, musicTrimStartTime]);
+    seekMusicPreviewToSeconds(Math.max(0, musicTrimStartTime));
+  }, [musicPreviewReady, musicTrimSheetVisible, musicTrimStartTime, seekMusicPreviewToSeconds]);
 
   useEffect(() => {
     if (!videoTrimSheetVisible || selectedAsset?.mediaType !== "video") {
@@ -1594,11 +1781,12 @@ function CreatePostScreen({ navigation, route }: any) {
   }, [selectedAsset?.mediaType, videoTrimPreviewLoaded, videoTrimSheetVisible, videoTrimStartTime]);
 
   const fetchMusicResults = useCallback(async (query: string) => {
-    if (!query) {
-      return getTrendingYouTubeMusic(12);
-    }
+    const trimmedQuery = String(query || "").trim();
+    const youtubeResults = trimmedQuery
+      ? await searchYouTubeMusic(trimmedQuery, 12)
+      : await getTrendingYouTubeMusic(12);
 
-    return searchYouTubeMusic(query, 12);
+    return dedupeMusicResults(youtubeResults as MusicResultItem[]).slice(0, 12);
   }, []);
 
   const runMusicSearch = useCallback(async () => {
@@ -1612,7 +1800,7 @@ function CreatePostScreen({ navigation, route }: any) {
       setMusicResults(nextResults);
 
       if (!nextResults.length) {
-        setMusicError(query ? "No tracks matched your search." : "No music results are available right now.");
+        setMusicError(query ? "No playable tracks matched your search." : "No playable music is available right now.");
       }
     } catch (error) {
       console.log("music search error:", error);
@@ -1630,54 +1818,6 @@ function CreatePostScreen({ navigation, route }: any) {
   }, [musicSheetVisible]);
 
   useEffect(() => {
-    const player = musicPreviewPlayerRef.current;
-
-    player.setSubscriptionDuration(0.1);
-    player.addPlayBackListener((event: any) => {
-      const playbackEndMs = musicPreviewEndMsRef.current;
-      const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
-
-      setMusicPreviewLoaded(true);
-      setMusicPreviewLoading(false);
-      setMusicPreviewPositionMs(currentPosition);
-
-      if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
-        musicPreviewEndMsRef.current = 0;
-        setMusicPreviewPlaying(false);
-        player.pausePlayer().catch(() => undefined);
-        player.seekToPlayer(musicPreviewStartMsRef.current).catch(() => undefined);
-        setMusicPreviewPositionMs(musicPreviewStartMsRef.current);
-      }
-    });
-    player.addPlaybackEndListener(() => {
-      musicPreviewEndMsRef.current = 0;
-      setMusicPreviewPlaying(false);
-      setMusicPreviewPositionMs(musicPreviewStartMsRef.current);
-    });
-
-    return () => {
-      try {
-        player.removePlayBackListener();
-      } catch {
-        // noop
-      }
-
-      try {
-        player.removePlaybackEndListener();
-      } catch {
-        // noop
-      }
-
-      player.stopPlayer().catch(() => undefined);
-      player.dispose();
-    };
-  }, []);
-
-  useEffect(() => () => {
-    stopYoutubePreviewPolling();
-  }, [stopYoutubePreviewPolling]);
-
-  useEffect(() => {
     if (!musicSheetVisible || musicSeedLoadedRef.current) {
       return;
     }
@@ -1687,16 +1827,10 @@ function CreatePostScreen({ navigation, route }: any) {
   }, [musicSheetVisible, runMusicSearch]);
 
   const closeMusicTrimSheet = useCallback(() => {
-    musicPreviewEndMsRef.current = 0;
-    musicPreviewPlayerRef.current.stopPlayer().catch(() => undefined);
-    stopYoutubePreviewPolling();
+    resetMusicPreview(0, 1);
     setMusicTrimSheetVisible(false);
     setPendingMusicSelection(null);
-    setMusicPreviewPlaying(false);
-    setMusicPreviewLoading(false);
-    setMusicPreviewLoaded(false);
-    setMusicPreviewReady(false);
-  }, [stopYoutubePreviewPolling]);
+  }, [resetMusicPreview]);
 
   const closeVideoTrimSheet = useCallback(() => {
     setVideoTrimSheetVisible(false);
@@ -1866,61 +2000,48 @@ function CreatePostScreen({ navigation, route }: any) {
         1,
         Math.max(1, safeDuration - nextStart),
       );
+      const nextEnd = Math.min(safeDuration, nextStart + nextDuration);
+      const resolvedVideoId = extractYouTubeVideoId(item);
 
       try {
-        setMusicImportingId(item.id);
         setMusicError("");
         if (__DEV__) {
           console.log("Track:", item);
         }
 
-        const preparedItem =
-          item.previewUrl
-            ? item
-            : await importMusicCatalogItem({
-                ...item,
-                clipStartTime: nextStart,
-                clipDuration: nextDuration,
-              });
-
-        const resolvedVideoId = extractYouTubeVideoId(preparedItem) || extractYouTubeVideoId(item);
-        const resolvedPreviewUrl = String(preparedItem?.previewUrl || preparedItem?.streamUrl || "").trim();
-        const resolvedExternalUrl = String(preparedItem?.externalUrl || item?.externalUrl || "").trim();
-
         if (__DEV__) {
-          console.log("Resolved Response:", preparedItem);
-          console.log("Preview URL:", resolvedPreviewUrl || preparedItem?.externalUrl);
           console.log("Preview checks:", {
-            hasPreviewUrl: Boolean(resolvedPreviewUrl),
             hasYoutubeVideoId: Boolean(resolvedVideoId),
-            hasExternalUrl: Boolean(resolvedExternalUrl),
             youtubeEmbedAvailable: Boolean(YoutubePlayer),
           });
         }
 
-        if (!resolvedPreviewUrl && !resolvedVideoId && !resolvedExternalUrl) {
-          throw new Error("This track can't be previewed inside the app right now. Try another result.");
+        if (!resolvedVideoId) {
+          throw new Error("This YouTube track is missing a video id. Try another result.");
+        }
+
+        if (!YoutubePlayer) {
+          throw new Error("YouTube preview is unavailable in this app build right now.");
         }
 
         setPendingMusicSelection({
-          ...preparedItem,
-          youtubeVideoId: preparedItem.youtubeVideoId || resolvedVideoId || undefined,
+          ...item,
+          youtubeVideoId: resolvedVideoId,
           clipStartTime: nextStart,
+          clipEndTime: nextEnd,
           clipDuration: nextDuration,
         });
-        setMusicPreviewMode(resolvedPreviewUrl ? "audio" : "youtube");
+        setMusicPreviewMode("youtube");
         setMusicTrimStartTime(nextStart);
         setMusicTrimDuration(nextDuration);
-        setMusicPreviewPositionMs(nextStart * 1000);
+        resetMusicPreview(nextStart, nextEnd);
         setMusicSheetVisible(false);
         setMusicTrimSheetVisible(true);
       } catch (error) {
         setMusicError(toUserSafeMessage(error));
-      } finally {
-        setMusicImportingId("");
       }
     },
-    [mode],
+    [mode, resetMusicPreview],
   );
 
   const quickSelectMusic = useCallback(
@@ -1935,21 +2056,23 @@ function CreatePostScreen({ navigation, route }: any) {
       const safeDuration = Math.max(1, Math.round(Number(pendingMusicSelection?.duration || 0) || 1));
       const safeStart = clamp(nextStartTime, 0, Math.max(0, safeDuration - 1));
       const clampedDuration = clamp(nextDuration, 1, Math.max(1, safeDuration - safeStart));
+      const safeEnd = Math.min(safeDuration, safeStart + clampedDuration);
 
       setMusicTrimStartTime(safeStart);
       setMusicTrimDuration(clampedDuration);
-      setMusicPreviewPositionMs(safeStart * 1000);
+      resetMusicPreview(safeStart, safeEnd);
       setPendingMusicSelection((current) =>
         current
           ? {
               ...current,
               clipStartTime: safeStart,
+              clipEndTime: safeEnd,
               clipDuration: clampedDuration,
             }
           : current,
       );
     },
-    [pendingMusicSelection?.duration],
+    [pendingMusicSelection?.duration, resetMusicPreview],
   );
 
   const toggleMusicPreview = useCallback(async () => {
@@ -1957,136 +2080,56 @@ function CreatePostScreen({ navigation, route }: any) {
       return;
     }
 
-    const clipStartMs = Math.max(0, musicTrimStartTime * 1000);
-    const clipEndMs = clipStartMs + Math.max(1000, musicTrimDuration * 1000);
-
-    if (musicPreviewMode === "youtube") {
-      if (!pendingMusicYoutubeVideoId) {
-        setMusicError("Music preview unavailable right now. Try another track.");
-        return;
-      }
-
-      if (!canRenderYoutubePreview) {
-        try {
-          if (__DEV__) {
-            console.log("Player Error:", "Embedded YouTube preview unavailable, opening external YouTube URL.");
-          }
-
-          if (!pendingMusicExternalUrl) {
-            throw new Error("YouTube preview unavailable right now.");
-          }
-
-          await Linking.openURL(pendingMusicExternalUrl);
-        } catch (error) {
-          console.log("Player Error:", error);
-          setMusicError("Music preview unavailable right now. Try another track.");
-        }
-        return;
-      }
-
-      try {
-        setMusicError("");
-        if (__DEV__) {
-          console.log("Preview URL:", pendingMusicPreviewUrl || pendingMusicYoutubeVideoId);
-        }
-
-        if (musicPreviewPlaying) {
-          stopYoutubePreviewPolling();
-          setMusicPreviewPlaying(false);
-          return;
-        }
-
-        setMusicPreviewLoading(true);
-        setMusicPreviewLoaded(true);
-        setMusicPreviewPositionMs(clipStartMs);
-
-        if (musicPreviewReady) {
-          youtubePreviewRef.current?.seekTo?.(Math.max(0, musicTrimStartTime), true);
-        }
-
-        stopYoutubePreviewPolling();
-        youtubePreviewPollRef.current = setInterval(async () => {
-          try {
-            const currentSeconds = await youtubePreviewRef.current?.getCurrentTime?.();
-            const currentMs = Math.max(0, Math.round(Number(currentSeconds || 0) * 1000));
-            setMusicPreviewLoaded(true);
-            setMusicPreviewLoading(false);
-            setMusicPreviewPositionMs(currentMs);
-
-            if (currentMs >= clipEndMs) {
-              stopYoutubePreviewPolling();
-              setMusicPreviewPlaying(false);
-              youtubePreviewRef.current?.seekTo?.(Math.max(0, musicTrimStartTime), true);
-              setMusicPreviewPositionMs(clipStartMs);
-            }
-          } catch (error) {
-            console.log("Player Error:", error);
-          }
-        }, 250);
-        setMusicPreviewPlaying(true);
-      } catch (error) {
-        console.log("Player Error:", error);
-        stopYoutubePreviewPolling();
-        setMusicPreviewPlaying(false);
-        setMusicPreviewLoaded(false);
-        setMusicError("Music preview unavailable right now. Try another track.");
-      } finally {
-        setMusicPreviewLoading(false);
-      }
+    if (!pendingMusicYoutubeVideoId || !canRenderYoutubePreview) {
+      setMusicError("Music preview unavailable right now. Try another YouTube result.");
       return;
     }
-
-    if (!pendingMusicPreviewUrl) {
-      return;
-    }
-
-    const player = musicPreviewPlayerRef.current;
 
     try {
       setMusicError("");
-      if (__DEV__) {
-        console.log("Preview URL:", pendingMusicPreviewUrl || pendingMusicSelection.streamUrl);
-      }
-
-      if (musicPreviewPlaying) {
-        musicPreviewEndMsRef.current = clipEndMs;
-        await player.pausePlayer();
-        setMusicPreviewPlaying(false);
-        return;
-      }
-
-      setMusicPreviewLoading(true);
-      await player.stopPlayer().catch(() => undefined);
-      musicPreviewEndMsRef.current = clipEndMs;
-      await player.startPlayer(pendingMusicPreviewUrl);
-      await player.seekToPlayer(clipStartMs);
-      await player.setVolume(1);
-      setMusicPreviewLoaded(true);
-      setMusicPreviewPositionMs(clipStartMs);
-      setMusicPreviewPlaying(true);
+      toggleYouTubeMusicPreview();
     } catch (error) {
       console.log("Player Error:", error);
-      musicPreviewEndMsRef.current = 0;
-      await player.stopPlayer().catch(() => undefined);
-      setMusicPreviewPlaying(false);
-      setMusicPreviewLoaded(false);
       setMusicError("Music preview unavailable right now. Try another track.");
-    } finally {
-      setMusicPreviewLoading(false);
     }
   }, [
+    canRenderYoutubePreview,
     musicPreviewLoading,
-    musicPreviewMode,
-    musicPreviewPlaying,
-    musicPreviewReady,
+    pendingMusicYoutubeVideoId,
+    pendingMusicSelection,
+    toggleYouTubeMusicPreview,
+  ]);
+
+  const seekMusicPreviewBy = useCallback(async (deltaSeconds: number) => {
+    if (!pendingMusicSelection) {
+      return;
+    }
+
+    const clipStartMs = Math.max(0, musicTrimStartTime * 1000);
+    const clipEndMs = clipStartMs + Math.max(1000, musicTrimDuration * 1000);
+    const nextTargetMs = clamp(
+      Math.round((musicPreviewPositionMs || clipStartMs) + deltaSeconds * 1000),
+      clipStartMs,
+      clipEndMs,
+    );
+
+    if (!canRenderYoutubePreview || !pendingMusicYoutubeVideoId) {
+      return;
+    }
+
+    try {
+      seekMusicPreviewToSeconds(Math.max(0, nextTargetMs / 1000));
+    } catch (error) {
+      console.log("Player Error:", error);
+    }
+  }, [
+    canRenderYoutubePreview,
+    musicPreviewPositionMs,
     musicTrimDuration,
     musicTrimStartTime,
-    pendingMusicPreviewUrl,
-    pendingMusicExternalUrl,
     pendingMusicSelection,
     pendingMusicYoutubeVideoId,
-    canRenderYoutubePreview,
-    stopYoutubePreviewPolling,
+    seekMusicPreviewToSeconds,
   ]);
 
   const confirmMusicTrim = useCallback(async () => {
@@ -2097,19 +2140,33 @@ function CreatePostScreen({ navigation, route }: any) {
     try {
       setMusicImportingId(pendingMusicSelection.id);
       setMusicError("");
+      const savedEndTime = Math.min(
+        Math.max(1, Number(pendingMusicSelection.duration || 1)),
+        Math.max(musicTrimStartTime + 1, musicTrimStartTime + Math.max(1, musicTrimDuration)),
+      );
       const imported = await importMusicCatalogItem({
         ...pendingMusicSelection,
+        externalId: pendingMusicYoutubeVideoId || pendingMusicSelection.externalId,
+        source: "youtube",
+        youtubeVideoId: pendingMusicYoutubeVideoId || pendingMusicSelection.youtubeVideoId,
         clipStartTime: musicTrimStartTime,
+        clipEndTime: savedEndTime,
         clipDuration: musicTrimDuration,
       });
-      setSelectedMusic(imported);
+      setSelectedMusic({
+        ...imported,
+        youtubeVideoId: pendingMusicYoutubeVideoId || extractYouTubeVideoId(imported) || pendingMusicSelection.youtubeVideoId,
+        clipStartTime: musicTrimStartTime,
+        clipEndTime: savedEndTime,
+        clipDuration: musicTrimDuration,
+      });
       closeMusicTrimSheet();
     } catch (error) {
       setMusicError(toUserSafeMessage(error));
     } finally {
       setMusicImportingId("");
     }
-  }, [closeMusicTrimSheet, musicTrimDuration, musicTrimStartTime, pendingMusicSelection]);
+  }, [closeMusicTrimSheet, musicTrimDuration, musicTrimStartTime, pendingMusicSelection, pendingMusicYoutubeVideoId]);
 
   const toggleMention = useCallback((candidate: AudienceCandidate) => {
     const normalized = String(candidate?.username || "").replace(/^@/, "").trim();
@@ -2308,6 +2365,12 @@ function CreatePostScreen({ navigation, route }: any) {
       setPublishError("");
       if (selectedMusic && !hasTrimmedMusicSelection(selectedMusic)) {
         throw new Error("Please trim the selected music before publishing.");
+      }
+      if (selectedMusic && !isPersistedMusicId(selectedMusic.id)) {
+        throw new Error("Selected track is still syncing. Please select it again.");
+      }
+      if (selectedMusic && !extractYouTubeVideoId(selectedMusic) && !getMusicClipPlaybackUrl(selectedMusic)) {
+        throw new Error("Selected track is missing YouTube playback data. Choose another track.");
       }
       const queueLabel = MODE_COPY[mode].label;
 
@@ -2747,21 +2810,23 @@ function CreatePostScreen({ navigation, route }: any) {
           },
         ]}
       >
-        {railItems.map((item) => (
-          <TouchableOpacity
-            key={item.id}
-            style={[
-              styles.storyRailButton,
-              item.active ? { backgroundColor: accentSoft, borderColor: accentColor } : { backgroundColor: inputBackground, borderColor },
-            ]}
-            onPress={item.onPress}
-          >
-            <Icon name={item.icon} size={17} color={accentColor} />
-            <Text style={[styles.storyRailButtonText, { color: textColor }]} numberOfLines={2}>
-              {item.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.storyToolRailScroll}>
+          {railItems.map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              style={[
+                styles.storyRailButton,
+                item.active ? { backgroundColor: accentSoft, borderColor: accentColor } : { backgroundColor: inputBackground, borderColor },
+              ]}
+              onPress={item.onPress}
+            >
+              <Icon name={item.icon} size={17} color={accentColor} />
+              <Text style={[styles.storyRailButtonText, { color: textColor }]} numberOfLines={2}>
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
     );
   };
@@ -3500,7 +3565,11 @@ function CreatePostScreen({ navigation, route }: any) {
     }
 
     return (
-      <View style={styles.filterRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterRow}
+      >
         {PHOTO_FILTER_LIST.map((filter) => (
           <FilterPreview
             key={filter.id}
@@ -3514,7 +3583,7 @@ function CreatePostScreen({ navigation, route }: any) {
             mutedColor={mutedColor}
           />
         ))}
-      </View>
+      </ScrollView>
     );
   };
 
@@ -4048,29 +4117,30 @@ function CreatePostScreen({ navigation, route }: any) {
                 <View style={styles.currentMusicCopy}>
                   <Text style={[styles.currentMusicTitle, { color: textColor }]}>{buildMusicLabel(selectedMusic)}</Text>
                   <Text style={[styles.currentMusicMeta, { color: mutedColor }]}>
-                    {formatDuration(selectedMusic.clipStartTime || 0)} - {formatDuration((selectedMusic.clipStartTime || 0) + (selectedMusic.clipDuration || selectedMusic.duration))} / {formatDuration(selectedMusic.clipDuration || selectedMusic.duration)} selected
+                    {formatDuration(selectedMusic.clipStartTime || 0)} - {formatDuration(selectedMusic.clipEndTime || ((selectedMusic.clipStartTime || 0) + (selectedMusic.clipDuration || selectedMusic.duration)))} / {formatDuration(selectedMusic.clipDuration || selectedMusic.duration)} selected
                   </Text>
                 </View>
               </View>
 
-            <View style={styles.musicActionRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.musicActionRow}>
               <TouchableOpacity
-                style={[styles.secondaryPill, { backgroundColor: inputBackground, borderColor }]}
+                style={[styles.musicActionIconButton, { backgroundColor: inputBackground, borderColor }]}
                 onPress={() => openMusicTrimmer(selectedMusic).catch(() => undefined)}
                 disabled={musicImportingId === selectedMusic.id}
               >
-                <Icon name="play-circle-outline" size={16} color={textColor} />
-                <Text style={[styles.secondaryPillText, { color: textColor }]}>
-                  {musicImportingId === selectedMusic.id ? "Loading..." : "Play / trim"}
-                </Text>
+                {musicImportingId === selectedMusic.id ? (
+                  <ActivityIndicator size="small" color={textColor} />
+                ) : (
+                  <Icon name="cut-outline" size={18} color={textColor} />
+                )}
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.secondaryPill, { backgroundColor: inputBackground, borderColor }]}
+                style={[styles.musicActionIconButton, styles.musicActionIconButtonDanger, { backgroundColor: inputBackground, borderColor }]}
                 onPress={() => setSelectedMusic(null)}
               >
-                <Text style={[styles.secondaryPillText, { color: textColor }]}>Remove</Text>
+                <Icon name="trash-outline" size={18} color={textColor} />
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </View>
         ) : null}
 
@@ -4078,11 +4148,11 @@ function CreatePostScreen({ navigation, route }: any) {
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetList}>
           {!musicLoading && !musicResults.length && !musicQuery.trim() ? (
-            <Text style={[styles.helperText, { color: mutedColor }]}>Search a song, tap Play to preview and trim, or Select to attach it fast.</Text>
+            <Text style={[styles.helperText, { color: mutedColor }]}>Choose a playable track, trim it, then preview the selected segment in-app.</Text>
           ) : null}
           {!musicLoading && !!musicQuery.trim() && !musicResults.length ? (
             <Text style={[styles.helperText, { color: mutedColor }]}>
-              No tracks matched your search.
+              No playable tracks matched your search.
             </Text>
           ) : null}
           {musicResults.map((item) => {
@@ -4121,8 +4191,7 @@ function CreatePostScreen({ navigation, route }: any) {
                     onPress={() => openMusicTrimmer(isSelected && selectedMusic ? selectedMusic : item).catch(() => undefined)}
                     disabled={isImporting}
                   >
-                    <Icon name="play" size={14} color={textColor} />
-                    <Text style={[styles.resultPlayButtonText, { color: textColor }]}>Play</Text>
+                    <Icon name="play-circle-outline" size={20} color={textColor} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.selectButton, { backgroundColor: accentColor }]}
@@ -4132,7 +4201,7 @@ function CreatePostScreen({ navigation, route }: any) {
                     {isImporting ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
-                      <Text style={styles.selectButtonText}>{isSelected ? "Use" : "Select"}</Text>
+                      <Icon name={isSelected ? "checkmark" : "add"} size={20} color="#fff" />
                     )}
                   </TouchableOpacity>
                 </View>
@@ -4148,6 +4217,13 @@ function CreatePostScreen({ navigation, route }: any) {
     const track = pendingMusicSelection;
     const activeClipDuration = track ? musicTrimDuration || track.clipDuration || track.duration : 0;
     const clipEndTime = track ? Math.min(track.duration, musicTrimStartTime + activeClipDuration) : 0;
+    const previewSelectionProgress = activeClipDuration
+      ? clamp(
+          (Math.max(0, musicPreviewPositionMs) - musicTrimStartTime * 1000) / Math.max(1000, activeClipDuration * 1000),
+          0,
+          1,
+        )
+      : 0;
 
     return (
       <DraggableBottomSheet
@@ -4169,150 +4245,173 @@ function CreatePostScreen({ navigation, route }: any) {
               <Icon name="close" size={18} color={textColor} />
             </TouchableOpacity>
           </View>
-
-          {track ? (
-            <View style={[styles.currentMusicCard, { backgroundColor: surfaceColor, borderColor }]}>
-              <View style={styles.currentMusicHeader}>
-                {track.artworkUrl ? (
-                  <Image source={{ uri: track.artworkUrl }} style={styles.currentMusicArtwork} />
-                ) : (
-                  <View style={[styles.currentMusicArtwork, styles.currentMusicArtworkFallback, { backgroundColor: inputBackground, borderColor }]}>
-                    <Icon name="musical-notes-outline" size={18} color={mutedColor} />
+          <ScrollView
+            style={styles.sheetBodyScroll}
+            contentContainerStyle={styles.sheetBodyContent}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+          >
+            {track ? (
+              <View style={[styles.currentMusicCard, { backgroundColor: surfaceColor, borderColor }]}>
+                <View style={styles.currentMusicHeader}>
+                  <View style={styles.currentMusicCopy}>
+                    <Text style={[styles.currentMusicTitle, { color: textColor }]} numberOfLines={1}>
+                      {track.title}
+                    </Text>
+                    <Text style={[styles.currentMusicMeta, { color: mutedColor }]} numberOfLines={1}>
+                      {track.artist || track.source || "Track"} / {formatDuration(track.duration)}
+                    </Text>
                   </View>
-                )}
-                <View style={styles.currentMusicCopy}>
-                  <Text style={[styles.currentMusicTitle, { color: textColor }]} numberOfLines={1}>
-                    {track.title}
-                  </Text>
-                  <Text style={[styles.currentMusicMeta, { color: mutedColor }]} numberOfLines={1}>
-                    {track.artist || track.source || "Track"} / {formatDuration(track.duration)}
-                  </Text>
                 </View>
-              </View>
 
-              <View style={[styles.trimPlayerCard, { backgroundColor: inputBackground, borderColor }]}>
                 <TouchableOpacity
-                  style={[styles.trimPreviewButton, { backgroundColor: accentColor }]}
+                  activeOpacity={0.9}
+                  style={[styles.trimHeroCard, { backgroundColor: inputBackground, borderColor }]}
                   onPress={() => toggleMusicPreview().catch(() => undefined)}
                   disabled={musicPreviewLoading || !canPreviewMusic}
                 >
-                  {musicPreviewLoading ? (
-                    <ActivityIndicator size="small" color="#fff" />
+                  {track.artworkUrl ? (
+                    <Image source={{ uri: track.artworkUrl }} style={styles.trimHeroArtwork} />
                   ) : (
-                    <Icon name={musicPreviewPlaying ? "pause" : "play"} size={18} color="#fff" />
+                    <View style={[styles.trimHeroArtwork, styles.trimHeroArtworkFallback, { backgroundColor: inputBackground }]}>
+                      <Icon name="musical-notes-outline" size={24} color="#fff" />
+                    </View>
                   )}
+                  <View style={styles.trimHeroShade} />
+                  <View style={styles.trimHeroTopRow}>
+                    <View style={[styles.trimHeroSourcePill, { backgroundColor: "rgba(15, 23, 42, 0.7)" }]}>
+                      <Text style={styles.trimHeroSourceText}>
+                        {String(track.source || "music").trim().toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.trimHeroCenter}>
+                    <View style={[styles.trimHeroPlayButton, { backgroundColor: "rgba(255,255,255,0.9)" }]}>
+                      {musicPreviewLoading ? (
+                        <ActivityIndicator size="small" color={accentColor} />
+                      ) : (
+                        <Icon name={musicPreviewPlaying ? "pause" : "play"} size={24} color={accentColor} />
+                      )}
+                    </View>
+                  </View>
+                  <View style={styles.trimHeroBottom}>
+                    <Text style={styles.trimHeroTitle} numberOfLines={1}>
+                      Trimmed preview
+                    </Text>
+                    <Text style={styles.trimHeroMeta} numberOfLines={1}>
+                      {formatDuration(Math.floor(musicPreviewPositionMs / 1000))} • {formatDuration(musicTrimStartTime)} - {formatDuration(clipEndTime)} / {formatDuration(activeClipDuration)}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
-                <View style={styles.trimPlayerCopy}>
-                  <Text style={[styles.trimPlayerTitle, { color: textColor }]}>
-                    {musicPreviewPlaying ? "Playing selection" : "Preview selection"}
-                  </Text>
-                  <Text style={[styles.trimPlayerMeta, { color: mutedColor }]}>
-                    {formatDuration(musicTrimStartTime)} - {formatDuration(clipEndTime)} / {formatDuration(activeClipDuration)}
-                  </Text>
-                </View>
-                <Text style={[styles.trimPlayerTime, { color: mutedColor }]}>
-                  {formatDuration(Math.floor(musicPreviewPositionMs / 1000))}
-                </Text>
-              </View>
 
-              {musicPreviewMode === "youtube" && pendingMusicYoutubeVideoId && canRenderYoutubePreview ? (
-                <View style={[styles.youtubePreviewCard, { backgroundColor: inputBackground, borderColor }]}>
-                  <YoutubePlayer
-                    ref={youtubePreviewRef}
-                    height={168}
-                    play={musicPreviewPlaying}
-                    videoId={pendingMusicYoutubeVideoId}
-                    initialPlayerParams={{
-                      controls: false,
-                      modestbranding: true,
-                      rel: false,
-                    }}
-                    onReady={() => {
-                      setMusicPreviewReady(true);
-                      setMusicPreviewLoaded(true);
-                      setMusicPreviewLoading(false);
-                      youtubePreviewRef.current?.seekTo?.(Math.max(0, musicTrimStartTime), true);
-                      setMusicPreviewPositionMs(Math.max(0, musicTrimStartTime * 1000));
-                    }}
-                    onError={(error: any) => {
-                      console.log("Player Error:", error);
-                      stopYoutubePreviewPolling();
-                      setMusicPreviewPlaying(false);
-                      setMusicPreviewLoading(false);
-                      setMusicError("Music preview unavailable right now. Try another track.");
-                    }}
-                    onChangeState={(state: string) => {
-                      if (state === "ended") {
-                        stopYoutubePreviewPolling();
-                        setMusicPreviewPlaying(false);
-                        youtubePreviewRef.current?.seekTo?.(Math.max(0, musicTrimStartTime), true);
-                        setMusicPreviewPositionMs(Math.max(0, musicTrimStartTime * 1000));
-                      }
-                    }}
+                <View style={[styles.trimPreviewProgressTrack, { backgroundColor: hairlineColor }]}>
+                  <View
+                    style={[
+                      styles.trimPreviewProgressFill,
+                      {
+                        backgroundColor: accentColor,
+                        width: `${previewSelectionProgress * 100}%`,
+                      },
+                    ]}
                   />
                 </View>
-              ) : null}
 
-              {musicPreviewMode === "youtube" && pendingMusicYoutubeVideoId && !canRenderYoutubePreview ? (
-                <View style={[styles.youtubePreviewCard, styles.youtubePreviewFallbackCard, { backgroundColor: inputBackground, borderColor }]}>
-                  <Icon name="logo-youtube" size={28} color="#FF0000" />
-                  <Text style={[styles.youtubePreviewFallbackTitle, { color: textColor }]}>YouTube preview fallback</Text>
-                  <Text style={[styles.youtubePreviewFallbackText, { color: mutedColor }]}>
-                    Embedded preview is unavailable on this build. Open the YouTube preview instead.
-                  </Text>
-                  <TouchableOpacity
-                    style={[styles.secondaryPill, { backgroundColor: surfaceColor, borderColor }]}
-                    onPress={() => {
-                      if (!pendingMusicExternalUrl) {
-                        return;
-                      }
-
-                      Linking.openURL(pendingMusicExternalUrl).catch((error) => {
+                {musicPreviewMode === "youtube" && pendingMusicYoutubeVideoId && canRenderYoutubePreview ? (
+                  <View style={[styles.youtubePreviewCard, { backgroundColor: inputBackground, borderColor }]}>
+                    <YoutubePlayer
+                      ref={youtubePreviewRef}
+                      height={168}
+                      play={musicPreviewPlaying}
+                      videoId={pendingMusicYoutubeVideoId}
+                      initialPlayerParams={{
+                        controls: false,
+                        modestbranding: true,
+                        rel: false,
+                      }}
+                      onReady={handleMusicPreviewReady}
+                      onError={(error: any) => {
                         console.log("Player Error:", error);
-                      });
-                    }}
+                        handleMusicPreviewError();
+                        setMusicError("Music preview unavailable right now. Try another track.");
+                      }}
+                      onChangeState={handleMusicPreviewStateChange}
+                    />
+                  </View>
+                ) : null}
+
+                {musicPreviewMode === "youtube" && pendingMusicYoutubeVideoId && !canRenderYoutubePreview ? (
+                  <View style={[styles.youtubePreviewCard, styles.youtubePreviewFallbackCard, { backgroundColor: inputBackground, borderColor }]}>
+                    <Icon name="alert-circle-outline" size={28} color={accentColor} />
+                    <Text style={[styles.youtubePreviewFallbackTitle, { color: textColor }]}>Preview not available</Text>
+                    <Text style={[styles.youtubePreviewFallbackText, { color: mutedColor }]}>
+                      This build only supports in-app playable tracks here. Choose another result from the app music list.
+                    </Text>
+                  </View>
+                ) : null}
+
+                <RangeSlider
+                  duration={track.duration}
+                  startTime={musicTrimStartTime}
+                  clipDuration={activeClipDuration}
+                  onChange={updateMusicTrimWindow}
+                  accentColor={accentColor}
+                  mutedColor={hairlineColor}
+                  showWaveform
+                />
+
+                <View style={styles.trimActionDock}>
+                  <ScrollView
+                    horizontal
+                    nestedScrollEnabled
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.trimActionRow}
                   >
-                    <Icon name="open-outline" size={16} color={textColor} />
-                    <Text style={[styles.secondaryPillText, { color: textColor }]}>Open YouTube</Text>
+                    <TouchableOpacity
+                      style={[styles.musicActionIconButton, { backgroundColor: inputBackground, borderColor }]}
+                      onPress={() => seekMusicPreviewBy(-5).catch(() => undefined)}
+                      disabled={!canPreviewMusic}
+                    >
+                      <Icon name="play-skip-back-outline" size={18} color={textColor} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.musicActionIconButton, { backgroundColor: inputBackground, borderColor }]}
+                      onPress={() => seekMusicPreviewBy(5).catch(() => undefined)}
+                      disabled={!canPreviewMusic}
+                    >
+                      <Icon name="play-skip-forward-outline" size={18} color={textColor} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.musicActionIconButton, { backgroundColor: inputBackground, borderColor }]}
+                      onPress={() => {
+                        closeMusicTrimSheet();
+                        setMusicSheetVisible(true);
+                      }}
+                    >
+                      <Icon name="swap-horizontal-outline" size={18} color={textColor} />
+                    </TouchableOpacity>
+                  </ScrollView>
+
+                  <TouchableOpacity
+                    style={[styles.primaryButton, styles.trimAddButton, { backgroundColor: accentColor }]}
+                    onPress={() => confirmMusicTrim().catch(() => undefined)}
+                    disabled={musicImportingId === track.id}
+                  >
+                    {musicImportingId === track.id ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <View style={styles.trimAddButtonContent}>
+                        <Icon name="checkmark" size={18} color="#fff" />
+                        <Text style={styles.primaryButtonText}>Add music</Text>
+                      </View>
+                    )}
                   </TouchableOpacity>
                 </View>
-              ) : null}
-
-              <RangeSlider
-                duration={track.duration}
-                startTime={musicTrimStartTime}
-                clipDuration={activeClipDuration}
-                onChange={updateMusicTrimWindow}
-                accentColor={accentColor}
-                mutedColor={hairlineColor}
-              />
-
-              <View style={styles.musicActionRow}>
-                <TouchableOpacity
-                  style={[styles.secondaryPill, { backgroundColor: inputBackground, borderColor }]}
-                  onPress={() => {
-                    closeMusicTrimSheet();
-                    setMusicSheetVisible(true);
-                  }}
-                >
-                  <Text style={[styles.secondaryPillText, { color: textColor }]}>Change</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.primaryButton, styles.trimAddButton, { backgroundColor: accentColor }]}
-                  onPress={() => confirmMusicTrim().catch(() => undefined)}
-                  disabled={musicImportingId === track.id}
-                >
-                  {musicImportingId === track.id ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.primaryButtonText}>Add</Text>
-                  )}
-                </TouchableOpacity>
               </View>
-            </View>
-          ) : null}
+            ) : null}
 
-          {musicError ? <Text style={[styles.sheetError, { color: isDarkMode ? "#FCA5A5" : "#B91C1C" }]}>{musicError}</Text> : null}
+            {musicError ? <Text style={[styles.sheetError, { color: isDarkMode ? "#FCA5A5" : "#B91C1C" }]}>{musicError}</Text> : null}
+          </ScrollView>
         </View>
       </DraggableBottomSheet>
     );
@@ -5041,6 +5140,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
     elevation: 12,
   },
+  storyToolRailScroll: {
+    gap: 8,
+    paddingBottom: 2,
+  },
   storyRailButton: {
     minHeight: 64,
     borderRadius: 18,
@@ -5246,6 +5349,7 @@ const styles = StyleSheet.create({
   filterRow: {
     flexDirection: "row",
     gap: 10,
+    paddingRight: 8,
   },
   filterCard: {
     width: 88,
@@ -5644,6 +5748,73 @@ const styles = StyleSheet.create({
   currentMusicCopy: {
     flex: 1,
   },
+  trimHeroCard: {
+    marginTop: 14,
+    height: 164,
+    borderRadius: 0,
+    borderWidth: 1,
+    overflow: "hidden",
+    justifyContent: "space-between",
+  },
+  trimHeroArtwork: {
+    ...StyleSheet.absoluteFillObject,
+    width: "100%",
+    height: "100%",
+  },
+  trimHeroArtworkFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#312E81",
+  },
+  trimHeroShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(15, 23, 42, 0.42)",
+  },
+  trimHeroTopRow: {
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  trimHeroSourcePill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  trimHeroSourceText: {
+    color: "#fff",
+    fontSize: 10,
+    fontFamily: appFonts.semibold,
+  },
+  trimHeroCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trimHeroPlayButton: {
+    width: 58,
+    height: 58,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trimHeroBottom: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+  },
+  trimHeroTitle: {
+    color: "#fff",
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: appFonts.semibold,
+  },
+  trimHeroMeta: {
+    marginTop: 4,
+    color: "rgba(255,255,255,0.88)",
+    fontSize: 11,
+    lineHeight: 15,
+    fontFamily: appFonts.medium,
+  },
   currentMusicTitle: {
     fontSize: 13,
     lineHeight: 16,
@@ -5672,23 +5843,88 @@ const styles = StyleSheet.create({
   },
   sliderTrack: {
     height: 6,
-    borderRadius: 999,
+    borderRadius: 0,
+    overflow: "hidden",
+  },
+  sliderTrackFrame: {
+    position: "relative",
+    justifyContent: "center",
+    minHeight: 38,
+  },
+  sliderViewport: {
     marginVertical: 14,
+  },
+  sliderScrollContent: {
+    paddingVertical: 2,
+  },
+  sliderTrackWaveform: {
+    height: 54,
+    justifyContent: "center",
+    paddingHorizontal: 8,
   },
   sliderSelection: {
     position: "absolute",
     top: 0,
     bottom: 0,
+    borderRadius: 0,
+  },
+  sliderSelectionEdge: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 2,
+  },
+  sliderWaveRow: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 8,
+  },
+  sliderWaveBar: {
+    width: 4,
     borderRadius: 999,
+    alignSelf: "center",
+  },
+  sliderHandleTouch: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sliderHandleTouchWaveform: {
+    width: 28,
   },
   sliderHandle: {
-    position: "absolute",
-    top: -9,
-    width: 24,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+  },
+  sliderHandleDefault: {
+    width: 14,
     height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    backgroundColor: "#fff",
+    borderRadius: 0,
+  },
+  sliderHandleWaveform: {
+    width: 12,
+    height: 44,
+    borderRadius: 0,
+  },
+  sliderHandleGrip: {
+    width: 0,
+    height: 0,
+    borderRadius: 0,
+  },
+  sliderHandleGripWaveform: {
+    height: 0,
+    borderRadius: 0,
   },
   valueSliderTrack: {
     height: 6,
@@ -5716,41 +5952,54 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 14,
     alignItems: "center",
+    paddingRight: 4,
   },
-  trimPlayerCard: {
+  trimActionRow: {
     flexDirection: "row",
+    gap: 10,
     alignItems: "center",
-    borderRadius: 18,
+    paddingRight: 4,
+  },
+  musicActionIconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
     borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginTop: 14,
-    gap: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  musicActionIconButtonPrimary: {
+    shadowColor: "#020617",
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+  },
+  musicActionIconButtonDanger: {
+    opacity: 0.92,
+  },
+  trimPreviewProgressTrack: {
+    height: 6,
+    borderRadius: 0,
+    overflow: "hidden",
+    marginTop: 10,
+  },
+  trimPreviewProgressFill: {
+    height: "100%",
+    borderRadius: 0,
   },
   trimPreviewButton: {
     width: 42,
     height: 42,
-    borderRadius: 21,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
   },
-  trimPlayerCopy: {
+  sheetBodyScroll: {
     flex: 1,
   },
-  trimPlayerTitle: {
-    fontSize: 12,
-    lineHeight: 15,
-    fontFamily: appFonts.semibold,
-  },
-  trimPlayerMeta: {
-    marginTop: 3,
-    fontSize: 10,
-    lineHeight: 14,
-    fontFamily: appFonts.regular,
-  },
-  trimPlayerTime: {
-    fontSize: 11,
-    fontFamily: appFonts.medium,
+  sheetBodyContent: {
+    paddingBottom: 8,
   },
   youtubePreviewCard: {
     marginTop: 12,
@@ -5779,6 +6028,16 @@ const styles = StyleSheet.create({
   trimAddButton: {
     flex: 1,
     height: 42,
+  },
+  trimAddButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  trimActionDock: {
+    marginTop: 14,
+    gap: 12,
   },
   videoTrimCard: {
     borderRadius: 24,
@@ -5862,32 +6121,19 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
   },
   resultPlayButton: {
-    minWidth: 68,
+    width: 40,
     height: 36,
     borderRadius: 14,
     borderWidth: 1,
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-  },
-  resultPlayButtonText: {
-    fontSize: 12,
-    fontFamily: appFonts.semibold,
   },
   selectButton: {
-    minWidth: 68,
+    width: 40,
     height: 36,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 12,
-  },
-  selectButtonText: {
-    color: "#fff",
-    fontSize: 12,
-    fontFamily: appFonts.semibold,
   },
 });
 

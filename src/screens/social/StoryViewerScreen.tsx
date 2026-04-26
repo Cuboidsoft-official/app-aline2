@@ -12,22 +12,25 @@ import {
   View
 } from "react-native";
 import { Alert } from "../../utils/appAlert";
+import { useIsFocused } from "@react-navigation/native";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
-import { createSound } from "react-native-nitro-sound";
 
+import HiddenYoutubeAudioPlayer from "../../components/media/HiddenYoutubeAudioPlayer";
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
 import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import StoryActivitySheet from "../../features/social/components/StoryActivitySheet";
+import { useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
 import { socialApi } from "../../features/social/socialApi";
 import { Story, StoryFilterPreset } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { DEFAULT_AVATAR_URL } from "../../constants/defaultAssets";
 import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
 import { buildSharedStoryMessage } from "../../utils/chatPresentation";
-import { startAudioPlaybackFromSources } from "../../utils/audioPlayback";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
+import { resolveMentionUserId } from "../../utils/mentionLinks";
+import { extractYouTubeVideoId } from "../../utils/youtubePlayback";
 
 const DEFAULT_STORY_MS = 5000;
 const TEXT_STORY_MS = 7000;
@@ -78,9 +81,13 @@ const getStoryFilterOverlayStyle = (
   }
 };
 
+const getMusicPlaybackUrl = (music?: Story["music"]): string =>
+  String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
+
 function StoryViewerScreen({ route, navigation }: any) {
   const storyId = typeof route?.params?.storyId === "string" ? route.params.storyId : "";
   const storyUserId = typeof route?.params?.storyUserId === "string" ? route.params.storyUserId : undefined;
+  const isScreenFocused = useIsFocused();
 
   const [stories, setStories] = useState<Story[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -99,11 +106,6 @@ function StoryViewerScreen({ route, navigation }: any) {
   const [isMusicEnabled, setIsMusicEnabled] = useState(true);
   const [showLikeBurst, setShowLikeBurst] = useState(false);
   const replyInputRef = useRef<TextInput | null>(null);
-  const storyMusicPlayerRef = useRef(createSound());
-  const storyMusicTrackKeyRef = useRef("");
-  const storyMusicEndMsRef = useRef(0);
-  const storyMusicStartMsRef = useRef(0);
-  const storyMusicShouldLoopRef = useRef(false);
   const storyTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     time: 0,
     timeout: null,
@@ -149,19 +151,35 @@ function StoryViewerScreen({ route, navigation }: any) {
   const storyDuration = useMemo(() => getStoryDuration(currentStory), [currentStory]);
   const canReplyToCurrentStory = !!currentStory && currentStory.allowReplies !== false;
   const canAccessOwnerTools = !!currentStory?.isOwner && isSyncedStoryId(currentStory?.id);
-  const storyMusicRawUrl = useMemo(
-    () => String(currentStory?.music?.previewUrl || "").trim(),
-    [currentStory?.music?.previewUrl],
-  );
+  const storyMusicRawUrl = useMemo(() => getMusicPlaybackUrl(currentStory?.music), [currentStory?.music]);
   const storyMusicUrl = useMemo(
     () => normalizeMediaUrl(storyMusicRawUrl),
     [storyMusicRawUrl],
   );
+  const storyMusicYoutubeVideoId = useMemo(() => extractYouTubeVideoId(currentStory?.music), [currentStory?.music]);
   const storyMusicStartMs = Math.max(0, Number(currentStory?.music?.startTime || 0) * 1000);
   const storyMusicDurationMs = Math.max(0, Number(currentStory?.music?.duration || 0) * 1000);
   const storyMusicTrackKey = currentStory
-    ? `${currentStory.id}:${storyMusicUrl}:${storyMusicStartMs}:${storyMusicDurationMs}`
+    ? `${currentStory.id}:${storyMusicYoutubeVideoId || storyMusicUrl}:${storyMusicStartMs}:${storyMusicDurationMs}`
     : "";
+  const hasStoryAttachedMusic = !!(storyMusicYoutubeVideoId || storyMusicUrl);
+  const shouldPlayStoryMusic = hasStoryAttachedMusic && isMusicEnabled && !paused && isScreenFocused;
+  const {
+    isUsingYoutube: isUsingYoutubeStoryMusic,
+    youtubePlay: youtubeStoryMusicPlay,
+    youtubePlayerRef: youtubeStoryMusicRef,
+    handleYoutubeReady: handleYoutubeStoryMusicReady,
+    handleYoutubeError: handleYoutubeStoryMusicError,
+    handleYoutubeStateChange: handleYoutubeStoryMusicStateChange,
+  } = useSegmentedMusicPlayback({
+    rawUrl: storyMusicRawUrl,
+    normalizedUrl: storyMusicUrl,
+    youtubeVideoId: storyMusicYoutubeVideoId,
+    trackKey: storyMusicTrackKey,
+    startMs: storyMusicStartMs,
+    durationMs: storyMusicDurationMs,
+    shouldPlay: shouldPlayStoryMusic,
+  });
 
   useEffect(() => {
     setProgress(0);
@@ -207,117 +225,12 @@ function StoryViewerScreen({ route, navigation }: any) {
   }, [currentStory, paused, storyDuration]);
 
   useEffect(() => {
-    storyMusicStartMsRef.current = storyMusicStartMs;
-    storyMusicEndMsRef.current = storyMusicDurationMs > 0 ? storyMusicStartMs + storyMusicDurationMs : 0;
-    storyMusicShouldLoopRef.current = !!storyMusicUrl && isMusicEnabled && !paused;
-  }, [isMusicEnabled, paused, storyMusicDurationMs, storyMusicStartMs, storyMusicUrl]);
-
-  useEffect(() => {
-    const player = storyMusicPlayerRef.current;
-
-    player.setSubscriptionDuration(0.1);
-    player.addPlayBackListener((event: any) => {
-      const playbackEndMs = storyMusicEndMsRef.current;
-      const playbackStartMs = storyMusicStartMsRef.current;
-      const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
-
-      if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
-        if (storyMusicShouldLoopRef.current) {
-          player.seekToPlayer(playbackStartMs).then(() => player.resumePlayer()).catch(() => undefined);
-        } else {
-          player.pausePlayer().catch(() => undefined);
-        }
-      }
-    });
-    player.addPlaybackEndListener(() => {
-      if (storyMusicShouldLoopRef.current) {
-        player.seekToPlayer(storyMusicStartMsRef.current).then(() => player.resumePlayer()).catch(() => undefined);
-      }
-    });
-
     return () => {
       if (storyTapRef.current.timeout) {
         clearTimeout(storyTapRef.current.timeout);
       }
-
-      try {
-        player.removePlayBackListener();
-      } catch {
-        // noop
-      }
-
-      try {
-        player.removePlaybackEndListener();
-      } catch {
-        // noop
-      }
-
-      player.stopPlayer().catch(() => undefined);
-      player.dispose();
     };
   }, []);
-
-  useEffect(() => {
-    const player = storyMusicPlayerRef.current;
-    const shouldPlayMusic = !!storyMusicUrl && isMusicEnabled;
-
-    const stopMusic = async () => {
-      storyMusicTrackKeyRef.current = "";
-      storyMusicEndMsRef.current = 0;
-
-      try {
-        await player.stopPlayer();
-      } catch {
-        // noop
-      }
-    };
-
-    if (!shouldPlayMusic) {
-      stopMusic().catch(() => undefined);
-      return;
-    }
-
-    if (paused) {
-      player.pausePlayer().catch(() => undefined);
-      return;
-    }
-
-    if (storyMusicTrackKeyRef.current === storyMusicTrackKey) {
-      player.resumePlayer().catch(() => undefined);
-      return;
-    }
-
-    let cancelled = false;
-
-    const playMusic = async () => {
-      await stopMusic();
-      if (cancelled || !storyMusicUrl) {
-        return;
-      }
-
-      storyMusicTrackKeyRef.current = storyMusicTrackKey;
-      await startAudioPlaybackFromSources(player, storyMusicRawUrl, storyMusicUrl);
-      await player.seekToPlayer(storyMusicStartMs);
-      await player.setVolume(1);
-    };
-
-    playMusic().catch((error) => {
-      console.log("story music playback error", error);
-      stopMusic().catch(() => undefined);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    isMusicEnabled,
-    paused,
-    storyMusicDurationMs,
-    storyMusicRawUrl,
-    storyMusicStartMs,
-    storyMusicTrackKey,
-    storyMusicUrl,
-  ]);
 
   useEffect(() => {
     if (!currentStory || paused || progress < 1) {
@@ -538,12 +451,14 @@ function StoryViewerScreen({ route, navigation }: any) {
     navigation.navigate("HashtagResultsScreen", { hashtag: normalizedTag });
   };
 
-  const openStoryMention = (userId?: string) => {
-    if (!userId) {
+  const openStoryMention = async (userId?: string, username?: string) => {
+    const resolvedUserId = String(userId || "").trim() || (await resolveMentionUserId(username || ""));
+    if (!resolvedUserId) {
+      Alert.alert("Profile unavailable", "This profile could not be opened right now.");
       return;
     }
 
-    navigation.navigate("ProfilePreviewScreen", { userId });
+    navigation.navigate("ProfilePreviewScreen", { userId: resolvedUserId });
   };
 
   const openOwnerActivity = (tab: "views" | "likes" | "replies") => {
@@ -603,7 +518,7 @@ function StoryViewerScreen({ route, navigation }: any) {
             posterUri={normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url)}
             style={styles.storyImage}
             paused={paused}
-            muted={!!currentStory.music?.previewUrl}
+            muted={hasStoryAttachedMusic}
             onEnd={next}
             contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}
           />
@@ -792,6 +707,16 @@ function StoryViewerScreen({ route, navigation }: any) {
 
   return (
     <SafeAreaView style={styles.container}>
+      {isUsingYoutubeStoryMusic && storyMusicYoutubeVideoId ? (
+        <HiddenYoutubeAudioPlayer
+          playerRef={youtubeStoryMusicRef}
+          play={youtubeStoryMusicPlay}
+          videoId={storyMusicYoutubeVideoId}
+          onReady={handleYoutubeStoryMusicReady}
+          onError={handleYoutubeStoryMusicError}
+          onChangeState={handleYoutubeStoryMusicStateChange}
+        />
+      ) : null}
       {renderStoryBody()}
       {renderStoryFilterOverlay()}
       {renderFloatingStickers()}
@@ -836,7 +761,7 @@ function StoryViewerScreen({ route, navigation }: any) {
           <View style={styles.iconButtonSpacer} />
         )}
 
-        {currentStory.music?.previewUrl ? (
+        {hasStoryAttachedMusic ? (
           <TouchableOpacity style={styles.iconButton} onPress={() => setIsMusicEnabled((current) => !current)}>
             <Icon
               name={isMusicEnabled ? "volume-high-outline" : "volume-mute-outline"}
@@ -891,18 +816,16 @@ function StoryViewerScreen({ route, navigation }: any) {
               </>
             );
 
-            return mention.id ? (
+            return (
               <TouchableOpacity
-                key={`story-mention-${mention.id}-${mention.username}`}
+                key={`story-mention-${mention.id || mention.username}-${mention.username}`}
                 style={styles.metaChip}
-                onPress={() => openStoryMention(mention.id)}
+                onPress={() => {
+                  void openStoryMention(mention.id, mention.username);
+                }}
               >
                 {content}
               </TouchableOpacity>
-            ) : (
-              <View key={`story-mention-${mention.username}`} style={styles.metaChip}>
-                {content}
-              </View>
             );
           })}
       </View>
@@ -913,7 +836,7 @@ function StoryViewerScreen({ route, navigation }: any) {
         </View>
       ) : null}
 
-      {(currentStory.music?.previewUrl || currentStory.media?.mediaType === "video") ? (
+      {(hasStoryAttachedMusic || currentStory.media?.mediaType === "video") ? (
         <View style={styles.mediaSoundHint}>
           <Icon name={isMusicEnabled ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
           <Text style={styles.mediaSoundHintText}>{isMusicEnabled ? "Sound on" : "Muted"}</Text>

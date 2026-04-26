@@ -20,22 +20,25 @@ import { Alert } from "../../utils/appAlert";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
-import { createSound } from "react-native-nitro-sound";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../../components/AppBottomDock";
+import HiddenYoutubeAudioPlayer from "../../components/media/HiddenYoutubeAudioPlayer";
 import CommentThreadSheet from "../../features/social/components/CommentThreadSheet";
+import InteractiveText from "../../features/social/components/InteractiveText";
 import ShareTargetsList, { ShareTarget } from "../../features/social/components/ShareTargetsList";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, Swipe, SwipeComment } from "../../features/social/types";
+import { useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
-import { startAudioPlaybackFromSources } from "../../utils/audioPlayback";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
+import { resolveMentionUserId } from "../../utils/mentionLinks";
 import { shouldShowVerifiedBadge } from "../../utils/verificationBadges";
 import { buildSharedPostMessage } from "../../utils/chatPresentation";
 import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
 import { API } from "../../api/api";
+import { extractYouTubeVideoId } from "../../utils/youtubePlayback";
 
 const { height } = Dimensions.get("window");
 const reportReasons: ReportReason[] = [
@@ -73,6 +76,9 @@ const formatSwipeMusicLabel = (music?: Swipe["music"]): string => {
   return artistName ? `${trackName} • ${artistName}` : trackName;
 };
 
+const getMusicPlaybackUrl = (music?: Swipe["music"]): string =>
+  String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
+
 function SwipesScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
   const [viewportHeight, setViewportHeight] = useState(height);
@@ -97,11 +103,6 @@ function SwipesScreen({ navigation, route }: any) {
   const [likeBurstSwipeId, setLikeBurstSwipeId] = useState("");
   const isScreenFocused = useIsFocused();
 
-  const swipeMusicPlayerRef = useRef(createSound());
-  const swipeMusicTrackKeyRef = useRef("");
-  const swipeMusicEndMsRef = useRef(0);
-  const swipeMusicStartMsRef = useRef(0);
-  const swipeMusicShouldLoopRef = useRef(false);
   const swipeTapRef = useRef<{ id: string; time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     id: "",
     time: 0,
@@ -110,14 +111,32 @@ function SwipesScreen({ navigation, route }: any) {
   const swipeListRef = useRef<FlatList<Swipe> | null>(null);
 
   const activeSwipe = swipes[activeSwipeIndex] || null;
-  const activeSwipeRawMusicUrl = String(activeSwipe?.music?.previewUrl || "").trim();
+  const activeSwipeRawMusicUrl = getMusicPlaybackUrl(activeSwipe?.music);
   const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipeRawMusicUrl);
+  const activeSwipeMusicYoutubeVideoId = extractYouTubeVideoId(activeSwipe?.music);
   const activeSwipeMusicStartMs = Math.max(0, Number(activeSwipe?.music?.startTime || 0) * 1000);
   const activeSwipeMusicDurationMs = Math.max(0, Number(activeSwipe?.music?.duration || 0) * 1000);
   const activeSwipeMusicTrackKey = activeSwipe
-    ? `${activeSwipe.id}:${activeSwipeMusicUrl}:${activeSwipeMusicStartMs}:${activeSwipeMusicDurationMs}`
+    ? `${activeSwipe.id}:${activeSwipeMusicYoutubeVideoId || activeSwipeMusicUrl}:${activeSwipeMusicStartMs}:${activeSwipeMusicDurationMs}`
     : "";
   const isSwipePlaybackEnabled = isSwipeSoundEnabled && !activeSheet && isScreenFocused;
+  const shouldPlaySwipeMusic = isSwipePlaybackEnabled && !!(activeSwipeMusicYoutubeVideoId || activeSwipeMusicUrl);
+  const {
+    isUsingYoutube: isUsingYoutubeSwipeMusic,
+    youtubePlay: youtubeSwipeMusicPlay,
+    youtubePlayerRef: youtubeSwipeMusicRef,
+    handleYoutubeReady: handleYoutubeSwipeMusicReady,
+    handleYoutubeError: handleYoutubeSwipeMusicError,
+    handleYoutubeStateChange: handleYoutubeSwipeMusicStateChange,
+  } = useSegmentedMusicPlayback({
+    rawUrl: activeSwipeRawMusicUrl,
+    normalizedUrl: activeSwipeMusicUrl,
+    youtubeVideoId: activeSwipeMusicYoutubeVideoId,
+    trackKey: activeSwipeMusicTrackKey,
+    startMs: activeSwipeMusicStartMs,
+    durationMs: activeSwipeMusicDurationMs,
+    shouldPlay: shouldPlaySwipeMusic,
+  });
   const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
     + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 75 }).current;
@@ -127,13 +146,6 @@ function SwipesScreen({ navigation, route }: any) {
       setActiveSwipeIndex(firstVisibleItem.index);
     }
   }).current;
-
-  useEffect(() => {
-    swipeMusicStartMsRef.current = activeSwipeMusicStartMs;
-    swipeMusicEndMsRef.current =
-      activeSwipeMusicDurationMs > 0 ? activeSwipeMusicStartMs + activeSwipeMusicDurationMs : 0;
-    swipeMusicShouldLoopRef.current = !!activeSwipeMusicUrl && isSwipePlaybackEnabled;
-  }, [activeSwipeMusicDurationMs, activeSwipeMusicStartMs, activeSwipeMusicUrl, isSwipePlaybackEnabled]);
 
   const isBusy = (type: "like" | "save" | "share", swipeId: string): boolean =>
     !!busyActions[`${type}_${swipeId}`];
@@ -170,14 +182,9 @@ function SwipesScreen({ navigation, route }: any) {
   useFocusEffect(
     useCallback(() => {
       return () => {
-        const player = swipeMusicPlayerRef.current;
-
         if (swipeTapRef.current.timeout) {
           clearTimeout(swipeTapRef.current.timeout);
         }
-        swipeMusicTrackKeyRef.current = "";
-        swipeMusicEndMsRef.current = 0;
-        player.stopPlayer().catch(() => undefined);
       };
     }, []),
   );
@@ -267,6 +274,25 @@ function SwipesScreen({ navigation, route }: any) {
     }
 
     navigation.navigate("ProfilePreviewScreen", { userId: normalizedUserId });
+  }, [navigation]);
+
+  const openMentionProfile = useCallback(async (username: string) => {
+    const resolvedUserId = await resolveMentionUserId(username);
+    if (!resolvedUserId) {
+      Alert.alert("Profile unavailable", "This profile could not be opened right now.");
+      return;
+    }
+
+    navigation.navigate("ProfilePreviewScreen", { userId: resolvedUserId });
+  }, [navigation]);
+
+  const openHashtagResults = useCallback((tag: string) => {
+    const normalizedTag = String(tag || "").replace(/^#/, "").trim();
+    if (!normalizedTag) {
+      return;
+    }
+
+    navigation.navigate("HashtagResultsScreen", { hashtag: normalizedTag });
   }, [navigation]);
 
   const closeSheet = () => {
@@ -573,107 +599,10 @@ function SwipesScreen({ navigation, route }: any) {
     });
   }, [route?.params?.swipeId, swipes]);
 
-  useEffect(() => {
-    const player = swipeMusicPlayerRef.current;
-
-    player.setSubscriptionDuration(0.1);
-    player.addPlayBackListener((event: any) => {
-      const playbackEndMs = swipeMusicEndMsRef.current;
-      const playbackStartMs = swipeMusicStartMsRef.current;
-      const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
-
-      if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
-        if (swipeMusicShouldLoopRef.current) {
-          player.seekToPlayer(playbackStartMs).then(() => player.resumePlayer()).catch(() => undefined);
-        } else {
-          player.pausePlayer().catch(() => undefined);
-        }
-      }
-    });
-    player.addPlaybackEndListener(() => {
-      if (swipeMusicShouldLoopRef.current) {
-        player.seekToPlayer(swipeMusicStartMsRef.current).then(() => player.resumePlayer()).catch(() => undefined);
-      }
-    });
-
-    return () => {
-      try {
-        player.removePlayBackListener();
-      } catch {
-        // noop
-      }
-
-      try {
-        player.removePlaybackEndListener();
-      } catch {
-        // noop
-      }
-
-      player.stopPlayer().catch(() => undefined);
-      player.dispose();
-    };
-  }, []);
-
-  useEffect(() => {
-    const player = swipeMusicPlayerRef.current;
-    const shouldPlayMusic = !!activeSwipeMusicUrl && isSwipePlaybackEnabled;
-
-    const stopMusic = async () => {
-      swipeMusicTrackKeyRef.current = "";
-      swipeMusicEndMsRef.current = 0;
-
-      try {
-        await player.stopPlayer();
-      } catch {
-        // noop
-      }
-    };
-
-    if (!shouldPlayMusic) {
-      stopMusic().catch(() => undefined);
-      return;
-    }
-
-    if (swipeMusicTrackKeyRef.current === activeSwipeMusicTrackKey) {
-      player.resumePlayer().catch(() => undefined);
-      return;
-    }
-
-    let cancelled = false;
-
-    const playMusic = async () => {
-      await stopMusic();
-      if (cancelled || !activeSwipeMusicUrl) {
-        return;
-      }
-
-      swipeMusicTrackKeyRef.current = activeSwipeMusicTrackKey;
-      await startAudioPlaybackFromSources(player, activeSwipeRawMusicUrl, activeSwipeMusicUrl);
-      await player.seekToPlayer(activeSwipeMusicStartMs);
-      await player.setVolume(1);
-    };
-
-    playMusic().catch((error) => {
-      console.log("swipe music playback error", error);
-      stopMusic().catch(() => undefined);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeSwipeMusicDurationMs,
-    activeSwipeRawMusicUrl,
-    activeSwipeMusicStartMs,
-    activeSwipeMusicTrackKey,
-    activeSwipeMusicUrl,
-    isSwipePlaybackEnabled,
-  ]);
-
   const renderSwipe = ({ item, index }: { item: Swipe; index: number }) => {
     const isActive = index === activeSwipeIndex;
     const musicLabel = formatSwipeMusicLabel(item.music);
-    const hasAttachedMusic = !!item.music?.previewUrl;
+    const hasAttachedMusic = !!(getMusicPlaybackUrl(item.music) || extractYouTubeVideoId(item.music));
 
     return (
       <View style={[styles.swipeItem, { height: viewportHeight }]}>
@@ -727,10 +656,35 @@ function SwipesScreen({ navigation, route }: any) {
                 {shouldShowVerifiedBadge(item.user) ? <Icon name="checkmark-circle" color="#6cbcff" size={16} /> : null}
               </TouchableOpacity>
 
-              <Text style={styles.caption}>{item.caption}</Text>
+              <InteractiveText
+                style={styles.caption}
+                mentionStyle={styles.captionEntity}
+                hashtagStyle={styles.captionEntity}
+                onPressMention={(mention) => {
+                  void openMentionProfile(mention);
+                }}
+                onPressHashtag={openHashtagResults}
+                text={item.caption}
+              />
+
+              {item.mentions.length ? (
+                <InteractiveText
+                  style={styles.mentionLine}
+                  mentionStyle={styles.captionEntity}
+                  onPressMention={(mention) => {
+                    void openMentionProfile(mention);
+                  }}
+                  text={item.mentions.map((mention) => `@${mention}`).join(" ")}
+                />
+              ) : null}
 
               {item.hashtags.length ? (
-                <Text style={styles.hashTags}>{item.hashtags.map((tag) => `#${tag}`).join(" ")}</Text>
+                <InteractiveText
+                  style={styles.hashTags}
+                  hashtagStyle={styles.captionEntity}
+                  onPressHashtag={openHashtagResults}
+                  text={item.hashtags.map((tag) => `#${tag}`).join(" ")}
+                />
               ) : null}
 
               {item.location ? (
@@ -807,6 +761,16 @@ function SwipesScreen({ navigation, route }: any) {
 
   return (
     <View style={styles.container}>
+      {isUsingYoutubeSwipeMusic && activeSwipeMusicYoutubeVideoId ? (
+        <HiddenYoutubeAudioPlayer
+          playerRef={youtubeSwipeMusicRef}
+          play={youtubeSwipeMusicPlay}
+          videoId={activeSwipeMusicYoutubeVideoId}
+          onReady={handleYoutubeSwipeMusicReady}
+          onError={handleYoutubeSwipeMusicError}
+          onChangeState={handleYoutubeSwipeMusicStateChange}
+        />
+      ) : null}
       <FlatList
         ref={swipeListRef}
         data={swipes}
@@ -1133,6 +1097,8 @@ const styles = StyleSheet.create({
   userRow: { flexDirection: "row", alignItems: "center" },
   userName: { color: "#fff", fontWeight: "900", fontSize: 15, marginRight: 5 },
   caption: { color: "#fff", marginTop: 8, fontSize: 14.5, lineHeight: 20, fontWeight: "600" },
+  captionEntity: { color: "#a9c4ff", fontWeight: "800" },
+  mentionLine: { color: "#d7e4ff", marginTop: 5, fontSize: 12.5, fontWeight: "700" },
   hashTags: { color: "#a9c4ff", marginTop: 5, fontSize: 12.5, fontWeight: "800" },
   locationRow: {
     flexDirection: "row",

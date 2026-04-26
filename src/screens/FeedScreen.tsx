@@ -17,15 +17,16 @@ import {
   View
 } from "react-native";
 import { Alert } from "../utils/appAlert";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { createSound } from "react-native-nitro-sound";
 import Icon from "react-native-vector-icons/Ionicons";
 import LinearGradient from "react-native-linear-gradient";
 
 import ContentActionSheet from "../features/social/components/ContentActionSheet";
+import InteractiveText from "../features/social/components/InteractiveText";
 import PostCommentsSheet from "../features/social/components/PostCommentsSheet";
 import PostShareSheet from "../features/social/components/PostShareSheet";
+import HiddenYoutubeAudioPlayer from "../components/media/HiddenYoutubeAudioPlayer";
 import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import SocialVideo from "../features/social/components/SocialVideo";
 import { socialApi } from "../features/social/socialApi";
@@ -36,10 +37,12 @@ import { API } from "../api/api";
 import { getStoredUser } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import { startAudioPlaybackFromSources } from "../utils/audioPlayback";
+import { useSegmentedMusicPlayback } from "../hooks/useSegmentedMusicPlayback";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
+import { resolveMentionUserId } from "../utils/mentionLinks";
+import { extractYouTubeVideoId } from "../utils/youtubePlayback";
 import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 import { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
@@ -61,6 +64,9 @@ const initialFeed: FeedResponse = {
 
 const FEED_ACCENT = "#9b4dff";
 
+const getMusicPlaybackUrl = (music?: Post["music"]): string =>
+  String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
+
 const formatCount = (value: number): string => {
   if (value >= 1000000) {
     return `${(value / 1000000).toFixed(1)}M`;
@@ -71,6 +77,20 @@ const formatCount = (value: number): string => {
   }
 
   return `${value}`;
+};
+
+const formatCompactCoinBalance = (value: number): string => {
+  const normalizedValue = Math.max(0, Number(value) || 0);
+
+  if (normalizedValue >= 1000000) {
+    return `${(normalizedValue / 1000000).toFixed(1)}M`;
+  }
+
+  if (normalizedValue >= 1000) {
+    return `${(normalizedValue / 1000).toFixed(normalizedValue >= 10000 ? 0 : 1)}K`;
+  }
+
+  return `${Math.round(normalizedValue)}`;
 };
 
 const formatAgo = (timestamp: number): string => {
@@ -142,17 +162,6 @@ const getImageResizeMode = (
   return Math.abs(assetRatio - frameAspectRatio) > 0.12 ? "contain" : "cover";
 };
 
-const hashFeedKey = (value: string): number => {
-  let hash = 0;
-  const source = String(value || "");
-
-  for (let index = 0; index < source.length; index += 1) {
-    hash = (hash * 31 + source.charCodeAt(index)) % 1000003;
-  }
-
-  return hash;
-};
-
 const buildMixedLatestFeedPosts = (items: Post[]): Post[] => {
   return Array.from(
     items.reduce((map, item) => {
@@ -161,7 +170,7 @@ const buildMixedLatestFeedPosts = (items: Post[]): Post[] => {
       }
       return map;
     }, new Map<string, Post>()).values(),
-  );
+  ).sort((left, right) => Number(right?.createdAt || 0) - Number(left?.createdAt || 0));
 };
 
 type CurrentUserSummary = {
@@ -183,6 +192,7 @@ type SellerAccountSummary = {
 function FeedScreen({ navigation }: any) {
   const { width } = useWindowDimensions();
   const { colors, isDarkMode } = useAppTheme();
+  const isScreenFocused = useIsFocused();
   const feedAccent = colors.primary || FEED_ACCENT;
   const feedAccentSoft = `${feedAccent}12`;
   const feedAccentBorder = `${feedAccent}30`;
@@ -196,6 +206,7 @@ function FeedScreen({ navigation }: any) {
   const [currentUser, setCurrentUser] = useState<CurrentUserSummary | null>(null);
   const [sellerAccount, setSellerAccount] = useState<SellerAccountSummary | null>(null);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [walletCoinBalance, setWalletCoinBalance] = useState(0);
   const [availabilityUpdating, setAvailabilityUpdating] = useState(false);
   const [liveStories, setLiveStories] = useState<any[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
@@ -210,11 +221,7 @@ function FeedScreen({ navigation }: any) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [publishTasks, setPublishTasks] = useState<PublishQueueTask[]>(() => getPublishQueueSnapshot());
   const slideAnim = useRef(new Animated.Value(0)).current;
-  const postMusicPlayerRef = useRef(createSound());
-  const postMusicTrackKeyRef = useRef("");
-  const postMusicEndMsRef = useRef(0);
-  const postMusicStartMsRef = useRef(0);
-  const postMusicShouldLoopRef = useRef(false);
+  const hasFeedContentRef = useRef(false);
   const postTapRef = useRef<{ id: string; time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     id: "",
     time: 0,
@@ -253,28 +260,35 @@ function FeedScreen({ navigation }: any) {
   );
   const activePublishTask = publishTasks[0] || null;
   const completedPublishTaskIdsRef = useRef<Set<string>>(new Set());
-  const activePostRawMusicUrl = String(activePost?.music?.previewUrl || "").trim();
+  const activePostRawMusicUrl = getMusicPlaybackUrl(activePost?.music);
   const activePostMusicUrl = normalizeMediaUrl(activePostRawMusicUrl);
+  const activePostMusicYoutubeVideoId = extractYouTubeVideoId(activePost?.music);
   const activePostMusicStartMs = Math.max(0, Number(activePost?.music?.startTime || 0) * 1000);
   const activePostMusicDurationMs = Math.max(0, Number(activePost?.music?.duration || 0) * 1000);
   const activePostMusicTrackKey = activePost
-    ? `${activePost.id}:${activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
+    ? `${activePost.id}:${activePostMusicYoutubeVideoId || activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
     : "";
-
-  useEffect(() => {
-    const isMuted = !activePostId || !!mutedPostIds[activePostId];
-    postMusicStartMsRef.current = activePostMusicStartMs;
-    postMusicEndMsRef.current =
-      activePostMusicDurationMs > 0 ? activePostMusicStartMs + activePostMusicDurationMs : 0;
-    postMusicShouldLoopRef.current = !!activePostMusicUrl && !isMuted && !activeSheet;
-  }, [
-    activePostId,
-    activePostMusicDurationMs,
-    activePostMusicStartMs,
-    activePostMusicUrl,
-    activeSheet,
-    mutedPostIds,
-  ]);
+  const activePostShouldPlayMusic = !!activePostId
+    && !mutedPostIds[activePostId]
+    && !activeSheet
+    && isScreenFocused
+    && !!(activePostMusicYoutubeVideoId || activePostMusicUrl);
+  const {
+    isUsingYoutube: isUsingYoutubePostMusic,
+    youtubePlay: youtubePostMusicPlay,
+    youtubePlayerRef: youtubePostMusicRef,
+    handleYoutubeReady: handleYoutubePostMusicReady,
+    handleYoutubeError: handleYoutubePostMusicError,
+    handleYoutubeStateChange: handleYoutubePostMusicStateChange,
+  } = useSegmentedMusicPlayback({
+    rawUrl: activePostRawMusicUrl,
+    normalizedUrl: activePostMusicUrl,
+    youtubeVideoId: activePostMusicYoutubeVideoId,
+    trackKey: activePostMusicTrackKey,
+    startMs: activePostMusicStartMs,
+    durationMs: activePostMusicDurationMs,
+    shouldPlay: activePostShouldPlayMusic,
+  });
 
   const readSellerAccount = useCallback(async (): Promise<SellerAccountSummary | null> => {
     try {
@@ -315,7 +329,7 @@ function FeedScreen({ navigation }: any) {
         title: "Account",
         data: [
           { icon: "person-outline", label: "My Profile", screen: "ProfileView" },
-          { icon: "wallet-outline", label: "My Balance", screen: "WalletScreen" },
+          { icon: "wallet-outline", label: "User Dashboard", screen: "WalletScreen" },
           { icon: "notifications-outline", label: "Notifications", screen: "NotificationScreen" },
         ],
       },
@@ -325,7 +339,7 @@ function FeedScreen({ navigation }: any) {
           { icon: "megaphone-outline", label: "Promotions", screen: "WalletScreen" },
           { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen" },
           hasSellerAccount
-            ? { icon: "briefcase-outline", label: "Seller Dashboard", screen: "SellerDashboardScreen" }
+            ? { icon: "briefcase-outline", label: "Seller Workspace", screen: "SellerDashboardScreen" }
             : { icon: "storefront-outline", label: "Become a Seller", screen: "SellerRegistration" },
         ],
       },
@@ -340,70 +354,88 @@ function FeedScreen({ navigation }: any) {
     [hasSellerAccount],
   );
 
-  const loadFeed = useCallback(async () => {
-    const [data, storedUser, seller, unreadNotifications, liveStreamsResponse] = await Promise.all([
+  const readWalletBalance = useCallback(async (): Promise<number> => {
+    try {
+      const response = await API.get("/wallet");
+      return Number(response?.data?.wallet?.balance || 0);
+    } catch {
+      return 0;
+    }
+  }, []);
+
+  const loadFeedSnapshot = useCallback(async () => {
+    const [data, storedUser, seller, unreadNotifications, liveStreamsResponse, walletBalance] = await Promise.all([
       socialApi.getFeed(),
       getStoredUser(),
       readSellerAccount(),
       readUnreadNotificationCount(),
       listLiveStreams().catch(() => ({ liveStreams: [] })),
+      readWalletBalance(),
     ]);
+
+    return {
+      data,
+      storedUser,
+      seller,
+      unreadNotifications,
+      walletBalance,
+      liveStories: Array.isArray(liveStreamsResponse?.liveStreams) ? liveStreamsResponse.liveStreams : [],
+    };
+  }, [readSellerAccount, readUnreadNotificationCount, readWalletBalance]);
+
+  const applyFeedSnapshot = useCallback((snapshot: any) => {
+    const { data, liveStories: nextLiveStories, seller, storedUser, unreadNotifications, walletBalance } = snapshot;
+
     setFeed({ ...data, posts: buildMixedLatestFeedPosts(data.posts) });
-    setLiveStories(Array.isArray(liveStreamsResponse?.liveStreams) ? liveStreamsResponse.liveStreams : []);
+    setLiveStories(nextLiveStories);
     setPage(1);
     setHasMore(data.posts.length >= 20);
     setCurrentUser(
-              storedUser
-                ? {
-                  id: String(storedUser._id || storedUser.id || ""),
-                  avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
-                  username: String(storedUser.username || ""),
-                  name: String(storedUser.name || ""),
-                  followingIds: Array.isArray(storedUser.following) ? storedUser.following.map((entry: any) => String(entry?._id || entry?.id || entry || "")).filter(Boolean) : [],
-                }
-                : null,
+      storedUser
+        ? {
+          id: String(storedUser._id || storedUser.id || ""),
+          avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
+          username: String(storedUser.username || ""),
+          name: String(storedUser.name || ""),
+          followingIds: Array.isArray(storedUser.following)
+            ? storedUser.following.map((entry: any) => String(entry?._id || entry?.id || entry || "")).filter(Boolean)
+            : [],
+        }
+        : null,
     );
     setSellerAccount(seller);
     setUnreadNotificationCount(unreadNotifications);
+    setWalletCoinBalance(walletBalance);
     setErrorMessage("");
-  }, [readSellerAccount, readUnreadNotificationCount]);
+  }, []);
+
+  const loadFeed = useCallback(async () => {
+    const snapshot = await loadFeedSnapshot();
+    applyFeedSnapshot(snapshot);
+  }, [applyFeedSnapshot, loadFeedSnapshot]);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
 
       const run = async () => {
+        const shouldShowInitialLoader = !hasFeedContentRef.current;
+
         try {
-          setLoading(true);
-          const [data, storedUser, seller, unreadNotifications, liveStreamsResponse] = await Promise.all([
-            socialApi.getFeed(),
-            getStoredUser(),
-            readSellerAccount(),
-            readUnreadNotificationCount(),
-            listLiveStreams().catch(() => ({ liveStreams: [] })),
-          ]);
+          if (shouldShowInitialLoader) {
+            setLoading(true);
+          }
+
+          const snapshot = await loadFeedSnapshot();
           if (active) {
-            setFeed({ ...data, posts: buildMixedLatestFeedPosts(data.posts) });
-            setLiveStories(Array.isArray(liveStreamsResponse?.liveStreams) ? liveStreamsResponse.liveStreams : []);
-            setCurrentUser(
-              storedUser
-                ? {
-                  id: String(storedUser._id || storedUser.id || ""),
-                  avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
-          username: String(storedUser.username || ""),
-          name: String(storedUser.name || ""),
-          followingIds: Array.isArray(storedUser.following) ? storedUser.following.map((entry: any) => String(entry?._id || entry?.id || entry || "")).filter(Boolean) : [],
-        }
-        : null,
-            );
-            setSellerAccount(seller);
-            setUnreadNotificationCount(unreadNotifications);
-            setErrorMessage("");
+            applyFeedSnapshot(snapshot);
           }
         } catch (error) {
           if (active) {
-            setFeed(initialFeed);
-            setLiveStories([]);
+            if (shouldShowInitialLoader) {
+              setFeed(initialFeed);
+              setLiveStories([]);
+            }
             setErrorMessage(getReadableApiErrorMessage(error, "Failed to load your feed."));
           }
         } finally {
@@ -419,8 +451,12 @@ function FeedScreen({ navigation }: any) {
       return () => {
         active = false;
       };
-    }, [readSellerAccount, readUnreadNotificationCount]),
+    }, [applyFeedSnapshot, loadFeedSnapshot]),
   );
+
+  useEffect(() => {
+    hasFeedContentRef.current = feed.posts.length > 0;
+  }, [feed.posts.length]);
 
   useEffect(() => {
     return subscribePublishQueue(setPublishTasks);
@@ -470,108 +506,12 @@ function FeedScreen({ navigation }: any) {
   }, [feed.posts]);
 
   useEffect(() => {
-    const player = postMusicPlayerRef.current;
-
-    player.setSubscriptionDuration(0.1);
-    player.addPlayBackListener((event: any) => {
-      const playbackEndMs = postMusicEndMsRef.current;
-      const playbackStartMs = postMusicStartMsRef.current;
-      const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
-
-      if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
-        if (postMusicShouldLoopRef.current) {
-          player.seekToPlayer(playbackStartMs).then(() => player.resumePlayer()).catch(() => undefined);
-        } else {
-          player.pausePlayer().catch(() => undefined);
-        }
-      }
-    });
-    player.addPlaybackEndListener(() => {
-      if (postMusicShouldLoopRef.current) {
-        player.seekToPlayer(postMusicStartMsRef.current).then(() => player.resumePlayer()).catch(() => undefined);
-      }
-    });
-
     return () => {
       if (postTapRef.current.timeout) {
         clearTimeout(postTapRef.current.timeout);
       }
-
-      try {
-        player.removePlayBackListener();
-      } catch {
-        // noop
-      }
-
-      try {
-        player.removePlaybackEndListener();
-      } catch {
-        // noop
-      }
-
-      player.stopPlayer().catch(() => undefined);
-      player.dispose();
     };
   }, []);
-
-  useEffect(() => {
-    const player = postMusicPlayerRef.current;
-    const isMuted = !activePostId || !!mutedPostIds[activePostId];
-    const shouldPlayMusic = !!activePostMusicUrl && !isMuted && !activeSheet;
-
-    const stopMusic = async () => {
-      postMusicTrackKeyRef.current = "";
-      postMusicEndMsRef.current = 0;
-
-      try {
-        await player.stopPlayer();
-      } catch {
-        // noop
-      }
-    };
-
-    if (!shouldPlayMusic) {
-      stopMusic().catch(() => undefined);
-      return;
-    }
-
-    if (postMusicTrackKeyRef.current === activePostMusicTrackKey) {
-      player.resumePlayer().catch(() => undefined);
-      return;
-    }
-
-    let cancelled = false;
-
-    const playMusic = async () => {
-      await stopMusic();
-      if (cancelled || !activePostMusicUrl) {
-        return;
-      }
-
-      postMusicTrackKeyRef.current = activePostMusicTrackKey;
-      await startAudioPlaybackFromSources(player, activePostRawMusicUrl, activePostMusicUrl);
-      await player.seekToPlayer(activePostMusicStartMs);
-      await player.setVolume(1);
-    };
-
-    playMusic().catch((error) => {
-      console.log("feed music playback error", error);
-      stopMusic().catch(() => undefined);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activePostId,
-    activePostMusicDurationMs,
-    activePostRawMusicUrl,
-    activePostMusicStartMs,
-    activePostMusicTrackKey,
-    activePostMusicUrl,
-    activeSheet,
-    mutedPostIds,
-  ]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -638,7 +578,10 @@ function FeedScreen({ navigation }: any) {
   const handlePostMediaPress = (post: Post) => {
     const now = Date.now();
     const lastTap = postTapRef.current;
-    const hasAudioLayer = post.media.some((asset) => asset.mediaType === "video") || !!post.music?.previewUrl;
+    const hasAudioLayer =
+      post.media.some((asset) => asset.mediaType === "video")
+      || !!getMusicPlaybackUrl(post.music)
+      || !!extractYouTubeVideoId(post.music);
 
     if (lastTap.id === post.id && now - lastTap.time < 260) {
       if (lastTap.timeout) {
@@ -749,6 +692,26 @@ function FeedScreen({ navigation }: any) {
     }
 
     navigation.navigate("ProfilePreviewScreen", { userId: normalizedUserId });
+  }, [currentUser?.id, navigation]);
+
+  const openMentionProfile = useCallback(async (username: string) => {
+    const normalizedUsername = String(username || "").replace(/^@/, "").trim();
+    if (!normalizedUsername) {
+      return;
+    }
+
+    const resolvedUserId = await resolveMentionUserId(normalizedUsername);
+    if (!resolvedUserId) {
+      Alert.alert("Profile unavailable", "This profile could not be opened right now.");
+      return;
+    }
+
+    if (resolvedUserId === String(currentUser?.id || "")) {
+      navigation.navigate("Profile");
+      return;
+    }
+
+    navigation.navigate("ProfilePreviewScreen", { userId: resolvedUserId });
   }, [currentUser?.id, navigation]);
 
   const openHashtagResults = useCallback((tag: string) => {
@@ -968,6 +931,10 @@ function FeedScreen({ navigation }: any) {
     API.put("/notifications/read-all").catch(() => {});
   }, [navigation]);
 
+  const openWalletDashboard = useCallback(() => {
+    navigation.navigate("WalletScreen");
+  }, [navigation]);
+
   const navigateFromMenu = useCallback((screen: string) => {
     closeMenu();
     if (screen === "NotificationScreen") {
@@ -1098,7 +1065,7 @@ function FeedScreen({ navigation }: any) {
     const mediaHeight = getPostMediaHeight(post);
     const frameAspectRatio = postMediaWidth / Math.max(1, mediaHeight);
     const currentCarouselIndex = carouselIndexByPostId[post.id] || 0;
-    const hasAttachedMusic = !!post.music?.previewUrl;
+    const hasAttachedMusic = !!(getMusicPlaybackUrl(post.music) || extractYouTubeVideoId(post.music));
     const isMuted = !!mutedPostIds[post.id];
     const renderSensitiveBadge = (label?: string) => (
       <View pointerEvents="none" style={styles.sensitiveBadge}>
@@ -1341,7 +1308,7 @@ function FeedScreen({ navigation }: any) {
   const renderPost = ({ item }: { item: Post }) => {
     const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
     const musicLabel = formatPostMusicLabel(item.music);
-    const hasAttachedMusic = !!item.music?.previewUrl;
+    const hasAttachedMusic = !!(getMusicPlaybackUrl(item.music) || extractYouTubeVideoId(item.music));
     const isMuted = !!mutedPostIds[item.id];
     void musicLabel;
     void hasAttachedMusic;
@@ -1386,8 +1353,14 @@ function FeedScreen({ navigation }: any) {
               style={[styles.postAvatar, width < 360 && styles.postAvatarCompact]}
             />
             <View style={styles.userMeta}>
-              <View style={styles.row}>
-                <Text style={[styles.username, { color: colors.text }]}>{item.user.username}</Text>
+              <View style={[styles.row, styles.usernameRow]}>
+                <Text
+                  style={[styles.username, styles.usernameText, { color: colors.text }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {item.user.username}
+                </Text>
                 {shouldShowVerifiedBadge(item.user) ? (
                   <Icon style={styles.verifiedIcon} name="checkmark-circle" color={FEED_ACCENT} size={16} />
                 ) : null}
@@ -1544,17 +1517,31 @@ function FeedScreen({ navigation }: any) {
           </Text>
         ) : null}
 
-        <Text style={[styles.caption, { paddingHorizontal: postBodyInset, color: colors.text }]}>
-          <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
-            {item.user.username}{" "}
-          </Text>
-          {item.caption}
-        </Text>
+        <InteractiveText
+          style={[styles.caption, { paddingHorizontal: postBodyInset, color: colors.text }]}
+          prefix={(
+            <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
+              {item.user.username}{" "}
+            </Text>
+          )}
+          mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
+          hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
+          onPressMention={(mention) => {
+            void openMentionProfile(mention);
+          }}
+          onPressHashtag={openHashtagResults}
+          text={item.caption}
+        />
 
         {item.mentions.length ? (
-          <Text style={[styles.tagLineMuted, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
-            {item.mentions.map((mention) => `@${mention}`).join(" ")}
-          </Text>
+          <InteractiveText
+            style={[styles.tagLineMuted, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}
+            mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
+            onPressMention={(mention) => {
+              void openMentionProfile(mention);
+            }}
+            text={item.mentions.map((mention) => `@${mention}`).join(" ")}
+          />
         ) : null}
 
         {renderPostMetaChips(item, postBodyInset)}
@@ -1615,7 +1602,7 @@ function FeedScreen({ navigation }: any) {
   const renderInstagramPost = ({ item }: { item: Post }) => {
     const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
     const musicLabel = formatPostMusicLabel(item.music);
-    const hasAttachedMusic = !!item.music?.previewUrl;
+    const hasAttachedMusic = !!(getMusicPlaybackUrl(item.music) || extractYouTubeVideoId(item.music));
     const isMuted = !!mutedPostIds[item.id];
     const metaLine = [getPostTypeTag(item), musicLabel ? `🎵 ${musicLabel}` : null].filter(Boolean).join(" • ");
 
@@ -1648,8 +1635,14 @@ function FeedScreen({ navigation }: any) {
               style={[styles.postAvatar, width < 360 && styles.postAvatarCompact]}
             />
             <View style={styles.userMeta}>
-              <View style={styles.row}>
-                <Text style={[styles.username, { color: colors.text }]}>{item.user.username}</Text>
+              <View style={[styles.row, styles.usernameRow]}>
+                <Text
+                  style={[styles.username, styles.usernameText, { color: colors.text }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {item.user.username}
+                </Text>
                 {shouldShowVerifiedBadge(item.user) ? (
                   <Icon style={styles.verifiedIcon} name="checkmark-circle" color={FEED_ACCENT} size={16} />
                 ) : null}
@@ -1817,17 +1810,31 @@ function FeedScreen({ navigation }: any) {
           </Text>
         ) : null}
 
-        <Text style={[styles.caption, { paddingHorizontal: postBodyInset, color: colors.text }]}>
-          <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
-            {item.user.username}{" "}
-          </Text>
-          {item.caption}
-        </Text>
+        <InteractiveText
+          style={[styles.caption, { paddingHorizontal: postBodyInset, color: colors.text }]}
+          prefix={(
+            <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
+              {item.user.username}{" "}
+            </Text>
+          )}
+          mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
+          hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
+          onPressMention={(mention) => {
+            void openMentionProfile(mention);
+          }}
+          onPressHashtag={openHashtagResults}
+          text={item.caption}
+        />
 
         {item.mentions.length ? (
-          <Text style={[styles.tagLineMuted, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
-            {item.mentions.map((mention) => `@${mention}`).join(" ")}
-          </Text>
+          <InteractiveText
+            style={[styles.tagLineMuted, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}
+            mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
+            onPressMention={(mention) => {
+              void openMentionProfile(mention);
+            }}
+            text={item.mentions.map((mention) => `@${mention}`).join(" ")}
+          />
         ) : null}
 
         {renderPostMetaChips(item, postBodyInset)}
@@ -2056,6 +2063,24 @@ function FeedScreen({ navigation }: any) {
                   </View>
                 ) : null}
               </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.headerIconGap,
+                  isCompactHeader && styles.headerIconGapCompact,
+                  styles.headerWalletButton,
+                  isCompactHeader && styles.headerWalletButtonCompact,
+                  { backgroundColor: utilityButtonBackground, borderColor: utilityButtonBorder },
+                ]}
+                onPress={openWalletDashboard}
+              >
+                <View style={styles.headerCoinBadge}>
+                  <Icon name="logo-bitcoin" size={isCompactHeader ? 13 : 14} color="#B45309" />
+                </View>
+                <Text style={[styles.headerWalletValue, { color: utilityIconColor, fontSize: isCompactHeader ? 11 : 12 }]}>
+                  {formatCompactCoinBalance(walletCoinBalance)}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -2160,6 +2185,16 @@ function FeedScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
+      {isUsingYoutubePostMusic && activePostMusicYoutubeVideoId ? (
+        <HiddenYoutubeAudioPlayer
+          playerRef={youtubePostMusicRef}
+          play={youtubePostMusicPlay}
+          videoId={activePostMusicYoutubeVideoId}
+          onReady={handleYoutubePostMusicReady}
+          onError={handleYoutubePostMusicError}
+          onChangeState={handleYoutubePostMusicStateChange}
+        />
+      ) : null}
       <View style={styles.screenShell}>
         <FlatList
           data={feed.posts}
@@ -2469,10 +2504,41 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     position: "relative",
   },
+  headerWalletButton: {
+    minWidth: 36,
+    height: 36,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+    flexDirection: "row",
+    paddingHorizontal: 10,
+  },
   headerIconButtonCompact: {
     width: 32,
     height: 32,
     borderRadius: 10,
+  },
+  headerWalletButtonCompact: {
+    minWidth: 32,
+    height: 32,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+  },
+  headerWalletValue: {
+    marginLeft: 5,
+    fontWeight: "800",
+  },
+  headerCoinBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FDE68A",
+    borderWidth: 1,
+    borderColor: "#F59E0B",
   },
   notificationBadge: {
     position: "absolute",
@@ -2863,9 +2929,11 @@ const styles = StyleSheet.create({
   postHeaderActions: { flexDirection: "row", alignItems: "center", marginLeft: 10, gap: 8 },
   postAvatar: { width: 52, height: 52, borderRadius: 26 },
   postAvatarCompact: { width: 46, height: 46, borderRadius: 23 },
-  userMeta: { marginLeft: 11, flexShrink: 1 },
+  userMeta: { marginLeft: 11, flexShrink: 1, minWidth: 0 },
   row: { flexDirection: "row", alignItems: "center" },
-  username: { fontSize: 17, fontWeight: "700", color: "#111" },
+  usernameRow: { flexShrink: 1, minWidth: 0, paddingRight: 6 },
+  username: { fontSize: 15, lineHeight: 18, fontWeight: "700", color: "#111" },
+  usernameText: { flexShrink: 1 },
   verifiedIcon: { marginLeft: 5 },
   postTime: { fontSize: 13.5, color: "#666", marginTop: 3 },
   moreButton: {
@@ -2994,6 +3062,7 @@ const styles = StyleSheet.create({
   likesText: { fontWeight: "700", color: "#121212", fontSize: 14, paddingHorizontal: 18 },
   caption: { fontSize: 14, color: "#131313", paddingHorizontal: 18, paddingTop: 7, lineHeight: 21 },
   captionUser: { fontWeight: "700" },
+  inlineEntity: { fontWeight: "700" },
   tagLine: { color: FEED_ACCENT, fontSize: 12.5, paddingHorizontal: 18, paddingTop: 7, fontWeight: "700" },
   tagLineMuted: { color: "#5a5a5a", fontSize: 12, paddingHorizontal: 18, paddingTop: 4 },
   metaChipRow: {

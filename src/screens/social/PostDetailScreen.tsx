@@ -12,25 +12,29 @@ import {
   View
 } from "react-native";
 import { Alert } from "../../utils/appAlert";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { createSound } from "react-native-nitro-sound";
 import Icon from "react-native-vector-icons/Ionicons";
 
+import HiddenYoutubeAudioPlayer from "../../components/media/HiddenYoutubeAudioPlayer";
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
+import InteractiveText from "../../features/social/components/InteractiveText";
 import PostCommentsSheet from "../../features/social/components/PostCommentsSheet";
 import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import PostShareSheet from "../../features/social/components/PostShareSheet";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
+import { useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { DEFAULT_AVATAR_URL } from "../../constants/defaultAssets";
 import { PHOTO_FILTER_LIST } from "../../utils/photoFilters";
 import { getStoredUserId } from "../../utils/authSession";
 import { downloadImageAsset } from "../../utils/mediaDownload";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
+import { resolveMentionUserId } from "../../utils/mentionLinks";
 import { useAppTheme } from "../../theme/AppThemeContext";
+import { extractYouTubeVideoId } from "../../utils/youtubePlayback";
 
 let ColorMatrix: any = null;
 try {
@@ -57,9 +61,13 @@ const formatPostTime = (timestamp?: number) => {
   return `${Math.floor(hours / 24)}d`;
 };
 
+const getMusicPlaybackUrl = (music?: Post["music"]) =>
+  String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
+
 function PostDetailScreen({ route, navigation }: any) {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const isScreenFocused = useIsFocused();
   const postId = typeof route?.params?.postId === "string" ? route.params.postId : "";
 
   const [post, setPost] = useState<Post | null>(null);
@@ -76,11 +84,6 @@ function PostDetailScreen({ route, navigation }: any) {
   const [caption, setCaption] = useState("");
   const [hideLikeCount, setHideLikeCount] = useState(false);
   const [disableComments, setDisableComments] = useState(false);
-  const musicPlayerRef = useRef(createSound());
-  const musicTrackKeyRef = useRef("");
-  const musicEndMsRef = useRef(0);
-  const musicStartMsRef = useRef(0);
-  const musicShouldLoopRef = useRef(false);
   const postTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     time: 0,
     timeout: null,
@@ -127,122 +130,40 @@ function PostDetailScreen({ route, navigation }: any) {
     }, [navigation, postId]),
   );
 
-  const attachedMusicUrl = useMemo(
-    () => normalizeMediaUrl(post?.music?.previewUrl || ""),
-    [post?.music?.previewUrl],
-  );
+  const attachedMusicRawUrl = getMusicPlaybackUrl(post?.music);
+  const attachedMusicUrl = useMemo(() => normalizeMediaUrl(attachedMusicRawUrl), [attachedMusicRawUrl]);
+  const attachedMusicYoutubeVideoId = useMemo(() => extractYouTubeVideoId(post?.music), [post?.music]);
   const attachedMusicStartMs = Math.max(0, Number(post?.music?.startTime || 0) * 1000);
   const attachedMusicDurationMs = Math.max(0, Number(post?.music?.duration || 0) * 1000);
   const attachedMusicTrackKey = post
-    ? `${post.id}:${attachedMusicUrl}:${attachedMusicStartMs}:${attachedMusicDurationMs}`
+    ? `${post.id}:${attachedMusicYoutubeVideoId || attachedMusicUrl}:${attachedMusicStartMs}:${attachedMusicDurationMs}`
     : "";
+  const hasAttachedMusic = !!(attachedMusicYoutubeVideoId || attachedMusicUrl);
+  const shouldPlayAttachedMusic = hasAttachedMusic && isMediaSoundEnabled && !activeSheet && isScreenFocused;
+  const {
+    isUsingYoutube: isUsingYoutubeAttachedMusic,
+    youtubePlay: youtubeAttachedMusicPlay,
+    youtubePlayerRef: youtubeAttachedMusicRef,
+    handleYoutubeReady: handleYoutubeAttachedMusicReady,
+    handleYoutubeError: handleYoutubeAttachedMusicError,
+    handleYoutubeStateChange: handleYoutubeAttachedMusicStateChange,
+  } = useSegmentedMusicPlayback({
+    rawUrl: attachedMusicRawUrl,
+    normalizedUrl: attachedMusicUrl,
+    youtubeVideoId: attachedMusicYoutubeVideoId,
+    trackKey: attachedMusicTrackKey,
+    startMs: attachedMusicStartMs,
+    durationMs: attachedMusicDurationMs,
+    shouldPlay: shouldPlayAttachedMusic,
+  });
 
   useEffect(() => {
-    musicStartMsRef.current = attachedMusicStartMs;
-    musicEndMsRef.current = attachedMusicDurationMs > 0 ? attachedMusicStartMs + attachedMusicDurationMs : 0;
-    musicShouldLoopRef.current = !!attachedMusicUrl && isMediaSoundEnabled && !activeSheet;
-  }, [activeSheet, attachedMusicDurationMs, attachedMusicStartMs, attachedMusicUrl, isMediaSoundEnabled]);
-
-  useEffect(() => {
-    const player = musicPlayerRef.current;
-
-    player.setSubscriptionDuration(0.1);
-    player.addPlayBackListener((event: any) => {
-      const playbackEndMs = musicEndMsRef.current;
-      const playbackStartMs = musicStartMsRef.current;
-      const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
-
-      if (playbackEndMs > 0 && currentPosition >= playbackEndMs) {
-        if (musicShouldLoopRef.current) {
-          player.seekToPlayer(playbackStartMs).then(() => player.resumePlayer()).catch(() => undefined);
-        } else {
-          player.pausePlayer().catch(() => undefined);
-        }
-      }
-    });
-    player.addPlaybackEndListener(() => {
-      if (musicShouldLoopRef.current) {
-        player.seekToPlayer(musicStartMsRef.current).then(() => player.resumePlayer()).catch(() => undefined);
-      }
-    });
-
     return () => {
       if (postTapRef.current.timeout) {
         clearTimeout(postTapRef.current.timeout);
       }
-
-      try {
-        player.removePlayBackListener();
-      } catch {
-        // noop
-      }
-
-      try {
-        player.removePlaybackEndListener();
-      } catch {
-        // noop
-      }
-
-      player.stopPlayer().catch(() => undefined);
-      player.dispose();
     };
   }, []);
-
-  useEffect(() => {
-    const player = musicPlayerRef.current;
-    const shouldPlayMusic = !!attachedMusicUrl && isMediaSoundEnabled && !activeSheet;
-
-    const stopMusic = async () => {
-      musicTrackKeyRef.current = "";
-      musicEndMsRef.current = 0;
-
-      try {
-        await player.stopPlayer();
-      } catch {
-        // noop
-      }
-    };
-
-    if (!shouldPlayMusic) {
-      stopMusic().catch(() => undefined);
-      return;
-    }
-
-    if (musicTrackKeyRef.current === attachedMusicTrackKey) {
-      player.resumePlayer().catch(() => undefined);
-      return;
-    }
-
-    let cancelled = false;
-
-    const playMusic = async () => {
-      await stopMusic();
-      if (cancelled || !attachedMusicUrl) {
-        return;
-      }
-
-      musicTrackKeyRef.current = attachedMusicTrackKey;
-      await player.startPlayer(attachedMusicUrl);
-      await player.seekToPlayer(attachedMusicStartMs);
-      await player.setVolume(1);
-    };
-
-    playMusic().catch((error) => {
-      console.log("post detail music playback error", error);
-      stopMusic().catch(() => undefined);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeSheet,
-    attachedMusicDurationMs,
-    attachedMusicStartMs,
-    attachedMusicTrackKey,
-    attachedMusicUrl,
-    isMediaSoundEnabled,
-  ]);
 
   const saveChanges = async () => {
     if (!post || saving || post.user.id !== currentUserId) {
@@ -289,6 +210,28 @@ function PostDetailScreen({ route, navigation }: any) {
         },
       },
     ]);
+  };
+
+  const openMentionProfile = async (username: string) => {
+    const resolvedUserId = await resolveMentionUserId(username);
+    if (!resolvedUserId) {
+      Alert.alert("Profile unavailable", "This profile could not be opened right now.");
+      return;
+    }
+
+    navigation.navigate(
+      resolvedUserId === String(currentUserId || "") ? "Profile" : "ProfilePreviewScreen",
+      resolvedUserId === String(currentUserId || "") ? undefined : { userId: resolvedUserId },
+    );
+  };
+
+  const openHashtagResults = (tag: string) => {
+    const normalizedTag = String(tag || "").replace(/^#/, "").trim();
+    if (!normalizedTag) {
+      return;
+    }
+
+    navigation.navigate("HashtagResultsScreen", { hashtag: normalizedTag });
   };
 
   const toggleLike = async () => {
@@ -356,7 +299,7 @@ function PostDetailScreen({ route, navigation }: any) {
 
     const now = Date.now();
     const lastTap = postTapRef.current;
-    const hasAudioLayer = post.media.some((asset) => asset.mediaType === "video") || !!post.music?.previewUrl;
+    const hasAudioLayer = post.media.some((asset) => asset.mediaType === "video") || hasAttachedMusic;
 
     if (now - lastTap.time < 260) {
       if (lastTap.timeout) {
@@ -401,7 +344,7 @@ function PostDetailScreen({ route, navigation }: any) {
             uri={assetUrl}
             posterUri={posterUrl}
             style={styles.image}
-            muted={!isMediaSoundEnabled || !!post?.music?.previewUrl}
+            muted={!isMediaSoundEnabled || hasAttachedMusic}
             repeat
             contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
           />
@@ -516,6 +459,16 @@ function PostDetailScreen({ route, navigation }: any) {
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={["top"]}>
+      {isUsingYoutubeAttachedMusic && attachedMusicYoutubeVideoId ? (
+        <HiddenYoutubeAudioPlayer
+          playerRef={youtubeAttachedMusicRef}
+          play={youtubeAttachedMusicPlay}
+          videoId={attachedMusicYoutubeVideoId}
+          onReady={handleYoutubeAttachedMusicReady}
+          onError={handleYoutubeAttachedMusicError}
+          onChangeState={handleYoutubeAttachedMusicStateChange}
+        />
+      ) : null}
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 12), borderColor: colors.border, backgroundColor: colors.card }]}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -547,7 +500,7 @@ function PostDetailScreen({ route, navigation }: any) {
             )}
             {renderStickerOverlay()}
 
-            {(post.music?.previewUrl || post.media.some((asset) => asset.mediaType === "video")) ? (
+            {(hasAttachedMusic || post.media.some((asset) => asset.mediaType === "video")) ? (
               <View style={styles.mediaSoundBadge}>
                 <Icon
                   name={isMediaSoundEnabled ? "volume-high-outline" : "volume-mute-outline"}
@@ -641,14 +594,26 @@ function PostDetailScreen({ route, navigation }: any) {
             {post.hashtags.length ? (
               <>
                 <Text style={[styles.label, { color: colors.text }]}>Hashtags</Text>
-                <Text style={[styles.entityLine, { color: colors.primary }]}>{post.hashtags.map((tag) => `#${tag}`).join(" ")}</Text>
+                <InteractiveText
+                  style={[styles.entityLine, { color: colors.primary }]}
+                  hashtagStyle={[styles.entityLineInteractive, { color: colors.primary }]}
+                  onPressHashtag={openHashtagResults}
+                  text={post.hashtags.map((tag) => `#${tag}`).join(" ")}
+                />
               </>
             ) : null}
 
             {post.mentions.length ? (
               <>
                 <Text style={[styles.label, { color: colors.text }]}>Mentions</Text>
-                <Text style={[styles.entityLine, { color: colors.mutedText }]}>{post.mentions.map((mention) => `@${mention}`).join(" ")}</Text>
+                <InteractiveText
+                  style={[styles.entityLine, { color: colors.mutedText }]}
+                  mentionStyle={[styles.entityLineInteractive, { color: colors.primary }]}
+                  onPressMention={(mention) => {
+                    void openMentionProfile(mention);
+                  }}
+                  text={post.mentions.map((mention) => `@${mention}`).join(" ")}
+                />
               </>
             ) : null}
 
@@ -886,6 +851,9 @@ const styles = StyleSheet.create({
   entityLine: {
     color: "#3345d1",
     lineHeight: 20,
+  },
+  entityLineInteractive: {
+    fontWeight: "800",
   },
   switchRow: {
     marginTop: 14,

@@ -5,6 +5,28 @@ export const startCallSession = async ({ conversationId, callType }) => {
   return response.data || {};
 };
 
+export const isCallAlreadyActiveError = (error) => {
+  const code = String(error?.response?.data?.code || "").trim();
+  const message = String(error?.response?.data?.message || "").trim().toLowerCase();
+
+  return code === "CALL_ALREADY_ACTIVE" || message === "a call is already active in this conversation";
+};
+
+export const getExistingCallPayloadFromError = (error) => {
+  const data = error?.response?.data || {};
+  const callSessionId = String(data?.callSession?._id || "").trim();
+
+  if (!callSessionId) {
+    return null;
+  }
+
+  return {
+    callSession: data.callSession,
+    iceServers: Array.isArray(data.iceServers) ? data.iceServers : [],
+    callRuntime: data.callRuntime || null,
+  };
+};
+
 export const getCallSession = async (callSessionId) => {
   const response = await API.get(`/chat/calls/${callSessionId}`);
   return response.data || {};

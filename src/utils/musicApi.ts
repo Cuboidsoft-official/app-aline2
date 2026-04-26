@@ -61,6 +61,7 @@ const mapMusicItem = (item: any): MusicCatalogItem => ({
   artworkUrl: item?.thumbnailUrl || item?.artworkUrl || undefined,
   previewUrl: item?.previewUrl || item?.audioUrl || undefined,
   streamUrl: item?.streamUrl || item?.audioUrl || undefined,
+  audioUrl: item?.audioUrl || item?.streamUrl || item?.previewUrl || undefined,
   externalUrl: normalizeExternalUrl(item?.externalUrl),
   source: item?.source || undefined,
   youtubeVideoId: item?.youtubeVideoId
@@ -193,6 +194,7 @@ export const importMusicCatalogItem = async (item: MusicCatalogItem): Promise<Mu
     thumbnailUrl: item.artworkUrl,
     previewUrl: item.previewUrl,
     streamUrl: item.streamUrl,
+    audioUrl: item.audioUrl,
     externalUrl: item.externalUrl,
     duration: item.duration,
   });
@@ -206,6 +208,7 @@ export const importMusicCatalogItem = async (item: MusicCatalogItem): Promise<Mu
     ...imported,
     previewUrl: imported.previewUrl || item.previewUrl,
     streamUrl: imported.streamUrl || item.streamUrl,
+    audioUrl: imported.audioUrl || item.audioUrl || item.streamUrl || item.previewUrl,
     youtubeVideoId: imported.youtubeVideoId || item.youtubeVideoId,
     clipStartTime: item.clipStartTime ?? imported.clipStartTime ?? 0,
     clipDuration: item.clipDuration ?? imported.clipDuration ?? imported.duration,
