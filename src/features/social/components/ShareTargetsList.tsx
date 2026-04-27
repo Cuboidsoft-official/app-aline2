@@ -38,6 +38,7 @@ interface ShareTargetsListProps {
   onToggleTarget: (target: ShareTarget) => void;
   title?: string;
   scrollEnabled?: boolean;
+  variant?: "default" | "dark";
 }
 
 function ShareTargetsList({
@@ -45,6 +46,7 @@ function ShareTargetsList({
   onToggleTarget,
   title = "Send to",
   scrollEnabled = true,
+  variant = "default",
 }: ShareTargetsListProps) {
   const { colors } = useAppTheme();
   const [targets, setTargets] = useState<ShareTarget[]>([]);
@@ -141,22 +143,35 @@ function ShareTargetsList({
     });
   }, [deferredSearchQuery, targets]);
 
+  const isDarkVariant = variant === "dark";
+  const titleColor = isDarkVariant ? "#F8FAFC" : colors.text;
+  const mutedColor = isDarkVariant ? "#94A3B8" : colors.mutedText;
+  const searchBorderColor = isDarkVariant ? "rgba(148, 163, 184, 0.22)" : colors.border;
+  const searchBackgroundColor = isDarkVariant ? "rgba(15, 23, 42, 0.92)" : colors.card;
+  const searchTextColor = isDarkVariant ? "#F8FAFC" : colors.text;
+  const placeholderColor = isDarkVariant ? "#64748B" : colors.placeholder;
+  const checkBorderColor = isDarkVariant ? "rgba(148, 163, 184, 0.55)" : "#cbd5e1";
+  const checkBackgroundColor = isDarkVariant ? "rgba(15, 23, 42, 0.94)" : "#fff";
+  const selectedCheckColor = isDarkVariant ? "#2563EB" : "#111827";
+  const avatarFallbackBackground = isDarkVariant ? "#1E293B" : "#e5e7eb";
+  const avatarFallbackTextColor = isDarkVariant ? "#F8FAFC" : "#1f2937";
+
   return (
     <View style={styles.container}>
-      <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
-      <View style={[styles.searchWrap, { borderColor: colors.border, backgroundColor: colors.card }]}>
-        <Icon name="search" size={16} color={colors.mutedText} />
+      <Text style={[styles.title, { color: titleColor }]}>{title}</Text>
+      <View style={[styles.searchWrap, { borderColor: searchBorderColor, backgroundColor: searchBackgroundColor }]}>
+        <Icon name="search" size={16} color={mutedColor} />
         <TextInput
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholder="Search chats"
-          placeholderTextColor={colors.placeholder}
-          style={[styles.searchInput, { color: colors.text }]}
+          placeholderTextColor={placeholderColor}
+          style={[styles.searchInput, { color: searchTextColor }]}
         />
       </View>
       {loading ? (
         <View style={styles.loadingWrap}>
-          <ActivityIndicator size="small" color={colors.text} />
+          <ActivityIndicator size="small" color={titleColor} />
         </View>
       ) : null}
       <FlatList
@@ -167,7 +182,7 @@ function ShareTargetsList({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         numColumns={4}
-        ListEmptyComponent={emptyMessage ? <Text style={[styles.emptyText, { color: colors.mutedText }]}>{emptyMessage}</Text> : null}
+        ListEmptyComponent={emptyMessage ? <Text style={[styles.emptyText, { color: mutedColor }]}>{emptyMessage}</Text> : null}
         renderItem={({ item }) => (
           <TouchableOpacity style={styles.card} activeOpacity={0.86} onPress={() => onToggleTarget(item)}>
             <View style={styles.avatarWrap}>
@@ -176,29 +191,33 @@ function ShareTargetsList({
                 name={item.name || item.username || "Chat"}
                 size={62}
                 style={styles.avatar}
-                backgroundColor="#e5e7eb"
-                textColor="#1f2937"
+                backgroundColor={avatarFallbackBackground}
+                textColor={avatarFallbackTextColor}
               />
               <View
                 style={[
                   styles.checkCircle,
-                  selectedTargetIds.includes(item.key) && styles.checkCircleSelected,
+                  {
+                    borderColor: checkBorderColor,
+                    backgroundColor: checkBackgroundColor,
+                  },
+                  selectedTargetIds.includes(item.key) ? [styles.checkCircleSelected, { backgroundColor: selectedCheckColor, borderColor: selectedCheckColor }] : null,
                 ]}
               >
                 {selectedTargetIds.includes(item.key) ? <Icon name="checkmark" size={12} color="#fff" /> : null}
               </View>
             </View>
             <View style={styles.nameRow}>
-              <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
+              <Text style={[styles.name, { color: titleColor }]} numberOfLines={1}>
                 {item.name}
               </Text>
               {item.kind === "group"
-                ? <Icon name="people" size={12} color={colors.primary} />
+                ? <Icon name="people" size={12} color={isDarkVariant ? "#60A5FA" : colors.primary} />
                 : item.isVerified
                   ? <Icon name="checkmark-circle" size={12} color="#2563eb" />
                   : null}
             </View>
-            <Text style={[styles.username, { color: colors.mutedText }]} numberOfLines={1}>
+            <Text style={[styles.username, { color: mutedColor }]} numberOfLines={1}>
               {item.kind === "group" ? item.subtitle || "Group chat" : item.subtitle || `@${item.username}`}
             </Text>
           </TouchableOpacity>

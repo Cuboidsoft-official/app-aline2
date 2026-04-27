@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createSound } from "react-native-nitro-sound";
 
-import { startManagedAudioClipPlayback } from "../utils/audioPlayback";
+import { ensureAudioClipStartPosition, startManagedAudioClipPlayback } from "../utils/audioPlayback";
 
 type UseSegmentedMusicPlaybackParams = {
   rawUrl: string;
@@ -24,11 +24,13 @@ export function useSegmentedMusicPlayback({
 }: UseSegmentedMusicPlaybackParams) {
   const audioPlayerRef = useRef(createSound());
   const audioTrackKeyRef = useRef("");
+  const audioSourceKeyRef = useRef("");
   const audioEndMsRef = useRef(0);
   const audioStartMsRef = useRef(0);
   const shouldLoopRef = useRef(false);
   const youtubePlayerRef = useRef<any>(null);
   const youtubeTrackKeyRef = useRef("");
+  const youtubeSourceKeyRef = useRef("");
   const youtubePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const youtubeVideoIdRef = useRef("");
   const [isYoutubeReady, setIsYoutubeReady] = useState(false);
@@ -36,6 +38,7 @@ export function useSegmentedMusicPlayback({
 
   const isUsingYoutube = !!youtubeVideoId;
   const playbackEndMs = durationMs > 0 ? startMs + durationMs : 0;
+  const audioSourceKey = normalizedUrl || rawUrl;
 
   useEffect(() => {
     audioStartMsRef.current = startMs;
@@ -76,12 +79,21 @@ export function useSegmentedMusicPlayback({
     }, 250);
   }, [seekYoutubeToStart, stopYoutubePolling]);
 
-  const stopAudioPlayback = useCallback(async () => {
+  const resetAudioPlayback = useCallback(async () => {
     audioTrackKeyRef.current = "";
+    audioSourceKeyRef.current = "";
     audioEndMsRef.current = 0;
 
     try {
       await audioPlayerRef.current.stopPlayer();
+    } catch {
+      // noop
+    }
+  }, []);
+
+  const pauseAudioPlayback = useCallback(async () => {
+    try {
+      await audioPlayerRef.current.pausePlayer();
     } catch {
       // noop
     }
@@ -132,16 +144,19 @@ export function useSegmentedMusicPlayback({
       setYoutubePlay(false);
       youtubeTrackKeyRef.current = "";
       stopYoutubePolling();
-      stopAudioPlayback().catch(() => undefined);
+      pauseAudioPlayback().catch(() => undefined);
       return;
     }
 
     if (isUsingYoutube) {
-      stopAudioPlayback().catch(() => undefined);
+      pauseAudioPlayback().catch(() => undefined);
 
-      if (youtubeTrackKeyRef.current !== trackKey) {
+      if (youtubeSourceKeyRef.current !== youtubeVideoId) {
+        youtubeSourceKeyRef.current = youtubeVideoId;
         youtubeTrackKeyRef.current = trackKey;
         setIsYoutubeReady(false);
+      } else {
+        youtubeTrackKeyRef.current = trackKey;
       }
 
       if (isYoutubeReady) {
@@ -159,41 +174,58 @@ export function useSegmentedMusicPlayback({
     stopYoutubePolling();
 
     const resumeAudio = async () => {
-      if (!normalizedUrl) {
+      if (!audioSourceKey) {
         return;
       }
 
       if (audioTrackKeyRef.current === trackKey) {
+        await ensureAudioClipStartPosition(audioPlayerRef.current, startMs).catch(() => undefined);
         await audioPlayerRef.current.resumePlayer().catch(() => undefined);
         return;
       }
 
-      await stopAudioPlayback();
+      if (audioSourceKeyRef.current === audioSourceKey) {
+        try {
+          audioTrackKeyRef.current = trackKey;
+          await ensureAudioClipStartPosition(audioPlayerRef.current, startMs);
+          await audioPlayerRef.current.resumePlayer().catch(() => undefined);
+          return;
+        } catch {
+          await resetAudioPlayback();
+        }
+      }
+
+      await resetAudioPlayback();
       audioTrackKeyRef.current = trackKey;
+      audioSourceKeyRef.current = audioSourceKey;
       await startManagedAudioClipPlayback(audioPlayerRef.current, {
         rawValue: rawUrl,
         normalizedValue: normalizedUrl,
         startPositionMs: startMs,
         volume: 1,
+        seekSettleDelayMs: 70,
       });
     };
 
     resumeAudio().catch((error) => {
       console.log("segmented music playback error", error);
-      stopAudioPlayback().catch(() => undefined);
+      resetAudioPlayback().catch(() => undefined);
     });
   }, [
+    audioSourceKey,
     isUsingYoutube,
     isYoutubeReady,
     normalizedUrl,
+    pauseAudioPlayback,
     rawUrl,
+    resetAudioPlayback,
     seekYoutubeToStart,
     shouldPlay,
     startMs,
     startYoutubePolling,
-    stopAudioPlayback,
     stopYoutubePolling,
     trackKey,
+    youtubeVideoId,
   ]);
 
   const handleYoutubeReady = useCallback(() => {

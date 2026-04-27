@@ -79,6 +79,19 @@ const formatSwipeMusicLabel = (music?: Swipe["music"]): string => {
 const getMusicPlaybackUrl = (music?: Swipe["music"]): string =>
   String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
 
+const getTrimmedMusicDurationMs = (
+  music?: { duration?: number; startTime?: number; endTime?: number },
+): number => {
+  const explicitDurationMs = Math.max(0, Number(music?.duration || 0) * 1000);
+  if (explicitDurationMs > 0) {
+    return explicitDurationMs;
+  }
+
+  const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
+  const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
+  return endMs > startMs ? endMs - startMs : 0;
+};
+
 function SwipesScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
   const [viewportHeight, setViewportHeight] = useState(height);
@@ -115,7 +128,7 @@ function SwipesScreen({ navigation, route }: any) {
   const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipeRawMusicUrl);
   const activeSwipeMusicYoutubeVideoId = extractYouTubeVideoId(activeSwipe?.music);
   const activeSwipeMusicStartMs = Math.max(0, Number(activeSwipe?.music?.startTime || 0) * 1000);
-  const activeSwipeMusicDurationMs = Math.max(0, Number(activeSwipe?.music?.duration || 0) * 1000);
+  const activeSwipeMusicDurationMs = getTrimmedMusicDurationMs(activeSwipe?.music);
   const activeSwipeMusicTrackKey = activeSwipe
     ? `${activeSwipe.id}:${activeSwipeMusicYoutubeVideoId || activeSwipeMusicUrl}:${activeSwipeMusicStartMs}:${activeSwipeMusicDurationMs}`
     : "";
@@ -139,7 +152,10 @@ function SwipesScreen({ navigation, route }: any) {
   });
   const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
     + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 75 }).current;
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 60,
+    minimumViewTime: 80,
+  }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null; isViewable?: boolean }> }) => {
     const firstVisibleItem = viewableItems.find((entry) => entry.isViewable && typeof entry.index === "number");
     if (typeof firstVisibleItem?.index === "number") {
@@ -787,6 +803,8 @@ function SwipesScreen({ navigation, route }: any) {
         initialNumToRender={2}
         maxToRenderPerBatch={2}
         windowSize={3}
+        updateCellsBatchingPeriod={16}
+        scrollEventThrottle={16}
         getItemLayout={(_, index) => ({
           length: viewportHeight,
           offset: viewportHeight * index,
@@ -821,8 +839,8 @@ function SwipesScreen({ navigation, route }: any) {
 
       <Modal visible={!!activeSheet} transparent animationType="slide" onRequestClose={closeSheet}>
         <Pressable style={styles.sheetBackdrop} onPress={closeSheet} />
-        <View style={styles.sheetWrap}>
-          <View style={styles.sheetHandle} />
+        <View style={[styles.sheetWrap, activeSheet === "share" && styles.shareSheetWrap]}>
+          <View style={[styles.sheetHandle, activeSheet === "share" && styles.shareSheetHandle]} />
           {activeSheet === "comments" ? (
             <View style={styles.sheetContent}>
               <View style={styles.sheetHeader}>
@@ -901,55 +919,74 @@ function SwipesScreen({ navigation, route }: any) {
           {activeSheet === "share" && selectedSwipe ? (
             <View style={styles.sheetContent}>
               <View style={styles.sheetHeader}>
-                <Text style={styles.sheetTitle}>Share</Text>
+                <Text style={[styles.sheetTitle, styles.shareSheetTitle]}>Share</Text>
                 <TouchableOpacity onPress={closeSheet}>
-                  <Icon name="close" size={20} color="#111" />
+                  <Icon name="close" size={20} color="#f8fafc" />
                 </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={styles.shareAction}
-                onPress={async () => {
-                  closeSheet();
-                  await handleShare(selectedSwipe.id);
-                }}
-              >
-                <Icon name="sparkles-outline" size={20} color="#111" />
-                <Text style={styles.shareActionText}>Add to your story</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.shareAction}
-                onPress={async () => {
-                  const updated = await socialApi.toggleSwipeSave(selectedSwipe.id);
-                  setSwipes((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-                  setSelectedSwipe(updated);
-                  closeSheet();
-                }}
-              >
-                <Icon name={selectedSwipe.saved ? "bookmark" : "bookmark-outline"} size={20} color="#111" />
-                <Text style={styles.shareActionText}>{selectedSwipe.saved ? "Remove from saved" : "Save"}</Text>
-              </TouchableOpacity>
-              <ShareTargetsList
-                selectedTargetIds={selectedShareTargets.map((target) => target.key)}
-                onToggleTarget={(target) => {
-                  setSelectedShareTargets((current) =>
-                    current.some((item) => item.key === target.key)
-                      ? current.filter((item) => item.key !== target.key)
-                      : [...current, target],
-                  );
-                }}
-              />
+              <Text style={styles.shareSheetSubtitle}>
+                Choose chats first, then use the other share options below.
+              </Text>
+
+              <View style={styles.sharePeoplePanel}>
+                <View style={styles.sharePanelHeader}>
+                  <Text style={styles.sharePanelTitle}>Chats</Text>
+                  <Text style={styles.sharePanelMeta}>
+                    {selectedShareTargets.length ? `${selectedShareTargets.length} selected` : "Tap chats to select"}
+                  </Text>
+                </View>
+                <ShareTargetsList
+                  title="Send to"
+                  variant="dark"
+                  scrollEnabled={false}
+                  selectedTargetIds={selectedShareTargets.map((target) => target.key)}
+                  onToggleTarget={(target) => {
+                    setSelectedShareTargets((current) =>
+                      current.some((item) => item.key === target.key)
+                        ? current.filter((item) => item.key !== target.key)
+                        : [...current, target],
+                    );
+                  }}
+                />
+              </View>
               <TouchableOpacity
                 style={[
-                  styles.commentsButton,
+                  styles.shareSendButton,
                   !selectedShareTargets.length && styles.commentsButtonDisabled,
                 ]}
                 disabled={!selectedShareTargets.length}
                 onPress={sendSwipeToSelectedChats}
               >
-                <Text style={styles.commentsButtonText}>
+                <Text style={styles.shareSendButtonText}>
                   {selectedShareTargets.length ? `Send to ${selectedShareTargets.length}` : "Select chats"}
                 </Text>
               </TouchableOpacity>
+
+              <View style={styles.shareActionsPanel}>
+                <Text style={styles.sharePanelTitle}>Other options</Text>
+                <TouchableOpacity
+                  style={styles.shareActionDark}
+                  onPress={async () => {
+                    closeSheet();
+                    await handleShare(selectedSwipe.id);
+                  }}
+                >
+                  <Icon name="sparkles-outline" size={20} color="#f8fafc" />
+                  <Text style={styles.shareActionTextDark}>Add to your story</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.shareActionDark}
+                  onPress={async () => {
+                    const updated = await socialApi.toggleSwipeSave(selectedSwipe.id);
+                    setSwipes((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+                    setSelectedSwipe(updated);
+                    closeSheet();
+                  }}
+                >
+                  <Icon name={selectedSwipe.saved ? "bookmark" : "bookmark-outline"} size={20} color="#f8fafc" />
+                  <Text style={styles.shareActionTextDark}>{selectedSwipe.saved ? "Remove from saved" : "Save"}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ) : null}
 
@@ -1163,6 +1200,9 @@ const styles = StyleSheet.create({
     maxHeight: height * 0.8,
     paddingTop: 10,
   },
+  shareSheetWrap: {
+    backgroundColor: "#020617",
+  },
   sheetHandle: {
     alignSelf: "center",
     width: 44,
@@ -1170,6 +1210,9 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "#d1d5db",
     marginBottom: 10,
+  },
+  shareSheetHandle: {
+    backgroundColor: "rgba(148,163,184,0.48)",
   },
   sheetContent: {
     flex: 1,
@@ -1182,6 +1225,12 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   sheetTitle: { fontSize: 18, fontWeight: "800", color: "#111827" },
+  shareSheetTitle: { color: "#f8fafc" },
+  shareSheetSubtitle: {
+    color: "#94a3b8",
+    fontSize: 11.5,
+    marginBottom: 12,
+  },
   sheetLink: { color: "#2563eb", fontWeight: "700" },
   sheetLoader: { paddingVertical: 24, alignItems: "center" },
   sheetListContent: { paddingBottom: 12 },
@@ -1216,6 +1265,31 @@ const styles = StyleSheet.create({
   },
   sheetSend: { color: "#2563eb", fontWeight: "700", paddingHorizontal: 12 },
   sheetSendDisabled: { color: "#9ca3af" },
+  sharePeoplePanel: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(148,163,184,0.22)",
+    backgroundColor: "rgba(15,23,42,0.92)",
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  sharePanelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  sharePanelTitle: {
+    color: "#f8fafc",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  sharePanelMeta: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "600",
+  },
   shareAction: {
     flexDirection: "row",
     alignItems: "center",
@@ -1224,6 +1298,42 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
   },
   shareActionText: { marginLeft: 12, color: "#111827", fontWeight: "600", fontSize: 14 },
+  shareActionsPanel: {
+    marginTop: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(148,163,184,0.22)",
+    backgroundColor: "rgba(8,14,26,0.96)",
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  shareActionDark: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 52,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(148,163,184,0.18)",
+  },
+  shareActionTextDark: {
+    marginLeft: 12,
+    color: "#f8fafc",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  shareSendButton: {
+    marginTop: 12,
+    minHeight: 48,
+    borderRadius: 16,
+    backgroundColor: "#2563eb",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shareSendButtonText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 14,
+  },
   commentsButton: {
     marginTop: 14,
     minHeight: 48,

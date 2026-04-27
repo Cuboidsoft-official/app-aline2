@@ -41,6 +41,8 @@ const companyAds = [
   },
 ];
 
+const roundAdPrice = (value: number) => Math.ceil(value / 50) * 50;
+
 function HowToEarnScreen({ navigation }: any) {
   const { colors, isDarkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -49,6 +51,8 @@ function HowToEarnScreen({ navigation }: any) {
   const [adPrice, setAdPrice] = useState("");
   const [referralCode, setReferralCode] = useState("");
   const [hasSellerAccount, setHasSellerAccount] = useState(false);
+  const [hasAdsMembership, setHasAdsMembership] = useState(false);
+  const [membershipLabel, setMembershipLabel] = useState("INR 100 membership required");
 
   useFocusEffect(
     useCallback(() => {
@@ -56,10 +60,15 @@ function HowToEarnScreen({ navigation }: any) {
 
       const loadReferralCode = async () => {
         try {
-          const [walletRes, user] = await Promise.all([
+          const [walletRes, user, sellerRes] = await Promise.all([
             API.get("/wallet").catch(() => ({ data: null })),
             getStoredUser().catch(() => null),
+            API.get("/seller/me").catch(() => ({ data: null })),
           ]);
+          const seller = sellerRes.data?.seller;
+          const sellerPlanCode = String(seller?.subscriptionPlan?.code || seller?.premiumPlan || "").trim();
+          const sellerPlanAmount = Number(seller?.subscriptionPlan?.amount || sellerPlanCode.replace(/\D/g, "")) || 0;
+          const sellerReady = Boolean(seller?.onboardingCompleted);
 
           const nextCode = String(
             walletRes.data?.referralCode
@@ -71,7 +80,13 @@ function HowToEarnScreen({ navigation }: any) {
 
           if (active) {
             setReferralCode(nextCode);
-            setHasSellerAccount(String(user?.category || "").toLowerCase() === "seller");
+            setHasSellerAccount(Boolean(sellerReady || String(user?.category || "").toLowerCase() === "seller"));
+            setHasAdsMembership(Boolean(sellerReady && sellerPlanAmount >= 100));
+            setMembershipLabel(
+              sellerReady && sellerPlanAmount >= 100
+                ? `Membership active: INR ${sellerPlanAmount}`
+                : "INR 100 membership required",
+            );
           }
         } catch (error) {
           console.log("how to earn referral load error:", error);
@@ -92,6 +107,58 @@ function HowToEarnScreen({ navigation }: any) {
     return `${codeLine}\n${shareBase}`;
   }, [referralCode]);
 
+  const adPackages = useMemo(() => {
+    const basePrice = roundAdPrice(Math.max(299, Number(adPrice) || 299));
+
+    return [
+      {
+        title: "Story mention",
+        hint: "15 sec story, brand tag, swipe CTA",
+        amount: `INR ${basePrice}`,
+      },
+      {
+        title: "Feed post",
+        hint: "Single post or carousel with caption mention",
+        amount: `INR ${roundAdPrice(basePrice * 2)}`,
+      },
+      {
+        title: "Reel / short video",
+        hint: "Short video or talking format with mention",
+        amount: `INR ${roundAdPrice(basePrice * 3)}`,
+      },
+      {
+        title: "Combo package",
+        hint: "1 story + 1 feed/reel for one campaign",
+        amount: `INR ${roundAdPrice(basePrice * 4.25)}`,
+      },
+    ];
+  }, [adPrice]);
+
+  const openMembershipSetup = useCallback(() => {
+    navigation.navigate("SellerRegistration", {
+      mode: hasSellerAccount ? "edit" : "create",
+      initialStep: 2,
+    });
+  }, [hasSellerAccount, navigation]);
+
+  const requireAdsMembership = useCallback((section: EarnSection) => {
+    setActiveSection(section);
+
+    if (section === "referral" || hasAdsMembership) {
+      return true;
+    }
+
+    Alert.alert(
+      "Membership required",
+      "Post an ad aur List yourself for ads use karne ke liye INR 100 membership zaruri hai.",
+      [
+        { text: "Later", style: "cancel" },
+        { text: hasSellerAccount ? "Open membership" : "Get membership", onPress: openMembershipSetup },
+      ],
+    );
+    return false;
+  }, [hasAdsMembership, hasSellerAccount, openMembershipSetup]);
+
   const copyReferralCode = () => {
     if (!referralCode) {
       Alert.alert("Referral code", "Your referral code is not available yet.");
@@ -111,6 +178,18 @@ function HowToEarnScreen({ navigation }: any) {
   };
 
   const saveAdListing = () => {
+    if (!hasAdsMembership) {
+      Alert.alert(
+        "Membership required",
+        "Ad listing save karne ke liye pehle INR 100 membership activate karo.",
+        [
+          { text: "Later", style: "cancel" },
+          { text: hasSellerAccount ? "Open membership" : "Get membership", onPress: openMembershipSetup },
+        ],
+      );
+      return;
+    }
+
     const cleanPrice = adPrice.trim();
 
     if (!cleanPrice) {
@@ -121,8 +200,29 @@ function HowToEarnScreen({ navigation }: any) {
     Alert.alert("Listing ready", `Your ad listing starts at INR ${cleanPrice}.`);
   };
 
+  const renderMembershipLock = (title: string, body: string) => (
+    <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={[styles.membershipBanner, { backgroundColor: `${colors.primary}12`, borderColor: `${colors.primary}28` }]}>
+        <Icon name="lock-closed-outline" size={16} color={colors.primary} />
+        <Text style={[styles.membershipBannerText, { color: colors.primary }]}>{membershipLabel}</Text>
+      </View>
+      <Text style={[styles.detailTitle, { color: colors.text }]}>{title}</Text>
+      <Text style={[styles.detailBody, { color: colors.mutedText }]}>{body}</Text>
+      <TouchableOpacity style={[styles.primaryButton, styles.membershipButton, { backgroundColor: colors.primary }]} onPress={openMembershipSetup}>
+        <Text style={styles.primaryButtonText}>{hasSellerAccount ? "Open membership" : "Get INR 100 membership"}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   const renderSection = () => {
     if (activeSection === "companyAds") {
+      if (!hasAdsMembership) {
+        return renderMembershipLock(
+          "Post an ad",
+          "Company campaigns dekhne aur apply karne ke liye INR 100 membership active honi chahiye.",
+        );
+      }
+
       return (
         <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.detailTitle, { color: colors.text }]}>Company ad list</Text>
@@ -136,7 +236,15 @@ function HowToEarnScreen({ navigation }: any) {
                 <Text style={[styles.campaignTitle, { color: colors.text }]}>{item.title}</Text>
                 <Text style={[styles.campaignMeta, { color: colors.mutedText }]}>{item.meta}</Text>
               </View>
-              <Text style={[styles.campaignPayout, { color: colors.primary }]}>{item.payout}</Text>
+              <View style={styles.campaignAside}>
+                <Text style={[styles.campaignPayout, { color: colors.primary }]}>{item.payout}</Text>
+                <TouchableOpacity
+                  style={[styles.applyChip, { backgroundColor: `${colors.primary}12`, borderColor: `${colors.primary}28` }]}
+                  onPress={() => Alert.alert("Application ready", `You can now apply for ${item.title}.`)}
+                >
+                  <Text style={[styles.applyChipText, { color: colors.primary }]}>Apply</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ))}
         </View>
@@ -144,11 +252,18 @@ function HowToEarnScreen({ navigation }: any) {
     }
 
     if (activeSection === "listAds") {
+      if (!hasAdsMembership) {
+        return renderMembershipLock(
+          "List yourself for ads",
+          "Apni ad profile public karne aur rates show karne ke liye INR 100 membership zaruri hai.",
+        );
+      }
+
       return (
         <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.detailTitle, { color: colors.text }]}>List yourself for ads</Text>
           <Text style={[styles.detailBody, { color: colors.mutedText }]}>
-            Set your starting price so brands know your ad rate.
+            Starting price set karo. Neeche brands ko dikhne wale common deliverables aur expected charges ka preview hai.
           </Text>
 
           <View style={[styles.priceBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -162,6 +277,22 @@ function HowToEarnScreen({ navigation }: any) {
               style={[styles.priceInput, { color: colors.text }]}
             />
           </View>
+
+          <View style={styles.packageList}>
+            {adPackages.map((item) => (
+              <View key={item.title} style={[styles.packageRow, { borderColor: colors.border }]}>
+                <View style={styles.packageCopy}>
+                  <Text style={[styles.packageTitle, { color: colors.text }]}>{item.title}</Text>
+                  <Text style={[styles.packageHint, { color: colors.mutedText }]}>{item.hint}</Text>
+                </View>
+                <Text style={[styles.packageAmount, { color: colors.primary }]}>{item.amount}</Text>
+              </View>
+            ))}
+          </View>
+
+          <Text style={[styles.helperNote, { color: colors.mutedText }]}>
+            Mention mein story, feed post, reel, combo package jaisi cheezein clear likho so brands ko samajh aaye kis cheez ka kitna charge hai.
+          </Text>
 
           <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={saveAdListing}>
             <Text style={styles.primaryButtonText}>Save listing</Text>
@@ -236,6 +367,11 @@ function HowToEarnScreen({ navigation }: any) {
           </View>
         </TouchableOpacity>
 
+        <View style={[styles.membershipBanner, { backgroundColor: `${colors.primary}10`, borderColor: `${colors.primary}24` }]}>
+          <Icon name={hasAdsMembership ? "checkmark-circle-outline" : "lock-closed-outline"} size={16} color={colors.primary} />
+          <Text style={[styles.membershipBannerText, { color: colors.text }]}>{membershipLabel}</Text>
+        </View>
+
         <View style={styles.actionList}>
           <TouchableOpacity
             style={[styles.actionRow, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -255,28 +391,32 @@ function HowToEarnScreen({ navigation }: any) {
 
           <TouchableOpacity
             style={[styles.actionRow, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => setActiveSection("companyAds")}
+            onPress={() => {
+              void requireAdsMembership("companyAds");
+            }}
           >
             <View style={[styles.actionIcon, { backgroundColor: `${colors.primary}14` }]}>
               <Icon name="megaphone-outline" size={20} color={colors.primary} />
             </View>
             <View style={styles.actionCopy}>
               <Text style={[styles.actionTitle, { color: colors.text }]}>Post an ad</Text>
-              <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>View company ad campaigns.</Text>
+              <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>View company ad campaigns. INR 100 membership required.</Text>
             </View>
             <Icon name="chevron-down" size={18} color={colors.mutedText} />
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.actionRow, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => setActiveSection("listAds")}
+            onPress={() => {
+              void requireAdsMembership("listAds");
+            }}
           >
             <View style={[styles.actionIcon, { backgroundColor: `${colors.primary}14` }]}>
               <Icon name="pricetag-outline" size={20} color={colors.primary} />
             </View>
             <View style={styles.actionCopy}>
               <Text style={[styles.actionTitle, { color: colors.text }]}>List yourself for ads</Text>
-              <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>Set your ad price.</Text>
+              <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>Set deliverables, rates, and brand mention pricing.</Text>
             </View>
             <Icon name="chevron-down" size={18} color={colors.mutedText} />
           </TouchableOpacity>
@@ -362,6 +502,21 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: "hidden",
     marginBottom: 16,
+  },
+  membershipBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
+    gap: 8,
+  },
+  membershipBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "800",
   },
   videoPreview: {
     height: 150,
@@ -458,6 +613,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
   },
+  campaignAside: {
+    alignItems: "flex-end",
+  },
+  applyChip: {
+    marginTop: 8,
+    minHeight: 30,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  applyChipText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
   priceBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -490,6 +661,41 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "800",
+  },
+  membershipButton: {
+    marginTop: 14,
+  },
+  packageList: {
+    marginBottom: 12,
+  },
+  packageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 12,
+    marginTop: 12,
+  },
+  packageCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  packageTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  packageHint: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  packageAmount: {
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  helperNote: {
+    marginBottom: 14,
+    fontSize: 12,
+    lineHeight: 18,
   },
   referralBox: {
     flexDirection: "row",

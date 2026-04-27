@@ -34,7 +34,11 @@ local.properties
 *.hprof
 .cxx/
 *.keystore
-!debug.keystore
+*.jks
+android/app/*.keystore
+android/app/*.jks
+android/app/*.keystore.*
+android/app/*.jks.*
 .kotlin/
 
 # node.js

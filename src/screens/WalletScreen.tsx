@@ -154,7 +154,7 @@ function WalletScreen({ navigation }: any) {
       if (error?.code === 0) {
         Alert.alert("Payment cancelled", "Wallet top-up was not completed.");
       } else if (error?.response?.status === 404) {
-        Alert.alert("Backend sync needed", "Wallet payment route nahi mila. Backend ko restart karo aur app ko reload karo.");
+        Alert.alert("Wallet payment unavailable", "Wallet payment service is not reachable right now. Restart the backend and try again.");
       } else {
         Alert.alert("Wallet top-up failed", error?.response?.data?.message || error?.message || "Please try again.");
       }
@@ -231,7 +231,7 @@ function WalletScreen({ navigation }: any) {
             <View style={styles.balanceBadge}>
               <Icon name="flash-outline" size={14} color={white} />
               <Text style={styles.balanceBadgeText}>
-                Recharge with Razorpay and use coins for appointments
+                Recharge coins securely and keep your balance ready for bookings
               </Text>
             </View>
           </View>
@@ -276,7 +276,7 @@ function WalletScreen({ navigation }: any) {
             </View>
             <View style={styles.sectionHeaderCopy}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>Recharge Coins</Text>
-              <Text style={[styles.cardText, { color: textSecondary }]}>Top up your dashboard balance, then use coins to book appointments faster.</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Top up your dashboard balance and use coins across bookings and paid actions.</Text>
             </View>
           </View>
 
@@ -321,7 +321,7 @@ function WalletScreen({ navigation }: any) {
             {addingMoney ? <ActivityIndicator color={white} /> : (
               <>
                 <Icon name="flash-outline" size={18} color={white} />
-                <Text style={styles.primaryButtonText}>Recharge with Razorpay</Text>
+                <Text style={styles.primaryButtonText}>Recharge coins</Text>
               </>
             )}
           </TouchableOpacity>

@@ -45,6 +45,7 @@ import { resolveMentionUserId } from "../utils/mentionLinks";
 import { extractYouTubeVideoId } from "../utils/youtubePlayback";
 import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 import { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
+import AppAvatar from "../components/AppAvatar";
 import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
 import { downloadImageAsset } from "../utils/mediaDownload";
 import { connectSocket, socket } from "../socket";
@@ -140,6 +141,19 @@ const formatPostMusicLabel = (music?: Post["music"]): string => {
   return artistName ? `${trackName} • ${artistName}` : trackName;
 };
 
+const getTrimmedMusicDurationMs = (
+  music?: { duration?: number; startTime?: number; endTime?: number },
+): number => {
+  const explicitDurationMs = Math.max(0, Number(music?.duration || 0) * 1000);
+  if (explicitDurationMs > 0) {
+    return explicitDurationMs;
+  }
+
+  const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
+  const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
+  return endMs > startMs ? endMs - startMs : 0;
+};
+
 const getPostAspectRatio = (post: Post): number => {
   const primaryMedia = post.media[0];
   const assetRatio =
@@ -147,7 +161,7 @@ const getPostAspectRatio = (post: Post): number => {
       ? primaryMedia.width / Math.max(1, primaryMedia.height)
       : 1;
 
-  return Math.min(1.91, Math.max(0.8, assetRatio || 1));
+  return Math.min(1.91, Math.max(0.65, assetRatio || 1));
 };
 
 const getImageResizeMode = (
@@ -190,7 +204,7 @@ type SellerAccountSummary = {
 };
 
 function FeedScreen({ navigation }: any) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const { colors, isDarkMode } = useAppTheme();
   const isScreenFocused = useIsFocused();
   const feedAccent = colors.primary || FEED_ACCENT;
@@ -222,33 +236,45 @@ function FeedScreen({ navigation }: any) {
   const [publishTasks, setPublishTasks] = useState<PublishQueueTask[]>(() => getPublishQueueSnapshot());
   const slideAnim = useRef(new Animated.Value(0)).current;
   const hasFeedContentRef = useRef(false);
+  const feedScrollTransitionRef = useRef(false);
+  const feedScrollResumeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastViewablePostIdRef = useRef("");
   const postTapRef = useRef<{ id: string; time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     id: "",
     time: 0,
     timeout: null,
   });
   const isTabletLayout = width >= 768;
-  const feedHorizontalInset = isTabletLayout ? 18 : width < 360 ? 10 : 14;
+  const isCompactPhone = width < 360;
+  const isMediumPhone = width < 430;
+  const feedHorizontalInset = isTabletLayout ? 18 : isCompactPhone ? 8 : 10;
   const storyRailVerticalInset = isTabletLayout ? 12 : width < 360 ? 8 : 10;
   const storyItemWidth = isTabletLayout ? 86 : width < 360 ? 68 : 76;
   const storyRingSize = isTabletLayout ? 72 : width < 360 ? 58 : 64;
   const storyAvatarSize = storyRingSize - 7;
   const storyAddBadgeSize = width < 360 ? 16 : 18;
-  const postCardRadius = isTabletLayout ? 18 : width < 360 ? 12 : 14;
-  const postHeaderPadding = isTabletLayout ? 18 : width < 360 ? 13 : 15;
+  const postCardRadius = isTabletLayout ? 16 : isCompactPhone ? 10 : 12;
+  const postHeaderPadding = isTabletLayout ? 14 : isCompactPhone ? 10 : 11;
   const postBodyInset = postHeaderPadding + 2;
-  const postActionButtonSize = width < 360 ? 38 : 40;
+  const postActionButtonSize = isCompactPhone ? 32 : isMediumPhone ? 35 : 36;
   const postMediaWidth = Math.max(width - feedHorizontalInset * 2, 0);
   const defaultPostMediaHeight = Math.round(
     Math.min(
       isTabletLayout ? 540 : 420,
-      Math.max(width < 360 ? 280 : 320, postMediaWidth * (isTabletLayout ? 0.76 : 0.92)),
+      Math.max(isCompactPhone ? 280 : 320, postMediaWidth * (isTabletLayout ? 0.76 : 0.92)),
     ),
   );
   const sidebarWidth = Math.min(width - (width < 360 ? 16 : 24), isTabletLayout ? 380 : width < 360 ? 312 : 340);
   const isCompactSidebar = width < 360;
   const isCompactHeader = width < 430;
   const hasSellerAccount = Boolean(sellerAccount);
+  const usernameFontSize = isTabletLayout ? 13.6 : isCompactPhone ? 12.2 : 12.8;
+  const postTimeFontSize = isTabletLayout ? 11.6 : isCompactPhone ? 10.1 : 10.6;
+  const captionFontSize = isTabletLayout ? 13.2 : isCompactPhone ? 12.2 : 12.7;
+  const captionLineHeight = isTabletLayout ? 19 : isCompactPhone ? 17 : 18;
+  const supportingFontSize = isTabletLayout ? 11.8 : isCompactPhone ? 10.2 : 10.7;
+  const composerFontSize = isTabletLayout ? 13.1 : isCompactPhone ? 11.8 : 12.4;
+  const mediaChipFontSize = isTabletLayout ? 10.8 : isCompactPhone ? 9.8 : 10.2;
 
   const sidebarTranslateX = slideAnim.interpolate({
     inputRange: [0, 1],
@@ -264,7 +290,7 @@ function FeedScreen({ navigation }: any) {
   const activePostMusicUrl = normalizeMediaUrl(activePostRawMusicUrl);
   const activePostMusicYoutubeVideoId = extractYouTubeVideoId(activePost?.music);
   const activePostMusicStartMs = Math.max(0, Number(activePost?.music?.startTime || 0) * 1000);
-  const activePostMusicDurationMs = Math.max(0, Number(activePost?.music?.duration || 0) * 1000);
+  const activePostMusicDurationMs = getTrimmedMusicDurationMs(activePost?.music);
   const activePostMusicTrackKey = activePost
     ? `${activePost.id}:${activePostMusicYoutubeVideoId || activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
     : "";
@@ -336,7 +362,7 @@ function FeedScreen({ navigation }: any) {
       {
         title: "Growth",
         data: [
-          { icon: "megaphone-outline", label: "Promotions", screen: "WalletScreen" },
+          { icon: "megaphone-outline", label: "Promotions", screen: "HowToEarnScreen" },
           { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen" },
           hasSellerAccount
             ? { icon: "briefcase-outline", label: "Seller Workspace", screen: "SellerDashboardScreen" }
@@ -497,18 +523,21 @@ function FeedScreen({ navigation }: any) {
   }, []);
 
   useEffect(() => {
-    if (!feed.posts.length) {
+    if (!isScreenFocused || !feed.posts.length) {
       setActivePostId("");
       return;
     }
 
     setActivePostId((current) => (current && feed.posts.some((item) => item.id === current) ? current : feed.posts[0].id));
-  }, [feed.posts]);
+  }, [feed.posts, isScreenFocused]);
 
   useEffect(() => {
     return () => {
       if (postTapRef.current.timeout) {
         clearTimeout(postTapRef.current.timeout);
+      }
+      if (feedScrollResumeTimeoutRef.current) {
+        clearTimeout(feedScrollResumeTimeoutRef.current);
       }
     };
   }, []);
@@ -536,11 +565,29 @@ function FeedScreen({ navigation }: any) {
 
     setIsActionBusy((prev) => ({ ...prev, [`like_${postId}`]: true }));
     try {
+      const currentPost = feed.posts.find((item) => item.id === postId);
       const updated = await socialApi.togglePostLike(postId);
-      updatePost(updated);
-      if (updated?.liked) {
-        loadFeed().catch(() => {});
-      }
+      const previewUsers = Array.isArray(currentPost?.likePreviewUsers) ? currentPost.likePreviewUsers : [];
+      const nextPreviewUsers = updated?.liked
+        ? [
+            {
+              id: currentUser?.id || "",
+              username: currentUser?.username || "",
+              name: currentUser?.name || "",
+              avatarUrl: currentUser?.avatarUrl || DEFAULT_AVATAR_URL,
+            },
+            ...previewUsers.filter((user) => String(user?.id || "") !== String(currentUser?.id || "")),
+          ].filter((user) => !!String(user?.id || "").trim()).slice(0, 3)
+        : previewUsers.filter((user) => String(user?.id || "") !== String(currentUser?.id || "")).slice(0, 3);
+
+      updatePost({
+        ...updated,
+        likePreviewUsers: nextPreviewUsers.length
+          ? nextPreviewUsers
+          : Array.isArray(updated?.likePreviewUsers)
+            ? updated.likePreviewUsers
+            : previewUsers,
+      });
     } catch (error) {
       Alert.alert("Could not like post", toUserSafeMessage(error));
     } finally {
@@ -574,6 +621,43 @@ function FeedScreen({ navigation }: any) {
       setLikeBurstPostId((current) => (current === postId ? "" : current));
     }, 720);
   }, []);
+
+  const restoreActiveVisiblePost = useCallback(() => {
+    if (feedScrollResumeTimeoutRef.current) {
+      clearTimeout(feedScrollResumeTimeoutRef.current);
+      feedScrollResumeTimeoutRef.current = null;
+    }
+
+    feedScrollTransitionRef.current = false;
+
+    if (!isScreenFocused || activeSheet) {
+      setActivePostId("");
+      return;
+    }
+
+    const nextActivePostId = lastViewablePostIdRef.current || feed.posts[0]?.id || "";
+    setActivePostId(nextActivePostId);
+  }, [activeSheet, feed.posts, isScreenFocused]);
+
+  const pauseActiveVisiblePost = useCallback(() => {
+    if (feedScrollResumeTimeoutRef.current) {
+      clearTimeout(feedScrollResumeTimeoutRef.current);
+      feedScrollResumeTimeoutRef.current = null;
+    }
+
+    feedScrollTransitionRef.current = true;
+    setActivePostId("");
+  }, []);
+
+  const scheduleRestoreActiveVisiblePost = useCallback((delay = 80) => {
+    if (feedScrollResumeTimeoutRef.current) {
+      clearTimeout(feedScrollResumeTimeoutRef.current);
+    }
+
+    feedScrollResumeTimeoutRef.current = setTimeout(() => {
+      restoreActiveVisiblePost();
+    }, delay);
+  }, [restoreActiveVisiblePost]);
 
   const handlePostMediaPress = (post: Post) => {
     const now = Date.now();
@@ -610,12 +694,19 @@ function FeedScreen({ navigation }: any) {
   const getPostMediaHeight = useCallback((post: Post) => {
     const aspectRatio = getPostAspectRatio(post);
     const resolvedHeight = Math.round(postMediaWidth / aspectRatio);
+    const minMediaHeight = Math.max(width < 360 ? 240 : 260, Math.round(postMediaWidth * 0.58));
+    const maxMediaHeight = Math.round(
+      Math.min(
+        isTabletLayout ? height * 0.72 : height * 0.62,
+        isTabletLayout ? 720 : 620,
+      ),
+    );
 
     return Math.max(
-      width < 360 ? 280 : 320,
-      Math.min(isTabletLayout ? 620 : 560, resolvedHeight || defaultPostMediaHeight),
+      minMediaHeight,
+      Math.min(maxMediaHeight, resolvedHeight || defaultPostMediaHeight),
     );
-  }, [defaultPostMediaHeight, isTabletLayout, postMediaWidth, width]);
+  }, [defaultPostMediaHeight, height, isTabletLayout, postMediaWidth, width]);
 
   const submitComment = async (postId: string, audioFile?: CommentAudioFile) => {
     const draft = (commentDrafts[postId] || "").trim();
@@ -1067,6 +1158,7 @@ function FeedScreen({ navigation }: any) {
     const currentCarouselIndex = carouselIndexByPostId[post.id] || 0;
     const hasAttachedMusic = !!(getMusicPlaybackUrl(post.music) || extractYouTubeVideoId(post.music));
     const isMuted = !!mutedPostIds[post.id];
+    const isPostActive = activePostId === post.id && isScreenFocused && !activeSheet;
     const renderSensitiveBadge = (label?: string) => (
       <View pointerEvents="none" style={styles.sensitiveBadge}>
         <Text style={styles.sensitiveBadgeText}>{label ? `${label} sensitive content` : "Sensitive content"}</Text>
@@ -1086,8 +1178,10 @@ function FeedScreen({ navigation }: any) {
               uri={normalizeMediaUrl(primaryMedia.url)}
               posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || primaryMedia.url)}
               style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
+              paused={!isPostActive}
               muted={isMuted || hasAttachedMusic}
               repeat
+              resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
               contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
             />
             {primaryMedia.sensitiveContent?.isSensitive ? renderSensitiveBadge(primaryMedia.sensitiveContent.label) : null}
@@ -1140,15 +1234,17 @@ function FeedScreen({ navigation }: any) {
             setCarouselIndexByPostId((prev) => ({ ...prev, [post.id]: nextIndex }));
           }}
         >
-          {post.media.map((asset) => (
+          {post.media.map((asset, index) => (
             asset.mediaType === "video" ? (
               <View key={asset.id}>
                 <SocialVideo
                   uri={normalizeMediaUrl(asset.url)}
                   posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
                   style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
+                  paused={!isPostActive || currentCarouselIndex !== index}
                   muted={isMuted || hasAttachedMusic}
                   repeat
+                  resizeMode={getImageResizeMode(asset, frameAspectRatio)}
                   contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
                 />
                 {asset.sensitiveContent?.isSensitive ? renderSensitiveBadge(asset.sensitiveContent.label) : null}
@@ -1310,6 +1406,8 @@ function FeedScreen({ navigation }: any) {
     const musicLabel = formatPostMusicLabel(item.music);
     const hasAttachedMusic = !!(getMusicPlaybackUrl(item.music) || extractYouTubeVideoId(item.music));
     const isMuted = !!mutedPostIds[item.id];
+    const likeAvatarUrl =
+      (item.liked ? currentUser?.avatarUrl : "") || item.user.avatarUrl || DEFAULT_AVATAR_URL;
     void musicLabel;
     void hasAttachedMusic;
     void isMuted;
@@ -1343,19 +1441,21 @@ function FeedScreen({ navigation }: any) {
             {
               paddingHorizontal: postHeaderPadding,
               paddingTop: postHeaderPadding,
-              paddingBottom: Math.max(12, postHeaderPadding - 2),
+              paddingBottom: Math.max(10, postHeaderPadding - 3),
             },
           ]}
         >
           <TouchableOpacity style={styles.postHeaderIdentity} onPress={() => openUserProfile(item.user.id)}>
-            <Image
-              source={{ uri: item.user.avatarUrl || DEFAULT_AVATAR_URL }}
+            <AppAvatar
+              uri={item.user.avatarUrl || DEFAULT_AVATAR_URL}
+              name={item.user.name || item.user.username}
+              size={width < 360 ? 38 : 42}
               style={[styles.postAvatar, width < 360 && styles.postAvatarCompact]}
             />
             <View style={styles.userMeta}>
               <View style={[styles.row, styles.usernameRow]}>
                 <Text
-                  style={[styles.username, styles.usernameText, { color: colors.text }]}
+                  style={[styles.username, styles.usernameText, { color: colors.text, fontSize: usernameFontSize }]}
                   numberOfLines={1}
                   ellipsizeMode="tail"
                 >
@@ -1369,16 +1469,15 @@ function FeedScreen({ navigation }: any) {
             </View>
           </TouchableOpacity>
           <View style={styles.postHeaderActions}>
-            {renderFeedRelationshipButton(item.user)}
             <TouchableOpacity
               style={[
                 styles.moreButton,
                 {
                   width: postActionButtonSize - 2,
                   height: postActionButtonSize - 2,
-                  borderRadius: Math.round((postActionButtonSize - 2) / 3),
-                  backgroundColor: feedAccentSoft,
-                  borderColor: feedAccentBorder,
+                  borderRadius: Math.round((postActionButtonSize - 2) / 2),
+                  backgroundColor: "transparent",
+                  borderColor: "transparent",
                 },
               ]}
               onPress={() => openContentActions(item)}
@@ -1404,14 +1503,14 @@ function FeedScreen({ navigation }: any) {
               {
                 width: postActionButtonSize,
                 height: postActionButtonSize,
-                borderRadius: Math.round(postActionButtonSize / 3.2),
-                backgroundColor: feedAccentSoft,
-                borderColor: feedAccentBorder,
+                borderRadius: Math.round(postActionButtonSize / 2),
+                backgroundColor: "transparent",
+                borderColor: "transparent",
               },
             ]}
             onPress={() => handleLike(item.id)}
           >
-            <Icon name={item.liked ? "heart" : "heart-outline"} size={24} color={item.liked ? "#f3425f" : colors.text} />
+            <Icon name={item.liked ? "heart" : "heart-outline"} size={23} color={item.liked ? "#f3425f" : colors.text} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1420,9 +1519,9 @@ function FeedScreen({ navigation }: any) {
               {
                 width: postActionButtonSize,
                 height: postActionButtonSize,
-                borderRadius: Math.round(postActionButtonSize / 3.2),
-                backgroundColor: feedAccentSoft,
-                borderColor: feedAccentBorder,
+                borderRadius: Math.round(postActionButtonSize / 2),
+                backgroundColor: "transparent",
+                borderColor: "transparent",
               },
             ]}
             onPress={() => openPostCommentsSheet(item)}
@@ -1512,13 +1611,16 @@ function FeedScreen({ navigation }: any) {
         </View>
 
         {!item.settings.hideLikeCount ? (
-          <Text style={[styles.likesText, { paddingHorizontal: postBodyInset, color: colors.text }]}>
+          <Text style={[styles.likesText, { paddingHorizontal: postBodyInset, color: colors.text, fontSize: supportingFontSize + 1 }]}>
             {formatCount(item.likesCount)} likes
           </Text>
         ) : null}
 
         <InteractiveText
-          style={[styles.caption, { paddingHorizontal: postBodyInset, color: colors.text }]}
+          style={[
+            styles.caption,
+            { paddingHorizontal: postBodyInset, color: colors.text, fontSize: captionFontSize, lineHeight: captionLineHeight },
+          ]}
           prefix={(
             <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
               {item.user.username}{" "}
@@ -1535,7 +1637,7 @@ function FeedScreen({ navigation }: any) {
 
         {item.mentions.length ? (
           <InteractiveText
-            style={[styles.tagLineMuted, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}
+            style={[styles.tagLineMuted, { paddingHorizontal: postBodyInset, color: colors.mutedText, fontSize: supportingFontSize }]}
             mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
             onPressMention={(mention) => {
               void openMentionProfile(mention);
@@ -1549,12 +1651,12 @@ function FeedScreen({ navigation }: any) {
           {metaLine}
         </Text>
 
-        {item.collaboratorIds.length ? (
+        {false ? (
           <Text style={[styles.collabLine, { color: colors.text }]}>Collab post • {item.collaboratorIds.length} collaborators</Text>
         ) : null}
 
         <TouchableOpacity onPress={() => openPostCommentsSheet(item)}>
-          <Text style={[styles.commentCount, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
+          <Text style={[styles.commentCount, { paddingHorizontal: postBodyInset, color: colors.mutedText, fontSize: supportingFontSize }]}>
             View all {item.commentsCount} comments
           </Text>
         </TouchableOpacity>
@@ -1573,12 +1675,14 @@ function FeedScreen({ navigation }: any) {
             <TextInput
               value={commentDrafts[item.id] || ""}
               onChangeText={(text) => setCommentDrafts((prev) => ({ ...prev, [item.id]: text }))}
-              style={[styles.commentInput, { color: colors.text }]}
+              style={[styles.commentInput, { color: colors.text, fontSize: composerFontSize }]}
               placeholder="Add a comment..."
               placeholderTextColor={colors.mutedText}
             />
             <TouchableOpacity onPress={() => handleCommentSubmit(item.id)}>
-              <Text style={[styles.postButton, { color: FEED_ACCENT }]}>Post</Text>
+              <Text style={[styles.postButton, { color: FEED_ACCENT, fontSize: composerFontSize }]}>
+                {isCompactPhone ? "Send" : "Post"}
+              </Text>
             </TouchableOpacity>
             <VoiceRecorderButton
               color={FEED_ACCENT}
@@ -1591,7 +1695,7 @@ function FeedScreen({ navigation }: any) {
             />
           </View>
         ) : (
-          <Text style={[styles.commentsDisabled, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
+          <Text style={[styles.commentsDisabled, { paddingHorizontal: postBodyInset, color: colors.mutedText, fontSize: supportingFontSize }]}>
             Comments limited for this post
           </Text>
         )}
@@ -1604,7 +1708,23 @@ function FeedScreen({ navigation }: any) {
     const musicLabel = formatPostMusicLabel(item.music);
     const hasAttachedMusic = !!(getMusicPlaybackUrl(item.music) || extractYouTubeVideoId(item.music));
     const isMuted = !!mutedPostIds[item.id];
-    const metaLine = [getPostTypeTag(item), musicLabel ? `🎵 ${musicLabel}` : null].filter(Boolean).join(" • ");
+    const likePreviewUsers =
+      Array.isArray(item.likePreviewUsers) && item.likePreviewUsers.length
+        ? item.likePreviewUsers.slice(0, 3)
+        : [];
+    const hasLikeSummary = !item.settings.hideLikeCount && item.likesCount > 0;
+    const latestLiker =
+      likePreviewUsers.find((likeUser) => String(likeUser?.id || "") !== String(currentUser?.id || ""))
+      || likePreviewUsers[0]
+      || null;
+    const latestLikerName = String(latestLiker?.name || latestLiker?.username || "").trim();
+    const likeSummaryLabel = latestLikerName
+      ? item.likesCount > 1
+        ? `Liked by ${latestLikerName} and ${Math.max(1, item.likesCount - 1)} others`
+        : `Liked by ${latestLikerName}`
+      : item.likesCount === 1
+        ? "1 like"
+        : `${formatCount(item.likesCount)} likes`;
 
     return (
       <View
@@ -1647,22 +1767,21 @@ function FeedScreen({ navigation }: any) {
                   <Icon style={styles.verifiedIcon} name="checkmark-circle" color={FEED_ACCENT} size={16} />
                 ) : null}
               </View>
-              <Text style={[styles.postTime, { color: colors.mutedText }]}>
+              <Text style={[styles.postTime, { color: colors.mutedText, fontSize: postTimeFontSize }]}>
                 {formatAgo(item.createdAt)}
               </Text>
             </View>
           </TouchableOpacity>
           <View style={styles.postHeaderActions}>
-            {renderFeedRelationshipButton(item.user)}
             <TouchableOpacity
               style={[
                 styles.moreButton,
                 {
                   width: postActionButtonSize - 2,
                   height: postActionButtonSize - 2,
-                  borderRadius: Math.round((postActionButtonSize - 2) / 3),
-                  backgroundColor: feedAccentSoft,
-                  borderColor: feedAccentBorder,
+                  borderRadius: Math.round((postActionButtonSize - 2) / 2),
+                  backgroundColor: "transparent",
+                  borderColor: "transparent",
                 },
               ]}
               onPress={() => openContentActions(item)}
@@ -1672,27 +1791,43 @@ function FeedScreen({ navigation }: any) {
           </View>
         </View>
 
-        <Pressable onPress={() => handlePostMediaPress(item)} style={styles.mediaPressSurface}>
-          {renderPostMedia(item)}
-          {renderPostStickerOverlay(item)}
-          {likeBurstPostId === item.id ? (
-            <View pointerEvents="none" style={styles.likeBurstOverlay}>
-              <Icon name="heart" size={88} color="rgba(255,255,255,0.92)" />
-            </View>
-          ) : null}
-          {(hasVideoMedia || hasAttachedMusic) ? (
-            <View style={styles.mediaSoundHint}>
-              <Icon name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color="#fff" />
-              <Text style={styles.mediaSoundHintText}>{isMuted ? "Muted" : "Sound on"}</Text>
-            </View>
-          ) : null}
-          {musicLabel ? (
-            <View style={styles.mediaMusicChip}>
-              <Icon name="musical-notes" size={13} color="#fff" />
-              <Text numberOfLines={1} style={styles.mediaMusicChipText}>{musicLabel}</Text>
-            </View>
-          ) : null}
-        </Pressable>
+        <View
+          style={[
+            styles.mediaFrame,
+            {
+              marginHorizontal: 0,
+              borderRadius: 0,
+              borderColor: "transparent",
+              backgroundColor: isDarkMode ? "#050816" : "#f6f8fc",
+            },
+          ]}
+        >
+          <Pressable onPress={() => handlePostMediaPress(item)} style={styles.mediaPressSurface}>
+            {renderPostMedia(item)}
+            {renderPostStickerOverlay(item)}
+            {likeBurstPostId === item.id ? (
+              <View pointerEvents="none" style={styles.likeBurstOverlay}>
+                <Icon name="heart" size={88} color="rgba(255,255,255,0.92)" />
+              </View>
+            ) : null}
+            {(hasVideoMedia || hasAttachedMusic) ? (
+              <View style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
+                <Icon name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color="#fff" />
+                <Text style={[styles.mediaSoundHintText, { fontSize: mediaChipFontSize }]}>
+                  {isMuted ? "Muted" : "Sound on"}
+                </Text>
+              </View>
+            ) : null}
+            {musicLabel ? (
+              <View style={[styles.mediaMusicChip, isCompactPhone && styles.mediaMusicChipCompact]}>
+                <Icon name="musical-notes" size={13} color="#fff" />
+                <Text numberOfLines={1} style={[styles.mediaMusicChipText, { fontSize: mediaChipFontSize }]}>
+                  {musicLabel}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
 
         <View style={[styles.actionsRow, { paddingHorizontal: postHeaderPadding }]}>
           <TouchableOpacity
@@ -1724,7 +1859,7 @@ function FeedScreen({ navigation }: any) {
             ]}
             onPress={() => openPostCommentsSheet(item)}
           >
-            <Icon name="chatbubble-outline" size={22} color={colors.text} />
+            <Icon name="chatbubble-outline" size={21} color={colors.text} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1733,58 +1868,17 @@ function FeedScreen({ navigation }: any) {
               {
                 width: postActionButtonSize,
                 height: postActionButtonSize,
-                borderRadius: Math.round(postActionButtonSize / 3.2),
-                backgroundColor: feedAccentSoft,
-                borderColor: feedAccentBorder,
+                borderRadius: Math.round(postActionButtonSize / 2),
+                backgroundColor: "transparent",
+                borderColor: "transparent",
               },
             ]}
             onPress={() => openPostShareSheet(item)}
           >
-            <Icon name="paper-plane-outline" size={22} color={colors.text} />
+            <Icon name="paper-plane-outline" size={21} color={colors.text} />
           </TouchableOpacity>
 
-          {(hasVideoMedia || hasAttachedMusic) ? (
-            <TouchableOpacity
-              style={[
-                styles.actionButton,
-                {
-                  width: postActionButtonSize,
-                  height: postActionButtonSize,
-                  borderRadius: Math.round(postActionButtonSize / 3.2),
-                  backgroundColor: feedAccentSoft,
-                  borderColor: feedAccentBorder,
-                },
-              ]}
-              onPress={() => togglePostMute(item.id)}
-            >
-              <Icon name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={22} color={FEED_ACCENT} />
-            </TouchableOpacity>
-          ) : null}
-
           <View style={styles.trailingActions}>
-            {item.type === "photo" ? (
-              <TouchableOpacity
-                style={[
-                  styles.actionButton,
-                  styles.trailingActionButton,
-                  {
-                    width: postActionButtonSize,
-                    height: postActionButtonSize,
-                    borderRadius: Math.round(postActionButtonSize / 3.2),
-                    backgroundColor: feedAccentSoft,
-                    borderColor: feedAccentBorder,
-                  },
-                ]}
-                onPress={() => handleDownload(item)}
-              >
-                {isActionBusy[`download_${item.id}`] ? (
-                  <ActivityIndicator size="small" color={FEED_ACCENT} />
-                ) : (
-                  <Icon name="download-outline" size={21} color={FEED_ACCENT} />
-                )}
-              </TouchableOpacity>
-            ) : null}
-
             <TouchableOpacity
               style={[
                 styles.actionButton,
@@ -1792,59 +1886,76 @@ function FeedScreen({ navigation }: any) {
                 {
                   width: postActionButtonSize,
                   height: postActionButtonSize,
-                  borderRadius: Math.round(postActionButtonSize / 3.2),
-                  backgroundColor: feedAccentSoft,
-                  borderColor: feedAccentBorder,
+                  borderRadius: Math.round(postActionButtonSize / 2),
+                  backgroundColor: "transparent",
+                  borderColor: "transparent",
                 },
               ]}
               onPress={() => handleSave(item.id)}
             >
-              <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={22} color={FEED_ACCENT} />
+              <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={22} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
 
-        {!item.settings.hideLikeCount ? (
-          <Text style={[styles.likesText, { paddingHorizontal: postBodyInset, color: colors.text }]}>
-            {formatCount(item.likesCount)} likes
-          </Text>
+        {hasLikeSummary ? (
+          <View style={[styles.likeSummaryRow, { paddingHorizontal: postBodyInset }]}>
+            {likePreviewUsers.length ? (
+              <View style={styles.likePreviewStack}>
+                {likePreviewUsers.map((likeUser, index) => (
+                  <TouchableOpacity
+                    key={`${item.id}_like_preview_${likeUser.id || index}`}
+                    style={[
+                      styles.likeSummaryAvatarButton,
+                      styles.likeSummaryAvatarStackButton,
+                      index > 0 ? styles.likeSummaryAvatarStackOverlap : null,
+                    ]}
+                    onPress={() => openUserProfile(likeUser.id || item.user.id)}
+                    activeOpacity={0.85}
+                  >
+                    <AppAvatar
+                      uri={likeUser.avatarUrl || DEFAULT_AVATAR_URL}
+                      name={likeUser.name || likeUser.username}
+                      size={22}
+                      style={styles.likeSummaryAvatar}
+                    />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
+            <TouchableOpacity
+              onPress={() => openUserProfile(latestLiker?.id || likePreviewUsers[0]?.id || item.user.id)}
+              activeOpacity={0.8}
+              style={styles.likeSummaryTextWrap}
+            >
+              <Text style={[styles.likesText, styles.likeSummaryText, { color: colors.text }]}>
+                {likeSummaryLabel}
+              </Text>
+            </TouchableOpacity>
+          </View>
         ) : null}
 
-        <InteractiveText
-          style={[styles.caption, { paddingHorizontal: postBodyInset, color: colors.text }]}
-          prefix={(
-            <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
-              {item.user.username}{" "}
-            </Text>
-          )}
-          mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
-          hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
-          onPressMention={(mention) => {
-            void openMentionProfile(mention);
-          }}
-          onPressHashtag={openHashtagResults}
-          text={item.caption}
-        />
-
-        {item.mentions.length ? (
+        {item.caption ? (
           <InteractiveText
-            style={[styles.tagLineMuted, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}
+            style={[styles.caption, { paddingHorizontal: postBodyInset, color: colors.text }]}
+            prefix={(
+              <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
+                {item.user.username}{" "}
+              </Text>
+            )}
             mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
+            hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
             onPressMention={(mention) => {
               void openMentionProfile(mention);
             }}
-            text={item.mentions.map((mention) => `@${mention}`).join(" ")}
+            onPressHashtag={openHashtagResults}
+            text={item.caption}
           />
         ) : null}
 
-        {renderPostMetaChips(item, postBodyInset)}
-        {metaLine ? (
-          <Text style={[styles.metaLine, { paddingHorizontal: postBodyInset, color: colors.mutedText }]} numberOfLines={1}>
-            {metaLine}
-          </Text>
-        ) : null}
+        
 
-        {item.collaboratorIds.length ? (
+        {false ? (
           <Text style={[styles.collabLine, { color: colors.text }]}>Collab post • {item.collaboratorIds.length} collaborators</Text>
         ) : null}
 
@@ -2167,10 +2278,14 @@ function FeedScreen({ navigation }: any) {
   const sidebarAvailabilityStatusStyle = sellerAccount?.availabilityStatus
     ? styles.sidebarStatusAvailable
     : styles.sidebarStatusUnavailable;
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 65 }).current;
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 55,
+    minimumViewTime: 120,
+  }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
     const firstVisiblePost = viewableItems.find((entry) => entry.isViewable && entry.item?.id)?.item;
-    if (firstVisiblePost?.id) {
+    lastViewablePostIdRef.current = firstVisiblePost?.id || "";
+    if (firstVisiblePost?.id && !feedScrollTransitionRef.current) {
       setActivePostId(firstVisiblePost.id);
     }
   }).current;
@@ -2205,11 +2320,18 @@ function FeedScreen({ navigation }: any) {
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS === "android"}
           initialNumToRender={4}
-          maxToRenderPerBatch={4}
-          updateCellsBatchingPeriod={32}
+          maxToRenderPerBatch={5}
+          updateCellsBatchingPeriod={24}
           windowSize={5}
+          decelerationRate="fast"
+          scrollEventThrottle={16}
+          keyboardDismissMode="on-drag"
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
+          onScrollBeginDrag={pauseActiveVisiblePost}
+          onMomentumScrollBegin={pauseActiveVisiblePost}
+          onScrollEndDrag={() => scheduleRestoreActiveVisiblePost(140)}
+          onMomentumScrollEnd={() => scheduleRestoreActiveVisiblePost(0)}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -2445,7 +2567,7 @@ function FeedScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
   screenShell: { flex: 1 },
-  feedContent: { paddingTop: 4, paddingBottom: 124 },
+  feedContent: { paddingTop: 4, paddingBottom: 112 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
   emptyState: { paddingHorizontal: 24, paddingTop: 72, alignItems: "center" },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111" },
@@ -2912,7 +3034,7 @@ const styles = StyleSheet.create({
   },
   postCard: {
     marginHorizontal: 14,
-    marginBottom: 14,
+    marginBottom: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 12,
     overflow: "hidden",
@@ -2920,22 +3042,22 @@ const styles = StyleSheet.create({
   instagramPostCard: {
     shadowColor: "#0f172a",
     shadowOpacity: 0.08,
-    shadowRadius: 16,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 2,
   },
-  postHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 15, paddingBottom: 12 },
+  postHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
   postHeaderIdentity: { flexDirection: "row", alignItems: "center", flex: 1 },
-  postHeaderActions: { flexDirection: "row", alignItems: "center", marginLeft: 10, gap: 8 },
-  postAvatar: { width: 52, height: 52, borderRadius: 26 },
-  postAvatarCompact: { width: 46, height: 46, borderRadius: 23 },
-  userMeta: { marginLeft: 11, flexShrink: 1, minWidth: 0 },
+  postHeaderActions: { flexDirection: "row", alignItems: "center", marginLeft: 8, gap: 6 },
+  postAvatar: { width: 42, height: 42, borderRadius: 21 },
+  postAvatarCompact: { width: 38, height: 38, borderRadius: 19 },
+  userMeta: { marginLeft: 8, flexShrink: 1, minWidth: 0 },
   row: { flexDirection: "row", alignItems: "center" },
   usernameRow: { flexShrink: 1, minWidth: 0, paddingRight: 6 },
-  username: { fontSize: 15, lineHeight: 18, fontWeight: "700", color: "#111" },
+  username: { fontSize: 13, lineHeight: 16, fontWeight: "700", color: "#111" },
   usernameText: { flexShrink: 1 },
   verifiedIcon: { marginLeft: 5 },
-  postTime: { fontSize: 13.5, color: "#666", marginTop: 3 },
+  postTime: { fontSize: 10.5, color: "#666", marginTop: 1 },
   moreButton: {
     width: 38,
     height: 38,
@@ -2981,7 +3103,16 @@ const styles = StyleSheet.create({
   },
   mediaFallback: { backgroundColor: "#0f172a" },
   postImage: { height: 360 },
-  mediaPressSurface: { position: "relative" },
+  mediaFrame: {
+    marginTop: 2,
+    overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  mediaPressSurface: {
+    position: "relative",
+    overflow: "hidden",
+    backgroundColor: "#0b1120",
+  },
   postStickerLayer: {
     ...StyleSheet.absoluteFillObject,
   },
@@ -3013,15 +3144,21 @@ const styles = StyleSheet.create({
   },
   mediaSoundHint: {
     position: "absolute",
-    right: 14,
-    top: 14,
+    right: 12,
+    top: 12,
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
+    gap: 4,
     borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     backgroundColor: "rgba(0,0,0,0.56)",
+  },
+  mediaSoundHintCompact: {
+    right: 10,
+    top: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
   },
   mediaSoundHintText: {
     color: "#fff",
@@ -3030,16 +3167,23 @@ const styles = StyleSheet.create({
   },
   mediaMusicChip: {
     position: "absolute",
-    left: 14,
-    bottom: 14,
-    right: 14,
+    left: 12,
+    bottom: 12,
+    right: 12,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
     backgroundColor: "rgba(0,0,0,0.56)",
+  },
+  mediaMusicChipCompact: {
+    left: 10,
+    right: 10,
+    bottom: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
   },
   mediaMusicChipText: {
     flex: 1,
@@ -3047,7 +3191,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
   },
-  actionsRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
+  actionsRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8 },
   actionButton: {
     width: 42,
     height: 42,
@@ -3055,16 +3199,53 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 10,
+    marginRight: 8,
   },
   trailingActions: { marginLeft: "auto", flexDirection: "row", alignItems: "center" },
-  trailingActionButton: { marginRight: 0, marginLeft: 8 },
-  likesText: { fontWeight: "700", color: "#121212", fontSize: 14, paddingHorizontal: 18 },
-  caption: { fontSize: 14, color: "#131313", paddingHorizontal: 18, paddingTop: 7, lineHeight: 21 },
+  trailingActionButton: { marginRight: 0, marginLeft: 6 },
+  likesText: { fontWeight: "700", color: "#121212", fontSize: 12.5, paddingHorizontal: 18 },
+  likeSummaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingTop: 1,
+  },
+  likePreviewStack: {
+    flexDirection: "row",
+    alignItems: "center",
+    minWidth: 40,
+  },
+  likeSummaryAvatarButton: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    overflow: "hidden",
+  },
+  likeSummaryAvatarStackButton: {
+    borderWidth: 1.5,
+    borderColor: "#fff",
+    backgroundColor: "#fff",
+  },
+  likeSummaryAvatarStackOverlap: {
+    marginLeft: -7,
+  },
+  likeSummaryAvatar: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 11,
+  },
+  likeSummaryText: {
+    paddingHorizontal: 0,
+    fontSize: 12.2,
+  },
+  likeSummaryTextWrap: {
+    flexShrink: 1,
+  },
+  caption: { fontSize: 12.6, color: "#131313", paddingHorizontal: 18, paddingTop: 5, lineHeight: 18 },
   captionUser: { fontWeight: "700" },
   inlineEntity: { fontWeight: "700" },
   tagLine: { color: FEED_ACCENT, fontSize: 12.5, paddingHorizontal: 18, paddingTop: 7, fontWeight: "700" },
-  tagLineMuted: { color: "#5a5a5a", fontSize: 12, paddingHorizontal: 18, paddingTop: 4 },
+  tagLineMuted: { color: "#5a5a5a", fontSize: 11.5, paddingHorizontal: 18, paddingTop: 4 },
   metaChipRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -3083,22 +3264,22 @@ const styles = StyleSheet.create({
   },
   metaChipText: {
     flexShrink: 1,
-    fontSize: 12,
+    fontSize: 10.5,
     fontWeight: "600",
   },
-  metaLine: { color: "#646464", fontSize: 12, paddingHorizontal: 18, paddingTop: 7 },
-  collabLine: { color: "#2f2f2f", fontSize: 12, paddingHorizontal: 18, paddingTop: 5, fontWeight: "600" },
-  commentCount: { color: "#787878", fontSize: 12, paddingHorizontal: 18, paddingTop: 9 },
+  metaLine: { color: "#646464", fontSize: 10.6, paddingHorizontal: 18, paddingTop: 5 },
+  collabLine: { color: "#2f2f2f", fontSize: 10.6, paddingHorizontal: 18, paddingTop: 4, fontWeight: "600" },
+  commentCount: { color: "#787878", fontSize: 10.8, paddingHorizontal: 18, paddingTop: 7 },
   commentComposer: {
     flexDirection: "row",
     alignItems: "center",
     marginHorizontal: 18,
-    marginTop: 8,
-    marginBottom: 12,
+    marginTop: 6,
+    marginBottom: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderRadius: 12,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
   },
   followBadge: {
     minHeight: 30,
@@ -3122,14 +3303,14 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textAlign: "center",
   },
-  commentInput: { flex: 1, fontSize: 14.5, color: "#222", paddingVertical: 6 },
-  postButton: { color: FEED_ACCENT, fontWeight: "700", fontSize: 14, paddingHorizontal: 8 },
+  commentInput: { flex: 1, fontSize: 12, color: "#222", paddingVertical: 3 },
+  postButton: { color: FEED_ACCENT, fontWeight: "700", fontSize: 11.5, paddingHorizontal: 8 },
   commentsDisabled: {
     color: "#707070",
-    fontSize: 13,
+    fontSize: 12,
     paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 16,
+    paddingTop: 9,
+    paddingBottom: 14,
   },
 });
 

@@ -44,6 +44,31 @@ const wait = (ms: number) =>
     setTimeout(resolve, ms);
   });
 
+export const ensureAudioClipStartPosition = async (
+  player: any,
+  startPositionMs: number,
+  seekSettleDelayMs = 70,
+): Promise<void> => {
+  if (!(startPositionMs > 0)) {
+    return;
+  }
+
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await wait(seekSettleDelayMs);
+
+    try {
+      await player.seekToPlayer(startPositionMs);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("Unable to seek audio clip to the trimmed start.");
+};
+
 export const startManagedAudioClipPlayback = async (
   player: any,
   {
@@ -60,7 +85,28 @@ export const startManagedAudioClipPlayback = async (
     seekSettleDelayMs?: number;
   },
 ): Promise<string> => {
+  const shouldDelayAudioOutput = startPositionMs > 0;
+  let playbackStarted = false;
+
+  if (shouldDelayAudioOutput) {
+    try {
+      await player.setVolume(0);
+    } catch {
+      // noop
+    }
+  }
+
   const source = await startAudioPlaybackFromSources(player, rawValue, normalizedValue);
+  playbackStarted = true;
+
+  try {
+    await ensureAudioClipStartPosition(player, startPositionMs, seekSettleDelayMs);
+  } catch (error) {
+    if (playbackStarted) {
+      await player.stopPlayer().catch(() => undefined);
+    }
+    throw error;
+  }
 
   try {
     await player.setVolume(volume);
@@ -68,19 +114,19 @@ export const startManagedAudioClipPlayback = async (
     // noop
   }
 
-  if (startPositionMs > 0) {
-    await wait(seekSettleDelayMs);
-
+  if (!shouldDelayAudioOutput) {
     try {
-      await player.seekToPlayer(startPositionMs);
+      await player.setVolume(volume);
     } catch {
-      await wait(seekSettleDelayMs);
+      // noop
+    }
+  }
 
-      try {
-        await player.seekToPlayer(startPositionMs);
-      } catch {
-        // Some remote streams reject early seeks. Let playback continue instead of failing hard.
-      }
+  if (shouldDelayAudioOutput) {
+    try {
+      await player.resumePlayer();
+    } catch {
+      // Some players continue automatically after seek; ignore resume misses.
     }
   }
 

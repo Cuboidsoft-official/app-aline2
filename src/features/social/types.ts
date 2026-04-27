@@ -78,6 +78,7 @@ export interface PostSettings {
 export interface Post {
   id: string;
   user: SocialUser;
+  likePreviewUsers?: SocialUser[];
   type: PostType;
   caption: string;
   media: MediaAsset[];

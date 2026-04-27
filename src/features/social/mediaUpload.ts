@@ -2,6 +2,7 @@ import { Asset, CameraOptions, ImageLibraryOptions, launchCamera, launchImageLib
 
 import { API } from "../../api/api";
 import { getReadableApiErrorMessage, isModerationBlockedError } from "../../api/networkErrors";
+import { postMultipart } from "../../utils/multipartUpload";
 import {
   ensureCameraPermission,
   ensureMicrophonePermission,
@@ -261,30 +262,28 @@ const uploadSingleVideo = async (
   try {
     const body = new FormData();
     body.append("video", toFormDataFile(asset) as never);
+    onProgress?.(0.08);
 
-    const res = await API.post("/upload/video", body, {
-      headers: { "Content-Type": "multipart/form-data" },
-      timeout: 120000,
-      onUploadProgress: (event) => {
-        if (typeof event?.total === "number" && event.total > 0) {
-          onProgress?.(Math.max(0, Math.min(1, event.loaded / event.total)));
-        }
-      },
+    const responseData = await postMultipart({
+      path: "/upload/video",
+      body,
+      timeoutMs: 600000,
     });
+    onProgress?.(0.94);
 
-    if (!res?.data?.url) {
+    if (!responseData?.url) {
       throw new Error("Video upload did not return a usable playback URL.");
     }
 
     return {
       id: asset.id,
       mediaType: "video",
-      url: res.data.url,
-      thumbnailUrl: res?.data?.thumbnailUrl,
-      durationMs: typeof res?.data?.duration === "number" ? res.data.duration * 1000 : asset.durationMs,
-      width: typeof res?.data?.width === "number" ? res.data.width : asset.width,
-      height: typeof res?.data?.height === "number" ? res.data.height : asset.height,
-      sensitiveContent: mapSensitiveContent(res?.data?.moderation),
+      url: responseData.url,
+      thumbnailUrl: responseData?.thumbnailUrl,
+      durationMs: typeof responseData?.duration === "number" ? responseData.duration * 1000 : asset.durationMs,
+      width: typeof responseData?.width === "number" ? responseData.width : asset.width,
+      height: typeof responseData?.height === "number" ? responseData.height : asset.height,
+      sensitiveContent: mapSensitiveContent(responseData?.moderation),
     };
   } catch (error) {
     if (isModerationBlockedError(error)) {

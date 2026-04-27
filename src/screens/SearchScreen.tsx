@@ -22,6 +22,7 @@ import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import AppAvatar from "../components/AppAvatar";
+import DraggableBottomSheet from "../components/DraggableBottomSheet";
 
 type UserItem = {
   _id: string;
@@ -96,16 +97,7 @@ const SearchScreen = ({ navigation, route }: any) => {
   const [errorMessage, setErrorMessage] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<keyof typeof TAB_LABELS>("users");
-  const activeTabHeadline = activeTab === "users"
-    ? "People and creators"
-    : activeTab === "sellers"
-      ? "Trusted sellers nearby"
-      : "Services worth checking out";
-  const activeTabSubline = activeTab === "users"
-    ? "Search profiles, mutuals, and suggested accounts."
-    : activeTab === "sellers"
-      ? "Browse available experts with faster, cleaner results."
-      : "Find services, hashtags, and featured offers in one place.";
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
 
   const applyUserResults = useCallback((items: UserItem[], userId: string | null) => {
     const filtered = items.filter((item) => item?._id && item._id !== userId);
@@ -270,6 +262,8 @@ const SearchScreen = ({ navigation, route }: any) => {
 
     return users;
   }, [activeTab, sellers, services, users]);
+
+  const activeResultsCount = currentData.length;
 
   const renderUser = ({ item }: { item: UserItem }) => (
     <TouchableOpacity
@@ -461,70 +455,42 @@ const SearchScreen = ({ navigation, route }: any) => {
     <View style={styles.screen}>
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.headerWrap}>
-          <View style={[styles.headerShell, { backgroundColor: colors.card, borderColor: accentBorder }]}>
-            <View style={styles.headerRow}>
+          <View style={[styles.headerShell, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.topHeaderRow}>
               <TouchableOpacity
-                style={[styles.iconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
+                style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
                 onPress={() => navigation.goBack()}
               >
-                <Icon name="arrow-back" size={20} color={accentColor} />
+                <Icon name="arrow-back" size={20} color={colors.text} />
               </TouchableOpacity>
 
-              <View style={styles.heroCopy}>
-                <Text style={[styles.heroEyebrow, { color: accentColor }]}>Explore</Text>
-                <Text style={[styles.headerTitle, { color: colors.text }]}>Search</Text>
-                <Text style={[styles.headerSubtitle, { color: colors.mutedText }]} numberOfLines={2}>
-                  {activeTabHeadline}
-                </Text>
+              <Text style={[styles.headerTitle, styles.headerTitleCompact, { color: colors.text }]}>Search</Text>
+              <View style={styles.headerSpacer} />
+            </View>
+
+            <View style={styles.searchRow}>
+              <View style={[styles.searchBar, styles.searchBarInline, { backgroundColor: colors.input, borderColor: colors.border }]}>
+                <Icon name="search-outline" size={18} color={colors.mutedText} />
+                <TextInput
+                  placeholder={`Search ${activeTab}...`}
+                  placeholderTextColor={colors.placeholder}
+                  style={[styles.searchInput, { color: colors.text }]}
+                  value={search}
+                  onChangeText={searchData}
+                />
               </View>
-            </View>
-
-            <View style={[styles.searchBar, { backgroundColor: colors.input, borderColor: colors.border }]}>
-              <Icon name="search-outline" size={18} color={colors.mutedText} />
-              <TextInput
-                placeholder={`Search ${activeTab}...`}
-                placeholderTextColor={colors.placeholder}
-                style={[styles.searchInput, { color: colors.text }]}
-                value={search}
-                onChangeText={searchData}
-              />
-            </View>
-
-            <Text style={[styles.searchHint, { color: colors.mutedText }]} numberOfLines={2}>
-              {activeTabSubline}
-            </Text>
-
-            <View style={[styles.tabsShell, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <TouchableOpacity
-                style={[styles.tab, activeTab === "users" ? { backgroundColor: accentColor } : null]}
-                onPress={() => setActiveTab("users")}
+                style={[styles.filterButton, { backgroundColor: accentColor }]}
+                onPress={() => setShowFilterSheet(true)}
+                activeOpacity={0.88}
               >
-                <Text style={[styles.tabText, { color: activeTab === "users" ? "#fff" : colors.mutedText }, activeTab === "users" && styles.activeText]}>
-                  Users
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.tab, activeTab === "sellers" ? { backgroundColor: accentColor } : null]}
-                onPress={() => setActiveTab("sellers")}
-              >
-                <Text style={[styles.tabText, { color: activeTab === "sellers" ? "#fff" : colors.mutedText }, activeTab === "sellers" && styles.activeText]}>
-                  Sellers
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.tab, activeTab === "services" ? { backgroundColor: accentColor } : null]}
-                onPress={() => setActiveTab("services")}
-              >
-                <Text style={[styles.tabText, { color: activeTab === "services" ? "#fff" : colors.mutedText }, activeTab === "services" && styles.activeText]}>
-                  Services
-                </Text>
+                <Icon name="options-outline" size={18} color="#fff" />
+                <Text style={[styles.filterButtonText, { color: "#fff" }]}>Filter</Text>
               </TouchableOpacity>
             </View>
 
             {searching ? (
-              <View style={[styles.searchingBox, { backgroundColor: accentSoft }]}>
+              <View style={[styles.searchingBox, { backgroundColor: colors.surface }]}>
                 <ActivityIndicator size="small" color={accentColor} />
                 <Text style={[styles.searchingText, { color: colors.mutedText }]}>Updating results...</Text>
               </View>
@@ -566,6 +532,66 @@ const SearchScreen = ({ navigation, route }: any) => {
           ]}
         />
       </SafeAreaView>
+      <DraggableBottomSheet
+        visible={showFilterSheet}
+        onClose={() => setShowFilterSheet(false)}
+        snapPoints={[0.34, 0.5, 0.72]}
+        initialSnapIndex={1}
+        minHeight={280}
+      >
+        <View style={[styles.filterSheet, { backgroundColor: colors.card }]}>
+          <View style={styles.filterSheetHeader}>
+            <Text style={[styles.filterSheetTitle, { color: colors.text }]}>Filters</Text>
+            <Text style={[styles.filterSheetMeta, { color: colors.mutedText }]}>{activeResultsCount} results</Text>
+          </View>
+
+          <Text style={[styles.filterSectionLabel, { color: colors.mutedText }]}>Content type</Text>
+          <View style={[styles.tabsShell, styles.tabsSheetShell, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            {(["users", "sellers", "services"] as Array<keyof typeof TAB_LABELS>).map((tabKey) => (
+              <TouchableOpacity
+                key={tabKey}
+                style={[styles.tab, activeTab === tabKey ? { backgroundColor: accentColor } : null]}
+                onPress={() => {
+                  setActiveTab(tabKey);
+                  setShowFilterSheet(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.tabText,
+                    { color: activeTab === tabKey ? "#fff" : colors.mutedText },
+                    activeTab === tabKey && styles.activeText,
+                  ]}
+                >
+                  {tabKey === "users" ? "Users" : tabKey === "sellers" ? "Sellers" : "Services"}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {activeTab === "services" ? (
+            <>
+              <Text style={[styles.filterSectionLabel, styles.filterSectionSpacing, { color: colors.mutedText }]}>Trending hashtags</Text>
+              <View style={styles.tagWrap}>
+                {trendingHashtags.length ? trendingHashtags.map((item) => (
+                  <TouchableOpacity
+                    key={item.tag}
+                    style={[styles.tagChip, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    onPress={() => {
+                      setShowFilterSheet(false);
+                      openHashtagResults(item.tag);
+                    }}
+                  >
+                    <Text style={[styles.tagText, { color: colors.text }]}>#{item.tag}</Text>
+                  </TouchableOpacity>
+                )) : (
+                  <Text style={[styles.helperText, { color: colors.mutedText }]}>No trending hashtags yet.</Text>
+                )}
+              </View>
+            </>
+          ) : null}
+        </View>
+      </DraggableBottomSheet>
       <AppBottomDock navigation={navigation} />
     </View>
   );
@@ -591,9 +617,9 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingHorizontal: 14,
     paddingTop: 14,
-    paddingBottom: 12,
+    paddingBottom: 14,
   },
-  headerRow: {
+  topHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 12,
@@ -605,6 +631,15 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
     justifyContent: "center",
+  },
+  headerSpacer: {
+    width: 40,
+    height: 40,
+  },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
   heroCopy: {
     flex: 1,
@@ -622,6 +657,12 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginTop: 2,
   },
+  headerTitleCompact: {
+    flex: 1,
+    marginTop: 0,
+    textAlign: "center",
+    fontSize: 22,
+  },
   headerSubtitle: {
     marginTop: 4,
     fontSize: 13,
@@ -637,11 +678,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     height: 50,
   },
+  searchBarInline: {
+    flex: 1,
+  },
   searchInput: {
     flex: 1,
     marginLeft: 10,
     color: "#111",
     fontSize: 15,
+  },
+  filterButton: {
+    height: 50,
+    minWidth: 98,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  filterButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
   },
   searchHint: {
     marginTop: 10,
@@ -650,10 +708,12 @@ const styles = StyleSheet.create({
   },
   tabsShell: {
     flexDirection: "row",
-    marginTop: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 18,
     padding: 4,
+  },
+  tabsSheetShell: {
+    marginTop: 10,
   },
   tab: {
     flex: 1,
@@ -878,6 +938,34 @@ const styles = StyleSheet.create({
   searchingText: {
     marginLeft: 8,
     color: "#666",
+  },
+  filterSheet: {
+    flex: 1,
+    paddingHorizontal: 18,
+    paddingTop: 4,
+    paddingBottom: 18,
+  },
+  filterSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  filterSheetTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  filterSheetMeta: {
+    fontSize: 12.5,
+    fontWeight: "600",
+  },
+  filterSectionLabel: {
+    marginTop: 18,
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  filterSectionSpacing: {
+    marginTop: 22,
   },
   center: {
     flex: 1,

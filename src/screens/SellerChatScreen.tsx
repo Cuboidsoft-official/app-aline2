@@ -107,6 +107,31 @@ const buildLocationMessage = (query: string): string => {
   return `${LOCATION_MESSAGE_LABEL} ${cleanQuery}\n${mapsUrl}`;
 };
 
+const buildOutgoingSendGuardKey = ({
+  conversationId,
+  text,
+  file,
+  messageType,
+  duration,
+  replyToMessageId,
+}: {
+  conversationId?: string | null;
+  text?: string;
+  file?: { uri?: string; name?: string | null; type?: string | null };
+  messageType?: string;
+  duration?: number;
+  replyToMessageId?: string;
+}): string =>
+  [
+    String(conversationId || "").trim(),
+    String(text || "").trim(),
+    String(file?.uri || "").trim(),
+    String(file?.name || "").trim(),
+    String(messageType || "text").trim().toLowerCase(),
+    Number(duration || 0),
+    String(replyToMessageId || "").trim(),
+  ].join("::");
+
 const parseLocationMessage = (value: string | undefined): { label: string; url: string } | null => {
   if (typeof value !== "string" || !value.startsWith(LOCATION_MESSAGE_LABEL)) {
     return null;
@@ -246,6 +271,7 @@ type PendingVoiceNote = {
 type CallEventPreview = {
   label: string;
   icon: string;
+  details?: string;
 };
 
 type ReplyPreviewState = {
@@ -371,10 +397,19 @@ const buildCallEventPreview = (message: ChatMessage, currentUserId: string): Cal
 
   const direction = String(callEvent.callerId || "") === String(currentUserId || "") ? "outgoing" : "incoming";
   const isVideo = callEvent.callType === "video";
-  const callLabel = isVideo ? "video call" : "voice call";
+  const event = String(callEvent.event || "started");
+
+  if (event === "missed") {
+    return {
+      label: isVideo ? "Missed video call" : "Missed voice call",
+      details: direction === "outgoing" ? "No answer" : "Missed",
+      icon: isVideo ? "videocam-outline" : "call-outline",
+    };
+  }
 
   return {
-    label: `${direction === "outgoing" ? "Outgoing" : "Incoming"} ${callLabel}`,
+    label: isVideo ? "Video call" : "Voice call",
+    details: event === "ended" ? "Completed" : direction === "outgoing" ? "Calling" : "Incoming",
     icon: isVideo ? "videocam-outline" : "call-outline",
   };
 };
@@ -441,20 +476,47 @@ const getMessageRenderKey = (message: ChatMessage | null | undefined): string =>
 
 const dedupeMessages = (items: ChatMessage[]): ChatMessage[] => {
   const seen = new Set<string>();
+  const seenSignatures = new Set<string>();
 
   return (Array.isArray(items) ? items : []).filter((item) => {
     const identity = getMessageIdentity(item);
-    if (!identity) {
-      return true;
+    const signature = buildMessageSignature(item);
+
+    if (identity) {
+      if (seen.has(identity)) {
+        return false;
+      }
+
+      seen.add(identity);
     }
 
-    if (seen.has(identity)) {
+    if (signature && seenSignatures.has(signature)) {
       return false;
     }
 
-    seen.add(identity);
+    if (signature) {
+      seenSignatures.add(signature);
+    }
+
     return true;
   });
+};
+
+const buildMessageSignature = (message: ChatMessage | null | undefined): string => {
+  const attachment = getMessageAttachment(message);
+  const replyId =
+    String((message as any)?.replyToMessageId || "").trim()
+    || getMessageIdentity(getMessageReply(message) as ChatMessage | null | undefined)
+    || "";
+
+  return [
+    String((message as any)?.messageType || "text").trim().toLowerCase(),
+    String(getMessageText(message) || "").trim(),
+    normalizeMediaUrl((message as any)?.mediaUrl || attachment?.url || ""),
+    String(attachment?.fileName || "").trim(),
+    Number((message as any)?.duration || 0),
+    replyId,
+  ].join("::");
 };
 
 const SellerChatScreen = ({ route, navigation }: any) => {
@@ -508,6 +570,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
   const [showAssistant, setShowAssistant] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const textSendLockRef = useRef(false);
+  const recentOutgoingSendRef = useRef<{ key: string; timestamp: number }>({ key: "", timestamp: 0 });
   const messageInputRef = useRef<TextInput | null>(null);
   const selectedServiceLabel = selectedService?.serviceName || serviceName || "service requests";
   const selectedAppointmentSlot = useMemo(
@@ -796,10 +860,29 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
     setMessages((prev) => {
       const nextIdentity = getMessageIdentity(normalizedMessage);
-      const exists = nextIdentity
-        ? prev.some((item) => getMessageIdentity(item) === nextIdentity)
-        : false;
-      return exists ? prev : [...prev, normalizedMessage];
+      const nextSignature = buildMessageSignature(normalizedMessage);
+      let hasChanged = false;
+
+      const mergedItems = prev.map((item) => {
+        const itemIdentity = getMessageIdentity(item);
+        if (nextIdentity && itemIdentity === nextIdentity) {
+          hasChanged = true;
+          return { ...item, ...normalizedMessage };
+        }
+
+        if (!hasChanged && buildMessageSignature(item) === nextSignature) {
+          hasChanged = true;
+          return { ...item, ...normalizedMessage };
+        }
+
+        return item;
+      });
+
+      if (hasChanged) {
+        return dedupeMessages(mergedItems);
+      }
+
+      return dedupeMessages([...prev, normalizedMessage]);
     });
   }, []);
 
@@ -822,7 +905,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       throw new Error("Unable to start this seller conversation right now.");
     }
 
-    const res = await sendChatMessage({
+    const sendGuardKey = buildOutgoingSendGuardKey({
       conversationId: resolvedConversationId,
       text: nextText,
       file,
@@ -830,24 +913,50 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       duration,
       replyToMessageId: replyingToMessageId || undefined,
     });
+    const sendAttemptedAt = Date.now();
+    if (
+      sendGuardKey
+      && recentOutgoingSendRef.current.key === sendGuardKey
+      && sendAttemptedAt - recentOutgoingSendRef.current.timestamp < 1400
+    ) {
+      return;
+    }
+    recentOutgoingSendRef.current = { key: sendGuardKey, timestamp: sendAttemptedAt };
 
-    const nextMessage = replyingToMessage
-      ? {
-        ...(res.message as ChatMessage),
-        replyToMessageId: (res.message as ChatMessage)?.replyToMessageId || replyingToMessageId,
-        replyToMessage: (res.message as ChatMessage)?.replyToMessage || replyingToMessage,
+    try {
+      const res = await sendChatMessage({
+        conversationId: resolvedConversationId,
+        text: nextText,
+        file,
+        messageType,
+        duration,
+        replyToMessageId: replyingToMessageId || undefined,
+      });
+
+      const nextMessage = replyingToMessage
+        ? {
+          ...(res.message as ChatMessage),
+          replyToMessageId: (res.message as ChatMessage)?.replyToMessageId || replyingToMessageId,
+          replyToMessage: (res.message as ChatMessage)?.replyToMessage || replyingToMessage,
+        }
+        : res.message as ChatMessage;
+      appendMessage(nextMessage);
+      setReplyingToMessage(null);
+    } catch (error) {
+      if (recentOutgoingSendRef.current.key === sendGuardKey) {
+        recentOutgoingSendRef.current = { key: "", timestamp: 0 };
       }
-      : res.message as ChatMessage;
-    appendMessage(nextMessage);
-    setReplyingToMessage(null);
+      throw error;
+    }
   }, [appendMessage, canUseComposer, ensureConversation, replyingToMessage, replyingToMessageId]);
 
   const sendMessage = useCallback(async (msgText = text) => {
-    if (!msgText.trim() || sending) {
+    if (!msgText.trim() || sending || textSendLockRef.current) {
       return;
     }
 
     try {
+      textSendLockRef.current = true;
       setSending(true);
       await submitMessage({ text: msgText.trim() });
       setText("");
@@ -855,6 +964,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       console.log("seller chat send error:", error);
       Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send message"));
     } finally {
+      textSendLockRef.current = false;
       setSending(false);
     }
   }, [sending, submitMessage, text]);

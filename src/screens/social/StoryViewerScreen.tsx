@@ -51,11 +51,24 @@ const getStoryDuration = (story: Story | undefined): number => {
     return DEFAULT_STORY_MS;
   }
 
-  if (typeof story.media?.durationMs === "number" && story.media.durationMs > 0) {
-    return Math.min(Math.max(story.media.durationMs, 4000), 15000);
+  if (story.media?.mediaType === "video" && typeof story.media?.durationMs === "number" && story.media.durationMs > 0) {
+    return Math.min(Math.max(story.media.durationMs, 1000), 60000);
   }
 
   return story.type === "text" ? TEXT_STORY_MS : DEFAULT_STORY_MS;
+};
+
+const getTrimmedMusicDurationMs = (
+  music?: { duration?: number; startTime?: number; endTime?: number },
+): number => {
+  const explicitDurationMs = Math.max(0, Number(music?.duration || 0) * 1000);
+  if (explicitDurationMs > 0) {
+    return explicitDurationMs;
+  }
+
+  const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
+  const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
+  return endMs > startMs ? endMs - startMs : 0;
 };
 
 const isSyncedStoryId = (storyId: string | undefined): boolean =>
@@ -158,7 +171,7 @@ function StoryViewerScreen({ route, navigation }: any) {
   );
   const storyMusicYoutubeVideoId = useMemo(() => extractYouTubeVideoId(currentStory?.music), [currentStory?.music]);
   const storyMusicStartMs = Math.max(0, Number(currentStory?.music?.startTime || 0) * 1000);
-  const storyMusicDurationMs = Math.max(0, Number(currentStory?.music?.duration || 0) * 1000);
+  const storyMusicDurationMs = getTrimmedMusicDurationMs(currentStory?.music);
   const storyMusicTrackKey = currentStory
     ? `${currentStory.id}:${storyMusicYoutubeVideoId || storyMusicUrl}:${storyMusicStartMs}:${storyMusicDurationMs}`
     : "";
@@ -517,7 +530,7 @@ function StoryViewerScreen({ route, navigation }: any) {
             uri={normalizeMediaUrl(currentStory.media?.url)}
             posterUri={normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url)}
             style={styles.storyImage}
-            paused={paused}
+            paused={paused || !isScreenFocused}
             muted={hasStoryAttachedMusic}
             onEnd={next}
             contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}

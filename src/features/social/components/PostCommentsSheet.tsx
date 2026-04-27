@@ -46,7 +46,7 @@ function PostCommentsSheet({
   onOpenFull,
   showOpenFull = true,
 }: PostCommentsSheetProps) {
-  const { colors } = useAppTheme();
+  const { colors, isDarkMode } = useAppTheme();
   const [comments, setComments] = useState<Comment[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
@@ -254,7 +254,14 @@ function PostCommentsSheet({
               onChangeText={setDraft}
               placeholder="Add a comment..."
               placeholderTextColor={colors.placeholder}
-              style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+              style={[
+                styles.input,
+                {
+                  color: colors.text,
+                  borderColor: colors.border,
+                  backgroundColor: isDarkMode ? colors.input : colors.surface,
+                },
+              ]}
             />
             <TouchableOpacity disabled={!draft.trim() || submitting} onPress={onSubmit}>
               <Text style={[styles.sendText, { color: colors.primary }, (!draft.trim() || submitting) && styles.sendTextDisabled]}>Post</Text>
@@ -287,50 +294,51 @@ function PostCommentsSheet({
 }
 
 const styles = StyleSheet.create({
-  sheetContent: { flex: 1, paddingHorizontal: 16 },
+  sheetContent: { flex: 1, paddingHorizontal: 14 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingBottom: 12,
   },
-  title: { fontSize: 18, fontWeight: "800" },
-  headerLink: { fontWeight: "700" },
+  title: { fontSize: 16.5, fontWeight: "800" },
+  headerLink: { fontWeight: "700", fontSize: 12.5 },
   loader: { paddingVertical: 24, alignItems: "center" },
   listContent: { paddingBottom: 12 },
-  commentRow: { flexDirection: "row", marginBottom: 14 },
-  avatar: { width: 34, height: 34, borderRadius: 17, marginTop: 2 },
-  commentBody: { flex: 1, marginLeft: 10 },
+  commentRow: { flexDirection: "row", marginBottom: 12 },
+  avatar: { width: 32, height: 32, borderRadius: 16, marginTop: 2 },
+  commentBody: { flex: 1, marginLeft: 9 },
   commentTop: { flexDirection: "row", alignItems: "center" },
-  username: { fontWeight: "700", fontSize: 13.5 },
-  time: { marginLeft: 8, fontSize: 11.5 },
-  commentText: { marginTop: 2, lineHeight: 19 },
+  username: { fontWeight: "700", fontSize: 12.8 },
+  time: { marginLeft: 8, fontSize: 10.8 },
+  commentText: { marginTop: 2, lineHeight: 18, fontSize: 13 },
   actionRow: { flexDirection: "row", alignItems: "center", marginTop: 6, flexWrap: "wrap" },
-  actionText: { fontWeight: "600", marginRight: 14, fontSize: 12.5, marginBottom: 4 },
-  metaText: { fontSize: 12.5, marginBottom: 4 },
+  actionText: { fontWeight: "600", marginRight: 12, fontSize: 11.8, marginBottom: 4 },
+  metaText: { fontSize: 11.8, marginBottom: 4 },
   deleteText: { color: "#b91c1c" },
   emptyText: { textAlign: "center", paddingVertical: 30 },
   composer: {
     flexDirection: "row",
     alignItems: "center",
     paddingTop: 10,
-    paddingBottom: 18,
+    paddingBottom: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   disabledComposer: {
     paddingTop: 12,
-    paddingBottom: 18,
+    paddingBottom: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   disabledComposerText: { textAlign: "center" },
   input: {
     flex: 1,
-    height: 42,
+    height: 40,
     borderWidth: 1,
-    borderRadius: 21,
-    paddingHorizontal: 14,
+    borderRadius: 20,
+    paddingHorizontal: 13,
+    fontSize: 13,
   },
-  sendText: { fontWeight: "700", paddingHorizontal: 12 },
+  sendText: { fontWeight: "700", paddingHorizontal: 12, fontSize: 12.5 },
   sendTextDisabled: { color: "#9ca3af" },
 });
 

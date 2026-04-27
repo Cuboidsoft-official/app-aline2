@@ -7,7 +7,7 @@ import { alpha, appFonts } from "../theme/designSystem";
 import { useAppTheme } from "../theme/AppThemeContext";
 import ProfileTabAvatar from "./ProfileTabAvatar";
 
-export const APP_BOTTOM_DOCK_BASE_HEIGHT = Platform.OS === "ios" ? 78 : 70;
+export const APP_BOTTOM_DOCK_BASE_HEIGHT = Platform.OS === "ios" ? 74 : 66;
 
 export const getAppBottomDockBottomPadding = (bottomInset = 0) => {
   const normalizedInset = Math.max(0, Number(bottomInset) || 0);
@@ -66,7 +66,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
   const dockHeight = getAppBottomDockHeight(insets.bottom);
   const surfaceColor = isDarkMode ? "#08111F" : colors.card;
   const activeTintColor = colors.primary;
-  const labelFontSize = Platform.OS === "ios" ? 9.5 : 9;
+  const labelFontSize = Platform.OS === "ios" ? 8.5 : 8.2;
   const routeNames = useMemo(() => navigation?.getState?.()?.routeNames || [], [navigation]);
   const swipeLockRef = useRef(false);
   const resolvedActiveKey = activeRouteName === "SwipesLauncher" ? "Swipes" : activeRouteName;
@@ -133,9 +133,9 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
             borderTopColor: isDarkMode ? "rgba(111,176,255,0.12)" : colors.border,
             shadowColor: isDarkMode ? "#000" : colors.text,
             shadowOpacity: isDarkMode ? 0.42 : 0.08,
-            shadowRadius: 18,
+            shadowRadius: 16,
             shadowOffset: { width: 0, height: -4 },
-            elevation: 18,
+            elevation: 16,
           },
         ]}
       >
@@ -207,18 +207,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minWidth: 0,
     paddingTop: 5,
-    paddingBottom: 3,
+    paddingBottom: 2,
     paddingHorizontal: 2,
-    marginHorizontal: 3,
-    marginTop: 5,
-    borderRadius: 16,
+    marginHorizontal: 2,
+    marginTop: 4,
+    borderRadius: 14,
     borderWidth: 1,
   },
   label: {
     marginTop: 1,
     width: "100%",
     textAlign: "center",
-    lineHeight: 11,
+    lineHeight: 10,
     fontFamily: appFonts.semibold,
     fontWeight: "700",
   },

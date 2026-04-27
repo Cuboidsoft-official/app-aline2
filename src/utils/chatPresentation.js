@@ -1,5 +1,6 @@
 const SHARED_CONTENT_PREFIX = "aline2:share:";
 const CALL_EVENT_PREFIX = "aline2:call:";
+const SCHEDULED_CALL_PREFIX = "aline2:call_schedule:";
 
 const extractPostShareFromUrl = (value) => {
   const rawValue = String(value || "").trim();
@@ -156,6 +157,46 @@ export const buildCallEventMessage = ({
   return `${CALL_EVENT_PREFIX}${encodeURIComponent(JSON.stringify(payload))}`;
 };
 
+/**
+ * @param {{
+ *   callType?: string;
+ *   title?: string;
+ *   details?: string;
+ *   startAt?: string;
+ *   endAt?: string;
+ *   durationMinutes?: number;
+ *   timeZone?: string;
+ *   createdBy?: string;
+ *   calendarUrl?: string;
+ * }} [params]
+ */
+export const buildScheduledCallMessage = ({
+  callType = "audio",
+  title = "",
+  details = "",
+  startAt,
+  endAt,
+  durationMinutes = 30,
+  timeZone = "",
+  createdBy = "",
+  calendarUrl = "",
+} = {}) => {
+  const payload = {
+    kind: "call_schedule",
+    callType: String(callType || "audio").trim() === "video" ? "video" : "audio",
+    title: String(title || "").trim(),
+    details: String(details || "").trim(),
+    startAt: String(startAt || new Date().toISOString()).trim(),
+    endAt: String(endAt || "").trim(),
+    durationMinutes: Math.max(5, Number(durationMinutes) || 30),
+    timeZone: String(timeZone || "").trim(),
+    createdBy: String(createdBy || "").trim(),
+    calendarUrl: String(calendarUrl || "").trim(),
+  };
+
+  return `${SCHEDULED_CALL_PREFIX}${encodeURIComponent(JSON.stringify(payload))}`;
+};
+
 const parseCallEventValue = (value) => {
   const rawValue = String(value || "").trim();
   if (!rawValue.startsWith(CALL_EVENT_PREFIX)) {
@@ -167,6 +208,21 @@ const parseCallEventValue = (value) => {
     return payload && typeof payload === "object" ? payload : null;
   } catch (error) {
     console.log("call event payload parse error:", error);
+    return null;
+  }
+};
+
+const parseScheduledCallValue = (value) => {
+  const rawValue = String(value || "").trim();
+  if (!rawValue.startsWith(SCHEDULED_CALL_PREFIX)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(decodeURIComponent(rawValue.slice(SCHEDULED_CALL_PREFIX.length)));
+    return payload && typeof payload === "object" ? payload : null;
+  } catch (error) {
+    console.log("scheduled call payload parse error:", error);
     return null;
   }
 };
@@ -191,6 +247,16 @@ export const parseCallEventMessage = (messageOrValue) => {
   );
 };
 
+export const parseScheduledCallMessage = (messageOrValue) => {
+  if (typeof messageOrValue === "string") {
+    return parseScheduledCallValue(messageOrValue);
+  }
+
+  return parseScheduledCallValue(
+    messageOrValue?.text || messageOrValue?.message || messageOrValue?.content || "",
+  );
+};
+
 export const getMessageSenderId = (message) =>
   message?.sender?._id || message?.sender?.id || message?.senderId || message?.sender || "";
 
@@ -198,12 +264,17 @@ export const getMessageText = (message) => {
   const rawText = String(message?.text || message?.message || message?.content || "").trim();
   const sharedContent = parseSharedContentValue(rawText);
   const callEvent = parseCallEventValue(rawText);
+  const scheduledCall = parseScheduledCallValue(rawText);
 
-  if (!sharedContent && !callEvent) {
+  if (!sharedContent && !callEvent && !scheduledCall) {
     return rawText;
   }
 
   if (callEvent?.kind === "call") {
+    return "";
+  }
+
+  if (scheduledCall?.kind === "call_schedule") {
     return "";
   }
 
@@ -381,6 +452,7 @@ export const getAttachmentDisplayName = (message) => {
 export const getConversationPreview = (conversation) => {
   const sharedContent = parseSharedContentMessage(conversation?.lastMessageText || "");
   const callEvent = parseCallEventMessage(conversation?.lastMessageText || "");
+  const scheduledCall = parseScheduledCallMessage(conversation?.lastMessageText || "");
   if (sharedContent?.kind === "post") {
     const username = String(sharedContent?.user?.username || "").trim();
     return username ? `Shared @${username}'s post` : "Shared a post";
@@ -408,8 +480,19 @@ export const getConversationPreview = (conversation) => {
   }
 
   if (callEvent?.kind === "call") {
-    const callLabel = callEvent.callType === "video" ? "Video call" : "Voice call";
-    return callEvent.event === "missed" ? `Missed ${callLabel.toLowerCase()}` : callLabel;
+    const isVideo = callEvent.callType === "video";
+    if (callEvent.event === "missed") {
+      return isVideo ? "Missed video call" : "Missed voice call";
+    }
+    if (callEvent.event === "ended") {
+      return isVideo ? "Video call completed" : "Voice call completed";
+    }
+    return isVideo ? "Video call" : "Voice call";
+  }
+
+  if (scheduledCall?.kind === "call_schedule") {
+    const isVideo = scheduledCall.callType === "video";
+    return isVideo ? "Scheduled video call" : "Scheduled voice call";
   }
 
   if (conversation?.lastMessageText) {

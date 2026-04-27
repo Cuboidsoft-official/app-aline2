@@ -178,6 +178,38 @@ const storyStickerPositions: Record<StoryStickerPlacement, { x: number; y: numbe
   bottom_right: { x: 0.68, y: 0.72 },
 };
 
+const resolveMusicSegmentDurationSeconds = (music: any, musicConfig?: any): number | undefined => {
+  const explicitDuration =
+    typeof musicConfig?.duration === "number"
+      ? musicConfig.duration
+      : typeof music?.duration === "number"
+        ? music.duration
+        : undefined;
+
+  if (typeof explicitDuration === "number" && explicitDuration > 0) {
+    return explicitDuration;
+  }
+
+  const startTime =
+    typeof musicConfig?.startTime === "number"
+      ? musicConfig.startTime
+      : typeof music?.startTime === "number"
+        ? music.startTime
+        : 0;
+  const endTime =
+    typeof musicConfig?.endTime === "number"
+      ? musicConfig.endTime
+      : typeof music?.endTime === "number"
+        ? music.endTime
+        : undefined;
+
+  if (typeof endTime === "number" && endTime > startTime) {
+    return endTime - startTime;
+  }
+
+  return undefined;
+};
+
 const resolveStoryStickerPosition = (
   customPosition: { x: number; y: number } | undefined,
   placement: StoryStickerPlacement | undefined,
@@ -251,11 +283,7 @@ const mapStoryMusicDetails = (music: any, musicConfig?: any) => {
           ? music.endTime
           : undefined,
     duration:
-      typeof musicConfig?.duration === "number"
-        ? musicConfig.duration
-        : typeof music?.duration === "number"
-          ? music.duration
-          : undefined,
+      resolveMusicSegmentDurationSeconds(music, musicConfig),
   };
 };
 
@@ -627,6 +655,9 @@ class RemoteSocialApi implements SocialApi {
       sharesCount: typeof post?.shares === "number" ? post.shares : 0,
       liked: typeof post?.liked === "boolean" ? post.liked : false,
       saved: typeof post?.saved === "boolean" ? post.saved : false,
+      likePreviewUsers: Array.isArray(post?.recentLikes)
+        ? post.recentLikes.map((user: any) => this.mapUser(user)).filter((user: SocialUser) => !!user.id)
+        : [],
       ...overrides,
     };
   }

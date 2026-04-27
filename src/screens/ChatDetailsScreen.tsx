@@ -46,7 +46,7 @@ import {
 import { getStoredUserId } from "../utils/authSession";
 import AppAvatar from "../components/AppAvatar";
 
-const PRIMARY = "#7b3fe4";
+const PRIMARY = "#111111";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -511,6 +511,16 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
         );
     }, [clearingChat, resolvedConversationId]);
 
+    const openScheduleCall = useCallback((callType: "audio" | "video") => {
+        navigation.navigate("ChatScreen", {
+            userId: user?._id || userId,
+            conversationId: resolvedConversationId,
+            conversationType: "direct",
+            openScheduleCallComposer: true,
+            openScheduleCallType: callType,
+        });
+    }, [navigation, resolvedConversationId, user?._id, userId]);
+
     // ─── Render helpers ─────────────────────────────────────────────────────
 
     const renderGridItem = useCallback(
@@ -572,6 +582,8 @@ const ChatDetailsScreen = ({ navigation, route }: any) => {
                     <Option icon="notifications-outline" title="Notifications" onPress={() => navigation.navigate("NotificationSettingsScreen")} colors={colors} />
                     <Option icon="images-outline" title="Refresh shared media" onPress={loadMedia} colors={colors} />
                     <Option icon="search-outline" title="Search messages" onPress={toggleSearch} colors={colors} />
+                    <Option icon="call-outline" title="Schedule audio meeting" onPress={() => openScheduleCall("audio")} colors={colors} />
+                    <Option icon="videocam-outline" title="Schedule video meeting" onPress={() => openScheduleCall("video")} colors={colors} />
                     <Option icon="color-palette-outline" title="Chat Theme" onPress={() => setShowThemePicker(true)} colors={colors} />
                     <Option
                         icon={savingWallpaper ? "hourglass-outline" : "image-outline"}

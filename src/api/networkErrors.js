@@ -31,6 +31,26 @@ const getModerationBlockedMessage = (error, fallbackMessage) => {
   return fallbackMessage;
 };
 
+const getRequestTargetType = (error) => {
+  const requestUrl = String(error?.config?.url || "").trim().toLowerCase();
+  const responseTarget = String(error?.response?.data?.target || "").trim().toLowerCase();
+  const combinedTarget = `${requestUrl} ${responseTarget}`;
+
+  if (combinedTarget.includes("/upload/video") || combinedTarget.includes("video")) {
+    return "video";
+  }
+
+  if (combinedTarget.includes("/upload/image") || combinedTarget.includes("/upload/images") || combinedTarget.includes("image")) {
+    return "image";
+  }
+
+  if (combinedTarget.includes("/comments") || combinedTarget.includes("chat")) {
+    return "chat";
+  }
+
+  return "general";
+};
+
 export const getReadableApiErrorMessage = (error, fallbackMessage = "Please try again.") => {
   if (error?.response?.data?.code) {
     const code = String(error.response.data.code).trim();
@@ -69,7 +89,17 @@ export const getReadableApiErrorMessage = (error, fallbackMessage = "Please try 
   }
 
   if (isTimeoutFailure(error)) {
+    const targetType = getRequestTargetType(error);
+    if (targetType === "video") {
+      return "Video upload took too long to respond. Please try again on a stable connection.";
+    }
+
     return `The server took too long to respond. Please try again on a stable connection.`;
+  }
+
+  const targetType = getRequestTargetType(error);
+  if (targetType === "video") {
+    return "Video upload could not reach the server. Please retry once and check your connection if it keeps happening.";
   }
 
   return `Unable to connect to the server. Please check your internet connection and try again.`;

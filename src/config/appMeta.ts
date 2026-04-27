@@ -1,13 +1,13 @@
-export const APP_VERSION = "0.0.1";
-export const APP_RELEASE_DATE = "April 26, 2026";
-export const APP_RELEASE_TITLE = "Faster chats, smoother swipes, and more reliable calls";
+export const APP_VERSION = "1.0.2";
+export const APP_RELEASE_DATE = "April 27, 2026";
+export const APP_RELEASE_TITLE = "Smaller feed UI, steadier video posting, and cleaner call updates";
 
 export const APP_RELEASE_HIGHLIGHTS = [
-  "Call sessions now reset more reliably after a call ends so the next call can start without the old active warning getting stuck.",
-  "Chat sending feels faster with a snappier latest-message view and less lag while conversations update.",
-  "Music attached to feed posts, stories, and swipes now plays more reliably after publishing.",
-  "Swipes now feel smoother with quicker full-screen transitions, faster auto playback, and a cleaner action dock layout.",
-  "Release notes have been refreshed to focus on user-facing improvements across chat, feed, swipes, seller, and account screens.",
+  "Feed cards now feel tighter and more Instagram-like with smaller avatars, lighter typography, and less bulky spacing.",
+  "Video post uploads now retry alternate backend connections instead of falling straight into a generic internet-error state.",
+  "Video trim preview feels more polished with clearer clip feedback and a stronger save-trim flow before publishing.",
+  "Call rows now explain what happened more clearly with better missed, calling, incoming, and completed labels.",
+  "Release notes now reflect the latest feed, upload, trim, referral, and call experience improvements more accurately.",
 ];
 
 export const APP_FEATURE_SECTIONS = [
@@ -55,6 +55,11 @@ export const APP_FEATURE_SECTIONS = [
 ];
 
 export const APP_BUG_FIXES = [
+  "Fixed a video-post upload path that could show a misleading internet error before trying the app's backup backend connection.",
+  "Reduced feed header and caption sizing so posts feel denser, cleaner, and closer to a familiar social feed layout.",
+  "Improved trim-sheet feedback so creators can preview the exact clip window and save the trimmed version more confidently.",
+  "Clarified call-event copy across chat surfaces so missed, completed, and in-progress calls are easier to understand.",
+  "Refreshed the in-app release summary so referral and release-note sections stay in sync with the current build.",
   "Reduced chat lag so text sending feels quicker and the newest message stays in view more consistently.",
   "Fixed a stuck active-call state that could appear even after the previous call had already ended.",
   "Improved music playback for published feed posts, stories, and swipes so sound starts more reliably.",
@@ -73,7 +78,7 @@ export const APP_BUG_FIXES = [
 ];
 
 export const APP_UPCOMING_CHANGES = [
-  "More helpful call status updates inside the call screen.",
+  "More detailed call states inside the live call screen itself.",
   "Expanded creator tooling for richer live moderation, better seller promo surfaces, and stronger review queues.",
   "A fuller historical release archive so each version can be reviewed directly inside the app.",
   "Optional upload previews before publishing completes, plus richer review tools.",

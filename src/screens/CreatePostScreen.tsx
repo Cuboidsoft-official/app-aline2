@@ -1881,9 +1881,12 @@ function CreatePostScreen({ navigation, route }: any) {
 
     const nextDuration = Math.min(selectedVideoDuration, videoDurationLimit);
     setVideoTrimError("");
-    setVideoTrimStartTime(0);
-    setVideoTrimDuration(Math.max(1, nextDuration));
-    setVideoTrimPreviewPositionMs(0);
+    setVideoTrimStartTime((current) => clamp(current, 0, Math.max(0, selectedVideoDuration - 1)));
+    setVideoTrimDuration((current) => {
+      const nextClipDuration = Math.max(1, nextDuration);
+      return current > 0 ? clamp(current, 1, Math.max(1, selectedVideoDuration)) : nextClipDuration;
+    });
+    setVideoTrimPreviewPositionMs((current) => (current > 0 ? current : 0));
     setVideoTrimSheetVisible(true);
   }, [selectedAsset?.mediaType, selectedVideoDuration, videoDurationLimit]);
 
@@ -1977,7 +1980,12 @@ function CreatePostScreen({ navigation, route }: any) {
               source: "local",
               fileName: `trimmed_${Date.now()}.mp4`,
               mimeType: "video/mp4",
-              durationMs: Math.max(1000, Number(result?.duration || videoTrimDuration * 1000)),
+              durationMs: Math.max(
+                1000,
+                Number(result?.duration && Number(result.duration) > 1000
+                  ? result.duration
+                  : Math.round((Number(result?.duration) || videoTrimDuration) * 1000))
+              ),
               thumbnailUrl: current.thumbnailUrl,
             }
           : current,
@@ -4482,13 +4490,17 @@ function CreatePostScreen({ navigation, route }: any) {
                 }}
               />
               <View pointerEvents="none" style={styles.videoTrimShade} />
+              <View pointerEvents="none" style={styles.videoTrimBadge}>
+                <Icon name="cut-outline" size={14} color="#fff" />
+                <Text style={styles.videoTrimBadgeText}>Preview clip</Text>
+              </View>
             </View>
 
             <View style={styles.videoTrimMetaRow}>
               <View style={styles.videoTrimMetaCopy}>
                 <Text style={[styles.videoTrimTitle, { color: textColor }]}>Selection</Text>
                 <Text style={[styles.videoTrimMeta, { color: mutedColor }]}>
-                  {formatDuration(videoTrimStartTime)} - {formatDuration(clipEndTime)} - {formatDuration(activeClipDuration)}
+                  {formatDuration(videoTrimStartTime)} - {formatDuration(clipEndTime)} • {formatDuration(activeClipDuration)}
                 </Text>
               </View>
               <TouchableOpacity
@@ -4506,6 +4518,9 @@ function CreatePostScreen({ navigation, route }: any) {
 
             <Text style={[styles.videoTrimTime, { color: mutedColor }]}>
               {formatDuration(Math.floor(videoTrimPreviewPositionMs / 1000))} / {formatDuration(selectedVideoDuration)}
+            </Text>
+            <Text style={[styles.helperText, { color: mutedColor }]}>
+              Drag the handles to keep the strongest part of the clip. The trimmed file replaces the original one for publishing.
             </Text>
 
             <RangeSlider
@@ -4532,7 +4547,7 @@ function CreatePostScreen({ navigation, route }: any) {
                 {videoTrimApplying ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Apply</Text>
+                  <Text style={styles.primaryButtonText}>Save trim</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -5842,14 +5857,14 @@ const styles = StyleSheet.create({
     fontFamily: appFonts.regular,
   },
   sliderTrack: {
-    height: 6,
-    borderRadius: 0,
+    height: 8,
+    borderRadius: 999,
     overflow: "hidden",
   },
   sliderTrackFrame: {
     position: "relative",
     justifyContent: "center",
-    minHeight: 38,
+    minHeight: 52,
   },
   sliderViewport: {
     marginVertical: 14,
@@ -5866,13 +5881,14 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 0,
     bottom: 0,
-    borderRadius: 0,
+    borderRadius: 999,
   },
   sliderSelectionEdge: {
     position: "absolute",
     top: 0,
     bottom: 0,
-    width: 2,
+    width: 3,
+    borderRadius: 999,
   },
   sliderWaveRow: {
     ...StyleSheet.absoluteFillObject,
@@ -5890,41 +5906,43 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 0,
     bottom: 0,
-    width: 24,
+    width: 30,
     alignItems: "center",
     justifyContent: "center",
   },
   sliderHandleTouchWaveform: {
-    width: 28,
+    width: 34,
   },
   sliderHandle: {
-    borderWidth: 0,
-    backgroundColor: "transparent",
+    borderWidth: 2,
+    backgroundColor: "rgba(255,255,255,0.96)",
     alignItems: "center",
     justifyContent: "center",
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 0,
+    shadowColor: "#020617",
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
   sliderHandleDefault: {
-    width: 14,
-    height: 24,
-    borderRadius: 0,
+    width: 18,
+    height: 28,
+    borderRadius: 999,
   },
   sliderHandleWaveform: {
-    width: 12,
-    height: 44,
-    borderRadius: 0,
+    width: 18,
+    height: 48,
+    borderRadius: 999,
   },
   sliderHandleGrip: {
-    width: 0,
-    height: 0,
-    borderRadius: 0,
+    width: 3,
+    height: 12,
+    borderRadius: 999,
   },
   sliderHandleGripWaveform: {
-    height: 0,
-    borderRadius: 0,
+    width: 4,
+    height: 18,
+    borderRadius: 999,
   },
   valueSliderTrack: {
     height: 6,
@@ -6058,6 +6076,24 @@ const styles = StyleSheet.create({
   videoTrimShade: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(2, 6, 23, 0.08)",
+  },
+  videoTrimBadge: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(15, 23, 42, 0.62)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  videoTrimBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: appFonts.semibold,
   },
   videoTrimMetaRow: {
     flexDirection: "row",

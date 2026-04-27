@@ -37,7 +37,7 @@ function PostShareSheet({
   onPostUpdate,
   onOpenStoryComposer,
 }: PostShareSheetProps) {
-  const { colors } = useAppTheme();
+  const { colors, isDarkMode } = useAppTheme();
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedTargets, setSelectedTargets] = useState<ShareTarget[]>([]);
 
@@ -211,7 +211,15 @@ function PostShareSheet({
         <Text style={[styles.subtitle, { color: colors.mutedText }]}>Choose people first, then use the other share options below.</Text>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          <View style={[styles.peoplePanel, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+          <View
+            style={[
+              styles.peoplePanel,
+              {
+                borderColor: colors.border,
+                backgroundColor: isDarkMode ? "rgba(10,18,34,0.94)" : colors.surface,
+              },
+            ]}
+          >
             <View style={styles.peopleHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>People</Text>
               <Text style={[styles.sectionMeta, { color: colors.mutedText }]}>
@@ -245,7 +253,15 @@ function PostShareSheet({
             )}
           </TouchableOpacity>
 
-          <View style={[styles.actionsPanel, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          <View
+            style={[
+              styles.actionsPanel,
+              {
+                borderColor: colors.border,
+                backgroundColor: isDarkMode ? "rgba(8,14,26,0.96)" : colors.card,
+              },
+            ]}
+          >
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Other options</Text>
 
             <TouchableOpacity style={[styles.actionRow, { borderColor: colors.border }]} disabled={!!busy} onPress={shareToStory}>
@@ -273,26 +289,26 @@ function PostShareSheet({
 }
 
 const styles = StyleSheet.create({
-  sheetContent: { flex: 1, paddingHorizontal: 16, paddingBottom: 24 },
+  sheetContent: { flex: 1, paddingHorizontal: 14, paddingBottom: 20 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingBottom: 12,
   },
-  title: { fontSize: 18, fontWeight: "800" },
+  title: { fontSize: 16.5, fontWeight: "800" },
   subtitle: {
-    fontSize: 12.5,
-    marginBottom: 12,
+    fontSize: 11.5,
+    marginBottom: 10,
   },
   scrollContent: {
     paddingBottom: 8,
   },
   peoplePanel: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 22,
-    paddingHorizontal: 14,
-    paddingTop: 14,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingTop: 12,
     paddingBottom: 8,
   },
   peopleHeader: {
@@ -302,32 +318,32 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "800",
   },
   sectionMeta: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
   },
   actionsPanel: {
-    marginTop: 14,
+    marginTop: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 22,
-    paddingHorizontal: 14,
-    paddingTop: 14,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingTop: 12,
     paddingBottom: 4,
   },
   actionRow: {
-    minHeight: 52,
+    minHeight: 48,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     alignItems: "center",
   },
-  actionText: { marginLeft: 12, marginRight: "auto", fontWeight: "600", fontSize: 14 },
+  actionText: { marginLeft: 12, marginRight: "auto", fontWeight: "600", fontSize: 13 },
   sendButton: {
-    marginTop: 14,
-    minHeight: 48,
-    borderRadius: 18,
+    marginTop: 12,
+    minHeight: 44,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -337,7 +353,7 @@ const styles = StyleSheet.create({
   sendButtonText: {
     color: "#fff",
     fontWeight: "800",
-    fontSize: 14,
+    fontSize: 13,
   },
 });
 

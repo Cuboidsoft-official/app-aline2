@@ -33,9 +33,11 @@ import { API } from "../api/api";
 import { connectSocket, socket } from "../socket";
 import {
   buildCallEventMessage,
+  buildScheduledCallMessage,
   getAttachmentDisplayName,
   getMessageAttachment,
   parseCallEventMessage,
+  parseScheduledCallMessage,
   getMessageReply,
   getMessageSenderId,
   getMessageText,
@@ -221,6 +223,14 @@ interface CallEventPreview {
   icon: string;
 }
 
+interface ScheduledCallPreview {
+  label: string;
+  meta: string;
+  calendarUrl: string;
+  icon: string;
+  durationMinutes: number;
+}
+
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
 const buildLocationMessage = (query: string): string => {
@@ -228,6 +238,114 @@ const buildLocationMessage = (query: string): string => {
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanQuery)}`;
   return `${LOCATION_MESSAGE_LABEL} ${cleanQuery}\n${mapsUrl}`;
 };
+
+const padDatePart = (value: number): string => String(value).padStart(2, "0");
+
+const buildLocalDateTimeInputValue = (date = new Date()): string => {
+  const nextDate = new Date(date);
+  nextDate.setMinutes(0, 0, 0);
+  nextDate.setHours(nextDate.getHours() + 1);
+
+  return [
+    nextDate.getFullYear(),
+    padDatePart(nextDate.getMonth() + 1),
+    padDatePart(nextDate.getDate()),
+  ].join("-")
+    + `T${padDatePart(nextDate.getHours())}:${padDatePart(nextDate.getMinutes())}`;
+};
+
+const parseLocalDateTimeInputValue = (value: string): Date | null => {
+  const normalizedValue = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalizedValue)) {
+    return null;
+  }
+
+  const parsedDate = new Date(normalizedValue);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+};
+
+const formatCalendarDate = (value: string | Date) => {
+  const date = value instanceof Date ? value : new Date(value);
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+};
+
+const buildGoogleCalendarUrl = ({
+  title,
+  details,
+  start,
+  end,
+}: {
+  title: string;
+  details?: string;
+  start: string | Date;
+  end: string | Date;
+}) => {
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: title,
+    details: details || "",
+    dates: `${formatCalendarDate(start)}/${formatCalendarDate(end)}`,
+  });
+
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+};
+
+const formatScheduledCallDateLabel = (startAt?: string, endAt?: string): string => {
+  const startDate = startAt ? new Date(startAt) : null;
+  const endDate = endAt ? new Date(endAt) : null;
+
+  if (!startDate || Number.isNaN(startDate.getTime())) {
+    return "Scheduled call";
+  }
+
+  const datePart = startDate.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+  });
+  const startTime = startDate.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  if (!endDate || Number.isNaN(endDate.getTime())) {
+    return `${datePart}, ${startTime}`;
+  }
+
+  const endTime = endDate.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  return `${datePart}, ${startTime} - ${endTime}`;
+};
+
+const buildOutgoingSendGuardKey = ({
+  conversationId,
+  text,
+  file,
+  mediaUrl,
+  messageType,
+  duration,
+  replyToMessageId,
+}: {
+  conversationId?: string | null;
+  text?: string;
+  file?: { uri?: string; name?: string; type?: string };
+  mediaUrl?: string;
+  messageType?: string;
+  duration?: number;
+  replyToMessageId?: string;
+}): string =>
+  [
+    String(conversationId || "").trim(),
+    String(text || "").trim(),
+    String(file?.uri || "").trim(),
+    String(file?.name || "").trim(),
+    String(mediaUrl || "").trim(),
+    String(messageType || "text").trim().toLowerCase(),
+    Number(duration || 0),
+    String(replyToMessageId || "").trim(),
+  ].join("::");
 
 const parseLocationMessage = (text: string | undefined | null): LocationPayload | null => {
   if (typeof text !== "string" || !text.startsWith(LOCATION_MESSAGE_LABEL)) {
@@ -310,18 +428,28 @@ const getMessageRenderKey = (message: any): string => {
 
 const dedupeMessages = (items: any[]): any[] => {
   const seen = new Set<string>();
+  const seenSignatures = new Set<string>();
 
   return (Array.isArray(items) ? items : []).filter((item) => {
     const identity = getMessageIdentity(item);
-    if (!identity) {
-      return true;
+    const signature = buildMessageSignature(item);
+
+    if (identity) {
+      if (seen.has(identity)) {
+        return false;
+      }
+
+      seen.add(identity);
     }
 
-    if (seen.has(identity)) {
+    if (signature && seenSignatures.has(signature)) {
       return false;
     }
 
-    seen.add(identity);
+    if (signature) {
+      seenSignatures.add(signature);
+    }
+
     return true;
   });
 };
@@ -341,6 +469,35 @@ const buildMessageSignature = (message: any): string => {
     Number(message?.duration || 0),
     replyId,
   ].join("::");
+};
+
+const getMessageTimestamp = (message: any): number => {
+  const rawValue = message?.createdAt || message?.updatedAt || message?.timestamp || 0;
+  const timestamp = new Date(rawValue).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const isNearDuplicateMessage = (leftMessage: any, rightMessage: any): boolean => {
+  const leftSignature = buildMessageSignature(leftMessage);
+  const rightSignature = buildMessageSignature(rightMessage);
+
+  if (!leftSignature || leftSignature !== rightSignature) {
+    return false;
+  }
+
+  const leftSenderId = String(getMessageSenderId(leftMessage) || "");
+  const rightSenderId = String(getMessageSenderId(rightMessage) || "");
+  if (leftSenderId && rightSenderId && leftSenderId !== rightSenderId) {
+    return false;
+  }
+
+  const leftTimestamp = getMessageTimestamp(leftMessage);
+  const rightTimestamp = getMessageTimestamp(rightMessage);
+  if (leftTimestamp && rightTimestamp && Math.abs(leftTimestamp - rightTimestamp) > 8000) {
+    return false;
+  }
+
+  return true;
 };
 
 const buildOptimisticMessage = ({
@@ -530,7 +687,6 @@ const buildCallEventPreview = (
 
   const direction = String(callEvent.callerId || "") === String(currentUserId || "") ? "outgoing" : "incoming";
   const isVideo = callEvent.callType === "video";
-  const callLabel = isVideo ? "video call" : "voice call";
   const event = String(callEvent.event || "started");
 
   switch (event) {
@@ -539,7 +695,7 @@ const buildCallEventPreview = (
         callType: isVideo ? "video" : "audio",
         direction,
         label: isVideo ? "Missed video call" : "Missed voice call",
-        meta: direction === "outgoing" ? "Unanswered" : "Incoming",
+        meta: direction === "outgoing" ? "No answer" : "Missed",
         icon: isVideo ? "videocam-outline" : "call-outline",
       };
     case "ended":
@@ -547,7 +703,7 @@ const buildCallEventPreview = (
         callType: isVideo ? "video" : "audio",
         direction,
         label: isVideo ? "Video call" : "Voice call",
-        meta: direction === "outgoing" ? "Outgoing" : "Incoming",
+        meta: "Completed",
         icon: isVideo ? "videocam-outline" : "call-outline",
       };
     default:
@@ -555,10 +711,28 @@ const buildCallEventPreview = (
         callType: isVideo ? "video" : "audio",
         direction,
         label: isVideo ? "Video call" : "Voice call",
-        meta: direction === "outgoing" ? "Outgoing" : "Incoming",
+        meta: direction === "outgoing" ? "Calling" : "Incoming",
         icon: isVideo ? "videocam-outline" : "call-outline",
       };
   }
+};
+
+const buildScheduledCallPreview = (message: ChatMessage): ScheduledCallPreview | null => {
+  const scheduledCall = parseScheduledCallMessage(message);
+  if (scheduledCall?.kind !== "call_schedule") {
+    return null;
+  }
+
+  const isVideo = scheduledCall.callType === "video";
+  const title = String(scheduledCall.title || "").trim();
+
+  return {
+    label: title || (isVideo ? "Scheduled video call" : "Scheduled voice call"),
+    meta: formatScheduledCallDateLabel(scheduledCall.startAt, scheduledCall.endAt),
+    calendarUrl: String(scheduledCall.calendarUrl || "").trim(),
+    icon: isVideo ? "videocam-outline" : "call-outline",
+    durationMinutes: Math.max(5, Number(scheduledCall.durationMinutes) || 30),
+  };
 };
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -568,7 +742,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
-  const { userId, conversationId, conversationType: conversationTypeParam, serviceId, groupName, groupAvatar, memberCount, groupConversation } = route.params || {};
+  const { userId, conversationId, conversationType: conversationTypeParam, serviceId, groupName, groupAvatar, memberCount, groupConversation, openScheduleCallComposer, openScheduleCallType } = route.params || {};
   const initialConversationType = (String(conversationTypeParam || "").trim().toLowerCase() || "direct") as "direct" | "seller" | "group";
   const [resolvedConversationType, setResolvedConversationType] = useState<"direct" | "seller" | "group">(initialConversationType);
   const isGroupConversation = resolvedConversationType === "group";
@@ -595,6 +769,11 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [lockingBusy, setLockingBusy] = useState(false);
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
+  const [showScheduleCallComposer, setShowScheduleCallComposer] = useState(false);
+  const [scheduleCallType, setScheduleCallType] = useState<"audio" | "video">("audio");
+  const [scheduleCallDateTime, setScheduleCallDateTime] = useState(() => buildLocalDateTimeInputValue());
+  const [scheduleCallDurationMinutes, setScheduleCallDurationMinutes] = useState("30");
+  const [scheduleCallAgenda, setScheduleCallAgenda] = useState("");
 
   useEffect(() => {
     const normalized = String(conversationTypeParam || "").trim().toLowerCase();
@@ -602,6 +781,14 @@ const ChatScreen = ({ navigation, route }: any) => {
       setResolvedConversationType(normalized as "direct" | "seller" | "group");
     }
   }, [conversationTypeParam]);
+
+  useEffect(() => {
+    if (openScheduleCallComposer) {
+      setScheduleCallType(openScheduleCallType === "video" ? "video" : "audio");
+      setShowScheduleCallComposer(true);
+      navigation.setParams?.({ openScheduleCallComposer: undefined, openScheduleCallType: undefined });
+    }
+  }, [navigation, openScheduleCallComposer, openScheduleCallType]);
   const [groupMeta, setGroupMeta] = useState<GroupMeta>({
     groupName: groupName || "Group chat",
     groupAvatar: groupAvatar || "",
@@ -611,6 +798,9 @@ const ChatScreen = ({ navigation, route }: any) => {
     isGroupAdmin: Boolean(groupConversation?.isGroupOwner || groupConversation?.isGroupAdmin),
   });
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const textSendLockRef = useRef(false);
+  const composerSendPressLockRef = useRef(false);
+  const recentOutgoingSendRef = useRef<{ key: string; timestamp: number }>({ key: "", timestamp: 0 });
 
   // Feature state: voice, stickers, message context menu
   const [showStickerPicker, setShowStickerPicker] = useState(false);
@@ -677,12 +867,17 @@ const ChatScreen = ({ navigation, route }: any) => {
 
         if (
           !hasChanged
-          && item?._optimistic
-          && String(getMessageSenderId(item) || "") === String(currentUserId || "")
-          && buildMessageSignature(item) === nextSignature
+          && (
+            (
+              item?._optimistic
+              && String(getMessageSenderId(item) || "") === String(currentUserId || "")
+              && buildMessageSignature(item) === nextSignature
+            )
+            || isNearDuplicateMessage(item, normalizedMessage)
+          )
         ) {
           hasChanged = true;
-          return { ...normalizedMessage, _optimistic: false };
+          return { ...item, ...normalizedMessage, _optimistic: false };
         }
 
         return item;
@@ -870,15 +1065,15 @@ const ChatScreen = ({ navigation, route }: any) => {
         setLoading(false);
       }
     }
-  }, [ensureConversation, fetchConversationMeta, fetchMessages, fetchUser, userId]);
+  }, [ensureConversation, fetchConversationMeta, fetchMessages, fetchUser, joinConversationRealtime, userId]);
 
   const sendCallEventLog = useCallback(async ({
-    conversationId,
+    targetConversationId,
     callSessionId,
     callType,
     event = "started",
   }: {
-    conversationId: string;
+    targetConversationId: string;
     callSessionId: string;
     callType: "audio" | "video";
     event?: string;
@@ -891,7 +1086,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     });
 
     const response = await sendChatMessage({
-      conversationId,
+      conversationId: targetConversationId,
       text: payload,
       messageType: "system",
     });
@@ -929,7 +1124,7 @@ const ChatScreen = ({ navigation, route }: any) => {
         void joinConversationRealtime(resolvedConversationId);
 
         sendCallEventLog({
-          conversationId: resolvedConversationId,
+          targetConversationId: resolvedConversationId,
           callSessionId: nextCallSessionId,
           callType,
         }).catch((error) => {
@@ -989,6 +1184,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
   }, [
     ensureConversation,
+    currentUserId,
     groupAvatar,
     groupMeta.groupAvatar,
     groupMeta.groupName,
@@ -1286,6 +1482,25 @@ const ChatScreen = ({ navigation, route }: any) => {
       throw new Error("Unable to start this conversation right now.");
     }
 
+    const sendGuardKey = buildOutgoingSendGuardKey({
+      conversationId: resolvedConversationId,
+      text: nextText,
+      file,
+      mediaUrl,
+      messageType,
+      duration,
+      replyToMessageId,
+    });
+    const sendAttemptedAt = Date.now();
+    if (
+      sendGuardKey
+      && recentOutgoingSendRef.current.key === sendGuardKey
+      && sendAttemptedAt - recentOutgoingSendRef.current.timestamp < 1400
+    ) {
+      return;
+    }
+    recentOutgoingSendRef.current = { key: sendGuardKey, timestamp: sendAttemptedAt };
+
     const optimisticId = `local:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
     mergeMessage(
       buildOptimisticMessage({
@@ -1326,6 +1541,9 @@ const ChatScreen = ({ navigation, route }: any) => {
         mergeMessage(mergedReplyMessage);
       }
     } catch (error) {
+      if (recentOutgoingSendRef.current.key === sendGuardKey) {
+        recentOutgoingSendRef.current = { key: "", timestamp: 0 };
+      }
       removeLocalMessage(optimisticId);
       setReplyingToMessage(replyToMessage || null);
       throw error;
@@ -1335,12 +1553,13 @@ const ChatScreen = ({ navigation, route }: any) => {
   const replyingToMessageId = useMemo(() => getMessageIdentity(replyingToMessage), [replyingToMessage]);
 
   const sendTextMessage = useCallback(async () => {
-    if (!text.trim() || sending) {
+    if (!text.trim() || sending || textSendLockRef.current) {
       return;
     }
 
     const trimmedText = text.trim();
     try {
+      textSendLockRef.current = true;
       setSending(true);
       setText("");
       await submitMessage({
@@ -1353,9 +1572,23 @@ const ChatScreen = ({ navigation, route }: any) => {
       console.log("Send message error:", err?.response?.data || err);
       Alert.alert("Error", getReadableApiErrorMessage(err, "Failed to send message"));
     } finally {
+      textSendLockRef.current = false;
       setSending(false);
     }
   }, [replyingToMessage, replyingToMessageId, sending, submitMessage, text]);
+
+  const runComposerSendAction = useCallback((action: () => Promise<void>) => {
+    if (composerSendPressLockRef.current) {
+      return;
+    }
+
+    composerSendPressLockRef.current = true;
+    action()
+      .catch(() => {})
+      .finally(() => {
+        composerSendPressLockRef.current = false;
+      });
+  }, []);
 
   const primaryThemeColor = useMemo(() => {
     return CHAT_THEME_LIST.find(t => t.id === chatTheme)?.sentBubble[0] || PRIMARY;
@@ -1405,6 +1638,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const callEventBubbleWidth = Math.min(Math.max(Math.round(width * 0.52), 164), 216);
   const mediaBubbleWidth = Math.min(width * 0.56, 192);
   const isChannelConversation = isGroupConversation && groupMeta.groupVisibility === "public";
+  const canScheduleCall = resolvedConversationType === "direct" || resolvedConversationType === "group";
   const canComposeGroupMessage = !isGroupConversation
     || groupMeta.groupMessagePermission !== "admins"
     || groupMeta.isGroupAdmin;
@@ -1414,22 +1648,6 @@ const ChatScreen = ({ navigation, route }: any) => {
       ? "Only admins can send messages in this channel."
       : "Only admins can send messages in this group."
     : "";
-  const chatHeroEyebrow = isChannelConversation ? "Channel" : isGroupConversation ? "Group conversation" : "Direct conversation";
-  const chatHeroTitle = isGroupConversation
-    ? groupMeta.groupName || "Group chat"
-    : user?.username || user?.name || "Conversation";
-  const chatHeroText = isGroupConversation
-    ? `${groupPresenceText}. Keep everyone aligned with messages, media, and quick call actions.`
-    : conversationListing?.serviceName
-      ? `${directPresenceText}. Linked service: ${conversationListing.serviceName}.`
-      : `${directPresenceText}. Messages, media, and support tools stay in one thread.`;
-  const chatHeroMeta = isConversationLockedState
-    ? "Locked chat"
-    : isGroupConversation
-      ? `${groupMeta.memberCount || 0} members`
-      : isDirectActive
-        ? "Live now"
-        : "Private thread";
   const assistantScope = isGroupConversation ? "Group chat support" : "Direct chat support";
   const assistantScopeHint = isGroupConversation
     ? `Get help with messages, calls, media, and group controls for ${groupMeta.groupName || "this group chat"}.`
@@ -1889,6 +2107,100 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
   }, [locationDraft, replyingToMessage, replyingToMessageId, submitMessage]);
 
+  const resetScheduleCallComposer = useCallback(() => {
+    setShowScheduleCallComposer(false);
+    setScheduleCallType("audio");
+    setScheduleCallDateTime(buildLocalDateTimeInputValue());
+    setScheduleCallDurationMinutes("30");
+    setScheduleCallAgenda("");
+  }, []);
+
+  const sendScheduledCallMessage = useCallback(async () => {
+    const scheduledStart = parseLocalDateTimeInputValue(scheduleCallDateTime);
+    const durationMinutes = Math.max(5, Number.parseInt(String(scheduleCallDurationMinutes || "30"), 10) || 30);
+
+    if (!scheduledStart) {
+      Alert.alert("Pick date & time", "Please enter a valid date and time for the scheduled call.");
+      return;
+    }
+
+    if (scheduledStart.getTime() <= Date.now()) {
+      Alert.alert("Future time required", "Please choose a future date and time for the scheduled call.");
+      return;
+    }
+
+    try {
+      setUploading(true);
+      const resolvedConversationId = await ensureConversation();
+      if (!resolvedConversationId) {
+        throw new Error("Unable to open this conversation right now.");
+      }
+
+      const scheduledEnd = new Date(scheduledStart.getTime() + durationMinutes * 60 * 1000);
+      const participantLabel = isGroupConversation
+        ? groupMeta.groupName || groupName || "this group"
+        : user?.name || user?.username || "this chat";
+      const scheduleTitle = `${scheduleCallType === "video" ? "Video" : "Voice"} call with ${participantLabel}`;
+      const scheduleDetails = [
+        scheduleCallAgenda ? `Agenda: ${scheduleCallAgenda.trim()}` : "",
+        isGroupConversation ? `Group chat: ${participantLabel}` : "Scheduled from Aline2 chat",
+      ].filter(Boolean).join("\n");
+      const calendarUrl = buildGoogleCalendarUrl({
+        title: scheduleTitle,
+        details: scheduleDetails,
+        start: scheduledStart,
+        end: scheduledEnd,
+      });
+      const payload = buildScheduledCallMessage({
+        callType: scheduleCallType,
+        title: scheduleTitle,
+        details: scheduleDetails,
+        startAt: scheduledStart.toISOString(),
+        endAt: scheduledEnd.toISOString(),
+        durationMinutes,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+        createdBy: currentUserId,
+        calendarUrl,
+      });
+
+      const response = await sendChatMessage({
+        conversationId: resolvedConversationId,
+        text: payload,
+        messageType: "system",
+        replyToMessageId: replyingToMessageId,
+      });
+
+      if (response?.message) {
+        mergeMessage(response.message);
+      }
+
+      resetScheduleCallComposer();
+      setReplyingToMessage(null);
+      scrollToLatestMessage();
+    } catch (error) {
+      console.log("schedule call message send error:", error);
+      Alert.alert("Could not schedule call", getReadableApiErrorMessage(error, "Please try again."));
+    } finally {
+      setUploading(false);
+    }
+  }, [
+    currentUserId,
+    ensureConversation,
+    groupMeta.groupName,
+    groupName,
+    isGroupConversation,
+    mergeMessage,
+    replyingToMessageId,
+    resetScheduleCallComposer,
+    scheduleCallAgenda,
+    scheduleCallDateTime,
+    scheduleCallDurationMinutes,
+    scheduleCallType,
+    scrollToLatestMessage,
+    user?.name,
+    user?.username,
+  ]);
+
   const tools: ToolItem[] = useMemo(() => [
     { id: "gallery", name: "Gallery", icon: "image", action: sendImageAttachment },
     { id: "document", name: "Document", icon: "document", action: sendDocumentAttachment },
@@ -1922,7 +2234,16 @@ const ChatScreen = ({ navigation, route }: any) => {
         setShowLocationComposer(true);
       },
     },
-  ], [sendAudioAttachment, sendCameraAttachment, sendDocumentAttachment, sendImageAttachment]);
+    ...(canScheduleCall ? [{
+      id: "schedule_call",
+      name: "Schedule call",
+      icon: "calendar",
+      action: () => {
+        setShowTools(false);
+        setShowScheduleCallComposer(true);
+      },
+    }] : []),
+  ], [canScheduleCall, sendAudioAttachment, sendCameraAttachment, sendDocumentAttachment, sendImageAttachment]);
 
   const loadMoreMessages = useCallback(async () => {
     if (!currentConversationId || !pagination?.hasMore || !pagination?.nextCursor || loadingMore) {
@@ -2132,6 +2453,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     const textValue = getMessageText(item);
     const sharedContent = parseSharedContentMessage(item);
     const callEvent = buildCallEventPreview(item, currentUserId);
+    const scheduledCall = buildScheduledCallPreview(item);
     const sharedMedia = Array.isArray(sharedContent?.media) ? sharedContent.media[0] : null;
     const locationPayload = parseLocationMessage(textValue);
     const linkPreview = item?.linkPreview || null;
@@ -2141,7 +2463,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     const replyPreview = buildReplyPreview(repliedMessage);
     const isHighlighted = getMessageIdentity(item) === highlightedMessageId;
     const messageTimeLabel = formatMessageTime(item?.createdAt);
-    if (isSystemMessage) {
+    if (isSystemMessage && !scheduledCall) {
       return (
         <View style={styles.systemMessageRow}>
           <View style={[styles.systemMessagePill, { backgroundColor: alpha(colors.surface, "E8"), borderColor: alpha(colors.border, "86") }]}>
@@ -2157,7 +2479,7 @@ const ChatScreen = ({ navigation, route }: any) => {
         </View>
       );
     }
-    const isEmojiOnly = !locationPayload && !sharedContent && !callEvent && !attachment?.url && isEmojiOnlyText(textValue);
+    const isEmojiOnly = !locationPayload && !sharedContent && !callEvent && !scheduledCall && !attachment?.url && isEmojiOnlyText(textValue);
     const hasImageBubble = isImageMessage(item) && attachment?.url;
     const hasVoiceBubble = (isAudioMessage(item) || item?.messageType === "voice") && attachment?.url;
     const hasVideoBubble = !hasVoiceBubble && isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url);
@@ -2267,7 +2589,7 @@ const ChatScreen = ({ navigation, route }: any) => {
               style={[
                 styles.messageBubble,
                 isMine ? styles.messageBubbleMineAligned : styles.messageBubbleOtherAligned,
-                !callEvent && !isEmojiOnly && !isMediaBubble ? {
+                !callEvent && !scheduledCall && !isEmojiOnly && !isMediaBubble ? {
                   paddingHorizontal: chatMetrics.bubblePaddingX,
                   paddingVertical: chatMetrics.bubblePaddingY,
                   borderRadius: chatMetrics.bubbleRadius,
@@ -2278,7 +2600,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                 sharedContent
                   ? [styles.messageBubbleWide, { maxWidth: wideContentBubbleMaxWidth, minWidth: minimumWideBubbleWidth }]
                   : null,
-                callEvent
+                (callEvent || scheduledCall)
                   ? [
                     styles.callEventBubbleShell,
                     { maxWidth: callEventBubbleWidth },
@@ -2418,6 +2740,51 @@ const ChatScreen = ({ navigation, route }: any) => {
               </View>
             ) : null}
 
+            {scheduledCall ? (
+              <TouchableOpacity
+                activeOpacity={scheduledCall.calendarUrl ? 0.85 : 1}
+                disabled={!scheduledCall.calendarUrl}
+                onPress={() => {
+                  if (!scheduledCall.calendarUrl) {
+                    return;
+                  }
+
+                  Linking.openURL(scheduledCall.calendarUrl).catch((error) => {
+                    console.log("scheduled call calendar open error:", error);
+                  });
+                }}
+                style={[styles.callEventCard, isMine ? styles.callEventCardMine : null]}
+              >
+                <View style={[styles.callEventIcon, isMine ? styles.callEventIconMine : null]}>
+                  <Icon
+                    name="calendar-outline"
+                    size={15}
+                    color={isMine ? "#fff" : primaryThemeColor}
+                  />
+                </View>
+                <View style={styles.callEventBody}>
+                  <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]}>
+                    {scheduledCall.label}
+                  </Text>
+                  <View style={styles.scheduledCallMetaRow}>
+                    <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null, styles.scheduledCallPrimaryMeta, { fontSize: chatMetrics.metaFontSize }]}>
+                      {scheduledCall.meta}
+                    </Text>
+                    <View style={[styles.scheduledCallDurationBadge, isMine ? styles.scheduledCallDurationBadgeMine : null]}>
+                      <Text style={[styles.scheduledCallDurationBadgeText, isMine ? styles.scheduledCallDurationBadgeTextMine : null, { fontSize: Math.max(10, chatMetrics.metaFontSize - 0.5) }]}>
+                        {`${scheduledCall.durationMinutes} min`}
+                      </Text>
+                    </View>
+                  </View>
+                  {scheduledCall.calendarUrl ? (
+                    <Text style={[styles.callEventLink, isMine ? styles.callEventLinkMine : null, { fontSize: chatMetrics.metaFontSize }]}>
+                      Open calendar invite
+                    </Text>
+                  ) : null}
+                </View>
+              </TouchableOpacity>
+            ) : null}
+
             {mediaBubbleKind === "image" ? (
               <View style={[styles.mediaCard, isGifBubble ? styles.gifMediaCard : null]}>
                 <Image
@@ -2500,7 +2867,7 @@ const ChatScreen = ({ navigation, route }: any) => {
               </Text>
             )}
 
-            {!locationPayload && !sharedContent && !callEvent && !isMediaBubble && !isEmojiOnly && linkPreview?.url ? (
+            {!locationPayload && !sharedContent && !callEvent && !scheduledCall && !isMediaBubble && !isEmojiOnly && linkPreview?.url ? (
               <MessageLinkPreview
                 preview={linkPreview}
                 isMine={isMine}
@@ -2545,7 +2912,7 @@ const ChatScreen = ({ navigation, route }: any) => {
               </View>
             )}
             </TouchableOpacity>
-            {!callEvent ? (
+            {!callEvent && !scheduledCall ? (
               <View style={[styles.messageMetaRow, isMine ? styles.messageMetaRowMine : styles.messageMetaRowOther]}>
                 {!!messageTimeLabel ? (
                   <Text
@@ -2912,6 +3279,92 @@ const ChatScreen = ({ navigation, route }: any) => {
           </View>
         </Modal>
 
+        <Modal visible={showScheduleCallComposer} transparent animationType="fade">
+          <View style={styles.locationComposerOverlay}>
+            <View style={styles.locationComposerCard}>
+              <Text style={styles.locationComposerTitle}>Schedule call</Text>
+              <Text style={styles.locationComposerText}>
+                Pick a time and we will drop a calendar invite right inside this chat.
+              </Text>
+
+              <View style={styles.scheduleTypeRow}>
+                {(["audio", "video"] as Array<"audio" | "video">).map((typeOption) => {
+                  const isActive = scheduleCallType === typeOption;
+                  return (
+                    <TouchableOpacity
+                      key={typeOption}
+                      style={[
+                        styles.scheduleTypeChip,
+                        isActive ? styles.scheduleTypeChipActive : null,
+                      ]}
+                      onPress={() => setScheduleCallType(typeOption)}
+                    >
+                      <Icon
+                        name={typeOption === "video" ? "videocam-outline" : "call-outline"}
+                        size={16}
+                        color={isActive ? "#FFFFFF" : "#111111"}
+                      />
+                      <Text
+                        style={[
+                          styles.scheduleTypeChipText,
+                          isActive ? styles.scheduleTypeChipTextActive : null,
+                        ]}
+                      >
+                        {typeOption === "video" ? "Video" : "Audio"}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <TextInput
+                style={styles.locationComposerInput}
+                value={scheduleCallDateTime}
+                onChangeText={setScheduleCallDateTime}
+                placeholder="2026-04-27T18:30"
+                placeholderTextColor="#888"
+                editable={!uploading}
+                autoCapitalize="none"
+              />
+              <TextInput
+                style={styles.locationComposerInput}
+                value={scheduleCallDurationMinutes}
+                onChangeText={setScheduleCallDurationMinutes}
+                placeholder="Duration in minutes"
+                placeholderTextColor="#888"
+                editable={!uploading}
+                keyboardType="number-pad"
+              />
+              <TextInput
+                style={[styles.locationComposerInput, styles.scheduleAgendaInput]}
+                value={scheduleCallAgenda}
+                onChangeText={setScheduleCallAgenda}
+                placeholder="Agenda or note"
+                placeholderTextColor="#888"
+                editable={!uploading}
+                multiline
+              />
+
+              <View style={styles.locationComposerActions}>
+                <TouchableOpacity
+                  style={styles.locationSecondaryButton}
+                  onPress={resetScheduleCallComposer}
+                  disabled={uploading}
+                >
+                  <Text style={styles.locationSecondaryText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.locationPrimaryButton}
+                  onPress={sendScheduledCallMessage}
+                  disabled={uploading}
+                >
+                  {uploading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.locationPrimaryText}>Share invite</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         {/* Sticker Picker */}
         <StickerPickerSheet
           visible={showStickerPicker}
@@ -3141,7 +3594,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   style={[styles.input, { color: colors.text, fontSize: chatMetrics.bodyFontSize, lineHeight: chatMetrics.bodyLineHeight, minHeight: chatMetrics.headerAction }]}
                   value={text}
                   onChangeText={handleTextChange}
-                  editable={!sending && !uploading && canComposeGroupMessage}
+                  editable={!sending && !textSendLockRef.current && !uploading && canComposeGroupMessage}
                 />
 
                 <View style={styles.inlineActions}>
@@ -3186,8 +3639,24 @@ const ChatScreen = ({ navigation, route }: any) => {
               ) : text.length > 0 || pendingAttachment || pendingVoiceNote ? (
                 <TouchableOpacity
                   style={[styles.sendBtn, { backgroundColor: colors.primary }]}
-                  onPress={pendingAttachment ? sendPendingAttachment : pendingVoiceNote ? sendPendingVoiceMessage : sendTextMessage}
-                  disabled={sending || !canComposeGroupMessage}
+                  onPress={() => {
+                    if (pendingAttachment) {
+                      runComposerSendAction(sendPendingAttachment);
+                      return;
+                    }
+
+                    if (pendingVoiceNote) {
+                      runComposerSendAction(sendPendingVoiceMessage);
+                      return;
+                    }
+
+                    if (textSendLockRef.current || sending || composerSendPressLockRef.current) {
+                      return;
+                    }
+
+                    runComposerSendAction(sendTextMessage);
+                  }}
+                  disabled={sending || textSendLockRef.current || uploading || !canComposeGroupMessage}
                 >
                   <Icon name="send" size={20} color="#fff" />
                 </TouchableOpacity>
@@ -3825,6 +4294,44 @@ const styles = StyleSheet.create({
   callEventMetaMine: {
     color: "rgba(255,255,255,0.82)",
   },
+  scheduledCallMetaRow: {
+    marginTop: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  scheduledCallPrimaryMeta: {
+    marginTop: 0,
+    flexShrink: 1,
+  },
+  scheduledCallDurationBadge: {
+    minWidth: 52,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(17,17,17,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scheduledCallDurationBadgeMine: {
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  scheduledCallDurationBadgeText: {
+    color: "#111111",
+    fontFamily: appFonts.semibold,
+  },
+  scheduledCallDurationBadgeTextMine: {
+    color: "#FFFFFF",
+  },
+  callEventLink: {
+    marginTop: 6,
+    color: "#111827",
+    fontFamily: appFonts.semibold,
+  },
+  callEventLinkMine: {
+    color: "#FFFFFF",
+  },
   messageText: {
     fontSize: 15,
     color: "#111",
@@ -4262,6 +4769,34 @@ const styles = StyleSheet.create({
     color: "#555",
     lineHeight: 20,
   },
+  scheduleTypeRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    gap: 10,
+  },
+  scheduleTypeChip: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#D4D4D4",
+    backgroundColor: "#F5F5F5",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  scheduleTypeChipActive: {
+    backgroundColor: "#111111",
+    borderColor: "#111111",
+  },
+  scheduleTypeChipText: {
+    color: "#111111",
+    fontWeight: "700",
+  },
+  scheduleTypeChipTextActive: {
+    color: "#FFFFFF",
+  },
   locationComposerInput: {
     marginTop: 14,
     borderWidth: 1,
@@ -4270,6 +4805,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     height: 48,
     color: "#111",
+  },
+  scheduleAgendaInput: {
+    minHeight: 84,
+    height: 84,
+    paddingTop: 12,
+    textAlignVertical: "top",
   },
   locationComposerActions: {
     marginTop: 16,
