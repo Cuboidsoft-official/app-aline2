@@ -4,6 +4,18 @@ require("react-native-gesture-handler/jestSetup");
 
 jest.mock("react-native-linear-gradient", () => "LinearGradient");
 jest.mock("react-native-vector-icons/Ionicons", () => "Ionicons");
+jest.mock("@react-native-clipboard/clipboard", () => ({
+  getString: jest.fn(async () => ""),
+  setString: jest.fn(),
+}));
+jest.mock("react-native-snackbar", () => ({
+  Snackbar: {
+    show: jest.fn(),
+    dismiss: jest.fn(),
+  },
+  show: jest.fn(),
+  dismiss: jest.fn(),
+}));
 jest.mock(
   "@react-native-async-storage/async-storage",
   () => require("@react-native-async-storage/async-storage/jest/async-storage-mock"),

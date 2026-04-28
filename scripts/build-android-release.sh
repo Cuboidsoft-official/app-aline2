@@ -33,7 +33,7 @@ if (( ${#missing[@]} > 0 )); then
   exit 1
 fi
 
-if [[ ! -f "$ANDROID_UPLOAD_STORE_FILE" && -f "$ROOT_DIR/$ANDROID_UPLOAD_STORE_FILE" ]]; then
+if [[ "${ANDROID_UPLOAD_STORE_FILE}" != /* && -f "$ROOT_DIR/$ANDROID_UPLOAD_STORE_FILE" ]]; then
   export ANDROID_UPLOAD_STORE_FILE="$ROOT_DIR/$ANDROID_UPLOAD_STORE_FILE"
 fi
 
