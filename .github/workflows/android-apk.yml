@@ -1,64 +1,47 @@
-name: Build Android APK
+name: Android Release
 
 on:
   workflow_dispatch:
-    inputs:
-      envfile:
-        description: Env file to use for the Android bundle
-        required: false
-        default: .env.staging
-        type: choice
-        options:
-          - .env.staging
-          - .env.production
-          - .env
-      artifact_name:
-        description: Optional artifact name override
-        required: false
-        default: ""
-        type: string
-      publish_release:
-        description: Also publish the APK to a GitHub Release
-        required: false
-        default: true
-        type: boolean
   push:
     branches:
       - main
-      - master
-      - develop
 
 permissions:
-  contents: write
+  contents: read
+  id-token: write
+
+concurrency:
+  group: android-production
+  cancel-in-progress: false
 
 jobs:
-  build-apk:
+  release-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PROD_INSTANCE_ID: ${{ vars.PROD_INSTANCE_ID }}
+      PROD_RELEASES_DIR: ${{ vars.PROD_RELEASES_DIR != '' && vars.PROD_RELEASES_DIR || '/opt/aline2/releases/android' }}
+      PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
+      BACKEND_ORIGIN_EXPECTED: https://api.aline2.com
+      SHARE_BASE_URL_EXPECTED: https://aline2.com
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Resolve workflow inputs
-        id: resolve_inputs
+      - name: Derive release metadata
+        id: meta
         run: |
-          envfile="${{ github.event_name == 'workflow_dispatch' && inputs.envfile || '.env.staging' }}"
-          artifact_name="${{ github.event_name == 'workflow_dispatch' && inputs.artifact_name || '' }}"
-          publish_release="${{ github.event_name == 'workflow_dispatch' && inputs.publish_release || 'false' }}"
-
-          if [ -z "$artifact_name" ]; then
-            artifact_name="aline2-android-apk-${{ github.run_number }}"
-          fi
-
-          release_tag="apk-build-${{ github.run_id }}-${{ github.run_attempt }}"
-          release_name="Android APK Build ${{ github.run_number }}.${{ github.run_attempt }}"
-
-          echo "envfile=$envfile" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
-          echo "publish_release=$publish_release" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          release_date="$(date -u +%Y%m%d)"
+          release_name="aline2-main-${short_sha}-release-${release_date}"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "release_date=$release_date" >> "$GITHUB_OUTPUT"
           echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
+          echo "apk_name=${release_name}.apk" >> "$GITHUB_OUTPUT"
+          echo "aab_name=${release_name}.aab" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -82,16 +65,66 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate deployment configuration
+        env:
+          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+        run: |
+          required_vars=(
+            AWS_REGION
+            PROD_INSTANCE_ID
+            PRIVATE_RELEASES_BUCKET
+          )
+          for key in "${required_vars[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "Missing workflow variable: $key" >&2
+              exit 1
+            fi
+          done
+
+          required_secrets=(
+            AWS_ROLE_TO_ASSUME
+            SMTP_HOST
+            SMTP_PORT
+            SMTP_USERNAME
+            SMTP_PASSWORD
+            SMTP_FROM
+          )
+          for key in "${required_secrets[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "Missing workflow secret: $key" >&2
+              exit 1
+            fi
+          done
+
+      - name: Run typecheck
+        run: npm run typecheck
+
+      - name: Run lint baseline
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test -- --runInBand --passWithNoTests
+
       - name: Prepare CI env file
         id: prepare_env
         env:
-          SELECTED_ENVFILE: ${{ steps.resolve_inputs.outputs.envfile }}
+          SELECTED_ENVFILE: .env.production
           BACKEND_ORIGIN_VALUE: ${{ vars.BACKEND_ORIGIN != '' && vars.BACKEND_ORIGIN || secrets.BACKEND_ORIGIN }}
           API_BASE_URL_VALUE: ${{ vars.API_BASE_URL != '' && vars.API_BASE_URL || secrets.API_BASE_URL }}
           SOCKET_URL_VALUE: ${{ vars.SOCKET_URL != '' && vars.SOCKET_URL || secrets.SOCKET_URL }}
           SHARE_BASE_URL_VALUE: ${{ vars.SHARE_BASE_URL != '' && vars.SHARE_BASE_URL || secrets.SHARE_BASE_URL }}
           GOOGLE_WEB_CLIENT_ID_VALUE: ${{ vars.GOOGLE_WEB_CLIENT_ID != '' && vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
           GOOGLE_IOS_CLIENT_ID_VALUE: ${{ vars.GOOGLE_IOS_CLIENT_ID != '' && vars.GOOGLE_IOS_CLIENT_ID || secrets.GOOGLE_IOS_CLIENT_ID }}
+          YOUTUBE_DATA_API_KEY_VALUE: ${{ vars.YOUTUBE_DATA_API_KEY != '' && vars.YOUTUBE_DATA_API_KEY || secrets.YOUTUBE_DATA_API_KEY }}
+          GEMINI_API_KEY_VALUE: ${{ vars.GEMINI_API_KEY != '' && vars.GEMINI_API_KEY || secrets.GEMINI_API_KEY }}
+          ZEGO_CLOUD_APP_ID_VALUE: ${{ vars.ZEGO_CLOUD_APP_ID != '' && vars.ZEGO_CLOUD_APP_ID || secrets.ZEGO_CLOUD_APP_ID }}
+          ZEGO_CLOUD_APP_SIGN_VALUE: ${{ vars.ZEGO_CLOUD_APP_SIGN != '' && vars.ZEGO_CLOUD_APP_SIGN || secrets.ZEGO_CLOUD_APP_SIGN }}
         run: |
           fallback_example="${SELECTED_ENVFILE}.example"
 
@@ -122,8 +155,24 @@ jobs:
           upsert_env "SHARE_BASE_URL" "$SHARE_BASE_URL_VALUE"
           upsert_env "GOOGLE_WEB_CLIENT_ID" "$GOOGLE_WEB_CLIENT_ID_VALUE"
           upsert_env "GOOGLE_IOS_CLIENT_ID" "$GOOGLE_IOS_CLIENT_ID_VALUE"
+          upsert_env "YOUTUBE_DATA_API_KEY" "$YOUTUBE_DATA_API_KEY_VALUE"
+          upsert_env "GEMINI_API_KEY" "$GEMINI_API_KEY_VALUE"
+          upsert_env "ZEGO_CLOUD_APP_ID" "$ZEGO_CLOUD_APP_ID_VALUE"
+          upsert_env "ZEGO_CLOUD_APP_SIGN" "$ZEGO_CLOUD_APP_SIGN_VALUE"
 
           echo "envfile=.env.ci" >> "$GITHUB_OUTPUT"
+
+      - name: Validate production env values
+        env:
+          ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
+        run: |
+          test -f "$ENVFILE_VALUE"
+          grep -q "^BACKEND_ORIGIN=${BACKEND_ORIGIN_EXPECTED}$" "$ENVFILE_VALUE"
+          grep -q "^SHARE_BASE_URL=${SHARE_BASE_URL_EXPECTED}$" "$ENVFILE_VALUE"
+          grep -Eq '^YOUTUBE_DATA_API_KEY=.{10,}$' "$ENVFILE_VALUE"
+          grep -Eq '^GEMINI_API_KEY=.{10,}$' "$ENVFILE_VALUE"
+          grep -Eq '^ZEGO_CLOUD_APP_ID=.{3,}$' "$ENVFILE_VALUE"
+          grep -Eq '^ZEGO_CLOUD_APP_SIGN=.{10,}$' "$ENVFILE_VALUE"
 
       - name: Patch React Native Gradle toolchain resolver for CI
         run: |
@@ -161,54 +210,211 @@ jobs:
           echo "Building Android release APK with ${ENVFILE_VALUE}"
           ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh apk
 
-      - name: Show APK outputs
-        run: find android/app/build/outputs/apk -type f -name '*.apk' | sort
+      - name: Build release AAB
+        env:
+          ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
+          ANDROID_UPLOAD_STORE_FILE: ${{ vars.ANDROID_UPLOAD_STORE_FILE != '' && vars.ANDROID_UPLOAD_STORE_FILE || 'android/app/aline2-release.keystore' }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ vars.ANDROID_UPLOAD_STORE_PASSWORD != '' && vars.ANDROID_UPLOAD_STORE_PASSWORD || secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ vars.ANDROID_UPLOAD_KEY_PASSWORD != '' && vars.ANDROID_UPLOAD_KEY_PASSWORD || secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          echo "Building Android release AAB with ${ENVFILE_VALUE}"
+          ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh aab
 
-      - name: Upload APK artifact
-        id: upload_apk
+      - name: Collect release artifacts
+        id: collect
+        run: |
+          apk_path="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          aab_path="$(find android/app/build/outputs/bundle/release -maxdepth 1 -type f -name '*.aab' | head -n 1)"
+          if [ -z "$apk_path" ] || [ -z "$aab_path" ]; then
+            echo "Release artifacts not found" >&2
+            exit 1
+          fi
+          cp "$apk_path" "${{ steps.meta.outputs.apk_name }}"
+          cp "$aab_path" "${{ steps.meta.outputs.aab_name }}"
+          sha256sum "${{ steps.meta.outputs.apk_name }}" > "${{ steps.meta.outputs.apk_name }}.sha256"
+          sha256sum "${{ steps.meta.outputs.aab_name }}" > "${{ steps.meta.outputs.aab_name }}.sha256"
+          echo "apk_path=${{ steps.meta.outputs.apk_name }}" >> "$GITHUB_OUTPUT"
+          echo "aab_path=${{ steps.meta.outputs.aab_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up bundletool
+        run: |
+          curl -fsSL -o /tmp/bundletool.jar https://github.com/google/bundletool/releases/download/1.18.2/bundletool-all-1.18.2.jar
+
+      - name: Verify release artifacts
+        run: |
+          apksigner verify --print-certs "${{ steps.collect.outputs.apk_path }}"
+          jarsigner -verify -strict -certs "${{ steps.collect.outputs.aab_path }}"
+          java -jar /tmp/bundletool.jar validate --bundle="${{ steps.collect.outputs.aab_path }}"
+
+      - name: Upload release artifacts
+        id: upload_release
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.resolve_inputs.outputs.artifact_name }}
-          path: android/app/build/outputs/apk/release/*.apk
+          name: android-release-${{ steps.meta.outputs.release_name }}
+          path: |
+            ${{ steps.collect.outputs.apk_path }}
+            ${{ steps.collect.outputs.aab_path }}
+            ${{ steps.collect.outputs.apk_path }}.sha256
+            ${{ steps.collect.outputs.aab_path }}.sha256
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
 
-      - name: Publish APK to GitHub Release
-        if: github.event_name == 'workflow_dispatch' && steps.resolve_inputs.outputs.publish_release == 'true'
-        id: publish_release
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload private AAB and generate secure link
+        id: private_aab
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ steps.resolve_inputs.outputs.release_tag }}
-          RELEASE_NAME: ${{ steps.resolve_inputs.outputs.release_name }}
-          ENVFILE_VALUE: ${{ steps.resolve_inputs.outputs.envfile }}
+          APK_PATH: ${{ steps.collect.outputs.apk_path }}
         run: |
-          gh release create "$RELEASE_TAG" \
-            android/app/build/outputs/apk/release/*.apk \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "$RELEASE_NAME" \
-            --notes "Android APK built from workflow run $GITHUB_RUN_NUMBER using ${ENVFILE_VALUE}." \
-            --prerelease
+          apk_key="android/public/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.apk_name }}"
+          s3_key="android/private/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.aab_name }}"
+          aws s3 cp "${APK_PATH}" "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --only-show-errors
+          aws s3 cp "${{ steps.collect.outputs.aab_path }}" "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --only-show-errors
+          apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --expires-in 604800)"
+          download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --expires-in 604800)"
+          echo "apk_key=$apk_key" >> "$GITHUB_OUTPUT"
+          echo "apk_download_url=$apk_download_url" >> "$GITHUB_OUTPUT"
+          echo "s3_key=$s3_key" >> "$GITHUB_OUTPUT"
+          echo "download_url=$download_url" >> "$GITHUB_OUTPUT"
 
-          release_url="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url --jq '.url')"
-          echo "release_url=$release_url" >> "$GITHUB_OUTPUT"
+      - name: Publish production APK to welcome host
+        env:
+          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
+          APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
+        run: |
+          cat > /tmp/publish-apk.sh <<EOF
+          set -euo pipefail
+          release_dir="${PROD_RELEASES_DIR}"
+          release_name="${RELEASE_NAME}"
+          backup_dir="${release_dir}/backups/${release_name}"
+          mkdir -p "${release_dir}"
+          chmod 755 "${release_dir}"
+          mkdir -p "${backup_dir}"
+          if [ -f "${release_dir}/latest.apk" ]; then
+            cp "${release_dir}/latest.apk" "${backup_dir}/latest.apk"
+          fi
+          if [ -f "${release_dir}/latest.apk.sha256" ]; then
+            cp "${release_dir}/latest.apk.sha256" "${backup_dir}/latest.apk.sha256"
+          fi
+          target_path="${release_dir}/${release_name}.apk"
+          curl -fsSL "${APK_DOWNLOAD_URL}" -o "${target_path}"
+          cp "${target_path}" "${release_dir}/latest.apk"
+          sha256sum "${target_path}" > "${target_path}.sha256"
+          sha256sum "${release_dir}/latest.apk" > "${release_dir}/latest.apk.sha256"
+          EOF
+
+          command_json="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.dumps({"commands": [Path("/tmp/publish-apk.sh").read_text()]}))
+          PY
+          )"
+
+          command_id="$(aws ssm send-command \
+            --instance-ids "${PROD_INSTANCE_ID}" \
+            --document-name AWS-RunShellScript \
+            --comment "aline2-android-release-${RELEASE_NAME}" \
+            --parameters "${command_json}" \
+            --query 'Command.CommandId' \
+            --output text)"
+
+          aws ssm wait command-executed --command-id "${command_id}" --instance-id "${PROD_INSTANCE_ID}"
+          aws ssm get-command-invocation \
+            --command-id "${command_id}" \
+            --instance-id "${PROD_INSTANCE_ID}" \
+            --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
+            --output json
+
+      - name: Verify public APK download
+        run: |
+          curl -IfsS https://welcome.aline2.com/downloads/android/latest.apk >/dev/null
+
+      - name: Email private AAB delivery notice
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: cuboidsoft@gmail.com
+          EMAIL_SUBJECT: Aline2 Android release ${{ steps.meta.outputs.release_name }}
+          EMAIL_BODY: |
+            The latest signed Aline2 Android production release is ready.
+
+            The public APK has been published to welcome.aline2.com.
+            This email carries the private AAB delivery path for Play Console usage.
+          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
+          AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
+          AAB_ATTACHMENT_PATH: ${{ steps.collect.outputs.aab_path }}
+        run: |
+          python3 ./scripts/ci/send_release_email.py
+
+      - name: Roll back public APK on failure
+        if: failure()
+        env:
+          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
+        run: |
+          cat > /tmp/rollback-apk.sh <<EOF
+          set -euo pipefail
+          release_dir="${PROD_RELEASES_DIR}"
+          release_name="${RELEASE_NAME}"
+          backup_dir="${release_dir}/backups/${release_name}"
+          if [ -f "${backup_dir}/latest.apk" ]; then
+            cp "${backup_dir}/latest.apk" "${release_dir}/latest.apk"
+            if [ -f "${backup_dir}/latest.apk.sha256" ]; then
+              cp "${backup_dir}/latest.apk.sha256" "${release_dir}/latest.apk.sha256"
+            else
+              sha256sum "${release_dir}/latest.apk" > "${release_dir}/latest.apk.sha256"
+            fi
+          else
+            rm -f "${release_dir}/latest.apk" "${release_dir}/latest.apk.sha256"
+          fi
+          EOF
+
+          command_json="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.dumps({"commands": [Path("/tmp/rollback-apk.sh").read_text()]}))
+          PY
+          )"
+
+          command_id="$(aws ssm send-command \
+            --instance-ids "${PROD_INSTANCE_ID}" \
+            --document-name AWS-RunShellScript \
+            --comment "aline2-android-release-rollback-${RELEASE_NAME}" \
+            --parameters "${command_json}" \
+            --query 'Command.CommandId' \
+            --output text)"
+
+          aws ssm wait command-executed --command-id "${command_id}" --instance-id "${PROD_INSTANCE_ID}"
+          aws ssm get-command-invocation \
+            --command-id "${command_id}" \
+            --instance-id "${PROD_INSTANCE_ID}" \
+            --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
+            --output json
 
       - name: Add build summary
         if: success()
         env:
-          ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
-          ARTIFACT_NAME: ${{ steps.resolve_inputs.outputs.artifact_name }}
-          ARTIFACT_URL: ${{ steps.upload_apk.outputs.artifact-url }}
-          RELEASE_URL: ${{ steps.publish_release.outputs.release_url }}
+          ARTIFACT_URL: ${{ steps.upload_release.outputs.artifact-url }}
+          APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          AAB_NAME: ${{ steps.meta.outputs.aab_name }}
         run: |
           {
-            echo "## Android APK"
+            echo "## Android Release"
             echo ""
-            echo "- Env file: \`${ENVFILE_VALUE}\`"
-            echo "- Artifact: [${ARTIFACT_NAME}](${ARTIFACT_URL})"
-            if [ -n "${RELEASE_URL}" ]; then
-              echo "- Release: [Download APK via GitHub Release](${RELEASE_URL})"
-            fi
-            echo "- APK files:"
-            find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | sort | sed 's/^/  - `/; s/$/`/'
+            echo "- Branch: \`main\`"
+            echo "- Release: \`${{ steps.meta.outputs.release_name }}\`"
+            echo "- Public APK URL: \`https://welcome.aline2.com/downloads/android/latest.apk\`"
+            echo "- Uploaded artifacts: [download](${ARTIFACT_URL})"
+            echo "- Private AAB link emailed to \`cuboidsoft@gmail.com\`"
+            echo "- APK checksum:"
+            cat "${APK_NAME}.sha256"
+            echo "- AAB checksum:"
+            cat "${AAB_NAME}.sha256"
           } >> "$GITHUB_STEP_SUMMARY"
