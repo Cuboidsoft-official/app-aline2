@@ -197,7 +197,7 @@ jobs:
           fi
 
           mkdir -p "$(dirname "$ANDROID_UPLOAD_STORE_FILE_VALUE")"
-          printf '%s' "$ANDROID_UPLOAD_KEYSTORE_BASE64" | base64 -d > "$ANDROID_UPLOAD_STORE_FILE_VALUE"
+          printf '%s' "$ANDROID_UPLOAD_KEYSTORE_BASE64" | tr -d '\r\n\t ' | base64 -d > "$ANDROID_UPLOAD_STORE_FILE_VALUE"
 
       - name: Build release APK
         env:
@@ -283,13 +283,14 @@ jobs:
           echo "download_url=$download_url" >> "$GITHUB_OUTPUT"
 
       - name: Publish production APK to welcome host
+        id: publish_apk
         env:
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
           APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
         run: |
           cat > /tmp/publish-apk.sh <<EOF
           set -euo pipefail
-          release_dir="${PROD_RELEASES_DIR}"
+          release_dir="${{ env.PROD_RELEASES_DIR }}"
           release_name="${RELEASE_NAME}"
           backup_dir="${release_dir}/backups/${release_name}"
           mkdir -p "${release_dir}"
@@ -355,13 +356,13 @@ jobs:
           python3 ./scripts/ci/send_release_email.py
 
       - name: Roll back public APK on failure
-        if: failure()
+        if: failure() && steps.publish_apk.outcome == 'success'
         env:
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
         run: |
           cat > /tmp/rollback-apk.sh <<EOF
           set -euo pipefail
-          release_dir="${PROD_RELEASES_DIR}"
+          release_dir="${{ env.PROD_RELEASES_DIR }}"
           release_name="${RELEASE_NAME}"
           backup_dir="${release_dir}/backups/${release_name}"
           if [ -f "${backup_dir}/latest.apk" ]; then
