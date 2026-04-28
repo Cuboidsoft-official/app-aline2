@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-aab}"
 CREDENTIALS_FILE="${ANDROID_UPLOAD_CREDENTIALS_FILE:-/tmp/aline2-upload-keystore-credentials.txt}"
 DEFAULT_KEYSTORE_PATH="$ROOT_DIR/android/app/aline2-upload.keystore"
+ENVFILE_PATH="${ENVFILE:-.env.production}"
 
 if [[ -f "$CREDENTIALS_FILE" ]]; then
   set -a
@@ -58,14 +59,14 @@ cd "$ROOT_DIR/android"
 # runs when `clean` and release packaging are requested together. Prewarming the
 # affected library in a separate invocation keeps the schema in place and avoids
 # false-negative validation failures from node_modules libraries.
-ENVFILE=.env.production ./gradlew \
+ENVFILE="$ENVFILE_PATH" ./gradlew \
   :react-native-color-matrix-image-filters:generateCodegenSchemaFromJavaScript \
   :react-native-color-matrix-image-filters:generateCodegenArtifactsFromSchema \
   --no-daemon \
   --console=plain \
   --max-workers=1
 
-ENVFILE=.env.production ./gradlew \
+ENVFILE="$ENVFILE_PATH" ./gradlew \
   "$TASK" \
   --no-daemon \
   --console=plain \
