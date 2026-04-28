@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { createSound } from "react-native-nitro-sound";
 
 import { ensureAudioClipStartPosition, startManagedAudioClipPlayback } from "../utils/audioPlayback";
@@ -23,23 +24,26 @@ export function useSegmentedMusicPlayback({
   durationMs,
   shouldPlay,
 }: UseSegmentedMusicPlaybackParams) {
+  const [isAppActive, setIsAppActive] = useState(AppState.currentState === "active");
   const audioPlayerRef = useRef(createSound());
   const audioTrackKeyRef = useRef("");
   const audioSourceKeyRef = useRef("");
   const audioEndMsRef = useRef(0);
   const audioStartMsRef = useRef(0);
   const shouldLoopRef = useRef(false);
+  const playbackRequestIdRef = useRef(0);
   const youtubePlayerRef = useRef<any>(null);
   const playbackEndMs = durationMs > 0 ? startMs + durationMs : 0;
   const audioSourceKey = useMemo(() => normalizedUrl || rawUrl, [normalizedUrl, rawUrl]);
+  const shouldPlayNow = shouldPlay && isAppActive;
 
   useEffect(() => {
     audioStartMsRef.current = startMs;
     audioEndMsRef.current = playbackEndMs;
-    shouldLoopRef.current = shouldPlay;
-  }, [playbackEndMs, shouldPlay, startMs]);
+    shouldLoopRef.current = shouldPlayNow;
+  }, [playbackEndMs, shouldPlayNow, startMs]);
 
-  const resetAudioPlayback = useCallback(async () => {
+  const stopAudioPlayback = useCallback(async () => {
     audioTrackKeyRef.current = "";
     audioSourceKeyRef.current = "";
     audioEndMsRef.current = 0;
@@ -51,12 +55,19 @@ export function useSegmentedMusicPlayback({
     }
   }, []);
 
-  const pauseAudioPlayback = useCallback(async () => {
-    try {
-      await audioPlayerRef.current.pausePlayer();
-    } catch {
-      // noop
-    }
+  const resetAudioPlayback = useCallback(async () => {
+    playbackRequestIdRef.current += 1;
+    await stopAudioPlayback();
+  }, [stopAudioPlayback]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      setIsAppActive(nextState === "active");
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -99,18 +110,25 @@ export function useSegmentedMusicPlayback({
   }, []);
 
   useEffect(() => {
-    if (!shouldPlay) {
-      pauseAudioPlayback().catch(() => undefined);
+    if (!shouldPlayNow) {
+      resetAudioPlayback().catch(() => undefined);
       return;
     }
 
     const resumeAudio = async () => {
+      const requestId = playbackRequestIdRef.current + 1;
+      playbackRequestIdRef.current = requestId;
+      const isCurrentRequest = () => playbackRequestIdRef.current === requestId && shouldLoopRef.current;
+
       if (!audioSourceKey) {
         return;
       }
 
       if (audioTrackKeyRef.current === trackKey) {
         await ensureAudioClipStartPosition(audioPlayerRef.current, startMs).catch(() => undefined);
+        if (!isCurrentRequest()) {
+          return;
+        }
         await audioPlayerRef.current.resumePlayer().catch(() => undefined);
         return;
       }
@@ -119,14 +137,20 @@ export function useSegmentedMusicPlayback({
         try {
           audioTrackKeyRef.current = trackKey;
           await ensureAudioClipStartPosition(audioPlayerRef.current, startMs);
+          if (!isCurrentRequest()) {
+            return;
+          }
           await audioPlayerRef.current.resumePlayer().catch(() => undefined);
           return;
         } catch {
-          await resetAudioPlayback();
+          await stopAudioPlayback();
         }
       }
 
-      await resetAudioPlayback();
+      await stopAudioPlayback();
+      if (!isCurrentRequest()) {
+        return;
+      }
       audioTrackKeyRef.current = trackKey;
       audioSourceKeyRef.current = audioSourceKey;
       await startManagedAudioClipPlayback(audioPlayerRef.current, {
@@ -136,6 +160,11 @@ export function useSegmentedMusicPlayback({
         volume: 1,
         seekSettleDelayMs: 70,
       });
+      if (!isCurrentRequest()) {
+        if (!shouldLoopRef.current) {
+          await stopAudioPlayback();
+        }
+      }
     };
 
     resumeAudio().catch((error) => {
@@ -145,11 +174,11 @@ export function useSegmentedMusicPlayback({
   }, [
     audioSourceKey,
     normalizedUrl,
-    pauseAudioPlayback,
     rawUrl,
     resetAudioPlayback,
-    shouldPlay,
+    shouldPlayNow,
     startMs,
+    stopAudioPlayback,
     trackKey,
   ]);
 

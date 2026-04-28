@@ -142,14 +142,15 @@ const formatPostMusicLabel = (music?: Post["music"]): string => {
 const getTrimmedMusicDurationMs = (
   music?: { duration?: number; startTime?: number; endTime?: number },
 ): number => {
+  const maxClipMs = 30000;
   const explicitDurationMs = Math.max(0, Number(music?.duration || 0) * 1000);
   if (explicitDurationMs > 0) {
-    return explicitDurationMs;
+    return Math.min(maxClipMs, explicitDurationMs);
   }
 
   const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
   const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
-  return endMs > startMs ? endMs - startMs : 0;
+  return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : 0;
 };
 
 const getPostAspectRatio = (post: Post): number => {

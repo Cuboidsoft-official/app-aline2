@@ -16,7 +16,6 @@ import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 
-import HiddenYoutubeAudioPlayer from "../../components/media/HiddenYoutubeAudioPlayer";
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
 import InteractiveText from "../../features/social/components/InteractiveText";
 import PostCommentsSheet from "../../features/social/components/PostCommentsSheet";
@@ -34,7 +33,6 @@ import { downloadImageAsset } from "../../utils/mediaDownload";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
 import { useAppTheme } from "../../theme/AppThemeContext";
-import { extractYouTubeVideoId } from "../../utils/youtubePlayback";
 
 let ColorMatrix: any = null;
 try {
@@ -63,6 +61,20 @@ const formatPostTime = (timestamp?: number) => {
 
 const getMusicPlaybackUrl = (music?: Post["music"]) =>
   String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
+
+const getTrimmedMusicDurationMs = (
+  music?: { duration?: number; startTime?: number; endTime?: number },
+): number => {
+  const maxClipMs = 30000;
+  const explicitDurationMs = Math.max(0, Number(music?.duration || 0) * 1000);
+  if (explicitDurationMs > 0) {
+    return Math.min(maxClipMs, explicitDurationMs);
+  }
+
+  const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
+  const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
+  return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : 0;
+};
 
 function PostDetailScreen({ route, navigation }: any) {
   const { colors } = useAppTheme();
@@ -132,25 +144,16 @@ function PostDetailScreen({ route, navigation }: any) {
 
   const attachedMusicRawUrl = getMusicPlaybackUrl(post?.music);
   const attachedMusicUrl = useMemo(() => normalizeMediaUrl(attachedMusicRawUrl), [attachedMusicRawUrl]);
-  const attachedMusicYoutubeVideoId = useMemo(() => extractYouTubeVideoId(post?.music), [post?.music]);
   const attachedMusicStartMs = Math.max(0, Number(post?.music?.startTime || 0) * 1000);
-  const attachedMusicDurationMs = Math.max(0, Number(post?.music?.duration || 0) * 1000);
+  const attachedMusicDurationMs = getTrimmedMusicDurationMs(post?.music);
   const attachedMusicTrackKey = post
-    ? `${post.id}:${attachedMusicYoutubeVideoId || attachedMusicUrl}:${attachedMusicStartMs}:${attachedMusicDurationMs}`
+    ? `${post.id}:${attachedMusicUrl}:${attachedMusicStartMs}:${attachedMusicDurationMs}`
     : "";
-  const hasAttachedMusic = !!(attachedMusicYoutubeVideoId || attachedMusicUrl);
+  const hasAttachedMusic = !!attachedMusicUrl;
   const shouldPlayAttachedMusic = hasAttachedMusic && isMediaSoundEnabled && !activeSheet && isScreenFocused;
-  const {
-    isUsingYoutube: isUsingYoutubeAttachedMusic,
-    youtubePlay: youtubeAttachedMusicPlay,
-    youtubePlayerRef: youtubeAttachedMusicRef,
-    handleYoutubeReady: handleYoutubeAttachedMusicReady,
-    handleYoutubeError: handleYoutubeAttachedMusicError,
-    handleYoutubeStateChange: handleYoutubeAttachedMusicStateChange,
-  } = useSegmentedMusicPlayback({
+  useSegmentedMusicPlayback({
     rawUrl: attachedMusicRawUrl,
     normalizedUrl: attachedMusicUrl,
-    youtubeVideoId: attachedMusicYoutubeVideoId,
     trackKey: attachedMusicTrackKey,
     startMs: attachedMusicStartMs,
     durationMs: attachedMusicDurationMs,
@@ -459,16 +462,6 @@ function PostDetailScreen({ route, navigation }: any) {
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={["top"]}>
-      {isUsingYoutubeAttachedMusic && attachedMusicYoutubeVideoId ? (
-        <HiddenYoutubeAudioPlayer
-          playerRef={youtubeAttachedMusicRef}
-          play={youtubeAttachedMusicPlay}
-          videoId={attachedMusicYoutubeVideoId}
-          onReady={handleYoutubeAttachedMusicReady}
-          onError={handleYoutubeAttachedMusicError}
-          onChangeState={handleYoutubeAttachedMusicStateChange}
-        />
-      ) : null}
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 12), borderColor: colors.border, backgroundColor: colors.card }]}>
           <TouchableOpacity onPress={() => navigation.goBack()}>

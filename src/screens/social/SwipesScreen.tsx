@@ -23,6 +23,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../../components/AppBottomDock";
+import DraggableBottomSheet from "../../components/DraggableBottomSheet";
 import CommentThreadSheet from "../../features/social/components/CommentThreadSheet";
 import InteractiveText from "../../features/social/components/InteractiveText";
 import ShareTargetsList, { ShareTarget } from "../../features/social/components/ShareTargetsList";
@@ -80,14 +81,15 @@ const getMusicPlaybackUrl = (music?: Swipe["music"]): string =>
 const getTrimmedMusicDurationMs = (
   music?: { duration?: number; startTime?: number; endTime?: number },
 ): number => {
+  const maxClipMs = 30000;
   const explicitDurationMs = Math.max(0, Number(music?.duration || 0) * 1000);
   if (explicitDurationMs > 0) {
-    return explicitDurationMs;
+    return Math.min(maxClipMs, explicitDurationMs);
   }
 
   const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
   const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
-  return endMs > startMs ? endMs - startMs : 0;
+  return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : 0;
 };
 
 function SwipesScreen({ navigation, route }: any) {
@@ -241,10 +243,13 @@ function SwipesScreen({ navigation, route }: any) {
         throw new Error("Swipe not found");
       }
 
-      navigation.navigate("Create", {
-        initialTab: "story",
-        initialMedia: targetSwipe.media.url,
-        initialMediaType: targetSwipe.media.mediaType || "video",
+      navigation.navigate("MainApp", {
+        screen: "Create",
+        params: {
+          initialTab: "story",
+          initialMedia: targetSwipe.media.url,
+          initialMediaType: targetSwipe.media.mediaType || "video",
+        },
       });
     } catch (error) {
       Alert.alert("Could not share swipe", toUserSafeMessage(error));
@@ -336,6 +341,13 @@ function SwipesScreen({ navigation, route }: any) {
   const openActionsSheet = (swipe: Swipe) => {
     setSelectedSwipe(swipe);
     setActiveSheet("actions");
+  };
+
+  const openSwipeComposer = () => {
+    navigation.navigate("MainApp", {
+      screen: "Create",
+      params: { initialTab: "swipe" },
+    });
   };
 
   const openCommentThread = (comment: SwipeComment) => {
@@ -647,7 +659,7 @@ function SwipesScreen({ navigation, route }: any) {
         <View style={[styles.overlay, { paddingBottom: bottomDockPadding + 12 }]}>
           <View style={styles.topBar}>
             <Text style={styles.screenTitle}>Swipes</Text>
-            <TouchableOpacity style={styles.createButton} onPress={() => navigation.navigate("Create", { initialTab: "swipe" })}>
+            <TouchableOpacity style={styles.createButton} onPress={openSwipeComposer}>
               <LinearGradient colors={["#00c6ff", "#7f00ff", "#ff4ecd"]} style={styles.createButtonGradient}>
                 <Icon name="add" size={18} color="#fff" />
                 <Text style={styles.createButtonText}>New Swipe</Text>
@@ -816,7 +828,7 @@ function SwipesScreen({ navigation, route }: any) {
       />
       <AppBottomDock navigation={navigation} activeRouteName="Swipes" />
 
-      <Modal visible={!!activeSheet} transparent animationType="slide" onRequestClose={closeSheet}>
+      <Modal visible={!!activeSheet && activeSheet !== "share"} transparent animationType="slide" onRequestClose={closeSheet}>
         <Pressable style={styles.sheetBackdrop} onPress={closeSheet} />
         <View style={[styles.sheetWrap, activeSheet === "share" && styles.shareSheetWrap]}>
           <View style={[styles.sheetHandle, activeSheet === "share" && styles.shareSheetHandle]} />
@@ -1019,6 +1031,90 @@ function SwipesScreen({ navigation, route }: any) {
         </View>
       </Modal>
 
+      <DraggableBottomSheet
+        visible={activeSheet === "share" && !!selectedSwipe}
+        onClose={closeSheet}
+        snapPoints={[0.58, 0.78, 0.92]}
+        initialSnapIndex={1}
+        maxHeightRatio={0.94}
+      >
+        {selectedSwipe ? (
+          <View style={[styles.sheetContent, styles.shareDraggableContent]}>
+            <View style={styles.sheetHeader}>
+              <Text style={[styles.sheetTitle, styles.shareSheetTitle]}>Share</Text>
+              <TouchableOpacity onPress={closeSheet}>
+                <Icon name="close" size={20} color="#f8fafc" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.shareSheetSubtitle}>
+              Choose chats first, then use the other share options below.
+            </Text>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.shareScrollContent}>
+              <View style={styles.sharePeoplePanel}>
+                <View style={styles.sharePanelHeader}>
+                  <Text style={styles.sharePanelTitle}>Chats</Text>
+                  <Text style={styles.sharePanelMeta}>
+                    {selectedShareTargets.length ? `${selectedShareTargets.length} selected` : "Tap chats to select"}
+                  </Text>
+                </View>
+                <ShareTargetsList
+                  title="Send to"
+                  variant="dark"
+                  scrollEnabled={false}
+                  selectedTargetIds={selectedShareTargets.map((target) => target.key)}
+                  onToggleTarget={(target) => {
+                    setSelectedShareTargets((current) =>
+                      current.some((item) => item.key === target.key)
+                        ? current.filter((item) => item.key !== target.key)
+                        : [...current, target],
+                    );
+                  }}
+                />
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.shareSendButton,
+                  !selectedShareTargets.length && styles.commentsButtonDisabled,
+                ]}
+                disabled={!selectedShareTargets.length}
+                onPress={sendSwipeToSelectedChats}
+              >
+                <Text style={styles.shareSendButtonText}>
+                  {selectedShareTargets.length ? `Send to ${selectedShareTargets.length}` : "Select chats"}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.shareActionsPanel}>
+                <Text style={styles.sharePanelTitle}>Other options</Text>
+                <TouchableOpacity
+                  style={styles.shareActionDark}
+                  onPress={async () => {
+                    closeSheet();
+                    await handleShare(selectedSwipe.id);
+                  }}
+                >
+                  <Icon name="sparkles-outline" size={20} color="#f8fafc" />
+                  <Text style={styles.shareActionTextDark}>Add to your story</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.shareActionDark}
+                  onPress={async () => {
+                    const updated = await socialApi.toggleSwipeSave(selectedSwipe.id);
+                    setSwipes((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+                    setSelectedSwipe(updated);
+                    closeSheet();
+                  }}
+                >
+                  <Icon name={selectedSwipe.saved ? "bookmark" : "bookmark-outline"} size={20} color="#f8fafc" />
+                  <Text style={styles.shareActionTextDark}>{selectedSwipe.saved ? "Remove from saved" : "Save"}</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        ) : null}
+      </DraggableBottomSheet>
+
       <CommentThreadSheet
         visible={!!threadComment}
         contentType="swipe"
@@ -1197,6 +1293,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 16,
   },
+  shareDraggableContent: {
+    backgroundColor: "#020617",
+    paddingTop: 12,
+  },
   sheetHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1209,6 +1309,9 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
     fontSize: 11.5,
     marginBottom: 12,
+  },
+  shareScrollContent: {
+    paddingBottom: 24,
   },
   sheetLink: { color: "#2563eb", fontWeight: "700" },
   sheetLoader: { paddingVertical: 24, alignItems: "center" },

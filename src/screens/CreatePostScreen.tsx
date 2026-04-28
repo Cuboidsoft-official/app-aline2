@@ -20,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
 import {
   errorCodes,
@@ -109,7 +110,8 @@ type MusicResultItem = SelectedMusicClip & {
 };
 
 type StoryToolPanel = "text" | "color" | "font" | "size" | "filters" | "sticker" | null;
-type StoryTextFontVariant = "bold" | "clean" | "soft";
+type ComposerEditToolPanel = "layout" | "filters" | "tag" | "music" | "trim" | null;
+type StoryTextFontVariant = "bold" | "italic" | "clean" | "soft";
 type MusicPreviewMode = "audio";
 
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
@@ -175,6 +177,7 @@ const MODE_COPY: Record<
   },
 };
 const LOCATION_SEEDS = ["Nearby", "Studio", "Cafe", "Beach", "Restaurant", "Office"];
+const MUSIC_DISCOVERY_FALLBACK_QUERIES = ["love", "party", "happy", "summer"];
 const STORY_TEXT_THEMES: Array<{
   id: StoryTextStickerTheme;
   label: string;
@@ -190,10 +193,12 @@ const STORY_TEXT_FONT_OPTIONS: Array<{
   id: StoryTextFontVariant;
   label: string;
   fontFamily: string;
+  fontStyle?: "normal" | "italic";
 }> = [
-  { id: "bold", label: "Bold", fontFamily: appFonts.bold },
-  { id: "clean", label: "Clean", fontFamily: appFonts.semibold },
-  { id: "soft", label: "Soft", fontFamily: appFonts.regular },
+  { id: "bold", label: "Bold", fontFamily: appFonts.bold, fontStyle: "normal" },
+  { id: "italic", label: "Italic", fontFamily: appFonts.regular, fontStyle: "italic" },
+  { id: "clean", label: "Clean", fontFamily: appFonts.semibold, fontStyle: "normal" },
+  { id: "soft", label: "Soft", fontFamily: appFonts.regular, fontStyle: "normal" },
 ];
 const STORY_FILTER_OPTIONS: Array<{ id: StoryFilterPreset; label: string }> = [
   { id: "none", label: "Original" },
@@ -202,7 +207,6 @@ const STORY_FILTER_OPTIONS: Array<{ id: StoryFilterPreset; label: string }> = [
   { id: "noir", label: "Noir" },
   { id: "dream", label: "Dream" },
 ];
-const STORY_TEXT_ALIGNMENTS: StoryStickerTextAlignment[] = ["left", "center", "right"];
 const STORY_BACKGROUND_COLORS = [
   "#101828",
   "#1D4ED8",
@@ -274,6 +278,38 @@ const buildUploadedTrackTitle = (value: string): string => {
   }
 
   return trimmedValue.replace(/\.[^.]+$/, "").trim() || "My audio";
+};
+
+const inferAudioMimeType = (fileName: string, fallbackType?: string | null): string => {
+  const normalizedFallback = String(fallbackType || "").trim().toLowerCase();
+  if (normalizedFallback.startsWith("audio/")) {
+    return normalizedFallback;
+  }
+
+  const extension = String(fileName || "")
+    .trim()
+    .toLowerCase()
+    .match(/\.([a-z0-9]+)$/)?.[1];
+
+  switch (extension) {
+    case "mp3":
+      return "audio/mpeg";
+    case "m4a":
+      return "audio/mp4";
+    case "aac":
+      return "audio/aac";
+    case "wav":
+      return "audio/wav";
+    case "ogg":
+      return "audio/ogg";
+    case "oga":
+    case "opus":
+      return "audio/ogg";
+    case "flac":
+      return "audio/flac";
+    default:
+      return normalizedFallback || "audio/mpeg";
+  }
 };
 
 const blendColorMatrix = (matrix: number[], intensity: number) =>
@@ -437,15 +473,7 @@ const normalizeLocalFileUri = (value: string): string => {
 const defaultClipDuration = (mode: ComposerMode, trackDuration: number): number => {
   const safe = Math.max(1, Math.round(trackDuration || 0));
 
-  if (mode === "story") {
-    return Math.min(15, safe);
-  }
-
-  if (mode === "swipe") {
-    return Math.min(30, safe);
-  }
-
-  return Math.min(20, safe);
+  return Math.min(30, safe);
 };
 
 const findAspectOption = (mode: ComposerMode, aspectId: string | undefined) =>
@@ -481,6 +509,29 @@ const dedupeMusicResults = (items: MusicResultItem[]) => {
 
   return nextItems;
 };
+
+const prioritizeFreshMusicResults = (items: MusicResultItem[]) =>
+  [...items].sort((left, right) => {
+    const leftSource = String(left.source || "").trim().toLowerCase();
+    const rightSource = String(right.source || "").trim().toLowerCase();
+
+    if (leftSource === "upload" && rightSource !== "upload") {
+      return -1;
+    }
+
+    if (rightSource === "upload" && leftSource !== "upload") {
+      return 1;
+    }
+
+    const leftIsExternal = !isPersistedMusicId(left.id);
+    const rightIsExternal = !isPersistedMusicId(right.id);
+
+    if (leftIsExternal !== rightIsExternal) {
+      return leftIsExternal ? -1 : 1;
+    }
+
+    return 0;
+  });
 
 const isPersistedMusicId = (value: unknown) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
@@ -997,6 +1048,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationFetchingCurrent, setLocationFetchingCurrent] = useState(false);
   const [tagSheetVisible, setTagSheetVisible] = useState(false);
+  const [composerEditToolPanel, setComposerEditToolPanel] = useState<ComposerEditToolPanel>("layout");
   const [musicSheetVisible, setMusicSheetVisible] = useState(false);
   const [musicTrimSheetVisible, setMusicTrimSheetVisible] = useState(false);
   const [videoTrimSheetVisible, setVideoTrimSheetVisible] = useState(false);
@@ -1042,7 +1094,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [storyTextColor, setStoryTextColor] = useState(STORY_TEXT_COLOR_OPTIONS[0]);
   const [storyTextTheme, setStoryTextTheme] = useState<StoryTextStickerTheme>("dark");
   const [storyTextFont, setStoryTextFont] = useState<StoryTextFontVariant>("bold");
-  const [storyTextAlignment, setStoryTextAlignment] = useState<StoryStickerTextAlignment>("center");
+  const [storyTextAlignment] = useState<StoryStickerTextAlignment>("center");
   const [storyTextScale, setStoryTextScale] = useState(1);
   const [storyTextRotation, setStoryTextRotation] = useState(0);
   const [storyTextPosition, setStoryTextPosition] = useState({ x: 0.18, y: 0.18 });
@@ -1187,7 +1239,6 @@ function CreatePostScreen({ navigation, route }: any) {
       setStoryTextColor(STORY_TEXT_COLOR_OPTIONS[0]);
       setStoryTextTheme("dark");
     setStoryTextFont("bold");
-    setStoryTextAlignment("center");
     setStoryTextScale(1);
     setStoryTextRotation(0);
     setStoryTextPosition({ x: 0.18, y: 0.18 });
@@ -1791,7 +1842,26 @@ function CreatePostScreen({ navigation, route }: any) {
       ? await searchMusicCatalog(trimmedQuery, 12)
       : await getTrendingMusicCatalog(12);
 
-    return dedupeMusicResults((catalogResults as MusicResultItem[]).filter(hasPlayableMusicClip)).slice(0, 12);
+    let combinedResults = (catalogResults as MusicResultItem[]).filter(hasPlayableMusicClip);
+
+    if (combinedResults.length < 8) {
+      const fallbackQueries = trimmedQuery
+        ? [trimmedQuery, ...MUSIC_DISCOVERY_FALLBACK_QUERIES]
+        : MUSIC_DISCOVERY_FALLBACK_QUERIES;
+
+      for (const fallbackQuery of fallbackQueries) {
+        const nextResults = (await searchMusicCatalog(fallbackQuery, 12)).filter(
+          hasPlayableMusicClip,
+        ) as MusicResultItem[];
+
+        combinedResults = dedupeMusicResults([...combinedResults, ...nextResults]);
+        if (combinedResults.length >= 12) {
+          break;
+        }
+      }
+    }
+
+    return prioritizeFreshMusicResults(dedupeMusicResults(combinedResults)).slice(0, 12);
   }, []);
 
   const runMusicSearch = useCallback(async () => {
@@ -1839,6 +1909,12 @@ function CreatePostScreen({ navigation, route }: any) {
     setPendingMusicSelection(null);
   }, [resetMusicPreview]);
 
+  const closeMusicSheet = useCallback(() => {
+    setMusicSheetVisible(false);
+    setActiveMusicPreviewId("");
+    resetListMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
+  }, [resetListMusicPreview]);
+
   const closeVideoTrimSheet = useCallback(() => {
     setVideoTrimSheetVisible(false);
     setVideoTrimPreviewPlaying(false);
@@ -1846,6 +1922,21 @@ function CreatePostScreen({ navigation, route }: any) {
     setVideoTrimPreviewLoaded(false);
     setVideoTrimError("");
   }, []);
+
+  const stopAllComposerAudio = useCallback(() => {
+    setActiveMusicPreviewId("");
+    setVideoTrimPreviewPlaying(false);
+    resetMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
+    resetListMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
+  }, [resetListMusicPreview, resetMusicPreview]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        stopAllComposerAudio();
+      };
+    }, [stopAllComposerAudio]),
+  );
 
   const resetComposerState = useCallback(() => {
     setStage("launcher");
@@ -1875,11 +1966,12 @@ function CreatePostScreen({ navigation, route }: any) {
     setVideoTrimStartTime(0);
     setVideoTrimDuration(0);
     setVideoTrimError("");
+    stopAllComposerAudio();
     setStoryVisibility("public");
     setStoryAllowReplies(true);
     setStoryAllowSharing(true);
     resetStoryEditor("media");
-  }, [resetStoryEditor]);
+  }, [resetStoryEditor, stopAllComposerAudio]);
 
   const openVideoTrimmer = useCallback(() => {
     if (selectedAsset?.mediaType !== "video") {
@@ -2037,13 +2129,13 @@ function CreatePostScreen({ navigation, route }: any) {
           rawUrl: rawPlaybackUrl,
           normalizedUrl: playbackUrl,
         });
-        setMusicSheetVisible(false);
+        closeMusicSheet();
         setMusicTrimSheetVisible(true);
       } catch (error) {
         setMusicError("");
       }
     },
-    [mode, resetMusicPreview],
+    [closeMusicSheet, mode, resetMusicPreview],
   );
 
   const quickSelectMusic = useCallback(
@@ -2088,10 +2180,11 @@ function CreatePostScreen({ navigation, route }: any) {
       setMusicUploading(true);
       const externalId = `upload-${Date.now()}`;
       const body = new FormData();
+      const normalizedName = String(file.name || `${externalId}.m4a`).trim() || `${externalId}.m4a`;
       body.append("audio", {
-        uri: localUri,
-        name: file.name || `${externalId}.m4a`,
-        type: file.type || "audio/*",
+        uri: normalizeLocalFileUri(localUri),
+        name: normalizedName,
+        type: inferAudioMimeType(normalizedName, file.type),
       } as any);
 
       const uploaded = await postMultipart({
@@ -2104,7 +2197,7 @@ function CreatePostScreen({ navigation, route }: any) {
       const nextTrack: MusicResultItem = {
         id: `upload:${externalId}`,
         externalId,
-        title: buildUploadedTrackTitle(file.name || ""),
+        title: buildUploadedTrackTitle(normalizedName),
         artist: "You",
         artworkUrl: selectedAsset?.thumbnailUrl,
         audioUrl: playbackUrl,
@@ -2119,7 +2212,7 @@ function CreatePostScreen({ navigation, route }: any) {
         throw new Error("Uploaded audio could not be prepared for preview.");
       }
 
-      setMusicResults((current) => dedupeMusicResults([nextTrack, ...current]).slice(0, 12));
+      setMusicResults((current) => prioritizeFreshMusicResults(dedupeMusicResults([nextTrack, ...current])).slice(0, 12));
       setMusicQuery("");
       await openMusicTrimmer(nextTrack);
     } catch (error: any) {
@@ -2261,7 +2354,7 @@ function CreatePostScreen({ navigation, route }: any) {
       const imported = await importMusicCatalogItem({
         ...pendingMusicSelection,
         externalId: pendingMusicSelection.externalId,
-        source: pendingMusicSelection.source || "spotify",
+        source: pendingMusicSelection.source || "upload",
         clipStartTime: musicTrimStartTime,
         clipEndTime: savedEndTime,
         clipDuration: musicTrimDuration,
@@ -2765,6 +2858,7 @@ function CreatePostScreen({ navigation, route }: any) {
                   color: storyTextColor || storyTextThemeStyle.color,
                   backgroundColor: storyTextThemeStyle.backgroundColor,
                   fontFamily: storyTextFontStyle.fontFamily,
+                  fontStyle: storyTextFontStyle.fontStyle || "normal",
                   textAlign: storyTextAlignment,
                 },
               ]}
@@ -2970,13 +3064,11 @@ function CreatePostScreen({ navigation, route }: any) {
           />
 
           <View style={styles.storyAlignmentRow}>
-            {STORY_TEXT_ALIGNMENTS.map((alignment) => {
-              const active = storyTextAlignment === alignment;
-              const iconName =
-                alignment === "left" ? "text-outline" : alignment === "center" ? "reorder-three-outline" : "menu-outline";
+            {STORY_TEXT_FONT_OPTIONS.slice(0, 3).map((option) => {
+              const active = storyTextFont === option.id;
               return (
                 <TouchableOpacity
-                  key={alignment}
+                  key={option.id}
                   style={[
                     styles.storyAlignButton,
                     {
@@ -2984,11 +3076,24 @@ function CreatePostScreen({ navigation, route }: any) {
                       borderColor: active ? accentColor : borderColor,
                     },
                   ]}
-                  onPress={() => setStoryTextAlignment(alignment)}
+                  onPress={() => setStoryTextFont(option.id)}
                 >
-                  <Icon name={iconName} size={16} color={accentColor} />
-                  <Text style={[styles.storyAlignButtonText, { color: textColor }]}>
-                    {alignment.charAt(0).toUpperCase() + alignment.slice(1)}
+                  <Icon
+                    name={option.id === "italic" ? "create-outline" : option.id === "bold" ? "text-outline" : "reader-outline"}
+                    size={16}
+                    color={accentColor}
+                  />
+                  <Text
+                    style={[
+                      styles.storyAlignButtonText,
+                      {
+                        color: textColor,
+                        fontFamily: option.fontFamily,
+                        fontStyle: option.fontStyle || "normal",
+                      },
+                    ]}
+                  >
+                    {option.label}
                   </Text>
                 </TouchableOpacity>
               );
@@ -3717,6 +3822,204 @@ function CreatePostScreen({ navigation, route }: any) {
     );
   };
 
+  const renderComposerEditToolRail = () => {
+    const railItems: Array<{
+      id: Exclude<ComposerEditToolPanel, null>;
+      label: string;
+      icon: string;
+      active?: boolean;
+      onPress: () => void;
+      hidden?: boolean;
+    }> = [
+      {
+        id: "layout",
+        label: "Layout",
+        icon: "crop-outline",
+        active: composerEditToolPanel === "layout",
+        onPress: () => setComposerEditToolPanel("layout"),
+      },
+      {
+        id: "filters",
+        label: "Filter",
+        icon: "color-filter-outline",
+        active: composerEditToolPanel === "filters",
+        onPress: () => setComposerEditToolPanel("filters"),
+        hidden: mode !== "post",
+      },
+      {
+        id: "tag",
+        label: "Tag",
+        icon: "person-add-outline",
+        active: composerEditToolPanel === "tag",
+        onPress: () => setComposerEditToolPanel("tag"),
+      },
+      {
+        id: "music",
+        label: "Music",
+        icon: "musical-notes-outline",
+        active: composerEditToolPanel === "music" || !!selectedMusic,
+        onPress: () => setComposerEditToolPanel("music"),
+      },
+      {
+        id: "trim",
+        label: "Trim",
+        icon: "cut-outline",
+        active: videoTrimSheetVisible,
+        onPress: openVideoTrimmer,
+        hidden: selectedAsset?.mediaType !== "video",
+      },
+    ];
+
+    return (
+      <View
+        style={[
+          styles.storyToolRail,
+          {
+            backgroundColor: toAlphaColor(isDarkMode ? "#020617" : "#ffffff", isDarkMode ? 0.86 : 0.92),
+            borderColor,
+            top: Math.max(insets.top + 92, 118),
+          },
+        ]}
+      >
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.storyToolRailScroll}>
+          {railItems.filter((item) => !item.hidden).map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              style={[
+                styles.storyRailButton,
+                item.active ? { backgroundColor: accentSoft, borderColor: accentColor } : { backgroundColor: inputBackground, borderColor },
+              ]}
+              onPress={item.onPress}
+            >
+              <Icon name={item.icon} size={17} color={accentColor} />
+              <Text style={[styles.storyRailButtonText, { color: textColor }]} numberOfLines={2}>
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  };
+
+  const renderComposerEditToolPanel = () => {
+    if (composerEditToolPanel === "layout") {
+      return (
+        <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Layout</Text>
+              <Text style={[styles.sectionTitle, { color: textColor }]}>Aspect ratio</Text>
+            </View>
+            <Text style={[styles.sectionMeta, { color: mutedColor }]}>
+              {mode === "post" ? "1:1, 4:5, 16:9" : "9:16, 4:5, 16:9"}
+            </Text>
+          </View>
+          {renderAspectSelector()}
+        </View>
+      );
+    }
+
+    if (composerEditToolPanel === "filters") {
+      return (
+        <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
+          <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Look</Text>
+          <Text style={[styles.sectionTitle, { color: textColor }]}>Filters</Text>
+          <View style={styles.composerSheetBlock}>
+            {selectedAsset?.mediaType === "image" ? (
+              renderFilterSelector()
+            ) : (
+              <Text style={[styles.helperText, { color: mutedColor }]}>Filters are available for photo posts.</Text>
+            )}
+          </View>
+        </View>
+      );
+    }
+
+    if (composerEditToolPanel === "tag") {
+      return (
+        <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
+          <TouchableOpacity
+            style={[styles.toolAction, styles.toolActionFullWidth, { backgroundColor: inputBackground, borderColor }]}
+            onPress={() => setTagSheetVisible(true)}
+          >
+            <Icon name="person-add-outline" size={18} color={accentColor} />
+            <View style={styles.toolActionBody}>
+              <Text style={[styles.toolActionTitle, { color: textColor }]}>Tag people</Text>
+              <Text style={[styles.toolActionMeta, { color: mutedColor }]}>
+                {selectedTagPeople.length || selectedMentions.length ? `${selectedTagPeople.length || selectedMentions.length} selected` : "Tap to choose"}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          <View style={styles.inlineBlock}>
+            <Text style={[styles.sectionTitle, { color: textColor }]}>Tagged</Text>
+            {renderMentionChips()}
+          </View>
+        </View>
+      );
+    }
+
+    if (composerEditToolPanel === "music") {
+      return (
+        <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
+          <TouchableOpacity
+            style={[styles.toolAction, styles.toolActionFullWidth, { backgroundColor: inputBackground, borderColor }]}
+            onPress={() => setMusicSheetVisible(true)}
+          >
+            <Icon name="musical-notes-outline" size={18} color={accentColor} />
+            <View style={styles.toolActionBody}>
+              <Text style={[styles.toolActionTitle, { color: textColor }]}>Add music</Text>
+              <Text style={[styles.toolActionMeta, { color: mutedColor }]}>{selectedMusic ? buildMusicLabel(selectedMusic) : "Choose a track"}</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return null;
+  };
+
+  const renderComposerEditToolSheet = () => {
+    if (!composerEditToolPanel) {
+      return null;
+    }
+
+    const sheetTitle =
+      composerEditToolPanel === "layout"
+        ? "Layout"
+        : composerEditToolPanel === "filters"
+          ? "Filters"
+          : composerEditToolPanel === "tag"
+            ? "Tag people"
+            : "Music";
+    const snapPoints = composerEditToolPanel === "filters" ? [0.42, 0.62] : [0.34, 0.52];
+
+    return (
+      <DraggableBottomSheet
+        visible
+        onClose={() => setComposerEditToolPanel(null)}
+        snapPoints={snapPoints}
+        initialSnapIndex={1}
+      >
+        <View style={styles.sheetContent}>
+          <View style={styles.sheetHeader}>
+            <View>
+              <Text style={[styles.sheetEyebrow, { color: accentColor }]}>{MODE_COPY[mode].label}</Text>
+              <Text style={[styles.sheetTitle, { color: textColor }]}>{sheetTitle}</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: inputBackground, borderColor }]}
+              onPress={() => setComposerEditToolPanel(null)}
+            >
+              <Icon name="close" size={18} color={textColor} />
+            </TouchableOpacity>
+          </View>
+          {renderComposerEditToolPanel()}
+        </View>
+      </DraggableBottomSheet>
+    );
+  };
+
   const renderEditStage = () => {
     if (mode === "story") {
       return renderStoryEditStage();
@@ -3725,7 +4028,7 @@ function CreatePostScreen({ navigation, route }: any) {
     return (
       <Animated.View
         style={[
-          styles.stageWrap,
+          styles.storyStageWrap,
           {
             opacity: stageAnimation,
             transform: [
@@ -3739,88 +4042,24 @@ function CreatePostScreen({ navigation, route }: any) {
           },
         ]}
       >
-        {renderStageHeader(`Edit ${MODE_COPY[mode].label}`, "", () => {
-          if (!canContinueFromEdit) {
-            Alert.alert("Add media first", MODE_COPY[mode].emptyLabel);
-            return;
-          }
-          startTransition(() => setStage("details"));
-        })}
-
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + CREATE_DOCK_OFFSET + 12, 98) }}>
-          {renderPreviewMedia()}
-
-          <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
-            <View style={styles.sectionHeader}>
-              <View>
-                <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Layout</Text>
-                <Text style={[styles.sectionTitle, { color: textColor }]}>Aspect ratio</Text>
-              </View>
-              <Text style={[styles.sectionMeta, { color: mutedColor }]}>
-                {mode === "post" ? "1:1, 4:5, 16:9" : "9:16, 4:5, 16:9"}
-              </Text>
-            </View>
-            {renderAspectSelector()}
-          </View>
-
-          {mode === "post" ? (
-            <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
-              <View style={styles.sectionHeader}>
-                <View>
-                  <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Look</Text>
-                  <Text style={[styles.sectionTitle, { color: textColor }]}>Filters</Text>
-                </View>
-                <Text style={[styles.sectionMeta, { color: mutedColor }]}>{selectedAsset?.mediaType === "image" ? "Live" : "Photo only"}</Text>
-              </View>
-              {renderFilterSelector()}
-            </View>
-          ) : null}
-
-          <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
-            <View style={styles.toolActionRow}>
-              <TouchableOpacity
-                style={[styles.toolAction, { backgroundColor: inputBackground, borderColor }]}
-                onPress={() => setTagSheetVisible(true)}
-              >
-                <Icon name="person-add-outline" size={18} color={accentColor} />
-                <View style={styles.toolActionBody}>
-                  <Text style={[styles.toolActionTitle, { color: textColor }]}>Tag people</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.toolAction, { backgroundColor: inputBackground, borderColor }]}
-                onPress={() => setMusicSheetVisible(true)}
-              >
-                <Icon name="musical-notes-outline" size={18} color={accentColor} />
-                <View style={styles.toolActionBody}>
-                  <Text style={[styles.toolActionTitle, { color: textColor }]}>Add music</Text>
-                  <Text style={[styles.toolActionMeta, { color: mutedColor }]}>{selectedMusic ? buildMusicLabel(selectedMusic) : "Music"}</Text>
-                </View>
-              </TouchableOpacity>
-
-              {selectedAsset?.mediaType === "video" ? (
-                <TouchableOpacity
-                  style={[styles.toolAction, { backgroundColor: inputBackground, borderColor }]}
-                  onPress={openVideoTrimmer}
-                >
-                  <Icon name="cut-outline" size={18} color={accentColor} />
-                  <View style={styles.toolActionBody}>
-                    <Text style={[styles.toolActionTitle, { color: textColor }]}>Trim video</Text>
-                    <Text style={[styles.toolActionMeta, { color: mutedColor }]}>
-                      {formatDuration(videoTrimStartTime)} - {formatDuration(Math.min(selectedVideoDuration, videoTrimStartTime + (videoTrimDuration || Math.min(selectedVideoDuration, videoDurationLimit))))}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-
-            <View style={styles.inlineBlock}>
-              <Text style={[styles.sectionTitle, { color: textColor }]}>Tagged</Text>
-              {renderMentionChips()}
+        <View style={styles.storyEditContent}>
+          <View style={styles.storyCanvasShell}>
+            <View style={styles.composerEditPreviewWrap}>
+              {renderPreviewMedia()}
             </View>
           </View>
-        </ScrollView>
+          <View style={[styles.storyStageTopBar, { paddingTop: Math.max(insets.top + 4, 10) }]}>
+            {renderStageHeader(`Edit ${MODE_COPY[mode].label}`, "", () => {
+              if (!canContinueFromEdit) {
+                Alert.alert("Add media first", MODE_COPY[mode].emptyLabel);
+                return;
+              }
+              startTransition(() => setStage("details"));
+            })}
+          </View>
+          {renderComposerEditToolRail()}
+        </View>
+        {renderComposerEditToolSheet()}
       </Animated.View>
     );
   };
@@ -4176,7 +4415,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const renderMusicSheet = () => (
     <DraggableBottomSheet
       visible={musicSheetVisible}
-      onClose={() => setMusicSheetVisible(false)}
+      onClose={closeMusicSheet}
       snapPoints={[0.54, 0.84]}
       initialSnapIndex={1}
     >
@@ -4188,7 +4427,7 @@ function CreatePostScreen({ navigation, route }: any) {
           </View>
           <TouchableOpacity
             style={[styles.iconButton, { backgroundColor: inputBackground, borderColor }]}
-            onPress={() => setMusicSheetVisible(false)}
+            onPress={closeMusicSheet}
           >
             <Icon name="close" size={18} color={textColor} />
           </TouchableOpacity>
@@ -4442,11 +4681,11 @@ function CreatePostScreen({ navigation, route }: any) {
                 {musicPreviewMode === "audio" && !canPreviewMusic ? (
                   <View style={[styles.youtubePreviewCard, styles.youtubePreviewFallbackCard, { backgroundColor: inputBackground, borderColor }]}>
                     <Icon name="alert-circle-outline" size={28} color={accentColor} />
-                    <Text style={[styles.youtubePreviewFallbackTitle, { color: textColor }]}>Preview not available</Text>
-                    <Text style={[styles.youtubePreviewFallbackText, { color: mutedColor }]}>
-                      This track does not have a playable Spotify preview. Choose another result from the app music list.
-                    </Text>
-                  </View>
+                  <Text style={[styles.youtubePreviewFallbackTitle, { color: textColor }]}>Preview not available</Text>
+                  <Text style={[styles.youtubePreviewFallbackText, { color: mutedColor }]}>
+                    This track does not have a playable audio preview. Choose another result or upload your own audio.
+                  </Text>
+                </View>
                 ) : null}
 
                 <RangeSlider
@@ -5342,6 +5581,16 @@ const styles = StyleSheet.create({
   storyStickerClear: {
     fontSize: 12,
     fontFamily: appFonts.semibold,
+  },
+  composerEditPreviewWrap: {
+    width: "100%",
+    paddingHorizontal: 14,
+    paddingTop: 112,
+    paddingBottom: 28,
+    justifyContent: "center",
+  },
+  composerSheetBlock: {
+    marginTop: 14,
   },
   previewFrame: {
     width: "100%",

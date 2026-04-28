@@ -71,7 +71,6 @@
     "react-native-walkthrough-tooltip": "^1.6.0",
     "react-native-webrtc": "^124.0.7",
     "react-native-webview": "^13.16.1",
-    "react-native-youtube-iframe": "^2.4.1",
     "socket.io-client": "^4.8.3",
     "zego-express-engine-reactnative": "^3.22.0"
   },

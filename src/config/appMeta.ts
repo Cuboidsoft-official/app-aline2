@@ -5,9 +5,10 @@ export const APP_RELEASE_TITLE = "Smaller feed UI, steadier video posting, and c
 export const APP_RELEASE_HIGHLIGHTS = [
   "Feed cards now feel tighter and more Instagram-like with smaller avatars, lighter typography, and less bulky spacing.",
   "Video post uploads now retry alternate backend connections instead of falling straight into a generic internet-error state.",
-  "Video trim preview feels more polished with clearer clip feedback and a stronger save-trim flow before publishing.",
-  "Call rows now explain what happened more clearly with better missed, calling, incoming, and completed labels.",
-  "Release notes now reflect the latest feed, upload, trim, referral, and call experience improvements more accurately.",
+  "Music search now pulls from the broader app catalog plus Jamendo instead of getting stuck on a tiny local list.",
+  "Custom audio uploads now accept more real-world file MIME types so attached music is less likely to fail before trim.",
+  "Feed, story, and swipe publishing now keep attached music metadata in sync more reliably across the latest build.",
+  "Release notes now explain the Jamendo royalty-free music source, visible artist credit, and no-download playback approach more clearly.",
 ];
 
 export const APP_FEATURE_SECTIONS = [
@@ -75,6 +76,10 @@ export const APP_BUG_FIXES = [
   "Fixed guest approval flow so approved viewers can join live on camera and the host sees the guest feed.",
   "Tightened call cleanup so repeat calls in the same conversation no longer get blocked by stale active sessions.",
   "Refined shared post cards in chat so incoming post previews look cleaner and more compact.",
+  "Switched music search away from Spotify-backed results and widened it with Jamendo plus the app's own music catalog.",
+  "Fixed attached-audio uploads so more picked MP3, M4A, AAC, WAV, and OGG files survive upload and reach the trim flow.",
+  "Returned richer music playback fields from the catalog so feed posts, stories, and swipes can attach playable tracks more consistently.",
+  "Updated the release summary to call out Jamendo royalty-free streaming, artist credit visibility, and the lack of in-app music downloading.",
 ];
 
 export const APP_UPCOMING_CHANGES = [
@@ -82,4 +87,5 @@ export const APP_UPCOMING_CHANGES = [
   "Expanded creator tooling for richer live moderation, better seller promo surfaces, and stronger review queues.",
   "A fuller historical release archive so each version can be reviewed directly inside the app.",
   "Optional upload previews before publishing completes, plus richer review tools.",
+  "More visible royalty-free music credit cues across music pickers and playback surfaces.",
 ];

@@ -17,7 +17,17 @@ export const openRazorpayCheckout = async (payment = {}) => {
     };
   }
 
-  const RazorpayCheckout = require("react-native-razorpay");
+  const RazorpayModule = require("react-native-razorpay");
+  const RazorpayCheckout = RazorpayModule?.default || RazorpayModule;
+  const openCheckout =
+    typeof RazorpayCheckout?.open === "function"
+      ? RazorpayCheckout.open.bind(RazorpayCheckout)
+      : null;
+
+  if (!openCheckout) {
+    throw new Error("Razorpay checkout is not available in this build.");
+  }
+
   const options = {
     key: payment.keyId,
     amount: payment.amount,
@@ -29,5 +39,5 @@ export const openRazorpayCheckout = async (payment = {}) => {
     theme: { color: "#7B4DFF" },
   };
 
-  return RazorpayCheckout.open(options);
+  return openCheckout(options);
 };

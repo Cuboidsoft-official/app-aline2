@@ -1753,7 +1753,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
                 style={styles.groupPickerList}
                 ListEmptyComponent={(
                   <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
-                    Koi public group available nahi hai abhi.
+                    No public groups are available right now.
                   </Text>
                 )}
                 renderItem={({ item }) => {

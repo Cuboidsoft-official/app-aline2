@@ -550,7 +550,7 @@ const fetchRequestData = useCallback(async () => {
             {availabilityPreview.detail}
           </Text>
           <Text style={[styles.availabilityCardFootnote, { color: colors.mutedText }]}>
-            User ko appointment book karte time yahi seller-set slots dikhte hain.
+            Buyers see these seller-set slots when booking an appointment.
           </Text>
         </View>
 

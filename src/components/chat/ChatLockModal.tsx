@@ -47,12 +47,12 @@ const ChatLockModal = ({
     const normalizedPasscode = String(passcode || "").trim();
 
     if (!/^\d{4,8}$/.test(normalizedPasscode)) {
-      setErrorMessage("Passcode 4 se 8 digits ka hona chahiye.");
+      setErrorMessage("Passcode must be 4 to 8 digits.");
       return;
     }
 
     if (mode === "setup" && normalizedPasscode !== String(confirmPasscode || "").trim()) {
-      setErrorMessage("Passcode match nahi hua.");
+      setErrorMessage("Passcodes do not match.");
       return;
     }
 
@@ -75,8 +75,8 @@ const ChatLockModal = ({
           </Text>
           <Text style={[styles.description, { color: colors.mutedText || colors.placeholder }]}>
             {description || (mode === "setup"
-              ? "Ek secure passcode set karo jisse locked chats aur groups khulenge."
-              : "Apna chat lock passcode daal kar conversation unlock karo.")}
+              ? "Set a secure passcode to open locked chats and groups."
+              : "Enter your chat lock passcode to unlock this conversation.")}
           </Text>
 
           <TextInput

@@ -927,7 +927,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
         <>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Create your seller identity</Text>
           <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
-            Yeh details buyers sabse pehle dekhenge. Clear photo, clean name, aur focused specialization trust build karte hain.
+            Buyers will see these details first. A clear photo, clean name, and focused specialization help build trust.
           </Text>
 
           <View style={[styles.stepIntroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -938,7 +938,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
               <View style={styles.stepIntroCopy}>
                 <Text style={[styles.stepIntroTitle, { color: colors.text }]}>A strong first impression</Text>
                 <Text style={[styles.stepIntroBody, { color: colors.mutedText }]}>
-                  Apni profile ko simple aur professional rakho so buyers quickly samajh saken aap kya offer karte ho.
+                  Keep your profile simple and professional so buyers quickly understand what you offer.
                 </Text>
               </View>
             </View>
@@ -950,7 +950,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
               </View>
               <View style={styles.stepTipRow}>
                 <Icon name="checkmark-circle" size={16} color={colors.primary} />
-                <Text style={[styles.stepTipText, { color: colors.text }]}>Name wahi rakho jo buyers ko dikhana hai</Text>
+                <Text style={[styles.stepTipText, { color: colors.text }]}>Use the name you want buyers to see</Text>
               </View>
               <View style={styles.stepTipRow}>
                 <Icon name="checkmark-circle" size={16} color={colors.primary} />

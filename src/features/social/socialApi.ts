@@ -178,6 +178,16 @@ const storyStickerPositions: Record<StoryStickerPlacement, { x: number; y: numbe
   bottom_right: { x: 0.68, y: 0.72 },
 };
 
+const MUSIC_CLIP_MAX_SECONDS = 30;
+
+const clampMusicClipDurationSeconds = (duration: number | undefined): number | undefined => {
+  if (typeof duration !== "number" || duration <= 0) {
+    return undefined;
+  }
+
+  return Math.min(MUSIC_CLIP_MAX_SECONDS, duration);
+};
+
 const resolveMusicSegmentDurationSeconds = (music: any, musicConfig?: any): number | undefined => {
   const explicitDuration =
     typeof musicConfig?.duration === "number"
@@ -187,7 +197,7 @@ const resolveMusicSegmentDurationSeconds = (music: any, musicConfig?: any): numb
         : undefined;
 
   if (typeof explicitDuration === "number" && explicitDuration > 0) {
-    return explicitDuration;
+    return clampMusicClipDurationSeconds(explicitDuration);
   }
 
   const startTime =
@@ -204,7 +214,7 @@ const resolveMusicSegmentDurationSeconds = (music: any, musicConfig?: any): numb
         : undefined;
 
   if (typeof endTime === "number" && endTime > startTime) {
-    return endTime - startTime;
+    return clampMusicClipDurationSeconds(endTime - startTime);
   }
 
   return undefined;
@@ -291,15 +301,26 @@ const mapStoryMusicDetails = (music: any, musicConfig?: any) => {
 
 const buildMusicRequestPayload = (music: any) =>
   music?.id
-    ? {
-      musicId: music.id,
-      musicConfig: {
-        startTime: music.clipStartTime ?? 0,
-        endTime: music.clipEndTime ?? ((music.clipStartTime ?? 0) + (music.clipDuration ?? music.duration ?? 0)),
-        duration: music.clipDuration ?? music.duration,
-        volume: 1,
-      },
-    }
+    ? (() => {
+      const startTime = Math.max(0, Number(music.clipStartTime ?? 0) || 0);
+      const rawDuration = Number(music.clipDuration ?? music.duration ?? MUSIC_CLIP_MAX_SECONDS) || MUSIC_CLIP_MAX_SECONDS;
+      const duration = Math.max(1, Math.min(MUSIC_CLIP_MAX_SECONDS, rawDuration));
+      const explicitEndTime = Number(music.clipEndTime);
+      const endTime = Math.min(
+        startTime + duration,
+        Number.isFinite(explicitEndTime) && explicitEndTime > startTime ? explicitEndTime : startTime + duration,
+      );
+
+      return {
+        musicId: music.id,
+        musicConfig: {
+          startTime,
+          endTime,
+          duration: Math.max(1, endTime - startTime),
+          volume: 1,
+        },
+      };
+    })()
     : {};
 
 const mapTaggedUsersForRequest = (taggedUsers: any[] | undefined) =>

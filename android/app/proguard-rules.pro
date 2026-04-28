@@ -8,3 +8,8 @@
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
 # Add any project specific keep options here:
+
+# Drop noisy annotation and metadata classes that are not needed at runtime.
+-dontnote kotlin.**
+-dontnote org.jetbrains.annotations.**
+-dontwarn kotlin.**

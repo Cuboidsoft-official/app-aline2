@@ -47,6 +47,9 @@ const withTimeout = async (promise: Promise<Response>, timeoutMs = 120000): Prom
   }
 };
 
+const isRetryableResponseStatus = (status: number | undefined): boolean =>
+  status === 408 || status === 429 || (typeof status === "number" && status >= 500);
+
 export const postMultipart = async ({ path, body, timeoutMs = 120000 }: MultipartOptions) => {
   const token = await getStoredToken();
   const requestBaseUrls = buildUploadBaseUrls();
@@ -97,7 +100,8 @@ export const postMultipart = async ({ path, body, timeoutMs = 120000 }: Multipar
     } catch (error: any) {
       lastError = error;
       const hasServerResponse = Boolean(error?.response);
-      if (hasServerResponse) {
+      const responseStatus = Number(error?.response?.status || 0);
+      if (hasServerResponse && !isRetryableResponseStatus(responseStatus)) {
         break;
       }
     }

@@ -2599,7 +2599,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             <Icon name="lock-closed-outline" size={26} color={colors.primary} />
             <Text style={[styles.lockedChatTitle, { color: sellerChatColors.text }]}>Seller chat locked</Text>
             <Text style={[styles.lockedChatText, { color: sellerChatColors.muted }]}>
-              Yeh seller conversation lock hai. Passcode dal kar updates aur booking history dekh sakte ho.
+              This seller conversation is locked. Enter your passcode to view updates and booking history.
             </Text>
             <TouchableOpacity
               style={[styles.lockedChatButton, { backgroundColor: colors.primary }]}

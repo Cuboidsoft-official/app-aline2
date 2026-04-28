@@ -1,6 +1,5 @@
 import { Asset, CameraOptions, ImageLibraryOptions, launchCamera, launchImageLibrary } from "react-native-image-picker";
 
-import { API } from "../../api/api";
 import { getReadableApiErrorMessage, isModerationBlockedError } from "../../api/networkErrors";
 import { postMultipart } from "../../utils/multipartUpload";
 import {
@@ -182,26 +181,24 @@ const uploadSingleImage = async (
     const body = new FormData();
     body.append("image", toFormDataFile(asset) as never);
 
-    const res = await API.post("/upload/image", body, {
-      headers: { "Content-Type": "multipart/form-data" },
-      onUploadProgress: (event) => {
-        if (typeof event?.total === "number" && event.total > 0) {
-          onProgress?.(Math.max(0, Math.min(1, event.loaded / event.total)));
-        }
-      },
+    const res = await postMultipart({
+      path: "/upload/image",
+      body,
+      timeoutMs: 180000,
     });
+    onProgress?.(0.94);
 
-    if (!res?.data?.url) {
+    if (!res?.url) {
       throw new Error("Image upload did not return a usable URL.");
     }
 
     return {
       id: asset.id,
       mediaType: "image",
-      url: res.data.url,
+      url: res.url,
       width: asset.width,
       height: asset.height,
-      sensitiveContent: mapSensitiveContent(res?.data?.moderation),
+      sensitiveContent: mapSensitiveContent(res?.moderation),
     };
   } catch (error) {
     if (isModerationBlockedError(error)) {
@@ -221,16 +218,14 @@ const uploadMultipleImages = async (
       body.append("images", toFormDataFile(asset) as never);
     });
 
-    const res = await API.post("/upload/images", body, {
-      headers: { "Content-Type": "multipart/form-data" },
-      onUploadProgress: (event) => {
-        if (typeof event?.total === "number" && event.total > 0) {
-          onProgress?.(Math.max(0, Math.min(1, event.loaded / event.total)));
-        }
-      },
+    const res = await postMultipart({
+      path: "/upload/images",
+      body,
+      timeoutMs: 180000,
     });
+    onProgress?.(0.94);
 
-    const uploaded = Array.isArray(res?.data?.urls) ? res.data.urls : [];
+    const uploaded = Array.isArray(res?.urls) ? res.urls : [];
 
     if (
       uploaded.length !== assets.length

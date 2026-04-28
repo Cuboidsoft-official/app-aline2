@@ -150,7 +150,7 @@ function HowToEarnScreen({ navigation }: any) {
 
     Alert.alert(
       "Membership required",
-      "Post an ad aur List yourself for ads use karne ke liye INR 100 membership zaruri hai.",
+      "An INR 100 membership is required to use Post an ad and List yourself for ads.",
       [
         { text: "Later", style: "cancel" },
         { text: hasSellerAccount ? "Open membership" : "Get membership", onPress: openMembershipSetup },
@@ -181,7 +181,7 @@ function HowToEarnScreen({ navigation }: any) {
     if (!hasAdsMembership) {
       Alert.alert(
         "Membership required",
-        "Ad listing save karne ke liye pehle INR 100 membership activate karo.",
+        "Activate the INR 100 membership before saving an ad listing.",
         [
           { text: "Later", style: "cancel" },
           { text: hasSellerAccount ? "Open membership" : "Get membership", onPress: openMembershipSetup },
@@ -219,7 +219,7 @@ function HowToEarnScreen({ navigation }: any) {
       if (!hasAdsMembership) {
         return renderMembershipLock(
           "Post an ad",
-          "Company campaigns dekhne aur apply karne ke liye INR 100 membership active honi chahiye.",
+          "An active INR 100 membership is required to view and apply for company campaigns.",
         );
       }
 
@@ -255,7 +255,7 @@ function HowToEarnScreen({ navigation }: any) {
       if (!hasAdsMembership) {
         return renderMembershipLock(
           "List yourself for ads",
-          "Apni ad profile public karne aur rates show karne ke liye INR 100 membership zaruri hai.",
+          "An INR 100 membership is required to publish your ad profile and show your rates.",
         );
       }
 
@@ -263,7 +263,7 @@ function HowToEarnScreen({ navigation }: any) {
         <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.detailTitle, { color: colors.text }]}>List yourself for ads</Text>
           <Text style={[styles.detailBody, { color: colors.mutedText }]}>
-            Starting price set karo. Neeche brands ko dikhne wale common deliverables aur expected charges ka preview hai.
+            Set your starting price. Below is a preview of common deliverables and expected charges that brands will see.
           </Text>
 
           <View style={[styles.priceBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -291,7 +291,7 @@ function HowToEarnScreen({ navigation }: any) {
           </View>
 
           <Text style={[styles.helperNote, { color: colors.mutedText }]}>
-            Mention mein story, feed post, reel, combo package jaisi cheezein clear likho so brands ko samajh aaye kis cheez ka kitna charge hai.
+            Clearly mention stories, feed posts, reels, combo packages, and prices so brands understand what each option costs.
           </Text>
 
           <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={saveAdListing}>

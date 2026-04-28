@@ -947,7 +947,7 @@ const GroupDetailsScreen = ({ navigation, route }: any) => {
         />
 
         <Text style={[styles.metaCardText, { color: colors.mutedText }]}>
-          Add website, community, invite, ya koi bhi useful link. Har line me ek link.
+          Add a website, community, invite, or any useful link. Put one link on each line.
         </Text>
 
         <TextInput

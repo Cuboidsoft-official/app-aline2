@@ -817,6 +817,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [conversationListing, setConversationListing] = useState<ConversationListingState | null>(null);
   const messageListRef = useRef<FlatList<ChatMessage> | null>(null);
   const messageInputRef = useRef<TextInput | null>(null);
+  const initialLatestScrollDoneRef = useRef(false);
   const replyHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingFocusMessageIdRef = useRef("");
   const latestAutoScrollMessageIdRef = useRef("");
@@ -3680,7 +3681,7 @@ const ChatScreen = ({ navigation, route }: any) => {
             <Icon name="lock-closed-outline" size={26} color={colors.primary} />
             <Text style={[styles.lockedChatTitle, { color: colors.text }]}>Chat locked</Text>
             <Text style={[styles.lockedChatText, { color: colors.mutedText }]}>
-              Yeh conversation lock hai. Passcode dal kar messages khol sakte ho.
+              This conversation is locked. Enter your passcode to open messages.
             </Text>
             <TouchableOpacity
               style={[styles.lockedChatButton, { backgroundColor: colors.primary }]}

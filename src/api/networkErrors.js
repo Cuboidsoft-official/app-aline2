@@ -4,6 +4,10 @@ const isNetworkFailure = (error) => !error?.response;
 const isTimeoutFailure = (error) =>
   String(error?.code || "").trim().toUpperCase() === "ECONNABORTED"
   || /timeout/i.test(String(error?.message || ""));
+const isRuntimeFailure = (error) =>
+  !error?.response
+  && !isTimeoutFailure(error)
+  && !/network error|request failed|unable to connect|socket|internet/i.test(String(error?.message || ""));
 
 const getModerationBlockedMessage = (error, fallbackMessage) => {
   const responseData = error?.response?.data || {};
@@ -86,6 +90,10 @@ export const getReadableApiErrorMessage = (error, fallbackMessage = "Please try 
 
   if (!isNetworkFailure(error)) {
     return error?.message || fallbackMessage;
+  }
+
+  if (isRuntimeFailure(error) && String(error?.message || "").trim()) {
+    return String(error.message).trim();
   }
 
   if (isTimeoutFailure(error)) {

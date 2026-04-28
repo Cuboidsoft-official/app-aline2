@@ -14,6 +14,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { Alert } from "../utils/appAlert";
 import { API } from "../api/api";
+import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import { formatCurrencyAmount } from "../utils/servicePricing";
 import { useAppTheme } from "../theme/AppThemeContext";
@@ -156,7 +157,10 @@ function WalletScreen({ navigation }: any) {
       } else if (error?.response?.status === 404) {
         Alert.alert("Wallet payment unavailable", "Wallet payment service is not reachable right now. Restart the backend and try again.");
       } else {
-        Alert.alert("Wallet top-up failed", error?.response?.data?.message || error?.message || "Please try again.");
+        Alert.alert(
+          "Wallet top-up failed",
+          getReadableApiErrorMessage(error, "Wallet top-up could not be completed."),
+        );
       }
     } finally {
       setAddingMoney(false);

@@ -53,6 +53,8 @@ const getId = (value: any): string => {
   return String(value._id || value.id || "");
 };
 
+const MUSIC_CLIP_MAX_SECONDS = 30;
+
 const mapMusicItem = (item: any): MusicCatalogItem => ({
   id: getId(item.musicId || item._id || item.id),
   externalId: item?.externalId ? String(item.externalId) : undefined,
@@ -74,7 +76,10 @@ const mapMusicItem = (item: any): MusicCatalogItem => ({
   clipStartTime: Math.max(0, Math.round(Number(item?.clipStartTime || item?.startTime || 0) || 0)),
   clipDuration: Math.max(
     1,
-    Math.round(Number(item?.clipDuration || item?.duration || 1) || 1),
+    Math.min(
+      MUSIC_CLIP_MAX_SECONDS,
+      Math.round(Number(item?.clipDuration || item?.duration || 1) || 1),
+    ),
   ),
 });
 
@@ -95,30 +100,9 @@ export const getTrendingMusicCatalog = async (limit = 10): Promise<MusicCatalogI
       .filter(Boolean) as MusicCatalogItem[];
   };
 
-  try {
-    const blended = await load("/music/catalog/trending", {
-      limit,
-      includeExternal: true,
-    });
-
-    if (blended.length) {
-      return blended;
-    }
-
-    const localOnly = await load("/music/catalog/trending", {
-      limit,
-      includeExternal: false,
-    });
-
-    if (localOnly.length) {
-      return localOnly;
-    }
-  } catch {
-    // Fall back to legacy endpoints below.
-  }
-
-  return load("/music/trending", {
+  return load("/music/catalog/trending", {
     limit,
+    includeExternal: true,
   });
 };
 
@@ -150,33 +134,10 @@ export const searchMusicCatalog = async (query: string, limit = 12): Promise<Mus
       .filter(Boolean) as MusicCatalogItem[];
   };
 
-  try {
-    const blended = await load("/music/catalog", {
-      query: trimmedQuery,
-      limit,
-      includeExternal: true,
-    });
-
-    if (blended.length) {
-      return blended;
-    }
-
-    const localOnly = await load("/music/catalog", {
-      query: trimmedQuery,
-      limit,
-      includeExternal: false,
-    });
-
-    if (localOnly.length) {
-      return localOnly;
-    }
-  } catch {
-    // Fall back to legacy endpoints below.
-  }
-
-  return load("/music", {
-    search: trimmedQuery,
+  return load("/music/catalog", {
+    query: trimmedQuery,
     limit,
+    includeExternal: true,
   });
 };
 
@@ -211,7 +172,10 @@ export const importMusicCatalogItem = async (item: MusicCatalogItem): Promise<Mu
     audioUrl: imported.audioUrl || item.audioUrl || item.streamUrl || item.previewUrl,
     youtubeVideoId: imported.youtubeVideoId || item.youtubeVideoId,
     clipStartTime: item.clipStartTime ?? imported.clipStartTime ?? 0,
-    clipDuration: item.clipDuration ?? imported.clipDuration ?? imported.duration,
+    clipDuration: Math.min(
+      MUSIC_CLIP_MAX_SECONDS,
+      item.clipDuration ?? imported.clipDuration ?? imported.duration,
+    ),
   };
 
   if (__DEV__) {
