@@ -185,6 +185,7 @@ jobs:
         run: |
           printf "sdk.dir=%s\n" "$ANDROID_SDK_ROOT" > android/local.properties
           chmod +x android/gradlew
+          chmod +x scripts/build-android-release.sh
 
       - name: Materialize Android release keystore
         env:
@@ -288,10 +289,10 @@ jobs:
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
           APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
         run: |
-          cat > /tmp/publish-apk.sh <<EOF
+          cat > /tmp/publish-apk.sh <<'EOF'
           set -euo pipefail
-          release_dir="${{ env.PROD_RELEASES_DIR }}"
-          release_name="${RELEASE_NAME}"
+          release_dir="__PROD_RELEASES_DIR__"
+          release_name="__RELEASE_NAME__"
           backup_dir="${release_dir}/backups/${release_name}"
           mkdir -p "${release_dir}"
           chmod 755 "${release_dir}"
@@ -303,7 +304,7 @@ jobs:
             cp "${release_dir}/latest.apk.sha256" "${backup_dir}/latest.apk.sha256"
           fi
           target_path="${release_dir}/${release_name}.apk"
-          curl -fsSL "${APK_DOWNLOAD_URL}" -o "${target_path}"
+          curl -fsSL "__APK_DOWNLOAD_URL__" -o "${target_path}"
           cp "${target_path}" "${release_dir}/latest.apk"
           sha256sum "${target_path}" > "${target_path}.sha256"
           sha256sum "${release_dir}/latest.apk" > "${release_dir}/latest.apk.sha256"
@@ -311,8 +312,19 @@ jobs:
 
           command_json="$(python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
-          print(json.dumps({"commands": [Path("/tmp/publish-apk.sh").read_text()]}))
+
+          path = Path("/tmp/publish-apk.sh")
+          content = path.read_text()
+          for key, value in {
+              "__PROD_RELEASES_DIR__": os.environ["PROD_RELEASES_DIR"],
+              "__RELEASE_NAME__": os.environ["RELEASE_NAME"],
+              "__APK_DOWNLOAD_URL__": os.environ["APK_DOWNLOAD_URL"],
+          }.items():
+              content = content.replace(key, value)
+          path.write_text(content)
+          print(json.dumps({"commands": [content]}))
           PY
           )"
 
@@ -360,10 +372,10 @@ jobs:
         env:
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
         run: |
-          cat > /tmp/rollback-apk.sh <<EOF
+          cat > /tmp/rollback-apk.sh <<'EOF'
           set -euo pipefail
-          release_dir="${{ env.PROD_RELEASES_DIR }}"
-          release_name="${RELEASE_NAME}"
+          release_dir="__PROD_RELEASES_DIR__"
+          release_name="__RELEASE_NAME__"
           backup_dir="${release_dir}/backups/${release_name}"
           if [ -f "${backup_dir}/latest.apk" ]; then
             cp "${backup_dir}/latest.apk" "${release_dir}/latest.apk"
@@ -379,8 +391,18 @@ jobs:
 
           command_json="$(python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
-          print(json.dumps({"commands": [Path("/tmp/rollback-apk.sh").read_text()]}))
+
+          path = Path("/tmp/rollback-apk.sh")
+          content = path.read_text()
+          for key, value in {
+              "__PROD_RELEASES_DIR__": os.environ["PROD_RELEASES_DIR"],
+              "__RELEASE_NAME__": os.environ["RELEASE_NAME"],
+          }.items():
+              content = content.replace(key, value)
+          path.write_text(content)
+          print(json.dumps({"commands": [content]}))
           PY
           )"
 
