@@ -96,15 +96,6 @@ export const getTrendingMusicCatalog = async (limit = 10): Promise<MusicCatalogI
   };
 
   try {
-    const localFirst = await load("/music/catalog/trending", {
-      limit,
-      includeExternal: false,
-    });
-
-    if (localFirst.length) {
-      return localFirst;
-    }
-
     const blended = await load("/music/catalog/trending", {
       limit,
       includeExternal: true,
@@ -112,6 +103,15 @@ export const getTrendingMusicCatalog = async (limit = 10): Promise<MusicCatalogI
 
     if (blended.length) {
       return blended;
+    }
+
+    const localOnly = await load("/music/catalog/trending", {
+      limit,
+      includeExternal: false,
+    });
+
+    if (localOnly.length) {
+      return localOnly;
     }
   } catch {
     // Fall back to legacy endpoints below.
@@ -151,16 +151,6 @@ export const searchMusicCatalog = async (query: string, limit = 12): Promise<Mus
   };
 
   try {
-    const localFirst = await load("/music/catalog", {
-      query: trimmedQuery,
-      limit,
-      includeExternal: false,
-    });
-
-    if (localFirst.length) {
-      return localFirst;
-    }
-
     const blended = await load("/music/catalog", {
       query: trimmedQuery,
       limit,
@@ -169,6 +159,16 @@ export const searchMusicCatalog = async (query: string, limit = 12): Promise<Mus
 
     if (blended.length) {
       return blended;
+    }
+
+    const localOnly = await load("/music/catalog", {
+      query: trimmedQuery,
+      limit,
+      includeExternal: false,
+    });
+
+    if (localOnly.length) {
+      return localOnly;
     }
   } catch {
     // Fall back to legacy endpoints below.

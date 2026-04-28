@@ -26,7 +26,6 @@ import ContentActionSheet from "../features/social/components/ContentActionSheet
 import InteractiveText from "../features/social/components/InteractiveText";
 import PostCommentsSheet from "../features/social/components/PostCommentsSheet";
 import PostShareSheet from "../features/social/components/PostShareSheet";
-import HiddenYoutubeAudioPlayer from "../components/media/HiddenYoutubeAudioPlayer";
 import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import SocialVideo from "../features/social/components/SocialVideo";
 import { socialApi } from "../features/social/socialApi";
@@ -42,7 +41,6 @@ import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
 import { resolveMentionUserId } from "../utils/mentionLinks";
-import { extractYouTubeVideoId } from "../utils/youtubePlayback";
 import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 import { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import AppAvatar from "../components/AppAvatar";
@@ -288,28 +286,19 @@ function FeedScreen({ navigation }: any) {
   const completedPublishTaskIdsRef = useRef<Set<string>>(new Set());
   const activePostRawMusicUrl = getMusicPlaybackUrl(activePost?.music);
   const activePostMusicUrl = normalizeMediaUrl(activePostRawMusicUrl);
-  const activePostMusicYoutubeVideoId = extractYouTubeVideoId(activePost?.music);
   const activePostMusicStartMs = Math.max(0, Number(activePost?.music?.startTime || 0) * 1000);
   const activePostMusicDurationMs = getTrimmedMusicDurationMs(activePost?.music);
   const activePostMusicTrackKey = activePost
-    ? `${activePost.id}:${activePostMusicYoutubeVideoId || activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
+    ? `${activePost.id}:${activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
     : "";
   const activePostShouldPlayMusic = !!activePostId
     && !mutedPostIds[activePostId]
     && !activeSheet
     && isScreenFocused
-    && !!(activePostMusicYoutubeVideoId || activePostMusicUrl);
-  const {
-    isUsingYoutube: isUsingYoutubePostMusic,
-    youtubePlay: youtubePostMusicPlay,
-    youtubePlayerRef: youtubePostMusicRef,
-    handleYoutubeReady: handleYoutubePostMusicReady,
-    handleYoutubeError: handleYoutubePostMusicError,
-    handleYoutubeStateChange: handleYoutubePostMusicStateChange,
-  } = useSegmentedMusicPlayback({
+    && !!activePostMusicUrl;
+  useSegmentedMusicPlayback({
     rawUrl: activePostRawMusicUrl,
     normalizedUrl: activePostMusicUrl,
-    youtubeVideoId: activePostMusicYoutubeVideoId,
     trackKey: activePostMusicTrackKey,
     startMs: activePostMusicStartMs,
     durationMs: activePostMusicDurationMs,
@@ -665,7 +654,7 @@ function FeedScreen({ navigation }: any) {
     const hasAudioLayer =
       post.media.some((asset) => asset.mediaType === "video")
       || !!getMusicPlaybackUrl(post.music)
-      || !!extractYouTubeVideoId(post.music);
+      || !!getMusicPlaybackUrl(post.music);
 
     if (lastTap.id === post.id && now - lastTap.time < 260) {
       if (lastTap.timeout) {
@@ -1156,7 +1145,7 @@ function FeedScreen({ navigation }: any) {
     const mediaHeight = getPostMediaHeight(post);
     const frameAspectRatio = postMediaWidth / Math.max(1, mediaHeight);
     const currentCarouselIndex = carouselIndexByPostId[post.id] || 0;
-    const hasAttachedMusic = !!(getMusicPlaybackUrl(post.music) || extractYouTubeVideoId(post.music));
+    const hasAttachedMusic = !!getMusicPlaybackUrl(post.music);
     const isMuted = !!mutedPostIds[post.id];
     const isPostActive = activePostId === post.id && isScreenFocused && !activeSheet;
     const renderSensitiveBadge = (label?: string) => (
@@ -1404,7 +1393,7 @@ function FeedScreen({ navigation }: any) {
   const renderPost = ({ item }: { item: Post }) => {
     const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
     const musicLabel = formatPostMusicLabel(item.music);
-    const hasAttachedMusic = !!(getMusicPlaybackUrl(item.music) || extractYouTubeVideoId(item.music));
+    const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isMuted = !!mutedPostIds[item.id];
     const likeAvatarUrl =
       (item.liked ? currentUser?.avatarUrl : "") || item.user.avatarUrl || DEFAULT_AVATAR_URL;
@@ -1706,7 +1695,7 @@ function FeedScreen({ navigation }: any) {
   const renderInstagramPost = ({ item }: { item: Post }) => {
     const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
     const musicLabel = formatPostMusicLabel(item.music);
-    const hasAttachedMusic = !!(getMusicPlaybackUrl(item.music) || extractYouTubeVideoId(item.music));
+    const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isMuted = !!mutedPostIds[item.id];
     const likePreviewUsers =
       Array.isArray(item.likePreviewUsers) && item.likePreviewUsers.length
@@ -2300,16 +2289,6 @@ function FeedScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
-      {isUsingYoutubePostMusic && activePostMusicYoutubeVideoId ? (
-        <HiddenYoutubeAudioPlayer
-          playerRef={youtubePostMusicRef}
-          play={youtubePostMusicPlay}
-          videoId={activePostMusicYoutubeVideoId}
-          onReady={handleYoutubePostMusicReady}
-          onError={handleYoutubePostMusicError}
-          onChangeState={handleYoutubePostMusicStateChange}
-        />
-      ) : null}
       <View style={styles.screenShell}>
         <FlatList
           data={feed.posts}

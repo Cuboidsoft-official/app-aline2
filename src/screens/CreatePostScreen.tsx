@@ -21,6 +21,13 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
+import {
+  errorCodes,
+  isErrorWithCode,
+  keepLocalCopy,
+  pick,
+  types,
+} from "@react-native-documents/picker";
 import { trim as trimMedia } from "react-native-video-trim";
 import { RTCView, mediaDevices } from "react-native-webrtc";
 import Video from "react-native-video";
@@ -53,20 +60,19 @@ import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import SocialVideo from "../features/social/components/SocialVideo";
 import { limits, parseCaptionEntities, toUserSafeMessage } from "../features/social/validation";
 import {
+  getTrendingMusicCatalog,
   importMusicCatalogItem,
+  searchMusicCatalog,
 } from "../utils/musicApi";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
+import { postMultipart } from "../utils/multipartUpload";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
 import { fetchEmojiStickers, fetchStickersForChat, searchStickers, type ChatSticker } from "../utils/chatStickerApi";
 import { appFonts } from "../theme/designSystem";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { ensureCameraPermission } from "../utils/permissions";
 import { VIDEO_DURATION_LIMITS } from "../utils/videoTrimConfig";
-import { useYouTubeTrimPreview } from "../hooks/useYouTubeTrimPreview";
-import {
-  getTrendingYouTubeMusic,
-  searchYouTubeMusic,
-} from "../utils/youtubeMusic";
+import { useAudioTrimPreview } from "../hooks/useAudioTrimPreview";
 import { startPublishTask } from "../features/social/publishQueue";
 
 let ColorMatrix: any = null;
@@ -74,17 +80,6 @@ try {
   ColorMatrix = require("react-native-color-matrix-image-filters").ColorMatrix;
 } catch {
   ColorMatrix = null;
-}
-
-let YoutubePlayer: any = null;
-try {
-  const youtubePlayerModule = require("react-native-youtube-iframe");
-  YoutubePlayer = youtubePlayerModule?.default || youtubePlayerModule;
-} catch (error) {
-  YoutubePlayer = null;
-  if (__DEV__) {
-    console.log("YouTube preview unavailable:", error);
-  }
 }
 
 type ComposerMode = "post" | "story" | "swipe";
@@ -115,7 +110,7 @@ type MusicResultItem = SelectedMusicClip & {
 
 type StoryToolPanel = "text" | "color" | "font" | "size" | "filters" | "sticker" | null;
 type StoryTextFontVariant = "bold" | "clean" | "soft";
-type MusicPreviewMode = "youtube";
+type MusicPreviewMode = "audio";
 
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
 const POST_ASPECTS: AspectOption[] = [
@@ -253,39 +248,32 @@ const formatDuration = (seconds: number) => {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(() => resolve(), ms));
 
-const extractYouTubeVideoId = (item: Partial<SelectedMusicClip> | null | undefined): string => {
-  const directId = String(item?.youtubeVideoId || "").trim();
-  if (directId) {
-    return directId;
+const getDocumentPickerMessage = (error: any, fallback = "Audio pick failed"): string => {
+  if (!isErrorWithCode(error)) {
+    return fallback;
   }
 
-  const externalId = String(item?.externalId || "").trim();
-  if (externalId && !/^https?:\/\//i.test(externalId)) {
-    return externalId.replace(/^youtube:/i, "").trim();
+  switch (error.code) {
+    case errorCodes.OPERATION_CANCELED:
+      return "";
+    case errorCodes.IN_PROGRESS:
+      return "The picker is already open.";
+    case errorCodes.NULL_PRESENTER:
+      return "Could not open the picker right now.";
+    case errorCodes.UNABLE_TO_OPEN_FILE_TYPE:
+      return "This audio type could not be opened on your device.";
+    default:
+      return fallback;
+  }
+};
+
+const buildUploadedTrackTitle = (value: string): string => {
+  const trimmedValue = String(value || "").trim();
+  if (!trimmedValue) {
+    return "My audio";
   }
 
-  const rawId = String(item?.id || "").trim();
-  if (/^youtube:/i.test(rawId)) {
-    return rawId.replace(/^youtube:/i, "").trim();
-  }
-
-  const externalUrl = String(item?.externalUrl || "").trim();
-  if (!externalUrl) {
-    return "";
-  }
-
-  const watchMatch = externalUrl.match(/[?&]v=([^&]+)/i);
-  if (watchMatch?.[1]) {
-    return watchMatch[1].trim();
-  }
-
-  const shortMatch = externalUrl.match(/youtu\.be\/([^?&/]+)/i);
-  if (shortMatch?.[1]) {
-    return shortMatch[1].trim();
-  }
-
-  const embedMatch = externalUrl.match(/embed\/([^?&/]+)/i);
-  return embedMatch?.[1] ? embedMatch[1].trim() : "";
+  return trimmedValue.replace(/\.[^.]+$/, "").trim() || "My audio";
 };
 
 const blendColorMatrix = (matrix: number[], intensity: number) =>
@@ -470,7 +458,7 @@ const getMusicClipPlaybackUrl = (music: Partial<SelectedMusicClip> | null | unde
   String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
 
 const hasPlayableMusicClip = (music: Partial<SelectedMusicClip> | null | undefined) =>
-  !!(getMusicClipPlaybackUrl(music) || extractYouTubeVideoId(music));
+  !!getMusicClipPlaybackUrl(music);
 
 const dedupeMusicResults = (items: MusicResultItem[]) => {
   const seen = new Set<string>();
@@ -1029,13 +1017,15 @@ function CreatePostScreen({ navigation, route }: any) {
   const [musicQuery, setMusicQuery] = useState("");
   const [musicResults, setMusicResults] = useState<MusicResultItem[]>([]);
   const [musicLoading, setMusicLoading] = useState(false);
+  const [musicUploading, setMusicUploading] = useState(false);
   const [musicImportingId, setMusicImportingId] = useState("");
   const [musicError, setMusicError] = useState("");
+  const [activeMusicPreviewId, setActiveMusicPreviewId] = useState("");
   const [selectedMusic, setSelectedMusic] = useState<SelectedMusicClip | null>(null);
   const [pendingMusicSelection, setPendingMusicSelection] = useState<MusicResultItem | null>(null);
   const [musicTrimStartTime, setMusicTrimStartTime] = useState(0);
   const [musicTrimDuration, setMusicTrimDuration] = useState(0);
-  const [musicPreviewMode, setMusicPreviewMode] = useState<MusicPreviewMode>("youtube");
+  const musicPreviewMode: MusicPreviewMode = "audio";
   const [videoTrimStartTime, setVideoTrimStartTime] = useState(0);
   const [videoTrimDuration, setVideoTrimDuration] = useState(0);
   const [videoTrimApplying, setVideoTrimApplying] = useState(false);
@@ -1090,7 +1080,6 @@ function CreatePostScreen({ navigation, route }: any) {
   const storyImagePan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const lastStoryAssetUriRef = useRef("");
   const {
-    playerRef: youtubePreviewRef,
     isReady: musicPreviewReady,
     isPlaying: musicPreviewPlaying,
     isLoading: musicPreviewLoading,
@@ -1098,11 +1087,13 @@ function CreatePostScreen({ navigation, route }: any) {
     resetPreview: resetMusicPreview,
     seekToSeconds: seekMusicPreviewToSeconds,
     setTrimWindow: setMusicPreviewTrimWindow,
-    togglePlayback: toggleYouTubeMusicPreview,
-    handleReady: handleMusicPreviewReady,
-    handleError: handleMusicPreviewError,
-    handleStateChange: handleMusicPreviewStateChange,
-  } = useYouTubeTrimPreview();
+    togglePlayback: toggleAudioMusicPreview,
+  } = useAudioTrimPreview();
+  const {
+    isPlaying: listMusicPreviewPlaying,
+    resetPreview: resetListMusicPreview,
+    togglePlayback: toggleListMusicPreview,
+  } = useAudioTrimPreview();
 
   const activeAspect = useMemo(() => findAspectOption(mode, aspectId[mode]), [aspectId, mode]);
   const videoDurationLimit = useMemo(() => VIDEO_DURATION_LIMITS[mode], [mode]);
@@ -1121,12 +1112,15 @@ function CreatePostScreen({ navigation, route }: any) {
 
     return storyCreationMode === "text" ? !!storyText.trim() : !!selectedAsset;
   }, [mode, selectedAsset, storyCreationMode, storyText]);
-  const pendingMusicYoutubeVideoId = useMemo(
-    () => extractYouTubeVideoId(pendingMusicSelection),
+  const pendingMusicPreviewRawUrl = useMemo(
+    () => getMusicClipPlaybackUrl(pendingMusicSelection),
     [pendingMusicSelection],
   );
-  const canRenderYoutubePreview = Boolean(YoutubePlayer && pendingMusicYoutubeVideoId);
-  const canPreviewMusic = Boolean(canRenderYoutubePreview);
+  const pendingMusicPreviewUrl = useMemo(
+    () => normalizeMediaUrl(pendingMusicPreviewRawUrl),
+    [pendingMusicPreviewRawUrl],
+  );
+  const canPreviewMusic = Boolean(pendingMusicPreviewRawUrl || pendingMusicPreviewUrl);
   const parentRouteNames = navigation?.getParent?.()?.getState?.()?.routeNames || [];
   const isInsideTabNavigator = Array.isArray(parentRouteNames)
     && parentRouteNames.includes("Feed")
@@ -1736,7 +1730,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
   useEffect(() => {
     if (!musicTrimSheetVisible || !pendingMusicSelection) {
-      resetMusicPreview(0, 1);
+      resetMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
       return;
     }
 
@@ -1745,8 +1739,19 @@ function CreatePostScreen({ navigation, route }: any) {
       Math.max(musicTrimStartTime + 1, musicTrimStartTime + Math.max(1, musicTrimDuration)),
     );
 
-    resetMusicPreview(Math.max(0, musicTrimStartTime), nextEndTime);
-  }, [musicTrimDuration, musicTrimSheetVisible, musicTrimStartTime, pendingMusicSelection, resetMusicPreview]);
+    resetMusicPreview(Math.max(0, musicTrimStartTime), nextEndTime, {
+      rawUrl: pendingMusicPreviewRawUrl,
+      normalizedUrl: pendingMusicPreviewUrl,
+    }).catch(() => undefined);
+  }, [
+    musicTrimDuration,
+    musicTrimSheetVisible,
+    musicTrimStartTime,
+    pendingMusicPreviewRawUrl,
+    pendingMusicPreviewUrl,
+    pendingMusicSelection,
+    resetMusicPreview,
+  ]);
 
   useEffect(() => {
     if (!musicTrimSheetVisible || !musicPreviewReady) {
@@ -1782,11 +1787,11 @@ function CreatePostScreen({ navigation, route }: any) {
 
   const fetchMusicResults = useCallback(async (query: string) => {
     const trimmedQuery = String(query || "").trim();
-    const youtubeResults = trimmedQuery
-      ? await searchYouTubeMusic(trimmedQuery, 12)
-      : await getTrendingYouTubeMusic(12);
+    const catalogResults = trimmedQuery
+      ? await searchMusicCatalog(trimmedQuery, 12)
+      : await getTrendingMusicCatalog(12);
 
-    return dedupeMusicResults(youtubeResults as MusicResultItem[]).slice(0, 12);
+    return dedupeMusicResults((catalogResults as MusicResultItem[]).filter(hasPlayableMusicClip)).slice(0, 12);
   }, []);
 
   const runMusicSearch = useCallback(async () => {
@@ -1800,12 +1805,12 @@ function CreatePostScreen({ navigation, route }: any) {
       setMusicResults(nextResults);
 
       if (!nextResults.length) {
-        setMusicError(query ? "No playable tracks matched your search." : "No playable music is available right now.");
+        setMusicError("");
       }
     } catch (error) {
       console.log("music search error:", error);
       setMusicResults([]);
-      setMusicError(toUserSafeMessage(error));
+      setMusicError("");
     } finally {
       setMusicLoading(false);
     }
@@ -1814,8 +1819,10 @@ function CreatePostScreen({ navigation, route }: any) {
   useEffect(() => {
     if (!musicSheetVisible) {
       musicSeedLoadedRef.current = false;
+      setActiveMusicPreviewId("");
+      resetListMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
     }
-  }, [musicSheetVisible]);
+  }, [musicSheetVisible, resetListMusicPreview]);
 
   useEffect(() => {
     if (!musicSheetVisible || musicSeedLoadedRef.current) {
@@ -1827,7 +1834,7 @@ function CreatePostScreen({ navigation, route }: any) {
   }, [musicSheetVisible, runMusicSearch]);
 
   const closeMusicTrimSheet = useCallback(() => {
-    resetMusicPreview(0, 1);
+    resetMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
     setMusicTrimSheetVisible(false);
     setPendingMusicSelection(null);
   }, [resetMusicPreview]);
@@ -2009,44 +2016,31 @@ function CreatePostScreen({ navigation, route }: any) {
         Math.max(1, safeDuration - nextStart),
       );
       const nextEnd = Math.min(safeDuration, nextStart + nextDuration);
-      const resolvedVideoId = extractYouTubeVideoId(item);
+      const rawPlaybackUrl = getMusicClipPlaybackUrl(item);
+      const playbackUrl = normalizeMediaUrl(rawPlaybackUrl);
 
       try {
         setMusicError("");
-        if (__DEV__) {
-          console.log("Track:", item);
-        }
-
-        if (__DEV__) {
-          console.log("Preview checks:", {
-            hasYoutubeVideoId: Boolean(resolvedVideoId),
-            youtubeEmbedAvailable: Boolean(YoutubePlayer),
-          });
-        }
-
-        if (!resolvedVideoId) {
-          throw new Error("This YouTube track is missing a video id. Try another result.");
-        }
-
-        if (!YoutubePlayer) {
-          throw new Error("YouTube preview is unavailable in this app build right now.");
+        if (!playbackUrl) {
+          return;
         }
 
         setPendingMusicSelection({
           ...item,
-          youtubeVideoId: resolvedVideoId,
           clipStartTime: nextStart,
           clipEndTime: nextEnd,
           clipDuration: nextDuration,
         });
-        setMusicPreviewMode("youtube");
         setMusicTrimStartTime(nextStart);
         setMusicTrimDuration(nextDuration);
-        resetMusicPreview(nextStart, nextEnd);
+        await resetMusicPreview(nextStart, nextEnd, {
+          rawUrl: rawPlaybackUrl,
+          normalizedUrl: playbackUrl,
+        });
         setMusicSheetVisible(false);
         setMusicTrimSheetVisible(true);
       } catch (error) {
-        setMusicError(toUserSafeMessage(error));
+        setMusicError("");
       }
     },
     [mode, resetMusicPreview],
@@ -2057,6 +2051,121 @@ function CreatePostScreen({ navigation, route }: any) {
       await openMusicTrimmer(item);
     },
     [openMusicTrimmer],
+  );
+
+  const uploadCustomMusic = useCallback(async () => {
+    try {
+      const [file] = await pick({
+        mode: "import",
+        allowMultiSelection: false,
+        type: [types.audio],
+      });
+
+      if (!file?.uri) {
+        return;
+      }
+
+      let localUri = file.uri;
+      if (file.isVirtual || String(file.uri || "").startsWith("content://")) {
+        const [localCopy] = await keepLocalCopy({
+          destination: "cachesDirectory",
+          files: [
+            {
+              uri: file.uri,
+              fileName: file.name || `audio_${Date.now()}`,
+              convertVirtualFileToType: file.convertibleToMimeTypes?.[0]?.mimeType,
+            },
+          ],
+        });
+
+        if (!localCopy || localCopy.status !== "success") {
+          throw new Error(localCopy?.copyError || "Unable to access the selected audio file.");
+        }
+
+        localUri = localCopy.localUri;
+      }
+
+      setMusicUploading(true);
+      const externalId = `upload-${Date.now()}`;
+      const body = new FormData();
+      body.append("audio", {
+        uri: localUri,
+        name: file.name || `${externalId}.m4a`,
+        type: file.type || "audio/*",
+      } as any);
+
+      const uploaded = await postMultipart({
+        path: "/upload/audio",
+        body,
+        timeoutMs: 120000,
+      });
+
+      const playbackUrl = String(uploaded?.url || "").trim();
+      const nextTrack: MusicResultItem = {
+        id: `upload:${externalId}`,
+        externalId,
+        title: buildUploadedTrackTitle(file.name || ""),
+        artist: "You",
+        artworkUrl: selectedAsset?.thumbnailUrl,
+        audioUrl: playbackUrl,
+        streamUrl: playbackUrl,
+        previewUrl: playbackUrl,
+        source: "upload",
+        isOriginal: true,
+        duration: Math.max(1, Math.round(Number(uploaded?.duration || 0) || 1)),
+      };
+
+      if (!hasPlayableMusicClip(nextTrack)) {
+        throw new Error("Uploaded audio could not be prepared for preview.");
+      }
+
+      setMusicResults((current) => dedupeMusicResults([nextTrack, ...current]).slice(0, 12));
+      setMusicQuery("");
+      await openMusicTrimmer(nextTrack);
+    } catch (error: any) {
+      const message =
+        getDocumentPickerMessage(error)
+        || getReadableApiErrorMessage(error, "Could not add your audio right now.");
+
+      if (!message) {
+        return;
+      }
+
+      console.log("custom music upload error:", error);
+      Alert.alert("Audio upload failed", message);
+    } finally {
+      setMusicUploading(false);
+    }
+  }, [openMusicTrimmer, selectedAsset?.thumbnailUrl]);
+
+  const toggleListPreviewForItem = useCallback(
+    async (item: MusicResultItem | SelectedMusicClip) => {
+      const rawPlaybackUrl = getMusicClipPlaybackUrl(item);
+      const playbackUrl = normalizeMediaUrl(rawPlaybackUrl);
+      if (!playbackUrl) {
+        return;
+      }
+
+      try {
+        if (activeMusicPreviewId === item.id && listMusicPreviewPlaying) {
+          await toggleListMusicPreview();
+          setActiveMusicPreviewId("");
+          return;
+        }
+
+        setActiveMusicPreviewId(item.id);
+        await resetListMusicPreview(
+          0,
+          Math.max(1, Math.min(Number(item.duration || 0) || 1, 30)),
+          { rawUrl: rawPlaybackUrl, normalizedUrl: playbackUrl },
+        );
+        await toggleListMusicPreview();
+      } catch (error) {
+        console.log("music list preview error:", error);
+        setActiveMusicPreviewId("");
+      }
+    },
+    [activeMusicPreviewId, listMusicPreviewPlaying, resetListMusicPreview, toggleListMusicPreview],
   );
 
   const updateMusicTrimWindow = useCallback(
@@ -2088,24 +2197,22 @@ function CreatePostScreen({ navigation, route }: any) {
       return;
     }
 
-    if (!pendingMusicYoutubeVideoId || !canRenderYoutubePreview) {
-      setMusicError("Music preview unavailable right now. Try another YouTube result.");
+    if (!canPreviewMusic) {
       return;
     }
 
     try {
       setMusicError("");
-      toggleYouTubeMusicPreview();
+      await toggleAudioMusicPreview();
     } catch (error) {
       console.log("Player Error:", error);
-      setMusicError("Music preview unavailable right now. Try another track.");
+      setMusicError("");
     }
   }, [
-    canRenderYoutubePreview,
+    canPreviewMusic,
     musicPreviewLoading,
-    pendingMusicYoutubeVideoId,
     pendingMusicSelection,
-    toggleYouTubeMusicPreview,
+    toggleAudioMusicPreview,
   ]);
 
   const seekMusicPreviewBy = useCallback(async (deltaSeconds: number) => {
@@ -2121,22 +2228,21 @@ function CreatePostScreen({ navigation, route }: any) {
       clipEndMs,
     );
 
-    if (!canRenderYoutubePreview || !pendingMusicYoutubeVideoId) {
+    if (!canPreviewMusic) {
       return;
     }
 
     try {
-      seekMusicPreviewToSeconds(Math.max(0, nextTargetMs / 1000));
+      await seekMusicPreviewToSeconds(Math.max(0, nextTargetMs / 1000));
     } catch (error) {
       console.log("Player Error:", error);
     }
   }, [
-    canRenderYoutubePreview,
+    canPreviewMusic,
     musicPreviewPositionMs,
     musicTrimDuration,
     musicTrimStartTime,
     pendingMusicSelection,
-    pendingMusicYoutubeVideoId,
     seekMusicPreviewToSeconds,
   ]);
 
@@ -2154,27 +2260,25 @@ function CreatePostScreen({ navigation, route }: any) {
       );
       const imported = await importMusicCatalogItem({
         ...pendingMusicSelection,
-        externalId: pendingMusicYoutubeVideoId || pendingMusicSelection.externalId,
-        source: "youtube",
-        youtubeVideoId: pendingMusicYoutubeVideoId || pendingMusicSelection.youtubeVideoId,
+        externalId: pendingMusicSelection.externalId,
+        source: pendingMusicSelection.source || "spotify",
         clipStartTime: musicTrimStartTime,
         clipEndTime: savedEndTime,
         clipDuration: musicTrimDuration,
       });
       setSelectedMusic({
         ...imported,
-        youtubeVideoId: pendingMusicYoutubeVideoId || extractYouTubeVideoId(imported) || pendingMusicSelection.youtubeVideoId,
         clipStartTime: musicTrimStartTime,
         clipEndTime: savedEndTime,
         clipDuration: musicTrimDuration,
       });
       closeMusicTrimSheet();
     } catch (error) {
-      setMusicError(toUserSafeMessage(error));
+      setMusicError("");
     } finally {
       setMusicImportingId("");
     }
-  }, [closeMusicTrimSheet, musicTrimDuration, musicTrimStartTime, pendingMusicSelection, pendingMusicYoutubeVideoId]);
+  }, [closeMusicTrimSheet, musicTrimDuration, musicTrimStartTime, pendingMusicSelection]);
 
   const toggleMention = useCallback((candidate: AudienceCandidate) => {
     const normalized = String(candidate?.username || "").replace(/^@/, "").trim();
@@ -2377,8 +2481,8 @@ function CreatePostScreen({ navigation, route }: any) {
       if (selectedMusic && !isPersistedMusicId(selectedMusic.id)) {
         throw new Error("Selected track is still syncing. Please select it again.");
       }
-      if (selectedMusic && !extractYouTubeVideoId(selectedMusic) && !getMusicClipPlaybackUrl(selectedMusic)) {
-        throw new Error("Selected track is missing YouTube playback data. Choose another track.");
+      if (selectedMusic && !getMusicClipPlaybackUrl(selectedMusic)) {
+        throw new Error("Selected track is missing playback data. Choose another track.");
       }
       const queueLabel = MODE_COPY[mode].label;
 
@@ -4112,6 +4216,19 @@ function CreatePostScreen({ navigation, route }: any) {
           </TouchableOpacity>
         </View>
 
+        <TouchableOpacity
+          style={[styles.uploadMusicButton, { backgroundColor: inputBackground, borderColor }]}
+          onPress={() => uploadCustomMusic().catch(() => undefined)}
+          disabled={musicUploading}
+        >
+          {musicUploading ? (
+            <ActivityIndicator size="small" color={textColor} />
+          ) : (
+            <Icon name="cloud-upload-outline" size={15} color={textColor} />
+          )}
+          <Text style={[styles.uploadMusicButtonText, { color: textColor }]}>Upload your audio</Text>
+        </TouchableOpacity>
+
         {selectedMusic ? (
           <View style={[styles.currentMusicCard, { backgroundColor: surfaceColor, borderColor }]}>
             <View style={styles.currentMusicHeader}>
@@ -4152,20 +4269,13 @@ function CreatePostScreen({ navigation, route }: any) {
           </View>
         ) : null}
 
-        {musicError ? <Text style={[styles.sheetError, { color: isDarkMode ? "#FCA5A5" : "#B91C1C" }]}>{musicError}</Text> : null}
-
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetList}>
-          {!musicLoading && !musicResults.length && !musicQuery.trim() ? (
-            <Text style={[styles.helperText, { color: mutedColor }]}>Choose a playable track, trim it, then preview the selected segment in-app.</Text>
-          ) : null}
-          {!musicLoading && !!musicQuery.trim() && !musicResults.length ? (
-            <Text style={[styles.helperText, { color: mutedColor }]}>
-              No playable tracks matched your search.
-            </Text>
-          ) : null}
+          {!musicLoading && !musicResults.length ? <View style={styles.musicResultSpacer} /> : null}
           {musicResults.map((item) => {
             const isSelected = selectedMusic?.externalId === item.externalId || selectedMusic?.title === item.title;
             const isImporting = musicImportingId === item.id;
+            const hasPreview = !!normalizeMediaUrl(getMusicClipPlaybackUrl(item));
+            const isPlayingPreview = activeMusicPreviewId === item.id && listMusicPreviewPlaying;
 
             return (
               <View
@@ -4196,10 +4306,14 @@ function CreatePostScreen({ navigation, route }: any) {
                 <View style={styles.musicResultActions}>
                   <TouchableOpacity
                     style={[styles.resultPlayButton, { backgroundColor: surfaceColor, borderColor }]}
-                    onPress={() => openMusicTrimmer(isSelected && selectedMusic ? selectedMusic : item).catch(() => undefined)}
-                    disabled={isImporting}
+                    onPress={() => toggleListPreviewForItem(item).catch(() => undefined)}
+                    disabled={isImporting || !hasPreview}
                   >
-                    <Icon name="play-circle-outline" size={20} color={textColor} />
+                    <Icon
+                      name={isPlayingPreview ? "pause-outline" : "play-outline"}
+                      size={16}
+                      color={hasPreview ? textColor : mutedColor}
+                    />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.selectButton, { backgroundColor: accentColor }]}
@@ -4325,35 +4439,12 @@ function CreatePostScreen({ navigation, route }: any) {
                   />
                 </View>
 
-                {musicPreviewMode === "youtube" && pendingMusicYoutubeVideoId && canRenderYoutubePreview ? (
-                  <View style={[styles.youtubePreviewCard, { backgroundColor: inputBackground, borderColor }]}>
-                    <YoutubePlayer
-                      ref={youtubePreviewRef}
-                      height={168}
-                      play={musicPreviewPlaying}
-                      videoId={pendingMusicYoutubeVideoId}
-                      initialPlayerParams={{
-                        controls: false,
-                        modestbranding: true,
-                        rel: false,
-                      }}
-                      onReady={handleMusicPreviewReady}
-                      onError={(error: any) => {
-                        console.log("Player Error:", error);
-                        handleMusicPreviewError();
-                        setMusicError("Music preview unavailable right now. Try another track.");
-                      }}
-                      onChangeState={handleMusicPreviewStateChange}
-                    />
-                  </View>
-                ) : null}
-
-                {musicPreviewMode === "youtube" && pendingMusicYoutubeVideoId && !canRenderYoutubePreview ? (
+                {musicPreviewMode === "audio" && !canPreviewMusic ? (
                   <View style={[styles.youtubePreviewCard, styles.youtubePreviewFallbackCard, { backgroundColor: inputBackground, borderColor }]}>
                     <Icon name="alert-circle-outline" size={28} color={accentColor} />
                     <Text style={[styles.youtubePreviewFallbackTitle, { color: textColor }]}>Preview not available</Text>
                     <Text style={[styles.youtubePreviewFallbackText, { color: mutedColor }]}>
-                      This build only supports in-app playable tracks here. Choose another result from the app music list.
+                      This track does not have a playable Spotify preview. Choose another result from the app music list.
                     </Text>
                   </View>
                 ) : null}
@@ -4418,7 +4509,6 @@ function CreatePostScreen({ navigation, route }: any) {
               </View>
             ) : null}
 
-            {musicError ? <Text style={[styles.sheetError, { color: isDarkMode ? "#FCA5A5" : "#B91C1C" }]}>{musicError}</Text> : null}
           </ScrollView>
         </View>
       </DraggableBottomSheet>
@@ -5732,6 +5822,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: appFonts.regular,
   },
+  uploadMusicButton: {
+    marginTop: 10,
+    marginBottom: 2,
+    minHeight: 40,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  uploadMusicButtonText: {
+    fontSize: 11.5,
+    lineHeight: 14,
+    fontFamily: appFonts.medium,
+  },
   searchButton: {
     width: 50,
     height: 50,
@@ -5740,20 +5847,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   currentMusicCard: {
-    marginTop: 14,
-    borderRadius: 22,
+    marginTop: 12,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 14,
+    padding: 12,
   },
   currentMusicHeader: {
     flexDirection: "row",
-    gap: 12,
+    gap: 10,
     alignItems: "center",
   },
   currentMusicArtwork: {
-    width: 54,
-    height: 54,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
   },
   currentMusicArtworkFallback: {
     borderWidth: 1,
@@ -5831,14 +5938,14 @@ const styles = StyleSheet.create({
     fontFamily: appFonts.medium,
   },
   currentMusicTitle: {
-    fontSize: 13,
-    lineHeight: 16,
+    fontSize: 12,
+    lineHeight: 15,
     fontFamily: appFonts.semibold,
   },
   currentMusicMeta: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 17,
+    marginTop: 2,
+    fontSize: 10.5,
+    lineHeight: 14,
     fontFamily: appFonts.regular,
   },
   sliderWrap: {
@@ -6128,46 +6235,51 @@ const styles = StyleSheet.create({
   musicResultRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    borderRadius: 20,
+    gap: 10,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 12,
+    minHeight: 72,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   musicResultArtwork: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
+    width: 42,
+    height: 42,
+    borderRadius: 12,
   },
   musicResultCopy: {
     flex: 1,
   },
   musicResultTitle: {
-    fontSize: 13,
-    lineHeight: 16,
+    fontSize: 11.5,
+    lineHeight: 14,
     fontFamily: appFonts.semibold,
   },
   musicResultMeta: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 17,
+    marginTop: 2,
+    fontSize: 10.2,
+    lineHeight: 13,
     fontFamily: appFonts.regular,
   },
   musicResultActions: {
-    gap: 8,
+    gap: 6,
     alignItems: "flex-end",
   },
+  musicResultSpacer: {
+    height: 8,
+  },
   resultPlayButton: {
-    width: 40,
-    height: 36,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 11,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   selectButton: {
-    width: 40,
-    height: 36,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
   },

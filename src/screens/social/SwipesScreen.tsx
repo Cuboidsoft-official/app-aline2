@@ -23,7 +23,6 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../../components/AppBottomDock";
-import HiddenYoutubeAudioPlayer from "../../components/media/HiddenYoutubeAudioPlayer";
 import CommentThreadSheet from "../../features/social/components/CommentThreadSheet";
 import InteractiveText from "../../features/social/components/InteractiveText";
 import ShareTargetsList, { ShareTarget } from "../../features/social/components/ShareTargetsList";
@@ -38,7 +37,6 @@ import { shouldShowVerifiedBadge } from "../../utils/verificationBadges";
 import { buildSharedPostMessage } from "../../utils/chatPresentation";
 import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
 import { API } from "../../api/api";
-import { extractYouTubeVideoId } from "../../utils/youtubePlayback";
 
 const { height } = Dimensions.get("window");
 const reportReasons: ReportReason[] = [
@@ -126,25 +124,16 @@ function SwipesScreen({ navigation, route }: any) {
   const activeSwipe = swipes[activeSwipeIndex] || null;
   const activeSwipeRawMusicUrl = getMusicPlaybackUrl(activeSwipe?.music);
   const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipeRawMusicUrl);
-  const activeSwipeMusicYoutubeVideoId = extractYouTubeVideoId(activeSwipe?.music);
   const activeSwipeMusicStartMs = Math.max(0, Number(activeSwipe?.music?.startTime || 0) * 1000);
   const activeSwipeMusicDurationMs = getTrimmedMusicDurationMs(activeSwipe?.music);
   const activeSwipeMusicTrackKey = activeSwipe
-    ? `${activeSwipe.id}:${activeSwipeMusicYoutubeVideoId || activeSwipeMusicUrl}:${activeSwipeMusicStartMs}:${activeSwipeMusicDurationMs}`
+    ? `${activeSwipe.id}:${activeSwipeMusicUrl}:${activeSwipeMusicStartMs}:${activeSwipeMusicDurationMs}`
     : "";
   const isSwipePlaybackEnabled = isSwipeSoundEnabled && !activeSheet && isScreenFocused;
-  const shouldPlaySwipeMusic = isSwipePlaybackEnabled && !!(activeSwipeMusicYoutubeVideoId || activeSwipeMusicUrl);
-  const {
-    isUsingYoutube: isUsingYoutubeSwipeMusic,
-    youtubePlay: youtubeSwipeMusicPlay,
-    youtubePlayerRef: youtubeSwipeMusicRef,
-    handleYoutubeReady: handleYoutubeSwipeMusicReady,
-    handleYoutubeError: handleYoutubeSwipeMusicError,
-    handleYoutubeStateChange: handleYoutubeSwipeMusicStateChange,
-  } = useSegmentedMusicPlayback({
+  const shouldPlaySwipeMusic = isSwipePlaybackEnabled && !!activeSwipeMusicUrl;
+  useSegmentedMusicPlayback({
     rawUrl: activeSwipeRawMusicUrl,
     normalizedUrl: activeSwipeMusicUrl,
-    youtubeVideoId: activeSwipeMusicYoutubeVideoId,
     trackKey: activeSwipeMusicTrackKey,
     startMs: activeSwipeMusicStartMs,
     durationMs: activeSwipeMusicDurationMs,
@@ -618,7 +607,7 @@ function SwipesScreen({ navigation, route }: any) {
   const renderSwipe = ({ item, index }: { item: Swipe; index: number }) => {
     const isActive = index === activeSwipeIndex;
     const musicLabel = formatSwipeMusicLabel(item.music);
-    const hasAttachedMusic = !!(getMusicPlaybackUrl(item.music) || extractYouTubeVideoId(item.music));
+    const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
 
     return (
       <View style={[styles.swipeItem, { height: viewportHeight }]}>
@@ -777,16 +766,6 @@ function SwipesScreen({ navigation, route }: any) {
 
   return (
     <View style={styles.container}>
-      {isUsingYoutubeSwipeMusic && activeSwipeMusicYoutubeVideoId ? (
-        <HiddenYoutubeAudioPlayer
-          playerRef={youtubeSwipeMusicRef}
-          play={youtubeSwipeMusicPlay}
-          videoId={activeSwipeMusicYoutubeVideoId}
-          onReady={handleYoutubeSwipeMusicReady}
-          onError={handleYoutubeSwipeMusicError}
-          onChangeState={handleYoutubeSwipeMusicStateChange}
-        />
-      ) : null}
       <FlatList
         ref={swipeListRef}
         data={swipes}

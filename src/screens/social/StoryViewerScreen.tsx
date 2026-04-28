@@ -16,7 +16,6 @@ import { useIsFocused } from "@react-navigation/native";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
 
-import HiddenYoutubeAudioPlayer from "../../components/media/HiddenYoutubeAudioPlayer";
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
 import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import SocialVideo from "../../features/social/components/SocialVideo";
@@ -30,7 +29,6 @@ import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
 import { buildSharedStoryMessage } from "../../utils/chatPresentation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
-import { extractYouTubeVideoId } from "../../utils/youtubePlayback";
 
 const DEFAULT_STORY_MS = 5000;
 const TEXT_STORY_MS = 7000;
@@ -169,25 +167,16 @@ function StoryViewerScreen({ route, navigation }: any) {
     () => normalizeMediaUrl(storyMusicRawUrl),
     [storyMusicRawUrl],
   );
-  const storyMusicYoutubeVideoId = useMemo(() => extractYouTubeVideoId(currentStory?.music), [currentStory?.music]);
   const storyMusicStartMs = Math.max(0, Number(currentStory?.music?.startTime || 0) * 1000);
   const storyMusicDurationMs = getTrimmedMusicDurationMs(currentStory?.music);
   const storyMusicTrackKey = currentStory
-    ? `${currentStory.id}:${storyMusicYoutubeVideoId || storyMusicUrl}:${storyMusicStartMs}:${storyMusicDurationMs}`
+    ? `${currentStory.id}:${storyMusicUrl}:${storyMusicStartMs}:${storyMusicDurationMs}`
     : "";
-  const hasStoryAttachedMusic = !!(storyMusicYoutubeVideoId || storyMusicUrl);
+  const hasStoryAttachedMusic = !!storyMusicUrl;
   const shouldPlayStoryMusic = hasStoryAttachedMusic && isMusicEnabled && !paused && isScreenFocused;
-  const {
-    isUsingYoutube: isUsingYoutubeStoryMusic,
-    youtubePlay: youtubeStoryMusicPlay,
-    youtubePlayerRef: youtubeStoryMusicRef,
-    handleYoutubeReady: handleYoutubeStoryMusicReady,
-    handleYoutubeError: handleYoutubeStoryMusicError,
-    handleYoutubeStateChange: handleYoutubeStoryMusicStateChange,
-  } = useSegmentedMusicPlayback({
+  useSegmentedMusicPlayback({
     rawUrl: storyMusicRawUrl,
     normalizedUrl: storyMusicUrl,
-    youtubeVideoId: storyMusicYoutubeVideoId,
     trackKey: storyMusicTrackKey,
     startMs: storyMusicStartMs,
     durationMs: storyMusicDurationMs,
@@ -720,16 +709,6 @@ function StoryViewerScreen({ route, navigation }: any) {
 
   return (
     <SafeAreaView style={styles.container}>
-      {isUsingYoutubeStoryMusic && storyMusicYoutubeVideoId ? (
-        <HiddenYoutubeAudioPlayer
-          playerRef={youtubeStoryMusicRef}
-          play={youtubeStoryMusicPlay}
-          videoId={storyMusicYoutubeVideoId}
-          onReady={handleYoutubeStoryMusicReady}
-          onError={handleYoutubeStoryMusicError}
-          onChangeState={handleYoutubeStoryMusicStateChange}
-        />
-      ) : null}
       {renderStoryBody()}
       {renderStoryFilterOverlay()}
       {renderFloatingStickers()}
