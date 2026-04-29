@@ -7,6 +7,13 @@ CREDENTIALS_FILE="${ANDROID_UPLOAD_CREDENTIALS_FILE:-/tmp/aline2-upload-keystore
 DEFAULT_KEYSTORE_PATH="$ROOT_DIR/android/app/aline2-upload.keystore"
 ENVFILE_PATH="${ENVFILE:-.env.production}"
 
+# React Native 0.82+ always runs with the New Architecture, but a number of
+# third-party Android libraries still gate their React codegen tasks behind the
+# legacy `newArchEnabled` Gradle property. Export it explicitly so fresh CI
+# runners generate those JNI/codegen artifacts before autolinking is frozen.
+: "${ORG_GRADLE_PROJECT_newArchEnabled:=true}"
+export ORG_GRADLE_PROJECT_newArchEnabled
+
 if [[ -f "$CREDENTIALS_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -75,16 +82,49 @@ esac
 
 cd "$ROOT_DIR/android"
 
-# RN 0.84 + Gradle 9 can validate library codegen inputs before the producing task
-# runs when `clean` and release packaging are requested together. Prewarming the
-# affected library in a separate invocation keeps the schema in place and avoids
-# false-negative validation failures from node_modules libraries.
+# Fresh CI runners can generate the app autolinking files before dependency
+# codegen output exists, which silently prunes required TurboModules from the
+# native appmodules library. Prime the package list first, then prewarm all
+# dependency codegen tasks before generating the new-arch autolinking files.
 ENVFILE="$ENVFILE_PATH" ./gradlew \
-  :react-native-color-matrix-image-filters:generateCodegenSchemaFromJavaScript \
-  :react-native-color-matrix-image-filters:generateCodegenArtifactsFromSchema \
+  :app:generateAutolinkingPackageList \
   --no-daemon \
   --console=plain \
   --max-workers=1
+
+mapfile -t CODEGEN_PREWARM_TASKS < <(
+  node "$ROOT_DIR/scripts/ci/list_android_codegen_prewarm_tasks.js"
+)
+
+mapfile -t AVAILABLE_CODEGEN_TASKS < <(
+  ENVFILE="$ENVFILE_PATH" ./gradlew \
+    tasks \
+    --all \
+    --console=plain \
+    --no-daemon \
+    --max-workers=1 |
+    sed -n 's/^\([[:alnum:]_:-]*generateCodegen[[:alnum:]_:-]*\).*/\1/p'
+)
+
+declare -A AVAILABLE_CODEGEN_TASK_MAP=()
+for task in "${AVAILABLE_CODEGEN_TASKS[@]}"; do
+  AVAILABLE_CODEGEN_TASK_MAP[":$task"]=1
+done
+
+FILTERED_CODEGEN_PREWARM_TASKS=()
+for task in "${CODEGEN_PREWARM_TASKS[@]}"; do
+  if [[ -n "${AVAILABLE_CODEGEN_TASK_MAP[$task]:-}" ]]; then
+    FILTERED_CODEGEN_PREWARM_TASKS+=("$task")
+  fi
+done
+
+if (( ${#FILTERED_CODEGEN_PREWARM_TASKS[@]} > 0 )); then
+  ENVFILE="$ENVFILE_PATH" ./gradlew \
+    "${FILTERED_CODEGEN_PREWARM_TASKS[@]}" \
+    --no-daemon \
+    --console=plain \
+    --max-workers=1
+fi
 
 ENVFILE="$ENVFILE_PATH" ./gradlew \
   :app:generateAutolinkingNewArchitectureFiles \

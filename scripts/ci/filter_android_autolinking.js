@@ -197,7 +197,9 @@ fs.writeFileSync(path.join(outputDir, "autolinking.h"), hTemplate);
 
 if (skipped.length > 0) {
   const skippedNames = skipped.map((dep) => dep.libraryName || dep.cxxModuleCMakeListsModuleName).join(", ");
-  console.log(`Filtered missing Android codegen deps: ${skippedNames}`);
-} else {
-  console.log("No Android codegen deps needed filtering.");
+  throw new Error(
+    `Filtered missing Android codegen deps: ${skippedNames}. Prewarm dependency codegen before generating Android autolinking files.`,
+  );
 }
+
+console.log("No Android codegen deps needed filtering.");
