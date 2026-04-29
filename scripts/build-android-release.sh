@@ -64,11 +64,13 @@ ENVFILE="$ENVFILE_PATH" ./gradlew \
   :react-native-color-matrix-image-filters:generateCodegenArtifactsFromSchema \
   --no-daemon \
   --console=plain \
-  --max-workers=1
+  --max-workers=1 \
+  -PnewArchEnabled=false
 
 ENVFILE="$ENVFILE_PATH" ./gradlew \
   "$TASK" \
   --no-daemon \
   --console=plain \
   --max-workers=1 \
+  -PnewArchEnabled=false \
   -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
