@@ -80,4 +80,5 @@ ENVFILE="$ENVFILE_PATH" ./gradlew \
   --console=plain \
   --max-workers=1 \
   -x generateAutolinkingNewArchitectureFiles \
+  -Paline2DisableAbiSplits=true \
   -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
