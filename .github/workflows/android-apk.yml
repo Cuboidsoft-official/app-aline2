@@ -2,6 +2,15 @@ name: Android Release
 
 on:
   workflow_dispatch:
+    inputs:
+      release_profile:
+        description: Release profile to build
+        required: true
+        default: standard
+        type: choice
+        options:
+          - standard
+          - arm64
   push:
     branches:
       - main
@@ -36,13 +45,40 @@ jobs:
       - name: Derive release metadata
         id: meta
         run: |
+          release_profile="standard"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_profile }}" ]; then
+            release_profile="${{ github.event.inputs.release_profile }}"
+          fi
+
           short_sha="$(git rev-parse --short=7 HEAD)"
           release_date="$(date -u +%Y%m%d)"
-          release_name="aline2-main-${short_sha}-release-${release_date}"
+
+          case "$release_profile" in
+            arm64)
+              release_name="aline2-main-${short_sha}-arm64-release-${release_date}"
+              apk_name="app-arm64-v8a-release.apk"
+              apk_mode="apk-arm64"
+              build_aab="false"
+              publish_public="false"
+              ;;
+            *)
+              release_name="aline2-main-${short_sha}-release-${release_date}"
+              apk_name="${release_name}.apk"
+              apk_mode="apk"
+              build_aab="true"
+              publish_public="true"
+              ;;
+          esac
+
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
           echo "release_date=$release_date" >> "$GITHUB_OUTPUT"
+          echo "release_profile=$release_profile" >> "$GITHUB_OUTPUT"
           echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
-          echo "apk_name=${release_name}.apk" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=android-release-${release_name}" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$apk_name" >> "$GITHUB_OUTPUT"
+          echo "apk_mode=$apk_mode" >> "$GITHUB_OUTPUT"
+          echo "build_aab=$build_aab" >> "$GITHUB_OUTPUT"
+          echo "publish_public=$publish_public" >> "$GITHUB_OUTPUT"
           echo "aab_name=${release_name}.aab" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
@@ -216,10 +252,11 @@ jobs:
           ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
           ANDROID_UPLOAD_KEY_PASSWORD: ${{ vars.ANDROID_UPLOAD_KEY_PASSWORD != '' && vars.ANDROID_UPLOAD_KEY_PASSWORD || secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
-          echo "Building Android release APK with ${ENVFILE_VALUE}"
-          ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh apk
+          echo "Building Android release APK with ${ENVFILE_VALUE} using mode ${{ steps.meta.outputs.apk_mode }}"
+          ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh "${{ steps.meta.outputs.apk_mode }}"
 
       - name: Build release AAB
+        if: steps.meta.outputs.build_aab == 'true'
         env:
           ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
           ANDROID_UPLOAD_STORE_FILE: ${{ vars.ANDROID_UPLOAD_STORE_FILE != '' && vars.ANDROID_UPLOAD_STORE_FILE || 'android/app/aline2-release.keystore' }}
@@ -233,23 +270,34 @@ jobs:
       - name: Collect release artifacts
         id: collect
         run: |
-          apk_path="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f \( -name 'app-release.apk' -o -name '*universal*.apk' \) | sort | head -n 1)"
-          if [ -z "$apk_path" ]; then
-            apk_path="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | sort | head -n 1)"
+          if [ "${{ steps.meta.outputs.release_profile }}" = "arm64" ]; then
+            apk_path="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-arm64-v8a-release.apk' | head -n 1)"
+          else
+            apk_path="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f \( -name 'app-release.apk' -o -name '*universal*.apk' \) | sort | head -n 1)"
+            if [ -z "$apk_path" ]; then
+              apk_path="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | sort | head -n 1)"
+            fi
           fi
-          aab_path="$(find android/app/build/outputs/bundle/release -maxdepth 1 -type f -name '*.aab' | head -n 1)"
-          if [ -z "$apk_path" ] || [ -z "$aab_path" ]; then
-            echo "Release artifacts not found" >&2
+          if [ -z "$apk_path" ]; then
+            echo "Release APK not found" >&2
             exit 1
           fi
           cp "$apk_path" "${{ steps.meta.outputs.apk_name }}"
-          cp "$aab_path" "${{ steps.meta.outputs.aab_name }}"
           sha256sum "${{ steps.meta.outputs.apk_name }}" > "${{ steps.meta.outputs.apk_name }}.sha256"
-          sha256sum "${{ steps.meta.outputs.aab_name }}" > "${{ steps.meta.outputs.aab_name }}.sha256"
           echo "apk_path=${{ steps.meta.outputs.apk_name }}" >> "$GITHUB_OUTPUT"
-          echo "aab_path=${{ steps.meta.outputs.aab_name }}" >> "$GITHUB_OUTPUT"
+          if [ "${{ steps.meta.outputs.build_aab }}" = "true" ]; then
+            aab_path="$(find android/app/build/outputs/bundle/release -maxdepth 1 -type f -name '*.aab' | head -n 1)"
+            if [ -z "$aab_path" ]; then
+              echo "Release AAB not found" >&2
+              exit 1
+            fi
+            cp "$aab_path" "${{ steps.meta.outputs.aab_name }}"
+            sha256sum "${{ steps.meta.outputs.aab_name }}" > "${{ steps.meta.outputs.aab_name }}.sha256"
+            echo "aab_path=${{ steps.meta.outputs.aab_name }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up bundletool
+        if: steps.meta.outputs.build_aab == 'true'
         run: |
           curl -fsSL -o /tmp/bundletool.jar https://github.com/google/bundletool/releases/download/1.18.2/bundletool-all-1.18.2.jar
 
@@ -267,15 +315,9 @@ jobs:
           fi
 
           "$apksigner_bin" verify --print-certs "${{ steps.collect.outputs.apk_path }}" | tee /tmp/apk-verify.txt
-          java -jar /tmp/bundletool.jar validate --bundle="${{ steps.collect.outputs.aab_path }}"
-
-          keytool -printcert -jarfile "${{ steps.collect.outputs.aab_path }}" | tee /tmp/aab-verify.txt
-
           trusted_sha="$(keytool -exportcert -alias "${ANDROID_UPLOAD_KEY_ALIAS}" -keystore "${ANDROID_UPLOAD_STORE_FILE}" -storepass "${ANDROID_UPLOAD_STORE_PASSWORD}" | openssl x509 -inform der -noout -fingerprint -sha256 | cut -d'=' -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           apk_sha="$(awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print $2; exit}' /tmp/apk-verify.txt | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          aab_sha="$(awk -F': ' '/SHA256:/ {print $2; exit}' /tmp/aab-verify.txt | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-
-          if [ -z "$trusted_sha" ] || [ -z "$apk_sha" ] || [ -z "$aab_sha" ]; then
+          if [ -z "$trusted_sha" ] || [ -z "$apk_sha" ]; then
             echo "Failed to extract signing certificate fingerprints" >&2
             exit 1
           fi
@@ -285,16 +327,26 @@ jobs:
             exit 1
           fi
 
-          if [ "$aab_sha" != "$trusted_sha" ]; then
-            echo "AAB signing certificate fingerprint mismatch" >&2
-            exit 1
+          if [ "${{ steps.meta.outputs.build_aab }}" = "true" ]; then
+            java -jar /tmp/bundletool.jar validate --bundle="${{ steps.collect.outputs.aab_path }}"
+            keytool -printcert -jarfile "${{ steps.collect.outputs.aab_path }}" | tee /tmp/aab-verify.txt
+            aab_sha="$(awk -F': ' '/SHA256:/ {print $2; exit}' /tmp/aab-verify.txt | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+            if [ -z "$aab_sha" ]; then
+              echo "Failed to extract AAB signing certificate fingerprint" >&2
+              exit 1
+            fi
+            if [ "$aab_sha" != "$trusted_sha" ]; then
+              echo "AAB signing certificate fingerprint mismatch" >&2
+              exit 1
+            fi
           fi
 
-      - name: Upload release artifacts
+      - name: Upload standard release artifacts
+        if: steps.meta.outputs.build_aab == 'true'
         id: upload_release
         uses: actions/upload-artifact@v4
         with:
-          name: android-release-${{ steps.meta.outputs.release_name }}
+          name: ${{ steps.meta.outputs.artifact_name }}
           path: |
             ${{ steps.collect.outputs.apk_path }}
             ${{ steps.collect.outputs.aab_path }}
@@ -303,13 +355,27 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Upload arm64 release artifact
+        if: steps.meta.outputs.build_aab != 'true'
+        id: upload_release_arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: |
+            ${{ steps.collect.outputs.apk_path }}
+            ${{ steps.collect.outputs.apk_path }}.sha256
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Configure AWS credentials
+        if: steps.meta.outputs.publish_public == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Upload private AAB and generate secure link
+        if: steps.meta.outputs.publish_public == 'true'
         id: private_aab
         env:
           APK_PATH: ${{ steps.collect.outputs.apk_path }}
@@ -326,6 +392,7 @@ jobs:
           echo "download_url=$download_url" >> "$GITHUB_OUTPUT"
 
       - name: Publish production APK to welcome host
+        if: steps.meta.outputs.publish_public == 'true'
         id: publish_apk
         env:
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
@@ -437,11 +504,13 @@ jobs:
             --output json
 
       - name: Verify public APK download
+        if: steps.meta.outputs.publish_public == 'true'
         run: |
           curl -IfsS https://welcome.aline2.com/downloads/android/latest.apk >/dev/null
           curl -IfsS "https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}" >/dev/null
 
       - name: Email private AAB delivery notice
+        if: steps.meta.outputs.publish_public == 'true'
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -463,7 +532,7 @@ jobs:
           python3 ./scripts/ci/send_release_email.py
 
       - name: Roll back public APK on failure
-        if: failure() && steps.publish_apk.outcome == 'success'
+        if: failure() && steps.meta.outputs.publish_public == 'true' && steps.publish_apk.outcome == 'success'
         env:
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
         run: |
@@ -526,13 +595,19 @@ jobs:
             echo "## Android Release"
             echo ""
             echo "- Branch: \`main\`"
+            echo "- Release profile: \`${{ steps.meta.outputs.release_profile }}\`"
             echo "- Release: \`${{ steps.meta.outputs.release_name }}\`"
-            echo "- Public APK URL: \`https://welcome.aline2.com/downloads/android/latest.apk\`"
-            echo "- Versioned AAB URL: \`https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}\`"
             echo "- GitHub Actions artifacts: available in this run while signed in to GitHub"
-            echo "- AAB delivery email sent to \`cuboidsoft@gmail.com\`"
             echo "- APK checksum:"
             cat "${APK_NAME}.sha256"
-            echo "- AAB checksum:"
-            cat "${AAB_NAME}.sha256"
+            if [ "${{ steps.meta.outputs.publish_public }}" = "true" ]; then
+              echo "- Public APK URL: \`https://welcome.aline2.com/downloads/android/latest.apk\`"
+              echo "- Versioned AAB URL: \`https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}\`"
+              echo "- AAB delivery email sent to \`cuboidsoft@gmail.com\`"
+              echo "- AAB checksum:"
+              cat "${AAB_NAME}.sha256"
+            else
+              echo "- Private artifact APK: \`${{ steps.meta.outputs.apk_name }}\`"
+              echo "- Public APK was not updated in this run."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
