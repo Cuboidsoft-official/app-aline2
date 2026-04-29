@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("apk", "aab")]
+  [ValidateSet("apk", "apk-arm64", "aab")]
   [string]$Mode = "apk"
 )
 
@@ -10,7 +10,28 @@ $androidDir = Join-Path $root "android"
 
 $env:ENVFILE = ".env.production"
 
-$task = if ($Mode -eq "aab") { "bundleRelease" } else { "assembleRelease" }
+switch ($Mode) {
+  "apk" {
+    $task = "assembleRelease"
+    $extraGradleArgs = @(
+      "-PreactNativeArchitectures=armeabi-v7a,arm64-v8a",
+      "-Paline2DisableAbiSplits=true"
+    )
+  }
+  "apk-arm64" {
+    $task = "assembleRelease"
+    $extraGradleArgs = @(
+      "-PreactNativeArchitectures=arm64-v8a"
+    )
+  }
+  "aab" {
+    $task = "bundleRelease"
+    $extraGradleArgs = @(
+      "-PreactNativeArchitectures=armeabi-v7a,arm64-v8a",
+      "-Paline2DisableAbiSplits=true"
+    )
+  }
+}
 
 Push-Location $androidDir
 try {
@@ -18,10 +39,8 @@ try {
     $task,
     "--no-daemon",
     "--console=plain",
-    "--max-workers=1",
-    "-PreactNativeArchitectures=armeabi-v7a,arm64-v8a",
-    "-Paline2DisableAbiSplits=true"
-  )
+    "--max-workers=1"
+  ) + $extraGradleArgs
 
   & .\gradlew.bat @gradleArgs
 }

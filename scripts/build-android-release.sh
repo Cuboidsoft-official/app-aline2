@@ -43,11 +43,31 @@ if [[ ! -f "$ANDROID_UPLOAD_STORE_FILE" ]]; then
   exit 1
 fi
 
+GRADLE_PROPS=()
+
 case "$MODE" in
-  apk) TASK=assembleRelease ;;
-  aab|bundle) TASK=bundleRelease ;;
+  apk)
+    TASK=assembleRelease
+    GRADLE_PROPS=(
+      -Paline2DisableAbiSplits=true
+      -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+    )
+    ;;
+  apk-arm64)
+    TASK=assembleRelease
+    GRADLE_PROPS=(
+      -PreactNativeArchitectures=arm64-v8a
+    )
+    ;;
+  aab|bundle)
+    TASK=bundleRelease
+    GRADLE_PROPS=(
+      -Paline2DisableAbiSplits=true
+      -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+    )
+    ;;
   *)
-    printf 'Unknown build mode: %s (expected apk or aab)
+    printf 'Unknown build mode: %s (expected apk, apk-arm64, or aab)
 ' "$MODE" >&2
     exit 1
     ;;
@@ -80,5 +100,4 @@ ENVFILE="$ENVFILE_PATH" ./gradlew \
   --console=plain \
   --max-workers=1 \
   -x generateAutolinkingNewArchitectureFiles \
-  -Paline2DisableAbiSplits=true \
-  -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+  "${GRADLE_PROPS[@]}"
