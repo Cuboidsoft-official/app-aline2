@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { createSound } from "react-native-nitro-sound";
 
-import { ensureAudioClipStartPosition, startManagedAudioClipPlayback } from "../utils/audioPlayback";
+import {
+  ensureAudioClipStartPosition,
+  getPlaybackSources,
+  registerManagedAudioPlayer,
+  startManagedAudioClipPlayback,
+  stopAllManagedAudioPlayback,
+} from "../utils/audioPlayback";
 
 type UseSegmentedMusicPlaybackParams = {
   rawUrl: string;
@@ -12,9 +18,131 @@ type UseSegmentedMusicPlaybackParams = {
   startMs: number;
   durationMs: number;
   shouldPlay: boolean;
+  pauseWhenInactive?: boolean;
 };
 
 const noop = () => {};
+let activePlaybackOwnerId = "";
+let activePlaybackStopper: null | (() => void) = null;
+let globalStopGeneration = 0;
+const playbackStoppers = new Set<() => void>();
+
+type UseSegmentedMusicWarmupParams = {
+  rawUrl: string;
+  normalizedUrl: string;
+  trackKey: string;
+  enabled: boolean;
+};
+
+export const registerGlobalMusicPlaybackStopper = (stopper: () => void) => {
+  playbackStoppers.add(stopper);
+  return () => {
+    playbackStoppers.delete(stopper);
+  };
+};
+
+export const stopAllSegmentedMusicPlayback = () => {
+  globalStopGeneration += 1;
+  playbackStoppers.forEach((stopper) => {
+    stopper();
+  });
+  stopAllManagedAudioPlayback();
+  activePlaybackOwnerId = "";
+  activePlaybackStopper = null;
+};
+
+export function useSegmentedMusicWarmup({
+  rawUrl,
+  normalizedUrl,
+  trackKey,
+  enabled,
+}: UseSegmentedMusicWarmupParams) {
+  const warmupPlayerRef = useRef<any>(null);
+  const warmupTrackKeyRef = useRef("");
+  const warmupRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    if (!warmupPlayerRef.current) {
+      warmupPlayerRef.current = createSound();
+    }
+
+    const player = warmupPlayerRef.current;
+    return () => {
+      warmupRequestIdRef.current += 1;
+      warmupTrackKeyRef.current = "";
+      player.setVolume?.(0)?.catch?.(() => undefined);
+      player.pausePlayer?.()?.catch?.(() => undefined);
+      player.stopPlayer?.()?.catch?.(() => undefined);
+      player.dispose?.();
+      warmupPlayerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => registerGlobalMusicPlaybackStopper(() => {
+    const player = warmupPlayerRef.current;
+    warmupRequestIdRef.current += 1;
+    warmupTrackKeyRef.current = "";
+    player?.setVolume?.(0)?.catch?.(() => undefined);
+    player?.pausePlayer?.()?.catch?.(() => undefined);
+    player?.stopPlayer?.()?.catch?.(() => undefined);
+  }), []);
+
+  useEffect(() => {
+    const player = warmupPlayerRef.current;
+    const sources = getPlaybackSources(rawUrl, normalizedUrl);
+
+    if (!enabled || !trackKey || !sources.length || warmupTrackKeyRef.current === trackKey || !player) {
+      return;
+    }
+
+    const requestId = warmupRequestIdRef.current + 1;
+    warmupRequestIdRef.current = requestId;
+    warmupTrackKeyRef.current = trackKey;
+    let cancelled = false;
+    let settleTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const warm = async () => {
+      player.setVolume?.(0)?.catch?.(() => undefined);
+      player.pausePlayer?.()?.catch?.(() => undefined);
+      player.stopPlayer?.()?.catch?.(() => undefined);
+
+      for (const source of sources) {
+        if (cancelled || warmupRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        try {
+          await player.startPlayer(source);
+          await player.setVolume(0).catch(() => undefined);
+          await player.pausePlayer().catch(() => undefined);
+          settleTimeout = setTimeout(() => {
+            if (!cancelled && warmupRequestIdRef.current === requestId) {
+              player.stopPlayer?.()?.catch?.(() => undefined);
+            }
+          }, 1600);
+          return;
+        } catch {
+          // Try the next normalized source candidate.
+        }
+      }
+    };
+
+    const startTimeout = setTimeout(() => {
+      warm().catch(() => undefined);
+    }, 90);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(startTimeout);
+      if (settleTimeout) {
+        clearTimeout(settleTimeout);
+      }
+      player.setVolume?.(0)?.catch?.(() => undefined);
+      player.pausePlayer?.()?.catch?.(() => undefined);
+      player.stopPlayer?.()?.catch?.(() => undefined);
+    };
+  }, [enabled, normalizedUrl, rawUrl, trackKey]);
+}
 
 export function useSegmentedMusicPlayback({
   rawUrl,
@@ -23,9 +151,14 @@ export function useSegmentedMusicPlayback({
   startMs,
   durationMs,
   shouldPlay,
+  pauseWhenInactive = false,
 }: UseSegmentedMusicPlaybackParams) {
   const [isAppActive, setIsAppActive] = useState(AppState.currentState === "active");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackError, setPlaybackError] = useState<unknown>(null);
   const audioPlayerRef = useRef(createSound());
+  const ownerIdRef = useRef(`music_${Date.now()}_${Math.random().toString(36).slice(2)}`);
   const audioTrackKeyRef = useRef("");
   const audioSourceKeyRef = useRef("");
   const audioEndMsRef = useRef(0);
@@ -43,25 +176,68 @@ export function useSegmentedMusicPlayback({
     shouldLoopRef.current = shouldPlayNow;
   }, [playbackEndMs, shouldPlayNow, startMs]);
 
-  const stopAudioPlayback = useCallback(async () => {
+  const silenceAudioPlayback = useCallback((options?: { disableLoop?: boolean }) => {
     audioTrackKeyRef.current = "";
     audioSourceKeyRef.current = "";
     audioEndMsRef.current = 0;
+    setIsLoading(false);
+    setIsPlaying(false);
+    if (options?.disableLoop) {
+      shouldLoopRef.current = false;
+    }
+
+    audioPlayerRef.current.setVolume(0).catch(() => undefined);
+    audioPlayerRef.current.pausePlayer().catch(() => undefined);
+    audioPlayerRef.current.stopPlayer().catch(() => undefined);
+  }, []);
+
+  const stopAudioPlayback = useCallback(async (options?: { disableLoop?: boolean }) => {
+    silenceAudioPlayback(options);
 
     try {
       await audioPlayerRef.current.stopPlayer();
     } catch {
       // noop
     }
+  }, [silenceAudioPlayback]);
+
+  const pauseAudioPlayback = useCallback(() => {
+    setIsLoading(false);
+    setIsPlaying(false);
+    shouldLoopRef.current = false;
+    audioPlayerRef.current.setVolume(0).catch(() => undefined);
+    audioPlayerRef.current.pausePlayer().catch(() => undefined);
   }, []);
 
   const resetAudioPlayback = useCallback(async () => {
     playbackRequestIdRef.current += 1;
-    await stopAudioPlayback();
-  }, [stopAudioPlayback]);
+    if (activePlaybackOwnerId === ownerIdRef.current) {
+      activePlaybackOwnerId = "";
+      activePlaybackStopper = null;
+    }
+    silenceAudioPlayback({ disableLoop: true });
+  }, [silenceAudioPlayback]);
+
+  const forceStopAudioPlayback = useCallback(() => {
+    playbackRequestIdRef.current += 1;
+    if (activePlaybackOwnerId === ownerIdRef.current) {
+      activePlaybackOwnerId = "";
+      activePlaybackStopper = null;
+    }
+    silenceAudioPlayback({ disableLoop: true });
+  }, [silenceAudioPlayback]);
+
+  useEffect(() => {
+    return registerGlobalMusicPlaybackStopper(forceStopAudioPlayback);
+  }, [forceStopAudioPlayback]);
+
+  useEffect(() => registerManagedAudioPlayer(audioPlayerRef.current), []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active") {
+        stopAllSegmentedMusicPlayback();
+      }
       setIsAppActive(nextState === "active");
     });
 
@@ -72,6 +248,7 @@ export function useSegmentedMusicPlayback({
 
   useEffect(() => {
     const player = audioPlayerRef.current;
+    const ownerId = ownerIdRef.current;
 
     player.setSubscriptionDuration(0.1);
     player.addPlayBackListener((event: any) => {
@@ -92,6 +269,13 @@ export function useSegmentedMusicPlayback({
     });
 
     return () => {
+      playbackRequestIdRef.current += 1;
+      shouldLoopRef.current = false;
+      if (activePlaybackOwnerId === ownerId) {
+        activePlaybackOwnerId = "";
+        activePlaybackStopper = null;
+      }
+
       try {
         player.removePlayBackListener();
       } catch {
@@ -104,6 +288,8 @@ export function useSegmentedMusicPlayback({
         // noop
       }
 
+      player.setVolume(0).catch(() => undefined);
+      player.pausePlayer().catch(() => undefined);
       player.stopPlayer().catch(() => undefined);
       player.dispose();
     };
@@ -111,18 +297,37 @@ export function useSegmentedMusicPlayback({
 
   useEffect(() => {
     if (!shouldPlayNow) {
-      resetAudioPlayback().catch(() => undefined);
+      if (pauseWhenInactive && audioTrackKeyRef.current) {
+        pauseAudioPlayback();
+      } else {
+        resetAudioPlayback().catch(() => undefined);
+      }
       return;
     }
 
     const resumeAudio = async () => {
       const requestId = playbackRequestIdRef.current + 1;
+      const stopGenerationAtStart = globalStopGeneration;
       playbackRequestIdRef.current = requestId;
-      const isCurrentRequest = () => playbackRequestIdRef.current === requestId && shouldLoopRef.current;
+      const isCurrentRequest = () =>
+        playbackRequestIdRef.current === requestId
+        && shouldLoopRef.current
+        && globalStopGeneration === stopGenerationAtStart;
 
       if (!audioSourceKey) {
+        setIsLoading(false);
+        setIsPlaying(false);
         return;
       }
+
+      if (activePlaybackOwnerId && activePlaybackOwnerId !== ownerIdRef.current) {
+        activePlaybackStopper?.();
+      }
+      activePlaybackOwnerId = ownerIdRef.current;
+      activePlaybackStopper = forceStopAudioPlayback;
+      setPlaybackError(null);
+      setIsLoading(true);
+      setIsPlaying(false);
 
       if (audioTrackKeyRef.current === trackKey) {
         await ensureAudioClipStartPosition(audioPlayerRef.current, startMs).catch(() => undefined);
@@ -130,6 +335,10 @@ export function useSegmentedMusicPlayback({
           return;
         }
         await audioPlayerRef.current.resumePlayer().catch(() => undefined);
+        if (isCurrentRequest()) {
+          setIsLoading(false);
+          setIsPlaying(true);
+        }
         return;
       }
 
@@ -141,13 +350,17 @@ export function useSegmentedMusicPlayback({
             return;
           }
           await audioPlayerRef.current.resumePlayer().catch(() => undefined);
+          if (isCurrentRequest()) {
+            setIsLoading(false);
+            setIsPlaying(true);
+          }
           return;
         } catch {
-          await stopAudioPlayback();
+          silenceAudioPlayback();
         }
       }
 
-      await stopAudioPlayback();
+      silenceAudioPlayback();
       if (!isCurrentRequest()) {
         return;
       }
@@ -158,31 +371,51 @@ export function useSegmentedMusicPlayback({
         normalizedValue: normalizedUrl,
         startPositionMs: startMs,
         volume: 1,
-        seekSettleDelayMs: 70,
+        seekSettleDelayMs: 24,
       });
       if (!isCurrentRequest()) {
         if (!shouldLoopRef.current) {
-          await stopAudioPlayback();
+          await stopAudioPlayback({ disableLoop: true });
         }
+        setIsLoading(false);
+        setIsPlaying(false);
+        return;
+      }
+
+      setIsLoading(false);
+      setIsPlaying(true);
+      if (activePlaybackOwnerId === ownerIdRef.current) {
+        activePlaybackOwnerId = ownerIdRef.current;
+        activePlaybackStopper = forceStopAudioPlayback;
       }
     };
 
     resumeAudio().catch((error) => {
       console.log("segmented music playback error", error);
+      setPlaybackError(error);
+      setIsLoading(false);
+      setIsPlaying(false);
       resetAudioPlayback().catch(() => undefined);
     });
   }, [
     audioSourceKey,
+    forceStopAudioPlayback,
     normalizedUrl,
+    pauseAudioPlayback,
+    pauseWhenInactive,
     rawUrl,
     resetAudioPlayback,
     shouldPlayNow,
+    silenceAudioPlayback,
     startMs,
     stopAudioPlayback,
     trackKey,
   ]);
 
   return {
+    isLoading,
+    isPlaying,
+    playbackError,
     isUsingYoutube: false,
     youtubePlay: false,
     youtubePlayerRef,

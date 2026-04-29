@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { createSound } from "react-native-nitro-sound";
 
 import {
   ensureAudioClipStartPosition,
+  registerManagedAudioPlayer,
   startManagedAudioClipPlayback,
+  stopManagedAudioPlayer,
 } from "../utils/audioPlayback";
+import {
+  registerGlobalMusicPlaybackStopper,
+  stopAllSegmentedMusicPlayback,
+} from "./useSegmentedMusicPlayback";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -30,6 +37,13 @@ export function useAudioTrimPreview() {
     }
     setIsPlaying(false);
     setIsLoading(false);
+  }, []);
+
+  const forceStopPlayback = useCallback(() => {
+    setIsPlaying(false);
+    setIsLoading(false);
+    setIsReady(false);
+    stopManagedAudioPlayer(playerRef.current);
   }, []);
 
   const seekToSeconds = useCallback(async (nextSeconds: number) => {
@@ -86,26 +100,35 @@ export function useAudioTrimPreview() {
       return;
     }
 
+    stopAllSegmentedMusicPlayback();
     setIsLoading(true);
 
-    const sourceChanged = !isReady;
-    if (sourceChanged) {
-      await startManagedAudioClipPlayback(playerRef.current, {
-        rawValue: rawUrl,
-        normalizedValue: normalizedUrl,
-        startPositionMs: Math.round(trimWindowRef.current.startTime * 1000),
-        volume: 1,
-        seekSettleDelayMs: 70,
-      });
-      setIsReady(true);
-    } else {
-      await seekToSeconds(trimWindowRef.current.startTime);
-      await playerRef.current.resumePlayer().catch(() => undefined);
-    }
+    await startManagedAudioClipPlayback(playerRef.current, {
+      rawValue: rawUrl,
+      normalizedValue: normalizedUrl,
+      startPositionMs: Math.round(trimWindowRef.current.startTime * 1000),
+      volume: 1,
+      seekSettleDelayMs: 24,
+    });
+    setIsReady(true);
 
     setIsPlaying(true);
     setIsLoading(false);
-  }, [isPlaying, isReady, seekToSeconds, stopPlayback]);
+  }, [isPlaying, stopPlayback]);
+
+  useEffect(() => registerGlobalMusicPlaybackStopper(forceStopPlayback), [forceStopPlayback]);
+
+  useEffect(() => registerManagedAudioPlayer(playerRef.current), []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active") {
+        forceStopPlayback();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [forceStopPlayback]);
 
   useEffect(() => {
     const player = playerRef.current;

@@ -36,6 +36,7 @@ function SocialVideo({
   const resolvedUri = String(uri || "").trim();
   const resolvedPosterUri = String(posterUri || "").trim();
   const containerStyle = useMemo(() => stripBackgroundColorFromStyle(style), [style]);
+  const shouldMountVideo = !!resolvedUri && !videoFailed && (!paused || controls);
 
   useEffect(() => {
     placeholderOpacity.stopAnimation();
@@ -74,7 +75,7 @@ function SocialVideo({
           <View style={styles.placeholderTint} />
         </Animated.View>
       ) : null}
-      {resolvedUri && !videoFailed ? (
+      {shouldMountVideo ? (
         <>
           <Video
             source={{ uri: resolvedUri }}

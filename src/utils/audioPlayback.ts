@@ -4,20 +4,76 @@ const buildPlaybackCandidates = (value: string): string[] => {
     return [];
   }
 
+  const decodedValue = (() => {
+    try {
+      return decodeURI(normalizedValue);
+    } catch {
+      return "";
+    }
+  })();
+
   const candidates = [
     normalizedValue,
     encodeURI(normalizedValue),
-    decodeURI(normalizedValue),
+    decodedValue,
     normalizedValue.startsWith("file://") ? normalizedValue.replace(/^file:\/\//i, "") : "",
   ];
 
   return candidates.filter(Boolean);
 };
 
+const managedAudioPlayers = new Set<any>();
+let managedAudioSessionId = 0;
+let activeManagedAudioPlayer: any = null;
+
+const silenceManagedAudioPlayer = (player: any) => {
+  if (!player) {
+    return;
+  }
+
+  player.setVolume?.(0)?.catch?.(() => undefined);
+  player.pausePlayer?.()?.catch?.(() => undefined);
+  player.stopPlayer?.()?.catch?.(() => undefined);
+};
+
+export const registerManagedAudioPlayer = (player: any) => {
+  if (!player) {
+    return () => {};
+  }
+
+  managedAudioPlayers.add(player);
+
+  return () => {
+    managedAudioPlayers.delete(player);
+    if (activeManagedAudioPlayer === player) {
+      activeManagedAudioPlayer = null;
+    }
+  };
+};
+
+export const stopManagedAudioPlayer = (player: any) => {
+  managedAudioSessionId += 1;
+  if (activeManagedAudioPlayer === player) {
+    activeManagedAudioPlayer = null;
+  }
+  silenceManagedAudioPlayer(player);
+};
+
+export const stopAllManagedAudioPlayback = (exceptPlayer?: any) => {
+  managedAudioSessionId += 1;
+  activeManagedAudioPlayer = exceptPlayer || null;
+
+  managedAudioPlayers.forEach((player) => {
+    if (player !== exceptPlayer) {
+      silenceManagedAudioPlayer(player);
+    }
+  });
+};
+
 export const getPlaybackSources = (rawValue: string, normalizedValue: string): string[] =>
   Array.from(new Set([
-    ...buildPlaybackCandidates(rawValue),
     ...buildPlaybackCandidates(normalizedValue),
+    ...buildPlaybackCandidates(rawValue),
   ]));
 
 export const startAudioPlaybackFromSources = async (
@@ -85,19 +141,38 @@ export const startManagedAudioClipPlayback = async (
     seekSettleDelayMs?: number;
   },
 ): Promise<string> => {
-  const shouldDelayAudioOutput = startPositionMs > 0;
+  stopAllManagedAudioPlayback(player);
+  managedAudioSessionId += 1;
+  const playbackSessionId = managedAudioSessionId;
+  activeManagedAudioPlayer = player;
   let playbackStarted = false;
+  const isCurrentSession = () =>
+    managedAudioSessionId === playbackSessionId && activeManagedAudioPlayer === player;
 
-  if (shouldDelayAudioOutput) {
-    try {
-      await player.setVolume(0);
-    } catch {
-      // noop
-    }
+  try {
+    await player.setVolume(0);
+  } catch {
+    // noop
+  }
+
+  try {
+    await player.pausePlayer();
+  } catch {
+    // noop
+  }
+
+  try {
+    await player.stopPlayer();
+  } catch {
+    // noop
   }
 
   const source = await startAudioPlaybackFromSources(player, rawValue, normalizedValue);
   playbackStarted = true;
+  if (!isCurrentSession()) {
+    silenceManagedAudioPlayer(player);
+    throw new Error("Audio playback was superseded.");
+  }
 
   try {
     await ensureAudioClipStartPosition(player, startPositionMs, seekSettleDelayMs);
@@ -107,6 +182,10 @@ export const startManagedAudioClipPlayback = async (
     }
     throw error;
   }
+  if (!isCurrentSession()) {
+    silenceManagedAudioPlayer(player);
+    throw new Error("Audio playback was superseded.");
+  }
 
   try {
     await player.setVolume(volume);
@@ -114,20 +193,14 @@ export const startManagedAudioClipPlayback = async (
     // noop
   }
 
-  if (!shouldDelayAudioOutput) {
-    try {
-      await player.setVolume(volume);
-    } catch {
-      // noop
-    }
+  try {
+    await player.resumePlayer();
+  } catch {
+    // Some players continue automatically after start/seek; ignore resume misses.
   }
-
-  if (shouldDelayAudioOutput) {
-    try {
-      await player.resumePlayer();
-    } catch {
-      // Some players continue automatically after seek; ignore resume misses.
-    }
+  if (!isCurrentSession()) {
+    silenceManagedAudioPlayer(player);
+    throw new Error("Audio playback was superseded.");
   }
 
   return source;

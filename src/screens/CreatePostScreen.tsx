@@ -2,10 +2,10 @@ import React, { startTransition, useCallback, useDeferredValue, useEffect, useMe
 import {
   ActivityIndicator,
   Animated,
+  AppState,
   BackHandler,
   Image,
   KeyboardAvoidingView,
-  Linking,
   PanResponder,
   PermissionsAndroid,
   Platform,
@@ -235,13 +235,6 @@ const STORY_TEXT_COLOR_OPTIONS = [
   "#8B5CF6",
   "#EC4899",
 ];
-const IDENTITY_COLOR_MATRIX = [
-  1, 0, 0, 0, 0,
-  0, 1, 0, 0, 0,
-  0, 0, 1, 0, 0,
-  0, 0, 0, 1, 0,
-];
-
 const formatDuration = (seconds: number) => {
   const safe = Math.max(0, Math.round(Number(seconds || 0)));
   const mins = Math.floor(safe / 60);
@@ -310,125 +303,6 @@ const inferAudioMimeType = (fileName: string, fallbackType?: string | null): str
     default:
       return normalizedFallback || "audio/mpeg";
   }
-};
-
-const blendColorMatrix = (matrix: number[], intensity: number) =>
-  IDENTITY_COLOR_MATRIX.map((value, index) => value + (matrix[index] - value) * intensity);
-
-const multiplyColorMatrices = (a: number[], b: number[]) => {
-  const result = new Array(20).fill(0);
-
-  for (let row = 0; row < 4; row += 1) {
-    for (let col = 0; col < 5; col += 1) {
-      const index = row * 5 + col;
-
-      if (col === 4) {
-        result[index] =
-          a[row * 5 + 4]
-          + a[row * 5 + 0] * b[4]
-          + a[row * 5 + 1] * b[9]
-          + a[row * 5 + 2] * b[14]
-          + a[row * 5 + 3] * b[19];
-        continue;
-      }
-
-      result[index] =
-        a[row * 5 + 0] * b[col]
-        + a[row * 5 + 1] * b[col + 5]
-        + a[row * 5 + 2] * b[col + 10]
-        + a[row * 5 + 3] * b[col + 15];
-    }
-  }
-
-  return result;
-};
-
-const buildBrightnessMatrix = (brightness: number) => [
-  brightness, 0, 0, 0, 0,
-  0, brightness, 0, 0, 0,
-  0, 0, brightness, 0, 0,
-  0, 0, 0, 1, 0,
-];
-
-const buildContrastMatrix = (contrast: number) => {
-  const translate = 128 * (1 - contrast);
-
-  return [
-    contrast, 0, 0, 0, translate,
-    0, contrast, 0, 0, translate,
-    0, 0, contrast, 0, translate,
-    0, 0, 0, 1, 0,
-  ];
-};
-
-const buildSaturationMatrix = (saturation: number) => {
-  const inverse = 1 - saturation;
-  const red = 0.213 * inverse;
-  const green = 0.715 * inverse;
-  const blue = 0.072 * inverse;
-
-  return [
-    red + saturation, green, blue, 0, 0,
-    red, green + saturation, blue, 0, 0,
-    red, green, blue + saturation, 0, 0,
-    0, 0, 0, 1, 0,
-  ];
-};
-
-const buildPresetMatrix = (preset: StoryFilterPreset) => {
-  switch (preset) {
-    case "warm":
-      return [
-        1.08, 0, 0, 0, 10,
-        0, 1.02, 0, 0, 6,
-        0, 0, 0.92, 0, -4,
-        0, 0, 0, 1, 0,
-      ];
-    case "cool":
-      return [
-        0.94, 0, 0, 0, -6,
-        0, 1.01, 0, 0, 2,
-        0, 0, 1.08, 0, 10,
-        0, 0, 0, 1, 0,
-      ];
-    case "noir":
-      return [
-        0.8, 0.8, 0.8, 0, -20,
-        0.7, 0.7, 0.7, 0, -20,
-        0.6, 0.6, 0.6, 0, -20,
-        0, 0, 0, 1, 0,
-      ];
-    case "dream":
-      return [
-        1.02, 0.02, 0.02, 0, 8,
-        0.02, 0.98, 0.04, 0, 10,
-        0.04, 0.02, 1.04, 0, 18,
-        0, 0, 0, 1, 0,
-      ];
-    case "none":
-    default:
-      return IDENTITY_COLOR_MATRIX;
-  }
-};
-
-const buildStoryImageMatrix = ({
-  preset,
-  intensity,
-  brightness,
-  contrast,
-  saturation,
-}: {
-  preset: StoryFilterPreset;
-  intensity: number;
-  brightness: number;
-  contrast: number;
-  saturation: number;
-}) => {
-  const presetMatrix = blendColorMatrix(buildPresetMatrix(preset), intensity);
-  return [presetMatrix, buildBrightnessMatrix(brightness), buildContrastMatrix(contrast), buildSaturationMatrix(saturation)].reduce(
-    (current, matrix) => multiplyColorMatrices(matrix, current),
-    IDENTITY_COLOR_MATRIX,
-  );
 };
 
 const buildStoryOverlayTint = (preset: StoryFilterPreset, intensity: number) => {
@@ -933,7 +807,7 @@ function ValueSlider({
       const nextValue = min + (clamp(position, 0, trackWidth) / trackWidth) * safeRange;
       onChange(nextValue);
     },
-    [max, min, onChange, safeRange, trackWidth],
+    [min, onChange, safeRange, trackWidth],
   );
 
   const panResponder = useMemo(
@@ -1071,7 +945,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [musicLoading, setMusicLoading] = useState(false);
   const [musicUploading, setMusicUploading] = useState(false);
   const [musicImportingId, setMusicImportingId] = useState("");
-  const [musicError, setMusicError] = useState("");
+  const [_musicError, setMusicError] = useState("");
   const [activeMusicPreviewId, setActiveMusicPreviewId] = useState("");
   const [selectedMusic, setSelectedMusic] = useState<SelectedMusicClip | null>(null);
   const [pendingMusicSelection, setPendingMusicSelection] = useState<MusicResultItem | null>(null);
@@ -1101,8 +975,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const [storyFilterPreset, setStoryFilterPreset] = useState<StoryFilterPreset>("none");
   const [storyFilterIntensity, setStoryFilterIntensity] = useState(1);
   const [storyBrightness, setStoryBrightness] = useState(1);
-  const [storyContrast, setStoryContrast] = useState(1);
-  const [storySaturation, setStorySaturation] = useState(1);
+  const [_storyContrast, setStoryContrast] = useState(1);
+  const [_storySaturation, setStorySaturation] = useState(1);
   const [storyStickerQuery, setStoryStickerQuery] = useState("");
   const [storyStickerLoading, setStoryStickerLoading] = useState(false);
   const [storyStickerError, setStoryStickerError] = useState("");
@@ -1187,17 +1061,6 @@ function CreatePostScreen({ navigation, route }: any) {
     STORY_TEXT_THEMES.find((item) => item.id === storyTextTheme) || STORY_TEXT_THEMES[0];
   const storyTextFontStyle =
     STORY_TEXT_FONT_OPTIONS.find((item) => item.id === storyTextFont) || STORY_TEXT_FONT_OPTIONS[0];
-  const storyImageFilterMatrix = useMemo(
-    () =>
-      buildStoryImageMatrix({
-        preset: storyFilterPreset,
-        intensity: storyFilterIntensity,
-        brightness: storyBrightness,
-        contrast: storyContrast,
-        saturation: storySaturation,
-      }),
-    [storyBrightness, storyContrast, storyFilterIntensity, storyFilterPreset, storySaturation],
-  );
   const storyOverlayTint = useMemo(
     () => buildStoryOverlayTint(storyFilterPreset, storyFilterIntensity),
     [storyFilterIntensity, storyFilterPreset],
@@ -1938,6 +1801,16 @@ function CreatePostScreen({ navigation, route }: any) {
     }, [stopAllComposerAudio]),
   );
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active") {
+        stopAllComposerAudio();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [stopAllComposerAudio]);
+
   const resetComposerState = useCallback(() => {
     setStage("launcher");
     setSelectedAsset(null);
@@ -2131,7 +2004,7 @@ function CreatePostScreen({ navigation, route }: any) {
         });
         closeMusicSheet();
         setMusicTrimSheetVisible(true);
-      } catch (error) {
+      } catch {
         setMusicError("");
       }
     },
@@ -2366,7 +2239,7 @@ function CreatePostScreen({ navigation, route }: any) {
         clipDuration: musicTrimDuration,
       });
       closeMusicTrimSheet();
-    } catch (error) {
+    } catch {
       setMusicError("");
     } finally {
       setMusicImportingId("");

@@ -12,7 +12,7 @@ import {
   View
 } from "react-native";
 import { Alert } from "../../utils/appAlert";
-import { useIsFocused } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
 
@@ -20,7 +20,7 @@ import ContentActionSheet from "../../features/social/components/ContentActionSh
 import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import StoryActivitySheet from "../../features/social/components/StoryActivitySheet";
-import { useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../../hooks/useSegmentedMusicPlayback";
 import { socialApi } from "../../features/social/socialApi";
 import { Story, StoryFilterPreset } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
@@ -160,6 +160,7 @@ function StoryViewerScreen({ route, navigation }: any) {
   }, [storyId, storyUserId]);
 
   const currentStory = useMemo(() => stories[activeIndex], [stories, activeIndex]);
+  const nextStory = useMemo(() => stories[activeIndex + 1] || null, [activeIndex, stories]);
   const storyDuration = useMemo(() => getStoryDuration(currentStory), [currentStory]);
   const canReplyToCurrentStory = !!currentStory && currentStory.allowReplies !== false;
   const canAccessOwnerTools = !!currentStory?.isOwner && isSyncedStoryId(currentStory?.id);
@@ -174,7 +175,12 @@ function StoryViewerScreen({ route, navigation }: any) {
     ? `${currentStory.id}:${storyMusicUrl}:${storyMusicStartMs}:${storyMusicDurationMs}`
     : "";
   const hasStoryAttachedMusic = !!storyMusicUrl;
-  const shouldPlayStoryMusic = hasStoryAttachedMusic && isMusicEnabled && !paused && isScreenFocused;
+  const shouldPlayStoryMusic = hasStoryAttachedMusic
+    && isMusicEnabled
+    && !paused
+    && !showActions
+    && !showOwnerActivity
+    && isScreenFocused;
   useSegmentedMusicPlayback({
     rawUrl: storyMusicRawUrl,
     normalizedUrl: storyMusicUrl,
@@ -182,7 +188,32 @@ function StoryViewerScreen({ route, navigation }: any) {
     startMs: storyMusicStartMs,
     durationMs: storyMusicDurationMs,
     shouldPlay: shouldPlayStoryMusic,
+    pauseWhenInactive: true,
   });
+  const nextStoryMusicRawUrl = useMemo(() => getMusicPlaybackUrl(nextStory?.music), [nextStory?.music]);
+  const nextStoryMusicUrl = useMemo(
+    () => normalizeMediaUrl(nextStoryMusicRawUrl),
+    [nextStoryMusicRawUrl],
+  );
+  const nextStoryMusicStartMs = Math.max(0, Number(nextStory?.music?.startTime || 0) * 1000);
+  const nextStoryMusicDurationMs = getTrimmedMusicDurationMs(nextStory?.music);
+  const nextStoryMusicTrackKey = nextStory
+    ? `${nextStory.id}:${nextStoryMusicUrl}:${nextStoryMusicStartMs}:${nextStoryMusicDurationMs}`
+    : "";
+  useSegmentedMusicWarmup({
+    rawUrl: nextStoryMusicRawUrl,
+    normalizedUrl: nextStoryMusicUrl,
+    trackKey: nextStoryMusicTrackKey,
+    enabled: isMusicEnabled && isScreenFocused && !!nextStoryMusicUrl,
+  });
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        stopAllSegmentedMusicPlayback();
+      };
+    }, []),
+  );
 
   useEffect(() => {
     setProgress(0);
@@ -232,6 +263,7 @@ function StoryViewerScreen({ route, navigation }: any) {
       if (storyTapRef.current.timeout) {
         clearTimeout(storyTapRef.current.timeout);
       }
+      stopAllSegmentedMusicPlayback();
     };
   }, []);
 
@@ -241,6 +273,7 @@ function StoryViewerScreen({ route, navigation }: any) {
     }
 
     if (activeIndex >= stories.length - 1) {
+      stopAllSegmentedMusicPlayback();
       navigation.goBack();
       return;
     }
@@ -248,9 +281,14 @@ function StoryViewerScreen({ route, navigation }: any) {
     setActiveIndex((prev) => prev + 1);
   }, [activeIndex, currentStory, navigation, paused, progress, stories.length]);
 
+  const closeStoryViewer = useCallback(() => {
+    stopAllSegmentedMusicPlayback();
+    navigation.goBack();
+  }, [navigation]);
+
   const next = () => {
     if (activeIndex >= stories.length - 1) {
-      navigation.goBack();
+      closeStoryViewer();
       return;
     }
 
@@ -266,7 +304,7 @@ function StoryViewerScreen({ route, navigation }: any) {
   };
 
   const sendStoryInteractionToChat = useCallback(
-    async ({ action, replyText }: { action: "like" | "reply"; replyText?: string }) => {
+    async ({ action, replyText: interactionReplyText }: { action: "like" | "reply"; replyText?: string }) => {
       if (!currentStory || currentStory.isOwner) {
         return;
       }
@@ -289,7 +327,7 @@ function StoryViewerScreen({ route, navigation }: any) {
 
         await sendChatMessage({
           conversationId,
-          text: buildSharedStoryMessage(currentStory, { action, replyText }),
+          text: buildSharedStoryMessage(currentStory, { action, replyText: interactionReplyText }),
         });
       } catch (error) {
         console.log("story interaction chat send error", error);
@@ -520,8 +558,8 @@ function StoryViewerScreen({ route, navigation }: any) {
             uri={normalizeMediaUrl(currentStory.media?.url)}
             posterUri={normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url)}
             style={styles.storyImage}
-            paused={paused || !isScreenFocused}
-            muted={hasStoryAttachedMusic}
+            paused={paused || showActions || showOwnerActivity || !isScreenFocused}
+            muted={!isScreenFocused || !isMusicEnabled || hasStoryAttachedMusic}
             onEnd={next}
             contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}
           />
@@ -701,7 +739,7 @@ function StoryViewerScreen({ route, navigation }: any) {
       <SafeAreaView style={styles.centered}>
         <Text style={styles.unavailableTitle}>Story unavailable</Text>
         <Text style={styles.unavailableText}>{loadError}</Text>
-        <TouchableOpacity style={styles.unavailableButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.unavailableButton} onPress={closeStoryViewer}>
           <Text style={styles.unavailableButtonText}>Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -764,7 +802,7 @@ function StoryViewerScreen({ route, navigation }: any) {
           </TouchableOpacity>
         ) : null}
 
-        <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.closeButton} onPress={closeStoryViewer}>
           <Icon name="close" size={26} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -814,7 +852,7 @@ function StoryViewerScreen({ route, navigation }: any) {
                 key={`story-mention-${mention.id || mention.username}-${mention.username}`}
                 style={styles.metaChip}
                 onPress={() => {
-                  void openStoryMention(mention.id, mention.username);
+                  openStoryMention(mention.id, mention.username).catch(() => undefined);
                 }}
               >
                 {content}
@@ -916,7 +954,8 @@ function StoryViewerScreen({ route, navigation }: any) {
             {currentStory.allowSharing !== false ? (
               <TouchableOpacity
                 style={styles.bottomIcon}
-                onPress={() =>
+                onPress={() => {
+                  stopAllSegmentedMusicPlayback();
                   navigation.navigate("MainApp", {
                     screen: "Create",
                     params: {
@@ -924,8 +963,8 @@ function StoryViewerScreen({ route, navigation }: any) {
                       initialMedia: currentStory.media?.url,
                       initialMediaType: currentStory.media?.mediaType,
                     },
-                  })
-                }
+                  });
+                }}
               >
                 <Icon name="paper-plane-outline" size={24} color="#fff" />
               </TouchableOpacity>
@@ -953,7 +992,7 @@ function StoryViewerScreen({ route, navigation }: any) {
           onClose={() => setShowActions(false)}
           onActionComplete={(action) => {
             if (action === "not_interested" || action === "mute" || action === "block") {
-              navigation.goBack();
+              closeStoryViewer();
             }
           }}
         />

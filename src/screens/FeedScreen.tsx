@@ -36,7 +36,7 @@ import { API } from "../api/api";
 import { getStoredUser } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import { useSegmentedMusicPlayback } from "../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../hooks/useSegmentedMusicPlayback";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
@@ -283,6 +283,10 @@ function FeedScreen({ navigation }: any) {
     () => feed.posts.find((item) => item.id === activePostId) || null,
     [activePostId, feed.posts],
   );
+  const nextMusicPost = useMemo(() => {
+    const activeIndex = feed.posts.findIndex((item) => item.id === activePostId);
+    return activeIndex >= 0 ? feed.posts[activeIndex + 1] || null : feed.posts[0] || null;
+  }, [activePostId, feed.posts]);
   const activePublishTask = publishTasks[0] || null;
   const completedPublishTaskIdsRef = useRef<Set<string>>(new Set());
   const activePostRawMusicUrl = getMusicPlaybackUrl(activePost?.music);
@@ -304,6 +308,20 @@ function FeedScreen({ navigation }: any) {
     startMs: activePostMusicStartMs,
     durationMs: activePostMusicDurationMs,
     shouldPlay: activePostShouldPlayMusic,
+    pauseWhenInactive: true,
+  });
+  const nextPostRawMusicUrl = getMusicPlaybackUrl(nextMusicPost?.music);
+  const nextPostMusicUrl = normalizeMediaUrl(nextPostRawMusicUrl);
+  const nextPostMusicStartMs = Math.max(0, Number(nextMusicPost?.music?.startTime || 0) * 1000);
+  const nextPostMusicDurationMs = getTrimmedMusicDurationMs(nextMusicPost?.music);
+  const nextPostMusicTrackKey = nextMusicPost
+    ? `${nextMusicPost.id}:${nextPostMusicUrl}:${nextPostMusicStartMs}:${nextPostMusicDurationMs}`
+    : "";
+  useSegmentedMusicWarmup({
+    rawUrl: nextPostRawMusicUrl,
+    normalizedUrl: nextPostMusicUrl,
+    trackKey: nextPostMusicTrackKey,
+    enabled: isScreenFocused && !activeSheet && !!nextPostMusicUrl,
   });
 
   const readSellerAccount = useCallback(async (): Promise<SellerAccountSummary | null> => {
@@ -466,6 +484,8 @@ function FeedScreen({ navigation }: any) {
 
       return () => {
         active = false;
+        setActivePostId("");
+        stopAllSegmentedMusicPlayback();
       };
     }, [applyFeedSnapshot, loadFeedSnapshot]),
   );
@@ -635,7 +655,7 @@ function FeedScreen({ navigation }: any) {
       feedScrollResumeTimeoutRef.current = null;
     }
 
-    feedScrollTransitionRef.current = true;
+    feedScrollTransitionRef.current = false;
     setActivePostId("");
   }, []);
 
@@ -1169,7 +1189,7 @@ function FeedScreen({ navigation }: any) {
               posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || primaryMedia.url)}
               style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
               paused={!isPostActive}
-              muted={isMuted || hasAttachedMusic}
+              muted={!isPostActive || isMuted || hasAttachedMusic}
               repeat
               resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
               contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
@@ -1232,7 +1252,7 @@ function FeedScreen({ navigation }: any) {
                   posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
                   style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
                   paused={!isPostActive || currentCarouselIndex !== index}
-                  muted={isMuted || hasAttachedMusic}
+                  muted={!isPostActive || currentCarouselIndex !== index || isMuted || hasAttachedMusic}
                   repeat
                   resizeMode={getImageResizeMode(asset, frameAspectRatio)}
                   contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
@@ -1459,6 +1479,7 @@ function FeedScreen({ navigation }: any) {
             </View>
           </TouchableOpacity>
           <View style={styles.postHeaderActions}>
+            {renderFeedRelationshipButton(item.user)}
             <TouchableOpacity
               style={[
                 styles.moreButton,
@@ -1763,6 +1784,7 @@ function FeedScreen({ navigation }: any) {
             </View>
           </TouchableOpacity>
           <View style={styles.postHeaderActions}>
+            {renderFeedRelationshipButton(item.user)}
             <TouchableOpacity
               style={[
                 styles.moreButton,
@@ -2269,13 +2291,17 @@ function FeedScreen({ navigation }: any) {
     ? styles.sidebarStatusAvailable
     : styles.sidebarStatusUnavailable;
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 55,
-    minimumViewTime: 120,
+    itemVisiblePercentThreshold: 62,
+    minimumViewTime: 80,
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
     const firstVisiblePost = viewableItems.find((entry) => entry.isViewable && entry.item?.id)?.item;
+    const previousVisiblePostId = lastViewablePostIdRef.current;
     lastViewablePostIdRef.current = firstVisiblePost?.id || "";
-    if (firstVisiblePost?.id && !feedScrollTransitionRef.current) {
+    if (firstVisiblePost?.id) {
+      if (previousVisiblePostId && previousVisiblePostId !== firstVisiblePost.id) {
+        stopAllSegmentedMusicPlayback();
+      }
       setActivePostId(firstVisiblePost.id);
     }
   }).current;
@@ -2310,7 +2336,7 @@ function FeedScreen({ navigation }: any) {
           viewabilityConfig={viewabilityConfig}
           onScrollBeginDrag={pauseActiveVisiblePost}
           onMomentumScrollBegin={pauseActiveVisiblePost}
-          onScrollEndDrag={() => scheduleRestoreActiveVisiblePost(140)}
+          onScrollEndDrag={() => scheduleRestoreActiveVisiblePost(40)}
           onMomentumScrollEnd={() => scheduleRestoreActiveVisiblePost(0)}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={

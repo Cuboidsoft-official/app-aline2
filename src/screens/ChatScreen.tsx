@@ -827,6 +827,11 @@ const ChatScreen = ({ navigation, route }: any) => {
     });
   }, []);
 
+  useEffect(() => {
+    initialLatestScrollDoneRef.current = false;
+    latestAutoScrollMessageIdRef.current = "";
+  }, [currentConversationId]);
+
   useEffect(() => () => {
     if (replyHighlightTimeoutRef.current) {
       clearTimeout(replyHighlightTimeoutRef.current);
@@ -1831,6 +1836,14 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
 
     const latestMessageId = getMessageIdentity(messages[messages.length - 1]);
+    if (!initialLatestScrollDoneRef.current) {
+      initialLatestScrollDoneRef.current = true;
+      latestAutoScrollMessageIdRef.current = latestMessageId || "";
+      scrollToLatestMessage(false);
+      setTimeout(() => scrollToLatestMessage(false), 80);
+      return;
+    }
+
     if (!latestMessageId || latestAutoScrollMessageIdRef.current === latestMessageId) {
       return;
     }
@@ -3168,6 +3181,12 @@ const ChatScreen = ({ navigation, route }: any) => {
             maxToRenderPerBatch={12}
             windowSize={7}
             keyboardShouldPersistTaps="handled"
+            onContentSizeChange={() => {
+              if (!initialLatestScrollDoneRef.current && messages.length) {
+                initialLatestScrollDoneRef.current = true;
+                scrollToLatestMessage(false);
+              }
+            }}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}

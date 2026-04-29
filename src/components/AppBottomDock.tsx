@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { alpha, appFonts } from "../theme/designSystem";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { stopAllSegmentedMusicPlayback } from "../hooks/useSegmentedMusicPlayback";
 import ProfileTabAvatar from "./ProfileTabAvatar";
 
 export const APP_BOTTOM_DOCK_BASE_HEIGHT = Platform.OS === "ios" ? 74 : 66;
@@ -76,6 +77,11 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
   );
 
   const navigateToItem = useCallback((screen: string) => {
+    const nextActiveKey = screen === "Swipes" ? "Swipes" : screen;
+    if (nextActiveKey !== resolvedActiveKey) {
+      stopAllSegmentedMusicPlayback();
+    }
+
     if (screen === "Swipes") {
       navigation.getParent?.()?.navigate("Swipes");
       return;
@@ -92,7 +98,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
     }
 
     navigation.getParent?.()?.navigate("MainApp", { screen });
-  }, [navigation, routeNames]);
+  }, [navigation, resolvedActiveKey, routeNames]);
 
   const panResponder = useMemo(
     () =>

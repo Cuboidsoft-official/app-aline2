@@ -76,7 +76,7 @@ export const APP_BUG_FIXES = [
   "Fixed guest approval flow so approved viewers can join live on camera and the host sees the guest feed.",
   "Tightened call cleanup so repeat calls in the same conversation no longer get blocked by stale active sessions.",
   "Refined shared post cards in chat so incoming post previews look cleaner and more compact.",
-  "Switched music search away from Spotify-backed results and widened it with Jamendo plus the app's own music catalog.",
+  "Switched music search to Jamendo-backed results only.",
   "Fixed attached-audio uploads so more picked MP3, M4A, AAC, WAV, and OGG files survive upload and reach the trim flow.",
   "Returned richer music playback fields from the catalog so feed posts, stories, and swipes can attach playable tracks more consistently.",
   "Updated the release summary to call out Jamendo royalty-free streaming, artist credit visibility, and the lack of in-app music downloading.",

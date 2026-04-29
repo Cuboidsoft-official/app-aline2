@@ -30,7 +30,7 @@ import ShareTargetsList, { ShareTarget } from "../../features/social/components/
 import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, Swipe, SwipeComment } from "../../features/social/types";
-import { useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
@@ -122,8 +122,10 @@ function SwipesScreen({ navigation, route }: any) {
     timeout: null,
   });
   const swipeListRef = useRef<FlatList<Swipe> | null>(null);
+  const activeSwipeIndexRef = useRef(0);
 
   const activeSwipe = swipes[activeSwipeIndex] || null;
+  const nextSwipe = swipes[activeSwipeIndex + 1] || null;
   const activeSwipeRawMusicUrl = getMusicPlaybackUrl(activeSwipe?.music);
   const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipeRawMusicUrl);
   const activeSwipeMusicStartMs = Math.max(0, Number(activeSwipe?.music?.startTime || 0) * 1000);
@@ -140,6 +142,20 @@ function SwipesScreen({ navigation, route }: any) {
     startMs: activeSwipeMusicStartMs,
     durationMs: activeSwipeMusicDurationMs,
     shouldPlay: shouldPlaySwipeMusic,
+    pauseWhenInactive: true,
+  });
+  const nextSwipeRawMusicUrl = getMusicPlaybackUrl(nextSwipe?.music);
+  const nextSwipeMusicUrl = normalizeMediaUrl(nextSwipeRawMusicUrl);
+  const nextSwipeMusicStartMs = Math.max(0, Number(nextSwipe?.music?.startTime || 0) * 1000);
+  const nextSwipeMusicDurationMs = getTrimmedMusicDurationMs(nextSwipe?.music);
+  const nextSwipeMusicTrackKey = nextSwipe
+    ? `${nextSwipe.id}:${nextSwipeMusicUrl}:${nextSwipeMusicStartMs}:${nextSwipeMusicDurationMs}`
+    : "";
+  useSegmentedMusicWarmup({
+    rawUrl: nextSwipeRawMusicUrl,
+    normalizedUrl: nextSwipeMusicUrl,
+    trackKey: nextSwipeMusicTrackKey,
+    enabled: isSwipePlaybackEnabled && !!nextSwipeMusicUrl,
   });
   const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
     + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
@@ -150,9 +166,17 @@ function SwipesScreen({ navigation, route }: any) {
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null; isViewable?: boolean }> }) => {
     const firstVisibleItem = viewableItems.find((entry) => entry.isViewable && typeof entry.index === "number");
     if (typeof firstVisibleItem?.index === "number") {
+      if (activeSwipeIndexRef.current !== firstVisibleItem.index) {
+        stopAllSegmentedMusicPlayback();
+      }
+      activeSwipeIndexRef.current = firstVisibleItem.index;
       setActiveSwipeIndex(firstVisibleItem.index);
     }
   }).current;
+
+  const stopSwipeMusicDuringScroll = useCallback(() => {
+    setActiveSwipeIndex(-1);
+  }, []);
 
   const isBusy = (type: "like" | "save" | "share", swipeId: string): boolean =>
     !!busyActions[`${type}_${swipeId}`];
@@ -192,6 +216,7 @@ function SwipesScreen({ navigation, route }: any) {
         if (swipeTapRef.current.timeout) {
           clearTimeout(swipeTapRef.current.timeout);
         }
+        stopAllSegmentedMusicPlayback();
       };
     }, []),
   );
@@ -629,7 +654,7 @@ function SwipesScreen({ navigation, route }: any) {
             posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
             style={styles.swipeMedia}
             paused={!isActive || !!activeSheet || !isScreenFocused}
-            muted={!isSwipePlaybackEnabled || hasAttachedMusic}
+            muted={!isActive || !isSwipePlaybackEnabled || hasAttachedMusic}
             repeat
             contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
           />
@@ -804,11 +829,15 @@ function SwipesScreen({ navigation, route }: any) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />}
         viewabilityConfig={viewabilityConfig}
         onViewableItemsChanged={onViewableItemsChanged}
+        onScrollBeginDrag={stopSwipeMusicDuringScroll}
+        onMomentumScrollBegin={stopSwipeMusicDuringScroll}
         onMomentumScrollEnd={(event) => {
           const nextIndex = Math.round(
             Number(event?.nativeEvent?.contentOffset?.y || 0) / Math.max(1, viewportHeight),
           );
-          setActiveSwipeIndex(Math.max(0, Math.min(swipes.length - 1, nextIndex)));
+          const boundedIndex = Math.max(0, Math.min(swipes.length - 1, nextIndex));
+          activeSwipeIndexRef.current = boundedIndex;
+          setActiveSwipeIndex(boundedIndex);
         }}
         onEndReachedThreshold={0.5}
         onEndReached={() => {

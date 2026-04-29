@@ -24,7 +24,7 @@ import PostShareSheet from "../../features/social/components/PostShareSheet";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
-import { useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { DEFAULT_AVATAR_URL } from "../../constants/defaultAssets";
 import { PHOTO_FILTER_LIST } from "../../utils/photoFilters";
@@ -138,6 +138,7 @@ function PostDetailScreen({ route, navigation }: any) {
 
       return () => {
         active = false;
+        stopAllSegmentedMusicPlayback();
       };
     }, [navigation, postId]),
   );
@@ -165,6 +166,7 @@ function PostDetailScreen({ route, navigation }: any) {
       if (postTapRef.current.timeout) {
         clearTimeout(postTapRef.current.timeout);
       }
+      stopAllSegmentedMusicPlayback();
     };
   }, []);
 

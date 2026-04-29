@@ -34,11 +34,7 @@ const normalizeExternalUrl = (value: any): string | undefined => {
     return raw;
   }
 
-  if (raw.startsWith("/")) {
-    return `https://audius.co${raw}`;
-  }
-
-  return raw;
+  return undefined;
 };
 
 const getId = (value: any): string => {
@@ -55,6 +51,19 @@ const getId = (value: any): string => {
 
 const MUSIC_CLIP_MAX_SECONDS = 30;
 
+const containsJamendoUrl = (...values: Array<string | undefined>) =>
+  values.some((value) => /jamendo/i.test(String(value || "")));
+
+const isJamendoMusicItem = (item: MusicCatalogItem): boolean => {
+  const source = String(item.source || "").trim().toLowerCase();
+  if (source === "youtube" || source === "spotify" || source === "audius") {
+    return false;
+  }
+
+  return source === "jamendo"
+    || containsJamendoUrl(item.previewUrl, item.streamUrl, item.audioUrl, item.externalUrl);
+};
+
 const mapMusicItem = (item: any): MusicCatalogItem => ({
   id: getId(item.musicId || item._id || item.id),
   externalId: item?.externalId ? String(item.externalId) : undefined,
@@ -66,11 +75,7 @@ const mapMusicItem = (item: any): MusicCatalogItem => ({
   audioUrl: item?.audioUrl || item?.streamUrl || item?.previewUrl || undefined,
   externalUrl: normalizeExternalUrl(item?.externalUrl),
   source: item?.source || undefined,
-  youtubeVideoId: item?.youtubeVideoId
-    ? String(item.youtubeVideoId).trim()
-    : String(item?.source || "").trim().toLowerCase() === "youtube"
-      ? String(item?.externalId || "").trim() || undefined
-      : undefined,
+  youtubeVideoId: undefined,
   isOriginal: !!item?.isOriginal,
   duration: Math.max(1, Math.round(Number(item?.duration || 0) || 0)),
   clipStartTime: Math.max(0, Math.round(Number(item?.clipStartTime || item?.startTime || 0) || 0)),
@@ -97,12 +102,15 @@ export const getTrendingMusicCatalog = async (limit = 10): Promise<MusicCatalogI
     return getMusicPayloadList(res)
       .map(mapMusicItem)
       .map(ensureValidMusicItem)
-      .filter(Boolean) as MusicCatalogItem[];
+      .filter((item): item is MusicCatalogItem => !!item && isJamendoMusicItem(item))
+      .slice(0, limit);
   };
 
   return load("/music/catalog/trending", {
     limit,
     includeExternal: true,
+    provider: "jamendo",
+    source: "jamendo",
   });
 };
 
@@ -131,13 +139,16 @@ export const searchMusicCatalog = async (query: string, limit = 12): Promise<Mus
     return getMusicPayloadList(res)
       .map(mapMusicItem)
       .map(ensureValidMusicItem)
-      .filter(Boolean) as MusicCatalogItem[];
+      .filter((item): item is MusicCatalogItem => !!item && isJamendoMusicItem(item))
+      .slice(0, limit);
   };
 
   return load("/music/catalog", {
     query: trimmedQuery,
     limit,
     includeExternal: true,
+    provider: "jamendo",
+    source: "jamendo",
   });
 };
 
@@ -170,7 +181,7 @@ export const importMusicCatalogItem = async (item: MusicCatalogItem): Promise<Mu
     previewUrl: imported.previewUrl || item.previewUrl,
     streamUrl: imported.streamUrl || item.streamUrl,
     audioUrl: imported.audioUrl || item.audioUrl || item.streamUrl || item.previewUrl,
-    youtubeVideoId: imported.youtubeVideoId || item.youtubeVideoId,
+    youtubeVideoId: undefined,
     clipStartTime: item.clipStartTime ?? imported.clipStartTime ?? 0,
     clipDuration: Math.min(
       MUSIC_CLIP_MAX_SECONDS,

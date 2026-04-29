@@ -274,12 +274,7 @@ const mapStoryMusicDetails = (music: any, musicConfig?: any) => {
     streamUrl: music?.streamUrl || music?.audioUrl || music?.previewUrl || undefined,
     audioUrl: music?.audioUrl || music?.streamUrl || music?.previewUrl || undefined,
     externalUrl: music?.externalUrl || undefined,
-    youtubeVideoId:
-      typeof music === "object" && String(music?.source || "").trim().toLowerCase() === "youtube"
-        ? String(music?.youtubeVideoId || music?.externalId || "").trim() || undefined
-        : typeof music === "object"
-          ? String(music?.youtubeVideoId || "").trim() || undefined
-          : undefined,
+    youtubeVideoId: undefined,
     source: music?.source || undefined,
     isOriginal: !!music?.isOriginal,
     startTime:
