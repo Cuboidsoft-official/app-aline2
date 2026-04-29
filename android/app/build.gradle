@@ -72,6 +72,12 @@ def hasReleaseSigning =
 def isReleaseBuildRequested = gradle.startParameter.taskNames.any { taskName ->
         taskName?.toLowerCase()?.contains('release')
 }
+def isBundleBuildRequested = gradle.startParameter.taskNames.any { taskName ->
+        taskName?.toLowerCase()?.contains('bundle')
+}
+def disableAbiSplitsForThisBuild =
+        (project.findProperty("aline2DisableAbiSplits")?.toString()?.toBoolean() ?: false) ||
+        isBundleBuildRequested
 
 if (isReleaseBuildRequested && !hasReleaseSigning) {
     throw new GradleException('Release signing credentials are required. Set ANDROID_UPLOAD_STORE_FILE, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, and ANDROID_UPLOAD_KEY_PASSWORD before building release artifacts.')
@@ -152,7 +158,7 @@ android {
     }
     splits {
         abi {
-            enable true
+            enable !disableAbiSplitsForThisBuild
             reset()
             include "armeabi-v7a", "arm64-v8a"
             universalApk false

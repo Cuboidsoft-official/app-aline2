@@ -13,3 +13,8 @@
 -dontnote kotlin.**
 -dontnote org.jetbrains.annotations.**
 -dontwarn kotlin.**
+
+# Some bundled annotation-processing helpers reference javax.lang.model APIs that
+# are only present in compiler environments, not on Android runtime classpaths.
+# These references are not used at runtime, so suppress their R8 missing-class warnings.
+-dontwarn javax.lang.model.**
