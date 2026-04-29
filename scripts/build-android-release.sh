@@ -64,13 +64,20 @@ ENVFILE="$ENVFILE_PATH" ./gradlew \
   :react-native-color-matrix-image-filters:generateCodegenArtifactsFromSchema \
   --no-daemon \
   --console=plain \
-  --max-workers=1 \
-  -PnewArchEnabled=false
+  --max-workers=1
+
+ENVFILE="$ENVFILE_PATH" ./gradlew \
+  :app:generateAutolinkingNewArchitectureFiles \
+  --no-daemon \
+  --console=plain \
+  --max-workers=1
+
+node "$ROOT_DIR/scripts/ci/filter_android_autolinking.js"
 
 ENVFILE="$ENVFILE_PATH" ./gradlew \
   "$TASK" \
   --no-daemon \
   --console=plain \
   --max-workers=1 \
-  -PnewArchEnabled=false \
+  -x generateAutolinkingNewArchitectureFiles \
   -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
