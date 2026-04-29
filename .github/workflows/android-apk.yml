@@ -288,12 +288,55 @@ jobs:
         env:
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
           APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
+          AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
+          AAB_NAME: ${{ steps.meta.outputs.aab_name }}
         run: |
           cat > /tmp/publish-apk.sh <<'EOF'
           set -euo pipefail
           release_dir="__PROD_RELEASES_DIR__"
           release_name="__RELEASE_NAME__"
+          aab_name="__AAB_NAME__"
           backup_dir="${release_dir}/backups/${release_name}"
+
+          prune_old_release_files() {
+            local search_dir="$1"
+            local pattern="$2"
+            local keep_count="$3"
+            local -a files=()
+
+            mapfile -t files < <(find "${search_dir}" -maxdepth 1 -type f -name "${pattern}" -printf '%T@ %p\n' | sort -n | sed 's/^[^ ]* //')
+            if [ "${#files[@]}" -le "${keep_count}" ]; then
+              return
+            fi
+
+            local prune_count=$(( ${#files[@]} - keep_count ))
+            local index
+            for (( index=0; index<prune_count; index++ )); do
+              rm -f "${files[$index]}" "${files[$index]}.sha256"
+            done
+          }
+
+          prune_old_backup_dirs() {
+            local backup_root="$1"
+            local keep_count="$2"
+            local -a dirs=()
+
+            if [ ! -d "${backup_root}" ]; then
+              return
+            fi
+
+            mapfile -t dirs < <(find "${backup_root}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -n | sed 's/^[^ ]* //')
+            if [ "${#dirs[@]}" -le "${keep_count}" ]; then
+              return
+            fi
+
+            local prune_count=$(( ${#dirs[@]} - keep_count ))
+            local index
+            for (( index=0; index<prune_count; index++ )); do
+              rm -rf "${dirs[$index]}"
+            done
+          }
+
           mkdir -p "${release_dir}"
           chmod 755 "${release_dir}"
           mkdir -p "${backup_dir}"
@@ -304,10 +347,16 @@ jobs:
             cp "${release_dir}/latest.apk.sha256" "${backup_dir}/latest.apk.sha256"
           fi
           target_path="${release_dir}/${release_name}.apk"
+          target_aab="${release_dir}/${aab_name}"
           curl -fsSL "__APK_DOWNLOAD_URL__" -o "${target_path}"
+          curl -fsSL "__AAB_DOWNLOAD_URL__" -o "${target_aab}"
           cp "${target_path}" "${release_dir}/latest.apk"
           sha256sum "${target_path}" > "${target_path}.sha256"
+          sha256sum "${target_aab}" > "${target_aab}.sha256"
           sha256sum "${release_dir}/latest.apk" > "${release_dir}/latest.apk.sha256"
+          prune_old_release_files "${release_dir}" 'aline2-*-release-*.apk' 5
+          prune_old_release_files "${release_dir}" 'aline2-*-release-*.aab' 5
+          prune_old_backup_dirs "${release_dir}/backups" 5
           EOF
 
           command_json="$(python3 - <<'PY'
@@ -321,6 +370,8 @@ jobs:
               "__PROD_RELEASES_DIR__": os.environ["PROD_RELEASES_DIR"],
               "__RELEASE_NAME__": os.environ["RELEASE_NAME"],
               "__APK_DOWNLOAD_URL__": os.environ["APK_DOWNLOAD_URL"],
+              "__AAB_DOWNLOAD_URL__": os.environ["AAB_DOWNLOAD_URL"],
+              "__AAB_NAME__": os.environ["AAB_NAME"],
           }.items():
               content = content.replace(key, value)
           path.write_text(content)
@@ -346,6 +397,7 @@ jobs:
       - name: Verify public APK download
         run: |
           curl -IfsS https://welcome.aline2.com/downloads/android/latest.apk >/dev/null
+          curl -IfsS "https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}" >/dev/null
 
       - name: Email private AAB delivery notice
         env:
@@ -360,9 +412,10 @@ jobs:
             The latest signed Aline2 Android production release is ready.
 
             The public APK has been published to welcome.aline2.com.
-            This email carries the private AAB delivery path for Play Console usage.
+            This email carries the versioned AAB delivery path for Play Console usage.
+            The AAB is not linked from the public landing page.
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
-          AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
+          AAB_DOWNLOAD_URL: https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}
           AAB_ATTACHMENT_PATH: ${{ steps.collect.outputs.aab_path }}
         run: |
           python3 ./scripts/ci/send_release_email.py
@@ -424,7 +477,6 @@ jobs:
       - name: Add build summary
         if: success()
         env:
-          ARTIFACT_URL: ${{ steps.upload_release.outputs.artifact-url }}
           APK_NAME: ${{ steps.meta.outputs.apk_name }}
           AAB_NAME: ${{ steps.meta.outputs.aab_name }}
         run: |
@@ -434,8 +486,9 @@ jobs:
             echo "- Branch: \`main\`"
             echo "- Release: \`${{ steps.meta.outputs.release_name }}\`"
             echo "- Public APK URL: \`https://welcome.aline2.com/downloads/android/latest.apk\`"
-            echo "- Uploaded artifacts: [download](${ARTIFACT_URL})"
-            echo "- Private AAB link emailed to \`cuboidsoft@gmail.com\`"
+            echo "- Versioned AAB URL: \`https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}\`"
+            echo "- GitHub Actions artifacts: available in this run while signed in to GitHub"
+            echo "- AAB delivery email sent to \`cuboidsoft@gmail.com\`"
             echo "- APK checksum:"
             cat "${APK_NAME}.sha256"
             echo "- AAB checksum:"
