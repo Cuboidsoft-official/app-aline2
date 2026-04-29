@@ -26,6 +26,8 @@ jobs:
       PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
       BACKEND_ORIGIN_EXPECTED: https://api.aline2.com
       SHARE_BASE_URL_EXPECTED: https://aline2.com
+      ANDROID_PLATFORM_VERSION: "36"
+      ANDROID_BUILD_TOOLS_VERSION: "36.0.0"
 
     steps:
       - name: Check out repository
@@ -60,7 +62,13 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
-        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+        run: sdkmanager "platform-tools" "platforms;android-${ANDROID_PLATFORM_VERSION}" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}"
+
+      - name: Expose Android build tools
+        run: |
+          build_tools_dir="${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}"
+          echo "$build_tools_dir" >> "$GITHUB_PATH"
+          "$build_tools_dir/apksigner" version
 
       - name: Install dependencies
         run: npm ci
@@ -246,10 +254,41 @@ jobs:
           curl -fsSL -o /tmp/bundletool.jar https://github.com/google/bundletool/releases/download/1.18.2/bundletool-all-1.18.2.jar
 
       - name: Verify release artifacts
+        env:
+          ANDROID_UPLOAD_STORE_FILE: ${{ vars.ANDROID_UPLOAD_STORE_FILE != '' && vars.ANDROID_UPLOAD_STORE_FILE || 'android/app/aline2-release.keystore' }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ vars.ANDROID_UPLOAD_STORE_PASSWORD != '' && vars.ANDROID_UPLOAD_STORE_PASSWORD || secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
         run: |
-          apksigner verify --print-certs "${{ steps.collect.outputs.apk_path }}"
-          jarsigner -verify -strict -certs "${{ steps.collect.outputs.aab_path }}"
+          build_tools_dir="${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}"
+          apksigner_bin="${build_tools_dir}/apksigner"
+          if [ ! -x "$apksigner_bin" ]; then
+            echo "apksigner not found at $apksigner_bin" >&2
+            exit 1
+          fi
+
+          "$apksigner_bin" verify --print-certs "${{ steps.collect.outputs.apk_path }}" | tee /tmp/apk-verify.txt
           java -jar /tmp/bundletool.jar validate --bundle="${{ steps.collect.outputs.aab_path }}"
+
+          keytool -printcert -jarfile "${{ steps.collect.outputs.aab_path }}" | tee /tmp/aab-verify.txt
+
+          trusted_sha="$(keytool -exportcert -alias "${ANDROID_UPLOAD_KEY_ALIAS}" -keystore "${ANDROID_UPLOAD_STORE_FILE}" -storepass "${ANDROID_UPLOAD_STORE_PASSWORD}" | openssl x509 -inform der -noout -fingerprint -sha256 | cut -d'=' -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          apk_sha="$(awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print $2; exit}' /tmp/apk-verify.txt | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          aab_sha="$(awk -F': ' '/SHA256:/ {print $2; exit}' /tmp/aab-verify.txt | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+
+          if [ -z "$trusted_sha" ] || [ -z "$apk_sha" ] || [ -z "$aab_sha" ]; then
+            echo "Failed to extract signing certificate fingerprints" >&2
+            exit 1
+          fi
+
+          if [ "$apk_sha" != "$trusted_sha" ]; then
+            echo "APK signing certificate fingerprint mismatch" >&2
+            exit 1
+          fi
+
+          if [ "$aab_sha" != "$trusted_sha" ]; then
+            echo "AAB signing certificate fingerprint mismatch" >&2
+            exit 1
+          fi
 
       - name: Upload release artifacts
         id: upload_release
