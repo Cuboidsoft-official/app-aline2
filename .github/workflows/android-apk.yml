@@ -52,17 +52,18 @@ jobs:
 
           short_sha="$(git rev-parse --short=7 HEAD)"
           release_date="$(date -u +%Y%m%d)"
+          app_version="$(node -p "require('./package.json').version")"
 
           case "$release_profile" in
             arm64)
-              release_name="aline2-main-${short_sha}-arm64-release-${release_date}"
+              release_name="Aline2-v${app_version}-${release_date}-${short_sha}-arm64"
               apk_name="app-arm64-v8a-release.apk"
               apk_mode="apk-arm64"
               build_aab="false"
               publish_public="false"
               ;;
             *)
-              release_name="aline2-main-${short_sha}-release-${release_date}"
+              release_name="Aline2-v${app_version}-${release_date}-${short_sha}"
               apk_name="${release_name}.apk"
               apk_mode="apk"
               build_aab="true"
@@ -70,6 +71,7 @@ jobs:
               ;;
           esac
 
+          echo "app_version=$app_version" >> "$GITHUB_OUTPUT"
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
           echo "release_date=$release_date" >> "$GITHUB_OUTPUT"
           echo "release_profile=$release_profile" >> "$GITHUB_OUTPUT"
@@ -452,17 +454,27 @@ jobs:
           if [ -f "${release_dir}/latest.apk" ]; then
             cp "${release_dir}/latest.apk" "${backup_dir}/latest.apk"
           fi
+          if [ -f "${release_dir}/Aline2-latest.apk" ]; then
+            cp "${release_dir}/Aline2-latest.apk" "${backup_dir}/Aline2-latest.apk"
+          fi
           if [ -f "${release_dir}/latest.apk.sha256" ]; then
             cp "${release_dir}/latest.apk.sha256" "${backup_dir}/latest.apk.sha256"
+          fi
+          if [ -f "${release_dir}/Aline2-latest.apk.sha256" ]; then
+            cp "${release_dir}/Aline2-latest.apk.sha256" "${backup_dir}/Aline2-latest.apk.sha256"
           fi
           target_path="${release_dir}/${release_name}.apk"
           target_aab="${release_dir}/${aab_name}"
           curl -fsSL "__APK_DOWNLOAD_URL__" -o "${target_path}"
           curl -fsSL "__AAB_DOWNLOAD_URL__" -o "${target_aab}"
           cp "${target_path}" "${release_dir}/latest.apk"
+          cp "${target_path}" "${release_dir}/Aline2-latest.apk"
           sha256sum "${target_path}" > "${target_path}.sha256"
           sha256sum "${target_aab}" > "${target_aab}.sha256"
           sha256sum "${release_dir}/latest.apk" > "${release_dir}/latest.apk.sha256"
+          sha256sum "${release_dir}/Aline2-latest.apk" > "${release_dir}/Aline2-latest.apk.sha256"
+          prune_old_release_files "${release_dir}" 'Aline2-v*.apk' 5
+          prune_old_release_files "${release_dir}" 'Aline2-v*.aab' 5
           prune_old_release_files "${release_dir}" 'aline2-*-release-*.apk' 5
           prune_old_release_files "${release_dir}" 'aline2-*-release-*.aab' 5
           prune_old_backup_dirs "${release_dir}/backups" 5
@@ -506,6 +518,7 @@ jobs:
       - name: Verify public APK download
         if: steps.meta.outputs.publish_public == 'true'
         run: |
+          curl -IfsS https://welcome.aline2.com/downloads/android/Aline2-latest.apk >/dev/null
           curl -IfsS https://welcome.aline2.com/downloads/android/latest.apk >/dev/null
           curl -IfsS "https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}" >/dev/null
 
@@ -548,8 +561,10 @@ jobs:
             else
               sha256sum "${release_dir}/latest.apk" > "${release_dir}/latest.apk.sha256"
             fi
+            cp "${release_dir}/latest.apk" "${release_dir}/Aline2-latest.apk"
+            sha256sum "${release_dir}/Aline2-latest.apk" > "${release_dir}/Aline2-latest.apk.sha256"
           else
-            rm -f "${release_dir}/latest.apk" "${release_dir}/latest.apk.sha256"
+            rm -f "${release_dir}/latest.apk" "${release_dir}/latest.apk.sha256" "${release_dir}/Aline2-latest.apk" "${release_dir}/Aline2-latest.apk.sha256"
           fi
           EOF
 
@@ -601,7 +616,8 @@ jobs:
             echo "- APK checksum:"
             cat "${APK_NAME}.sha256"
             if [ "${{ steps.meta.outputs.publish_public }}" = "true" ]; then
-              echo "- Public APK URL: \`https://welcome.aline2.com/downloads/android/latest.apk\`"
+              echo "- Public APK URL: \`https://welcome.aline2.com/downloads/android/Aline2-latest.apk\`"
+              echo "- Compatibility APK URL: \`https://welcome.aline2.com/downloads/android/latest.apk\`"
               echo "- Versioned AAB URL: \`https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}\`"
               echo "- AAB delivery email sent to \`cuboidsoft@gmail.com\`"
               echo "- AAB checksum:"
