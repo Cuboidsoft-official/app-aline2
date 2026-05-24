@@ -29,6 +29,7 @@ jest.mock('../src/screens/TagsMentionsScreen', () => () => null);
 jest.mock('../src/screens/DeleteAccountScreen', () => () => null);
 jest.mock('../src/screens/HelpSupportScreen', () => () => null);
 jest.mock('../src/screens/PrivacyPolicyScreen', () => () => null);
+jest.mock('../src/screens/ChildSafetyScreen', () => () => null);
 jest.mock('../src/screens/ReleaseNotesScreen', () => () => null);
 jest.mock('../src/screens/ForgotPasswordScreen', () => () => null);
 jest.mock('../src/screens/SellerRegistration', () => () => null);

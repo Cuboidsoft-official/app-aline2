@@ -1,14 +1,14 @@
-export const APP_VERSION = "1.0.2";
-export const APP_RELEASE_DATE = "April 27, 2026";
-export const APP_RELEASE_TITLE = "Smaller feed UI, steadier video posting, and cleaner call updates";
+export const APP_VERSION = "1.0.3";
+export const APP_RELEASE_DATE = "April 30, 2026";
+export const APP_RELEASE_TITLE = "Live music fixes, refreshed Firebase sync, and cleaner release visibility";
 
 export const APP_RELEASE_HIGHLIGHTS = [
-  "Feed cards now feel tighter and more Instagram-like with smaller avatars, lighter typography, and less bulky spacing.",
-  "Video post uploads now retry alternate backend connections instead of falling straight into a generic internet-error state.",
-  "Music search now pulls from the broader app catalog plus Jamendo instead of getting stuck on a tiny local list.",
-  "Custom audio uploads now accept more real-world file MIME types so attached music is less likely to fail before trim.",
-  "Feed, story, and swipe publishing now keep attached music metadata in sync more reliably across the latest build.",
-  "Release notes now explain the Jamendo royalty-free music source, visible artist credit, and no-download playback approach more clearly.",
+  "Attached music now refreshes from the live royalty-free catalog more reliably after the latest parser and catalog recovery fixes.",
+  "Feed, story, and swipe publishing now keep selected-track metadata steadier so attached music is less likely to disappear between picker, publish, and playback.",
+  "Android Google services have been refreshed for the current signed release so Firebase-backed flows stay aligned with the latest production certificate.",
+  "The feed menu, settings, and release-notes screen now all show the same current build details instead of drifting to stale version labels.",
+  "The latest stable signed APK remains the public install target while the matching private AAB stays ready for store and verification workflows.",
+  "Music source details now read more clearly in-app, including royalty-free playback expectations and visible artist credit where available.",
 ];
 
 export const APP_FEATURE_SECTIONS = [
@@ -56,30 +56,16 @@ export const APP_FEATURE_SECTIONS = [
 ];
 
 export const APP_BUG_FIXES = [
-  "Fixed a video-post upload path that could show a misleading internet error before trying the app's backup backend connection.",
-  "Reduced feed header and caption sizing so posts feel denser, cleaner, and closer to a familiar social feed layout.",
-  "Improved trim-sheet feedback so creators can preview the exact clip window and save the trimmed version more confidently.",
-  "Clarified call-event copy across chat surfaces so missed, completed, and in-progress calls are easier to understand.",
-  "Refreshed the in-app release summary so referral and release-note sections stay in sync with the current build.",
-  "Reduced chat lag so text sending feels quicker and the newest message stays in view more consistently.",
-  "Fixed a stuck active-call state that could appear even after the previous call had already ended.",
-  "Improved music playback for published feed posts, stories, and swipes so sound starts more reliably.",
-  "Smoothed swipe playback and scrolling so videos feel closer to a continuous full-screen reel experience.",
-  "Reordered swipe actions so share, sound, save, and more options feel more familiar and easier to reach.",
-  "Tightened chat bubble sizing, composer spacing, and footer alignment across direct and group chat screens.",
-  "Added first-letter avatar fallbacks when a user has not uploaded a profile photo on major list and chat surfaces.",
-  "Added clear-chat controls and disappearing message timers inside chat details.",
-  "Improved voice-note handling so recordings can be previewed before sending and no longer fall back into video-style chat cards.",
-  "Improved voice and live session clarity so conversations sound fuller and easier to hear.",
-  "Added direct sidebar access to release notes and surfaced the current app version in the feed menu.",
-  "Added a fun camera effect during supported video calls and tightened camera switching behavior.",
-  "Fixed guest approval flow so approved viewers can join live on camera and the host sees the guest feed.",
-  "Tightened call cleanup so repeat calls in the same conversation no longer get blocked by stale active sessions.",
-  "Refined shared post cards in chat so incoming post previews look cleaner and more compact.",
-  "Switched music search to Jamendo-backed results only.",
-  "Fixed attached-audio uploads so more picked MP3, M4A, AAC, WAV, and OGG files survive upload and reach the trim flow.",
-  "Returned richer music playback fields from the catalog so feed posts, stories, and swipes can attach playable tracks more consistently.",
-  "Updated the release summary to call out Jamendo royalty-free streaming, artist credit visibility, and the lack of in-app music downloading.",
+  "Fixed a live music catalog regression that could fail the picker instead of returning the latest playable tracks.",
+  "Fixed version drift where the feed sidebar could still show the old v0.0.1 label after newer releases had already shipped.",
+  "Refreshed Firebase Android configuration for the current release certificate so Google-services-backed flows stay in sync with the production build.",
+  "Improved Jamendo-backed track parsing so catalog responses return safer playback URLs, track titles, and artist details more consistently.",
+  "Kept the latest public APK and the matching versioned Android bundle delivery paths aligned for release and verification workflows.",
+  "Preserved attached-audio metadata more reliably across create-post, story, and swipe publishing.",
+  "Reduced false generic network errors during video publishing by keeping backup backend retry behavior in place.",
+  "Improved attached-audio acceptance for common MP3, M4A, AAC, WAV, and OGG uploads before trim and publish.",
+  "Returned richer playback fields from the music catalog so published posts, stories, and swipes can resolve selected tracks more consistently.",
+  "Refreshed in-app release-note copy so the current build, settings version, and release summary all stay aligned.",
 ];
 
 export const APP_UPCOMING_CHANGES = [
@@ -87,5 +73,5 @@ export const APP_UPCOMING_CHANGES = [
   "Expanded creator tooling for richer live moderation, better seller promo surfaces, and stronger review queues.",
   "A fuller historical release archive so each version can be reviewed directly inside the app.",
   "Optional upload previews before publishing completes, plus richer review tools.",
-  "More visible royalty-free music credit cues across music pickers and playback surfaces.",
+  "More visible music-source credit cues and playback context across pickers and published media surfaces.",
 ];

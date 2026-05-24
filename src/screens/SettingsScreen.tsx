@@ -408,6 +408,12 @@ const SettingsScreen = ({ navigation }: any) => {
               onPress: () => navigation.navigate("PrivacyPolicyScreen"),
             })}
             {renderActionRow({
+              title: "Child Safety Standards",
+              hint: "Read our zero-tolerance policy for child safety and abuse prevention",
+              icon: "shield-checkmark-outline",
+              onPress: () => navigation.navigate("ChildSafetyScreen"),
+            })}
+            {renderActionRow({
               title: "Release notes",
               hint: `Version ${APP_VERSION}`,
               icon: "sparkles-outline",

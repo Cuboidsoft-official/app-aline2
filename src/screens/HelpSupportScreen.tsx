@@ -95,6 +95,21 @@ const HelpSupportScreen = ({ navigation }: any) => {
             <Text style={[styles.helper, { color: colors.mutedText }]}>
               Use this form for login problems, profile issues, publishing bugs, payments, or anything blocking your account.
             </Text>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={[styles.infoCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => navigation.navigate("ChildSafetyScreen")}
+            >
+              <View style={[styles.infoIcon, { backgroundColor: `${colors.primary}14` }]}>
+                <Icon name="shield-checkmark-outline" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.infoCopy}>
+                <Text style={[styles.infoTitle, { color: colors.text }]}>Child safety concerns</Text>
+                <Text style={[styles.infoHint, { color: colors.mutedText }]}>
+                  Open our child safety standards and contact path for urgent abuse or minor-safety reporting.
+                </Text>
+              </View>
+            </TouchableOpacity>
             {supportEmail ? (
               <Text style={[styles.helper, { color: colors.mutedText }]}>Support inbox: {supportEmail}</Text>
             ) : null}
@@ -192,6 +207,35 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: "700" },
   helper: { marginTop: 8, fontSize: 13, lineHeight: 19 },
+  infoCard: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  infoIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  infoCopy: {
+    flex: 1,
+  },
+  infoTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  infoHint: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   label: { marginTop: 18, marginBottom: 8, fontSize: 14, fontWeight: "600" },
   input: {
     borderWidth: 1,

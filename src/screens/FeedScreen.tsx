@@ -49,6 +49,7 @@ import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
 import { downloadImageAsset } from "../utils/mediaDownload";
 import { connectSocket, socket } from "../socket";
 import { listLiveStreams } from "../utils/liveStreamApi";
+import { APP_RELEASE_DATE, APP_VERSION } from "../config/appMeta";
 
 let ColorMatrix: any;
 try {
@@ -2550,7 +2551,9 @@ function FeedScreen({ navigation, route }: any) {
             <View style={[styles.sidebarReleaseCard, { borderColor: colors.border, backgroundColor: colors.surface }]}>
               <View style={styles.sidebarReleaseCopy}>
                 <Text style={[styles.sidebarReleaseLabel, { color: colors.mutedText }]}>App version</Text>
-                <Text style={[styles.sidebarReleaseValue, { color: colors.text }]}>v0.0.1 • April 21, 2026</Text>
+                <Text style={[styles.sidebarReleaseValue, { color: colors.text }]}>
+                  {`v${APP_VERSION} • ${APP_RELEASE_DATE}`}
+                </Text>
               </View>
               <TouchableOpacity
                 style={[styles.sidebarReleaseButton, { backgroundColor: feedAccentSoft }]}

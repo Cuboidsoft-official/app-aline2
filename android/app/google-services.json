@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "1028646610739",
-    "project_id": "aline2-80d8c",
-    "storage_bucket": "aline2-80d8c.firebasestorage.app"
+    "project_number": "85652178007",
+    "project_id": "aline2-80d8c-b5be1",
+    "storage_bucket": "aline2-80d8c-b5be1.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1028646610739:android:2265ccbad44adf0e2a4046",
+        "mobilesdk_app_id": "1:85652178007:android:d0537064548ff4c4760f12",
         "android_client_info": {
           "package_name": "com.aline2"
         }
@@ -15,26 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBkKSWHrBdyKcMwiudONI0p6S-OGFmWc1E"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:1028646610739:android:af643ed3479508de2a4046",
-        "android_client_info": {
-          "package_name": "com.aline2.debug"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyBkKSWHrBdyKcMwiudONI0p6S-OGFmWc1E"
+          "current_key": "AIzaSyANpEjmGzvJO7t-IHk1iZZEsPyDPckN9VM"
         }
       ],
       "services": {
