@@ -14,13 +14,19 @@ import {
 } from "react-native";
 import { Alert } from "../../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
+import { useNavigation } from "@react-navigation/native";
+import { API } from "../../../api/api";
+import MentionSuggestionList from "../../../components/MentionSuggestionList";
 
 import CommentAudioBubble from "./CommentAudioBubble";
+import InteractiveText from "./InteractiveText";
 import { socialApi } from "../socialApi";
 import { Comment, CommentAudioFile, SwipeComment } from "../types";
 import { toUserSafeMessage } from "../validation";
 import VoiceRecorderButton from "../../../components/chat/VoiceRecorderButton";
 import { normalizeMediaUrl } from "../../../utils/mediaUrls";
+import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../../../utils/mentionComposer";
+import { resolveMentionUserId } from "../../../utils/mentionLinks";
 
 type ThreadComment = Comment | SwipeComment;
 type ThreadContentType = "post" | "swipe";
@@ -50,13 +56,59 @@ function CommentThreadSheet({
   onClose,
   onCommentUpdate,
 }: CommentThreadSheetProps) {
+  const navigation = useNavigation<any>();
   const [replies, setReplies] = useState<Comment[]>([]);
   const [draft, setDraft] = useState("");
+  const [mentionSuggestions, setMentionSuggestions] = useState<MentionCandidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
   const [threadComment, setThreadComment] = useState<ThreadComment | null>(comment);
+  const [pendingVoice, setPendingVoice] = useState<CommentAudioFile | null>(null);
+  const mentionQuery = getActiveMentionQuery(draft);
+
+  useEffect(() => {
+    if (mentionQuery === null) {
+      setMentionSuggestions([]);
+      return;
+    }
+
+    let mounted = true;
+    const query = mentionQuery.trim();
+
+    const loadMentions = async () => {
+      try {
+        const response = query
+          ? await API.get("/auth/search", { params: { query } })
+          : await API.get("/search/suggested/users", { params: { limit: 8 } });
+        const users = Array.isArray(response?.data?.users) ? response.data.users : [];
+        if (mounted) {
+          setMentionSuggestions(users.map(mapMentionCandidate).filter(Boolean) as MentionCandidate[]);
+        }
+      } catch {
+        if (mounted) {
+          setMentionSuggestions([]);
+        }
+      }
+    };
+
+    const timeout = setTimeout(() => {
+      loadMentions().catch(() => undefined);
+    }, query ? 180 : 0);
+
+    return () => {
+      mounted = false;
+      clearTimeout(timeout);
+    };
+  }, [mentionQuery]);
+
+  const openMentionProfile = async (username: string) => {
+    const userId = await resolveMentionUserId(username);
+    if (userId) {
+      navigation.navigate("ProfilePreviewScreen", { userId });
+    }
+  };
 
   useEffect(() => {
     setThreadComment(comment);
@@ -79,6 +131,7 @@ function CommentThreadSheet({
       setRefreshing(false);
       setSubmitting(false);
       setBusyIds({});
+      setPendingVoice(null);
       return;
     }
 
@@ -153,6 +206,7 @@ function CommentThreadSheet({
         replyCount: (current.replyCount || 0) + 1,
       }));
       setDraft("");
+      setPendingVoice(null);
     } catch (error) {
       Alert.alert("Could not send reply", toUserSafeMessage(error));
     } finally {
@@ -239,7 +293,16 @@ function CommentThreadSheet({
                   <Text style={styles.username}>@{threadComment.user.username}</Text>
                   <Text style={styles.time}>{formatAgo(threadComment.createdAt)}</Text>
                 </View>
-                {threadComment.text ? <Text style={styles.replyText}>{threadComment.text}</Text> : null}
+                {threadComment.text ? (
+                  <InteractiveText
+                    style={styles.replyText}
+                    mentionStyle={styles.mentionText}
+                    onPressMention={(mention) => {
+                      openMentionProfile(mention).catch(() => undefined);
+                    }}
+                    text={threadComment.text}
+                  />
+                ) : null}
                 {threadComment.audioUrl ? (
                   <CommentAudioBubble audioUrl={threadComment.audioUrl} audioDuration={threadComment.audioDuration} />
                 ) : null}
@@ -265,7 +328,16 @@ function CommentThreadSheet({
                       <Text style={styles.username}>@{item.user.username}</Text>
                       <Text style={styles.time}>{formatAgo(item.createdAt)}</Text>
                     </View>
-                    {item.text ? <Text style={styles.replyText}>{item.text}</Text> : null}
+                    {item.text ? (
+                      <InteractiveText
+                        style={styles.replyText}
+                        mentionStyle={styles.mentionText}
+                        onPressMention={(mention) => {
+                          openMentionProfile(mention).catch(() => undefined);
+                        }}
+                        text={item.text}
+                      />
+                    ) : null}
                     {item.audioUrl ? (
                       <CommentAudioBubble audioUrl={item.audioUrl} audioDuration={item.audioDuration} />
                     ) : null}
@@ -289,26 +361,51 @@ function CommentThreadSheet({
             />
           )}
 
+          <MentionSuggestionList
+            visible={mentionQuery !== null}
+            candidates={mentionSuggestions}
+            onSelect={(candidate) => {
+              setDraft((current) => insertMentionAtCursorEnd(current, candidate.username));
+              setMentionSuggestions([]);
+            }}
+          />
           <View style={styles.composer}>
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Write a reply..."
-              placeholderTextColor="#8a8a8a"
-              style={styles.input}
-            />
-            <TouchableOpacity disabled={!draft.trim() || submitting} onPress={onSubmit}>
-              <Text style={[styles.sendText, (!draft.trim() || submitting) && styles.sendTextDisabled]}>Reply</Text>
-            </TouchableOpacity>
-            <VoiceRecorderButton
-              color="#3345d1"
-              disabled={submitting}
-              onSend={(voiceFile) => {
-                submitReply(voiceFile).catch((error) => {
-                  Alert.alert("Could not send voice reply", toUserSafeMessage(error));
-                });
-              }}
-            />
+            {!pendingVoice ? (
+              <TextInput
+                value={draft}
+                onChangeText={setDraft}
+                placeholder="Write a reply..."
+                placeholderTextColor="#8a8a8a"
+                style={styles.input}
+              />
+            ) : null}
+            {pendingVoice ? (
+              <View style={styles.voicePreviewWrap}>
+                <CommentAudioBubble audioUrl={pendingVoice.uri} audioDuration={pendingVoice.duration} />
+                <TouchableOpacity style={styles.voiceDeleteButton} onPress={() => setPendingVoice(null)} disabled={submitting}>
+                  <Icon name="close-circle" size={22} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            {draft.trim() || pendingVoice ? (
+              <TouchableOpacity
+                style={styles.sendIconButton}
+                disabled={submitting}
+                onPress={() => {
+                  submitReply(pendingVoice || undefined).catch((error) => {
+                    Alert.alert("Could not send voice reply", toUserSafeMessage(error));
+                  });
+                }}
+              >
+                <Icon name="send" size={17} color="#fff" />
+              </TouchableOpacity>
+            ) : (
+              <VoiceRecorderButton
+                color="#3345d1"
+                disabled={submitting}
+                onSend={(voiceFile) => setPendingVoice(voiceFile)}
+              />
+            )}
           </View>
         </View>
       </View>
@@ -363,6 +460,7 @@ const styles = StyleSheet.create({
   username: { fontWeight: "700", color: "#111", fontSize: 13.5 },
   time: { marginLeft: 8, color: "#7a7a7a", fontSize: 11.5 },
   replyText: { color: "#1f1f1f", marginTop: 2, lineHeight: 19 },
+  mentionText: { color: "#3345d1", fontWeight: "800" },
   parentMeta: { color: "#6b7280", marginTop: 8, fontSize: 12.5, fontWeight: "600" },
   actionRow: { flexDirection: "row", alignItems: "center", marginTop: 6, flexWrap: "wrap" },
   actionText: { color: "#444", fontWeight: "600", marginRight: 14, fontSize: 12.5, marginBottom: 4 },
@@ -381,6 +479,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
   },
   input: {
     flex: 1,
@@ -390,6 +489,27 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     paddingHorizontal: 14,
     color: "#111",
+  },
+  sendIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#3345d1",
+  },
+  voicePreviewWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  voiceDeleteButton: {
+    width: 30,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
   },
   sendText: { color: "#3345d1", fontWeight: "700", fontSize: 14, paddingHorizontal: 12 },
   sendTextDisabled: { color: "#9ca3af" },

@@ -65,6 +65,15 @@ const formatMinutesLabel = (minutes = 0) => {
   });
 };
 
+const getSummaryTotal = (summary: any, amountKey: string, totalsKey: string) => {
+  const totals = Array.isArray(summary?.[totalsKey]) ? summary[totalsKey] : [];
+  if (totals.length) {
+    return totals.reduce((sum: number, item: any) => sum + (Number(item?.amount) || 0), 0);
+  }
+
+  return Number(summary?.[amountKey]) || 0;
+};
+
 const buildAvailabilityPreview = (seller: any) => {
   const weeklyAvailability = Array.isArray(seller?.weeklyAvailability) ? seller.weeklyAvailability : [];
   const enabledDays = weeklyAvailability
@@ -258,6 +267,16 @@ const fetchRequestData = useCallback(async () => {
 
   const availabilityPreview = buildAvailabilityPreview(seller);
   const isCompactLayout = width < 380;
+  const pendingPayoutAmount = getSummaryTotal(
+    requestSummary,
+    "settlementPendingAmount",
+    "settlementPendingAmountByCurrency",
+  );
+  const paidSellerAmount = getSummaryTotal(requestSummary, "paidAmount", "paidAmountByCurrency");
+  const sellerRevenueKey = pendingPayoutAmount > 0 ? "settlementPending" : paidSellerAmount > 0 ? "paid" : "completed";
+  const dashboardRevenueKey = productFlags.sellerMonetizationInConsumerApp ? sellerRevenueKey : "completed";
+  const sellerRevenueTitle = pendingPayoutAmount > 0 ? "Pending Payout" : "Seller Earnings";
+  const sellerRevenueHint = pendingPayoutAmount > 0 ? "2-day hold active" : "80% seller share";
   const heroStatusColor = seller?.availabilityStatus ? "#22C55E" : "#F59E0B";
   const heroStatusLabel = seller?.availabilityStatus ? "I am In" : "I am Out";
   const heroStatusCopy = seller?.availabilityStatus
@@ -489,12 +508,15 @@ const fetchRequestData = useCallback(async () => {
             <View>
               <Text style={[styles.walletEyebrow, { color: colors.mutedText }]}>Revenue snapshot</Text>
               <Text style={[styles.walletTitle, { color: colors.text }]}>
-                {productFlags.sellerMonetizationInConsumerApp ? "Seller Wallet" : "Completed Request Value"}
+                {productFlags.sellerMonetizationInConsumerApp ? sellerRevenueTitle : "Completed Request Value"}
               </Text>
+              {productFlags.sellerMonetizationInConsumerApp ? (
+                <Text style={[styles.walletHint, { color: colors.mutedText }]}>{sellerRevenueHint}</Text>
+              ) : null}
             </View>
           </View>
 
-          <Text style={[styles.walletAmount, { color: colors.text }]}>{formatSummaryAmount(requestSummary, "completed")}</Text>
+          <Text style={[styles.walletAmount, { color: colors.text }]}>{formatSummaryAmount(requestSummary, dashboardRevenueKey)}</Text>
         </View>
 
         {!productFlags.sellerMonetizationInConsumerApp ? (
@@ -1017,6 +1039,11 @@ const styles = StyleSheet.create({
   walletTitle: {
     fontWeight: "600",
     color: "#111"
+  },
+  walletHint: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: "700",
   },
 
   walletAmount: {

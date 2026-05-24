@@ -42,6 +42,37 @@ const normalizeUploadUri = (value) => {
   return rawValue;
 };
 
+const getExtensionForMimeType = (mimeType = "") => {
+  const normalizedMimeType = String(mimeType || "").trim().toLowerCase();
+  if (normalizedMimeType.includes("jpeg")) return ".jpg";
+  if (normalizedMimeType.includes("png")) return ".png";
+  if (normalizedMimeType.includes("gif")) return ".gif";
+  if (normalizedMimeType.includes("webp")) return ".webp";
+  if (normalizedMimeType.includes("mp4")) return ".mp4";
+  if (normalizedMimeType.includes("quicktime")) return ".mov";
+  if (normalizedMimeType.includes("webm")) return ".webm";
+  if (normalizedMimeType.includes("mpeg")) return ".mp3";
+  if (normalizedMimeType.includes("wav")) return ".wav";
+  if (normalizedMimeType.includes("aac")) return ".aac";
+  if (normalizedMimeType.includes("ogg")) return ".ogg";
+  return "";
+};
+
+const ensureFileNameExtension = (name = "", mimeType = "") => {
+  const cleanName = String(name || "").trim();
+  const extension = getExtensionForMimeType(mimeType);
+
+  if (!cleanName) {
+    return `upload_${Date.now()}${extension}`;
+  }
+
+  if (/\.[a-z0-9]{2,5}$/i.test(cleanName) || !extension) {
+    return cleanName;
+  }
+
+  return `${cleanName}${extension}`;
+};
+
 const buildModerationBody = ({ file, mediaUrl, messageType } = {}) => {
   if (!file?.uri) {
     return {
@@ -61,7 +92,7 @@ const buildModerationBody = ({ file, mediaUrl, messageType } = {}) => {
 
   body.append("file", {
     uri: normalizeUploadUri(file.uri),
-    name: file.name || `moderation_${Date.now()}`,
+    name: ensureFileNameExtension(file.name || `moderation_${Date.now()}`, file.type),
     type: file.type || "application/octet-stream",
   });
 
@@ -100,19 +131,19 @@ const shouldBlockModerationLocally = (moderation = {}) => {
   const hentai = getNormalizedScore(scores?.hentai);
   const sexy = getNormalizedScore(scores?.sexy);
 
-  if (status === "blocked" || status === "review") {
+  if (status === "blocked") {
     return true;
   }
 
-  if (porn >= 0.42 || hentai >= 0.42 || sexy >= 0.48) {
+  if (porn >= 0.82 || hentai >= 0.82 || sexy >= 0.9) {
     return true;
   }
 
-  if ((topLabel === "porn" || topLabel === "hentai") && confidence >= 0.36) {
+  if ((topLabel === "porn" || topLabel === "hentai") && confidence >= 0.82) {
     return true;
   }
 
-  if (topLabel === "sexy" && confidence >= 0.55) {
+  if (topLabel === "sexy" && confidence >= 0.9) {
     return true;
   }
 
@@ -472,9 +503,9 @@ export const forwardChatMessage = async ({ messageId, targetConversationId } = {
 };
 
 /**
- * @param {{ conversationId?: string; text?: string; file?: { uri?: string; name?: string | null; type?: string | null }; mediaUrl?: string; messageType?: string; replyToMessageId?: string; duration?: number }} [params]
+ * @param {{ conversationId?: string; text?: string; file?: { uri?: string; name?: string | null; type?: string | null }; mediaUrl?: string; messageType?: string; replyToMessageId?: string; clientMessageId?: string; duration?: number }} [params]
  */
-export const sendChatMessage = async ({ conversationId, text, file, mediaUrl, messageType, replyToMessageId, duration } = {}) => {
+export const sendChatMessage = async ({ conversationId, text, file, mediaUrl, messageType, replyToMessageId, clientMessageId, duration } = {}) => {
   const trimmedText = String(text || "").trim();
   const normalizedReplyToMessageId = String(replyToMessageId || "").trim();
   const normalizedDuration = Number(duration);
@@ -506,6 +537,7 @@ export const sendChatMessage = async ({ conversationId, text, file, mediaUrl, me
         text: trimmedText,
         mediaUrl,
         messageType,
+        clientMessageId,
         ...replyFields,
         ...(hasDuration ? { duration: normalizedDuration } : {}),
       },
@@ -526,6 +558,10 @@ export const sendChatMessage = async ({ conversationId, text, file, mediaUrl, me
     body.append("messageType", messageType);
   }
 
+  if (clientMessageId) {
+    body.append("clientMessageId", String(clientMessageId));
+  }
+
   if (normalizedReplyToMessageId) {
     body.append("replyToMessageId", normalizedReplyToMessageId);
     body.append("replyMessageId", normalizedReplyToMessageId);
@@ -541,7 +577,7 @@ export const sendChatMessage = async ({ conversationId, text, file, mediaUrl, me
     "file",
     {
       uri: normalizeUploadUri(file.uri),
-      name: file.name || `upload_${Date.now()}`,
+      name: ensureFileNameExtension(file.name || `upload_${Date.now()}`, file.type),
       type: file.type || "application/octet-stream",
     }
   );

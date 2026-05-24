@@ -28,6 +28,7 @@ import CommentThreadSheet from "../../features/social/components/CommentThreadSh
 import InteractiveText from "../../features/social/components/InteractiveText";
 import ShareTargetsList, { ShareTarget } from "../../features/social/components/ShareTargetsList";
 import SocialVideo from "../../features/social/components/SocialVideo";
+import MentionSuggestionList from "../../components/MentionSuggestionList";
 import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, Swipe, SwipeComment } from "../../features/social/types";
 import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../../hooks/useSegmentedMusicPlayback";
@@ -38,6 +39,8 @@ import { shouldShowVerifiedBadge } from "../../utils/verificationBadges";
 import { buildSharedPostMessage } from "../../utils/chatPresentation";
 import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
 import { API } from "../../api/api";
+import { getStoredUserId } from "../../utils/authSession";
+import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../../utils/mentionComposer";
 
 const { height } = Dimensions.get("window");
 const reportReasons: ReportReason[] = [
@@ -103,6 +106,7 @@ function SwipesScreen({ navigation, route }: any) {
   const [selectedSwipe, setSelectedSwipe] = useState<Swipe | null>(null);
   const [sheetComments, setSheetComments] = useState<SwipeComment[]>([]);
   const [sheetDraft, setSheetDraft] = useState("");
+  const [sheetMentionSuggestions, setSheetMentionSuggestions] = useState<MentionCandidate[]>([]);
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetSubmitting, setSheetSubmitting] = useState(false);
   const [sheetBusyIds, setSheetBusyIds] = useState<Record<string, boolean>>({});
@@ -114,6 +118,8 @@ function SwipesScreen({ navigation, route }: any) {
   const [isSwipeSoundEnabled, setIsSwipeSoundEnabled] = useState(true);
   const [activeSwipeIndex, setActiveSwipeIndex] = useState(0);
   const [likeBurstSwipeId, setLikeBurstSwipeId] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
+  const sheetMentionQuery = getActiveMentionQuery(sheetDraft);
   const isScreenFocused = useIsFocused();
 
   const swipeTapRef = useRef<{ id: string; time: number; timeout: ReturnType<typeof setTimeout> | null }>({
@@ -123,6 +129,9 @@ function SwipesScreen({ navigation, route }: any) {
   });
   const swipeListRef = useRef<FlatList<Swipe> | null>(null);
   const activeSwipeIndexRef = useRef(0);
+  const focusedSwipeId = String(route?.params?.swipeId || "").trim();
+  const focusUserId = String(route?.params?.userId || "").trim();
+  const isFocusedSwipeFeed = Boolean(focusedSwipeId || focusUserId);
 
   const activeSwipe = swipes[activeSwipeIndex] || null;
   const nextSwipe = swipes[activeSwipeIndex + 1] || null;
@@ -135,6 +144,57 @@ function SwipesScreen({ navigation, route }: any) {
     : "";
   const isSwipePlaybackEnabled = isSwipeSoundEnabled && !activeSheet && isScreenFocused;
   const shouldPlaySwipeMusic = isSwipePlaybackEnabled && !!activeSwipeMusicUrl;
+
+  useEffect(() => {
+    if (sheetMentionQuery === null) {
+      setSheetMentionSuggestions([]);
+      return;
+    }
+
+    let mounted = true;
+    const query = sheetMentionQuery.trim();
+
+    const loadMentions = async () => {
+      try {
+        const response = query
+          ? await API.get("/auth/search", { params: { query } })
+          : await API.get("/search/suggested/users", { params: { limit: 8 } });
+        const users = Array.isArray(response?.data?.users) ? response.data.users : [];
+        if (mounted) {
+          setSheetMentionSuggestions(users.map(mapMentionCandidate).filter(Boolean) as MentionCandidate[]);
+        }
+      } catch {
+        if (mounted) {
+          setSheetMentionSuggestions([]);
+        }
+      }
+    };
+
+    const timeout = setTimeout(() => {
+      loadMentions().catch(() => undefined);
+    }, query ? 180 : 0);
+
+    return () => {
+      mounted = false;
+      clearTimeout(timeout);
+    };
+  }, [sheetMentionQuery]);
+
+  useEffect(() => {
+    let active = true;
+
+    getStoredUserId()
+      .then((userId) => {
+        if (active) {
+          setCurrentUserId(String(userId || ""));
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, []);
   useSegmentedMusicPlayback({
     rawUrl: activeSwipeRawMusicUrl,
     normalizedUrl: activeSwipeMusicUrl,
@@ -166,16 +226,14 @@ function SwipesScreen({ navigation, route }: any) {
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null; isViewable?: boolean }> }) => {
     const firstVisibleItem = viewableItems.find((entry) => entry.isViewable && typeof entry.index === "number");
     if (typeof firstVisibleItem?.index === "number") {
-      if (activeSwipeIndexRef.current !== firstVisibleItem.index) {
-        stopAllSegmentedMusicPlayback();
-      }
       activeSwipeIndexRef.current = firstVisibleItem.index;
       setActiveSwipeIndex(firstVisibleItem.index);
     }
   }).current;
 
   const stopSwipeMusicDuringScroll = useCallback(() => {
-    setActiveSwipeIndex(-1);
+    // Keep playback tied to viewability so music switches as soon as the next
+    // swipe becomes dominant instead of waiting for scroll momentum to finish.
   }, []);
 
   const isBusy = (type: "like" | "save" | "share", swipeId: string): boolean =>
@@ -191,7 +249,7 @@ function SwipesScreen({ navigation, route }: any) {
 
       const load = async () => {
         try {
-          const data = await socialApi.getSwipes();
+          const data = focusUserId ? await socialApi.getUserSwipes(focusUserId) : await socialApi.getSwipes();
           if (active) {
             setSwipes(data);
           }
@@ -207,7 +265,7 @@ function SwipesScreen({ navigation, route }: any) {
       return () => {
         active = false;
       };
-    }, []),
+    }, [focusUserId]),
   );
 
   useFocusEffect(
@@ -286,7 +344,7 @@ function SwipesScreen({ navigation, route }: any) {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      const data = await socialApi.getSwipes();
+      const data = focusUserId ? await socialApi.getUserSwipes(focusUserId) : await socialApi.getSwipes();
       setSwipes(data);
     } catch (error) {
       Alert.alert("Could not refresh swipes", toUserSafeMessage(error));
@@ -294,6 +352,31 @@ function SwipesScreen({ navigation, route }: any) {
       setRefreshing(false);
     }
   };
+
+  useEffect(() => {
+    let active = true;
+
+    const ensureFocusedSwipeVisible = async () => {
+      if (!focusedSwipeId || swipes.some((item) => item.id === focusedSwipeId)) {
+        return;
+      }
+
+      try {
+        const swipe = await socialApi.getSwipe(focusedSwipeId);
+        if (active) {
+          setSwipes((prev) => [swipe, ...prev.filter((item) => item.id !== swipe.id)]);
+        }
+      } catch (error) {
+        console.log("focused swipe lookup error:", error);
+      }
+    };
+
+    ensureFocusedSwipeVisible();
+
+    return () => {
+      active = false;
+    };
+  }, [focusedSwipeId, swipes]);
 
   const onListLayout = ({ nativeEvent }: LayoutChangeEvent) => {
     const nextHeight = Math.round(nativeEvent.layout.height);
@@ -508,6 +591,30 @@ function SwipesScreen({ navigation, route }: any) {
     }
   };
 
+  const onDeleteSwipe = () => {
+    if (!selectedSwipe) {
+      return;
+    }
+
+    const swipeId = selectedSwipe.id;
+    Alert.alert("Delete swipe", "This cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await socialApi.deleteSwipe(swipeId);
+            setSwipes((prev) => prev.filter((item) => item.id !== swipeId));
+            closeSheet();
+          } catch (error) {
+            Alert.alert("Could not delete swipe", toUserSafeMessage(error));
+          }
+        },
+      },
+    ]);
+  };
+
   const sendSwipeToSelectedChats = async () => {
     if (!selectedSwipe || !selectedShareTargets.length) {
       return;
@@ -625,7 +732,7 @@ function SwipesScreen({ navigation, route }: any) {
   }, [activeSwipeIndex, swipes.length]);
 
   useEffect(() => {
-    const targetSwipeId = String(route?.params?.swipeId || "").trim();
+    const targetSwipeId = focusedSwipeId;
     if (!targetSwipeId || !swipes.length) {
       return;
     }
@@ -639,7 +746,64 @@ function SwipesScreen({ navigation, route }: any) {
     requestAnimationFrame(() => {
       swipeListRef.current?.scrollToIndex?.({ index: targetIndex, animated: false });
     });
-  }, [route?.params?.swipeId, swipes]);
+  }, [focusedSwipeId, swipes]);
+
+  const renderSwipeStickerOverlay = (item: Swipe) => {
+    if (!item.stickers?.length) {
+      return null;
+    }
+
+    return (
+      <View pointerEvents="none" style={styles.swipeStickerLayer}>
+        {item.stickers.map((sticker) => {
+          const baseStyle = {
+            left: `${Math.max(0, Math.min(1, sticker.position.x)) * 100}%`,
+            top: `${Math.max(0, Math.min(1, sticker.position.y)) * 100}%`,
+            width: `${Math.max(0.12, Math.min(1, sticker.position.width)) * 100}%`,
+            minHeight: `${Math.max(0.08, Math.min(1, sticker.position.height)) * 100}%`,
+            transform: [
+              { rotate: `${sticker.position.rotation || 0}deg` },
+              { scale: sticker.position.scale || 1 },
+            ],
+          } as const;
+
+          if (sticker.type === "emoji") {
+            return (
+              <View key={sticker.id} style={[styles.swipeEmojiSticker, baseStyle]}>
+                <Text style={[styles.swipeEmojiStickerText, sticker.style?.fontSize ? { fontSize: sticker.style.fontSize } : null]}>
+                  {sticker.text}
+                </Text>
+              </View>
+            );
+          }
+
+          return (
+            <View
+              key={sticker.id}
+              style={[
+                styles.swipeTextSticker,
+                baseStyle,
+                sticker.style?.backgroundColor ? { backgroundColor: sticker.style.backgroundColor } : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.swipeTextStickerText,
+                  sticker.style?.color ? { color: sticker.style.color } : null,
+                  sticker.style?.fontSize ? { fontSize: sticker.style.fontSize } : null,
+                  sticker.style?.fontFamily ? { fontFamily: sticker.style.fontFamily } : null,
+                  sticker.style?.fontStyle ? { fontStyle: sticker.style.fontStyle } : null,
+                  sticker.style?.alignment ? { textAlign: sticker.style.alignment } : null,
+                ]}
+              >
+                {sticker.text}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
 
   const renderSwipe = ({ item, index }: { item: Swipe; index: number }) => {
     const isActive = index === activeSwipeIndex;
@@ -665,6 +829,7 @@ function SwipesScreen({ navigation, route }: any) {
               </Text>
             </View>
           ) : null}
+          {renderSwipeStickerOverlay(item)}
           {likeBurstSwipeId === item.id ? (
             <View pointerEvents="none" style={styles.likeBurstOverlay}>
               <Icon name="heart" size={92} color="rgba(255,255,255,0.92)" />
@@ -754,39 +919,39 @@ function SwipesScreen({ navigation, route }: any) {
                 </View>
               </View>
             </View>
+          </View>
 
-            <View style={styles.actionRail}>
-              <TouchableOpacity style={styles.actionButton} onPress={() => handleLike(item.id)}>
-                <Icon name={item.liked ? "heart" : "heart-outline"} size={28} color={item.liked ? "#ff4f73" : "#fff"} />
-                <Text style={styles.actionText}>{formatCount(item.likesCount)}</Text>
-              </TouchableOpacity>
+          <View style={[styles.actionRail, { top: Math.max(116, Math.round(viewportHeight * 0.36) - 112) }]}>
+            <TouchableOpacity style={styles.actionButton} onPress={() => handleLike(item.id)}>
+              <Icon name={item.liked ? "heart" : "heart-outline"} size={28} color={item.liked ? "#ff4f73" : "#fff"} />
+              <Text style={styles.actionText}>{formatCount(item.likesCount)}</Text>
+            </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionButton} onPress={() => openCommentsSheet(item)}>
-                <Icon name="chatbubble-outline" size={25} color="#fff" />
-                <Text style={styles.actionText}>{formatCount(item.commentsCount)}</Text>
-              </TouchableOpacity>
+            <TouchableOpacity style={styles.actionButton} onPress={() => openCommentsSheet(item)}>
+              <Icon name="chatbubble-outline" size={25} color="#fff" />
+              <Text style={styles.actionText}>{formatCount(item.commentsCount)}</Text>
+            </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionButton} onPress={() => openShareSheet(item)}>
-                <Icon name="paper-plane-outline" size={25} color="#fff" />
-                <Text style={styles.actionText}>{formatCount(item.sharesCount)}</Text>
-              </TouchableOpacity>
+            <TouchableOpacity style={styles.actionButton} onPress={() => openShareSheet(item)}>
+              <Icon name="paper-plane-outline" size={25} color="#fff" />
+              <Text style={styles.actionText}>{formatCount(item.sharesCount)}</Text>
+            </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionButton} onPress={() => setIsSwipeSoundEnabled((current) => !current)}>
-                <Icon
-                  name={isSwipePlaybackEnabled ? "volume-high-outline" : "volume-mute-outline"}
-                  size={23}
-                  color="#fff"
-                />
-              </TouchableOpacity>
+            <TouchableOpacity style={styles.actionButton} onPress={() => setIsSwipeSoundEnabled((current) => !current)}>
+              <Icon
+                name={isSwipePlaybackEnabled ? "volume-high-outline" : "volume-mute-outline"}
+                size={23}
+                color="#fff"
+              />
+            </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionButton} onPress={() => handleSave(item.id)}>
-                <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={23} color="#fff" />
-              </TouchableOpacity>
+            <TouchableOpacity style={styles.actionButton} onPress={() => handleSave(item.id)}>
+              <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={23} color="#fff" />
+            </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionButton} onPress={() => openActionsSheet(item)}>
-                <Icon name="ellipsis-horizontal" size={23} color="#fff" />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={styles.actionButton} onPress={() => openActionsSheet(item)}>
+              <Icon name="ellipsis-horizontal" size={23} color="#fff" />
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -841,7 +1006,7 @@ function SwipesScreen({ navigation, route }: any) {
         }}
         onEndReachedThreshold={0.5}
         onEndReached={() => {
-          if (!loadingMore) {
+          if (!isFocusedSwipeFeed && !loadingMore) {
             setLoadingMore(true);
             socialApi.getSwipes().then((data) => {
               if (data.length > 0) {
@@ -894,7 +1059,16 @@ function SwipesScreen({ navigation, route }: any) {
                           <Text style={styles.sheetCommentUser}>@{item.user.username}</Text>
                           <Text style={styles.sheetCommentTime}>{formatAgo(item.createdAt)}</Text>
                         </View>
-                        <Text style={styles.sheetCommentText}>{item.text}</Text>
+                        {item.text ? (
+                          <InteractiveText
+                            style={styles.sheetCommentText}
+                            mentionStyle={styles.sheetCommentMention}
+                            onPressMention={(mention) => {
+                              void openMentionProfile(mention);
+                            }}
+                            text={item.text}
+                          />
+                        ) : null}
                         <View style={styles.sheetCommentActions}>
                           <TouchableOpacity onPress={() => onToggleSheetCommentLike(item.id)}>
                             <Text style={styles.sheetCommentAction}>{item.liked ? "Unlike" : "Like"}</Text>
@@ -921,7 +1095,15 @@ function SwipesScreen({ navigation, route }: any) {
                   ListEmptyComponent={<Text style={styles.emptySheetText}>No comments yet.</Text>}
                 />
               )}
-              <View style={styles.sheetComposer}>
+                <MentionSuggestionList
+                  visible={sheetMentionQuery !== null}
+                  candidates={sheetMentionSuggestions}
+                  onSelect={(candidate) => {
+                    setSheetDraft((current) => insertMentionAtCursorEnd(current, candidate.username));
+                    setSheetMentionSuggestions([]);
+                  }}
+                />
+                <View style={styles.sheetComposer}>
                 <TextInput
                   value={sheetDraft}
                   onChangeText={setSheetDraft}
@@ -1018,43 +1200,52 @@ function SwipesScreen({ navigation, route }: any) {
                   <Icon name="close" size={20} color="#111" />
                 </TouchableOpacity>
               </View>
-              <TouchableOpacity style={styles.shareAction} onPress={onMarkSwipeNotInterested}>
-                <Icon name="eye-off-outline" size={20} color="#111" />
-                <Text style={styles.shareActionText}>Not interested</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.shareAction} onPress={onMuteSwipeUser}>
-                <Icon name="volume-mute-outline" size={20} color="#111" />
-                <Text style={styles.shareActionText}>Mute @{selectedSwipe.user.username}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.shareAction} onPress={onBlockSwipeUser}>
-                <Icon name="ban-outline" size={20} color="#b91c1c" />
-                <Text style={[styles.shareActionText, styles.dangerText]}>Block @{selectedSwipe.user.username}</Text>
-              </TouchableOpacity>
-              <Text style={styles.reportTitle}>Report swipe</Text>
-              <View style={styles.reasonWrap}>
-                {reportReasons.map((reason) => (
-                  <TouchableOpacity
-                    key={reason}
-                    style={[styles.reasonPill, selectedReason === reason && styles.reasonPillSelected]}
-                    onPress={() => setSelectedReason(reason)}
-                  >
-                    <Text style={[styles.reasonText, selectedReason === reason && styles.reasonTextSelected]}>
-                      {reason.replace("_", " ")}
-                    </Text>
+              {String(selectedSwipe.user.id) === String(currentUserId) ? (
+                <TouchableOpacity style={styles.shareAction} onPress={onDeleteSwipe}>
+                  <Icon name="trash-outline" size={20} color="#b91c1c" />
+                  <Text style={[styles.shareActionText, styles.dangerText]}>Delete swipe</Text>
+                </TouchableOpacity>
+              ) : (
+                <>
+                  <TouchableOpacity style={styles.shareAction} onPress={onMarkSwipeNotInterested}>
+                    <Icon name="eye-off-outline" size={20} color="#111" />
+                    <Text style={styles.shareActionText}>Not interested</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-              <TextInput
-                style={styles.reportInput}
-                value={reportNote}
-                onChangeText={setReportNote}
-                placeholder="Additional context (optional)"
-                placeholderTextColor="#8a8a8a"
-                multiline
-              />
-              <TouchableOpacity style={styles.reportButton} onPress={onReportSwipe}>
-                <Text style={styles.reportButtonText}>Submit report</Text>
-              </TouchableOpacity>
+                  <TouchableOpacity style={styles.shareAction} onPress={onMuteSwipeUser}>
+                    <Icon name="volume-mute-outline" size={20} color="#111" />
+                    <Text style={styles.shareActionText}>Mute @{selectedSwipe.user.username}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.shareAction} onPress={onBlockSwipeUser}>
+                    <Icon name="ban-outline" size={20} color="#b91c1c" />
+                    <Text style={[styles.shareActionText, styles.dangerText]}>Block @{selectedSwipe.user.username}</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.reportTitle}>Report swipe</Text>
+                  <View style={styles.reasonWrap}>
+                    {reportReasons.map((reason) => (
+                      <TouchableOpacity
+                        key={reason}
+                        style={[styles.reasonPill, selectedReason === reason && styles.reasonPillSelected]}
+                        onPress={() => setSelectedReason(reason)}
+                      >
+                        <Text style={[styles.reasonText, selectedReason === reason && styles.reasonTextSelected]}>
+                          {reason.replace("_", " ")}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <TextInput
+                    style={styles.reportInput}
+                    value={reportNote}
+                    onChangeText={setReportNote}
+                    placeholder="Additional context (optional)"
+                    placeholderTextColor="#8a8a8a"
+                    multiline
+                  />
+                  <TouchableOpacity style={styles.reportButton} onPress={onReportSwipe}>
+                    <Text style={styles.reportButtonText}>Submit report</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </ScrollView>
           ) : null}
         </View>
@@ -1169,6 +1360,30 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#000" },
   swipeItem: { justifyContent: "flex-end", backgroundColor: "#121212" },
   swipeMedia: { ...StyleSheet.absoluteFillObject },
+  swipeStickerLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  swipeEmojiSticker: {
+    position: "absolute",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  swipeEmojiStickerText: {
+    fontSize: 24,
+  },
+  swipeTextSticker: {
+    position: "absolute",
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: "rgba(15,23,42,0.58)",
+  },
+  swipeTextStickerText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "800",
+    textAlign: "center",
+  },
   likeBurstOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
@@ -1278,17 +1493,22 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   reelMetaText: { color: "#fff", marginLeft: 5, fontSize: 11.5, fontWeight: "800" },
-  actionRail: { alignItems: "center", marginBottom: 6 },
+  actionRail: {
+    position: "absolute",
+    right: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
   actionButton: {
     alignItems: "center",
-    marginBottom: 14,
-    minWidth: 48,
+    width: 46,
     minHeight: 48,
-    borderRadius: 24,
+    borderRadius: 23,
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.28)",
+    backgroundColor: "rgba(0,0,0,0.34)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
+    borderColor: "rgba(255,255,255,0.18)",
   },
   actionText: { color: "#fff", fontSize: 11.5, marginTop: 3, fontWeight: "800" },
   sheetBackdrop: {
@@ -1353,6 +1573,7 @@ const styles = StyleSheet.create({
   sheetCommentUser: { fontWeight: "700", color: "#111827", fontSize: 13.5 },
   sheetCommentTime: { marginLeft: 8, color: "#6b7280", fontSize: 11.5 },
   sheetCommentText: { marginTop: 2, color: "#111827", lineHeight: 19 },
+  sheetCommentMention: { color: "#2563eb", fontWeight: "800" },
   sheetCommentActions: { flexDirection: "row", alignItems: "center", marginTop: 6 },
   sheetCommentAction: { color: "#4b5563", fontWeight: "600", marginRight: 14, fontSize: 12.5 },
   sheetCommentDelete: { color: "#b91c1c" },

@@ -23,6 +23,7 @@ import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
+import { openPostInFeed, openSwipeInSwipes } from "../utils/socialNavigation";
 
 type ProfilePreviewPost = {
  _id: string;
@@ -387,7 +388,13 @@ const renderPost = ({ item }: { item: any }) => (
  <TouchableOpacity
   activeOpacity={0.9}
   style={[styles.postCard, { width: postCardSize }]}
-  onPress={() => navigation.navigate("PostDetail", { postId: item._id })}
+  onPress={() => {
+   if (isReelPost(item)) {
+    openSwipeInSwipes(navigation, { swipeId: item._id, userId });
+    return;
+   }
+   openPostInFeed(navigation, { postId: item._id, userId });
+  }}
  >
   {getPostPreviewUrl(item) ? (
    <Image

@@ -72,11 +72,15 @@ def hasReleaseSigning =
 def isReleaseBuildRequested = gradle.startParameter.taskNames.any { taskName ->
         taskName?.toLowerCase()?.contains('release')
 }
+def isDebugBuildRequested = gradle.startParameter.taskNames.any { taskName ->
+        taskName?.toLowerCase()?.contains('debug')
+}
 def isBundleBuildRequested = gradle.startParameter.taskNames.any { taskName ->
         taskName?.toLowerCase()?.contains('bundle')
 }
 def disableAbiSplitsForThisBuild =
         (project.findProperty("aline2DisableAbiSplits")?.toString()?.toBoolean() ?: false) ||
+        isDebugBuildRequested ||
         isBundleBuildRequested
 
 if (isReleaseBuildRequested && !hasReleaseSigning) {

@@ -28,7 +28,7 @@ const reportReasons: ReportReason[] = [
   "other",
 ];
 
-type ActionKind = "archive" | "not_interested" | "mute" | "block" | "report";
+type ActionKind = "archive" | "delete" | "not_interested" | "mute" | "block" | "report";
 
 interface ContentActionSheetProps {
   visible: boolean;
@@ -102,6 +102,20 @@ function ContentActionSheet({
     }
   };
 
+  const confirmDelete = () => {
+    const label = contentType === "swipe" || contentType === "reel" ? "swipe" : contentType;
+    Alert.alert(`Delete ${label}`, "This cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          runAction("delete", () => socialApi.deletePost(contentId)).catch(() => undefined);
+        },
+      },
+    ]);
+  };
+
   const displayTitle =
     title || (contentType === "story" ? "Story options" : contentType === "swipe" ? "Swipe options" : "Post options");
   const isOwner = !!userId && !!currentUserId && String(userId) === String(currentUserId);
@@ -118,15 +132,26 @@ function ContentActionSheet({
         </View>
 
         {isOwner && contentType === "post" ? (
-          <TouchableOpacity
-            style={[styles.actionRow, { borderColor: colors.border }]}
-            disabled={!!busyAction}
-            onPress={() => runAction("archive", () => socialApi.archivePost(contentId))}
-          >
-            <Icon name="archive-outline" size={20} color={colors.text} />
-            <Text style={[styles.actionText, { color: colors.text }]}>Archive post</Text>
-            {busyAction === "archive" ? <ActivityIndicator size="small" color={colors.text} /> : null}
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              style={[styles.actionRow, { borderColor: colors.border }]}
+              disabled={!!busyAction}
+              onPress={() => runAction("archive", () => socialApi.archivePost(contentId))}
+            >
+              <Icon name="archive-outline" size={20} color={colors.text} />
+              <Text style={[styles.actionText, { color: colors.text }]}>Archive post</Text>
+              {busyAction === "archive" ? <ActivityIndicator size="small" color={colors.text} /> : null}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionRow, { borderColor: colors.border }]}
+              disabled={!!busyAction}
+              onPress={confirmDelete}
+            >
+              <Icon name="trash-outline" size={20} color="#b91c1c" />
+              <Text style={[styles.actionText, styles.dangerText]}>Delete post</Text>
+              {busyAction === "delete" ? <ActivityIndicator size="small" color="#b91c1c" /> : null}
+            </TouchableOpacity>
+          </>
         ) : (
           <>
             <TouchableOpacity

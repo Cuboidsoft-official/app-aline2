@@ -10,9 +10,14 @@ import {
   View
 } from "react-native";
 import { Alert } from "../../../utils/appAlert";
+import Icon from "react-native-vector-icons/Ionicons";
+import { useNavigation } from "@react-navigation/native";
+import { API } from "../../../api/api";
+import MentionSuggestionList from "../../../components/MentionSuggestionList";
 
 import CommentThreadSheet from "./CommentThreadSheet";
 import CommentAudioBubble from "./CommentAudioBubble";
+import InteractiveText from "./InteractiveText";
 import { socialApi } from "../socialApi";
 import { Comment, CommentAudioFile, Post } from "../types";
 import { toUserSafeMessage } from "../validation";
@@ -20,6 +25,8 @@ import VoiceRecorderButton from "../../../components/chat/VoiceRecorderButton";
 import { normalizeMediaUrl } from "../../../utils/mediaUrls";
 import { useAppTheme } from "../../../theme/AppThemeContext";
 import DraggableBottomSheet from "../../../components/DraggableBottomSheet";
+import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../../../utils/mentionComposer";
+import { resolveMentionUserId } from "../../../utils/mentionLinks";
 
 const formatAgo = (timestamp: number): string => {
   const mins = Math.max(1, Math.floor((Date.now() - timestamp) / (1000 * 60)));
@@ -47,12 +54,15 @@ function PostCommentsSheet({
   showOpenFull = true,
 }: PostCommentsSheetProps) {
   const { colors, isDarkMode } = useAppTheme();
+  const navigation = useNavigation<any>();
   const [comments, setComments] = useState<Comment[]>([]);
   const [draft, setDraft] = useState("");
+  const [mentionSuggestions, setMentionSuggestions] = useState<MentionCandidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
   const [threadComment, setThreadComment] = useState<Comment | null>(null);
+  const [pendingVoice, setPendingVoice] = useState<CommentAudioFile | null>(null);
 
   useEffect(() => {
     if (!visible || !post) {
@@ -62,6 +72,7 @@ function PostCommentsSheet({
       setSubmitting(false);
       setBusyIds({});
       setThreadComment(null);
+      setPendingVoice(null);
       return;
     }
 
@@ -92,6 +103,49 @@ function PostCommentsSheet({
   }, [post, visible]);
 
   const commentsDisabled = !!post?.settings.disableComments;
+  const mentionQuery = getActiveMentionQuery(draft);
+
+  useEffect(() => {
+    if (mentionQuery === null) {
+      setMentionSuggestions([]);
+      return;
+    }
+
+    let mounted = true;
+    const query = mentionQuery.trim();
+
+    const loadMentions = async () => {
+      try {
+        const response = query
+          ? await API.get("/auth/search", { params: { query } })
+          : await API.get("/search/suggested/users", { params: { limit: 8 } });
+        const users = Array.isArray(response?.data?.users) ? response.data.users : [];
+        if (mounted) {
+          setMentionSuggestions(users.map(mapMentionCandidate).filter(Boolean) as MentionCandidate[]);
+        }
+      } catch {
+        if (mounted) {
+          setMentionSuggestions([]);
+        }
+      }
+    };
+
+    const timeout = setTimeout(() => {
+      loadMentions().catch(() => undefined);
+    }, query ? 180 : 0);
+
+    return () => {
+      mounted = false;
+      clearTimeout(timeout);
+    };
+  }, [mentionQuery]);
+
+  const openMentionProfile = async (username: string) => {
+    const userId = await resolveMentionUserId(username);
+    if (userId) {
+      navigation.navigate("ProfilePreviewScreen", { userId });
+    }
+  };
 
   const submitComment = async (audioFile?: CommentAudioFile) => {
     if (!post || submitting) {
@@ -113,6 +167,7 @@ function PostCommentsSheet({
       setComments((prev) => [added, ...prev]);
       onPostUpdate({ ...post, commentsCount: post.commentsCount + 1 });
       setDraft("");
+      setPendingVoice(null);
     } catch (error) {
       Alert.alert("Could not comment", toUserSafeMessage(error));
     } finally {
@@ -208,7 +263,16 @@ function PostCommentsSheet({
                     <Text style={[styles.username, { color: colors.text }]}>@{item.user.username}</Text>
                     <Text style={[styles.time, { color: colors.mutedText }]}>{formatAgo(item.createdAt)}</Text>
                   </View>
-                  {item.text ? <Text style={[styles.commentText, { color: colors.text }]}>{item.text}</Text> : null}
+                  {item.text ? (
+                    <InteractiveText
+                      style={[styles.commentText, { color: colors.text }]}
+                      mentionStyle={{ color: colors.primary, fontWeight: "800" }}
+                      onPressMention={(mention) => {
+                        openMentionProfile(mention).catch(() => undefined);
+                      }}
+                      text={item.text}
+                    />
+                  ) : null}
                   {item.audioUrl ? (
                     <CommentAudioBubble audioUrl={item.audioUrl} audioDuration={item.audioDuration} />
                   ) : null}
@@ -248,34 +312,61 @@ function PostCommentsSheet({
             <Text style={[styles.disabledComposerText, { color: colors.mutedText }]}>Comments are turned off for this post.</Text>
           </View>
         ) : (
+          <>
+          <MentionSuggestionList
+            visible={mentionQuery !== null}
+            candidates={mentionSuggestions}
+            onSelect={(candidate) => {
+              setDraft((current) => insertMentionAtCursorEnd(current, candidate.username));
+              setMentionSuggestions([]);
+            }}
+          />
           <View style={[styles.composer, { borderColor: colors.border }]}>
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Add a comment..."
-              placeholderTextColor={colors.placeholder}
-              style={[
-                styles.input,
-                {
-                  color: colors.text,
-                  borderColor: colors.border,
-                  backgroundColor: isDarkMode ? colors.input : colors.surface,
-                },
-              ]}
-            />
-            <TouchableOpacity disabled={!draft.trim() || submitting} onPress={onSubmit}>
-              <Text style={[styles.sendText, { color: colors.primary }, (!draft.trim() || submitting) && styles.sendTextDisabled]}>Post</Text>
-            </TouchableOpacity>
-            <VoiceRecorderButton
-              color={colors.primary}
-              disabled={submitting}
-              onSend={(voiceFile) => {
-                submitComment(voiceFile).catch((error) => {
-                  Alert.alert("Could not send voice comment", toUserSafeMessage(error));
-                });
-              }}
-            />
+            {!pendingVoice ? (
+              <TextInput
+                value={draft}
+                onChangeText={setDraft}
+                placeholder="Add a comment..."
+                placeholderTextColor={colors.placeholder}
+                style={[
+                  styles.input,
+                  {
+                    color: colors.text,
+                    borderColor: colors.border,
+                    backgroundColor: isDarkMode ? colors.input : colors.surface,
+                  },
+                ]}
+              />
+            ) : null}
+            {pendingVoice ? (
+              <View style={styles.voicePreviewWrap}>
+                <CommentAudioBubble audioUrl={pendingVoice.uri} audioDuration={pendingVoice.duration} />
+                <TouchableOpacity style={styles.voiceDeleteButton} onPress={() => setPendingVoice(null)} disabled={submitting}>
+                  <Icon name="close-circle" size={22} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            {draft.trim() || pendingVoice ? (
+              <TouchableOpacity
+                style={[styles.sendIconButton, { backgroundColor: colors.primary }]}
+                disabled={submitting}
+                onPress={() => {
+                  submitComment(pendingVoice || undefined).catch((error) => {
+                    Alert.alert("Could not send comment", toUserSafeMessage(error));
+                  });
+                }}
+              >
+                <Icon name="send" size={17} color="#fff" />
+              </TouchableOpacity>
+            ) : (
+              <VoiceRecorderButton
+                color={colors.primary}
+                disabled={submitting}
+                onSend={(voiceFile) => setPendingVoice(voiceFile)}
+              />
+            )}
           </View>
+          </>
         )}
 
         <CommentThreadSheet
@@ -320,6 +411,7 @@ const styles = StyleSheet.create({
   composer: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
     paddingTop: 10,
     paddingBottom: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -337,6 +429,26 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 13,
     fontSize: 13,
+  },
+  sendIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voicePreviewWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  voiceDeleteButton: {
+    width: 30,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
   },
   sendText: { fontWeight: "700", paddingHorizontal: 12, fontSize: 12.5 },
   sendTextDisabled: { color: "#9ca3af" },

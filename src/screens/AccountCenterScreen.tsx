@@ -24,6 +24,10 @@ type AccountCenterResponse = {
     name?: string;
     username?: string;
     isVerified?: boolean;
+    bankAccountName?: string;
+    bankAccountNumber?: string;
+    bankIfsc?: string;
+    bankName?: string;
     linkedAuth?: {
       password?: boolean;
       google?: boolean;
@@ -52,6 +56,29 @@ const formatDateTime = (value?: string) => {
   }
 
   return date.toLocaleString();
+};
+
+const buildBankSummary = (account?: {
+  bankName?: string;
+  bankAccountNumber?: string;
+}) => {
+  const bankName = String(account?.bankName || "").trim();
+  const accountNumber = String(account?.bankAccountNumber || "").trim();
+  const lastFour = accountNumber.slice(-4);
+
+  if (!bankName && !lastFour) {
+    return "Add your payout account";
+  }
+
+  if (!bankName) {
+    return `Ending in ${lastFour}`;
+  }
+
+  if (!lastFour) {
+    return bankName;
+  }
+
+  return `${bankName} - ${lastFour}`;
 };
 
 const AccountCenterScreen = ({ navigation }: any) => {
@@ -138,6 +165,8 @@ const AccountCenterScreen = ({ navigation }: any) => {
 
   const account = data.account || {};
   const sessions = data.sessions || [];
+  const hasBankAccount = !!String(account.bankAccountNumber || "").trim();
+  const bankSummary = buildBankSummary(account);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -190,6 +219,30 @@ const AccountCenterScreen = ({ navigation }: any) => {
             >
               <Text style={[styles.inlineButtonText, { color: colors.text }]}>
                 {account.linkedAuth?.password ? "Change password" : "Set password"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.row}>
+              <View style={styles.bankCopy}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Bank account setup</Text>
+                <Text style={[styles.secondaryText, { color: colors.mutedText }]}>
+                  {bankSummary}
+                  {account.bankIfsc ? ` - IFSC ${account.bankIfsc}` : ""}
+                </Text>
+              </View>
+              <Text style={[styles.badge, { color: hasBankAccount ? colors.primary : colors.mutedText }]}>
+                {hasBankAccount ? "Added" : "Not set"}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.inlineButton, { borderColor: colors.border }]}
+              onPress={() => navigation.navigate("Profile")}
+            >
+              <Text style={[styles.inlineButtonText, { color: colors.text }]}>
+                {hasBankAccount ? "Update bank account" : "Set up bank account"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -266,6 +319,7 @@ const styles = StyleSheet.create({
   secondaryText: { marginTop: 4, fontSize: 13, lineHeight: 18 },
   badge: { fontSize: 13, fontWeight: "700" },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  bankCopy: { flex: 1 },
   actionLinkDisabled: { opacity: 0.5 },
   inlineButton: {
     marginTop: 14,

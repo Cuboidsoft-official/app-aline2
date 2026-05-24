@@ -11,6 +11,8 @@ import {
   Modal,
   StatusBar,
   ActivityIndicator,
+  PermissionsAndroid,
+  NativeModules,
   Linking,
   KeyboardAvoidingView,
   Platform,
@@ -78,12 +80,17 @@ import MessageContextMenu from "../components/chat/MessageContextMenu";
 import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 import AISupportSheet from "../components/chat/AISupportSheet";
 import MessageLinkPreview from "../components/chat/MessageLinkPreview";
+import { openSharedContent } from "../utils/socialNavigation";
 import ChatLockModal from "../components/chat/ChatLockModal";
 import AppAvatar from "../components/AppAvatar";
+import DraggableBottomSheet from "../components/DraggableBottomSheet";
+import MentionSuggestionList from "../components/MentionSuggestionList";
+import InteractiveText from "../features/social/components/InteractiveText";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { showModerationBlockedSheet } from "../utils/moderationNotice";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
+import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../utils/mentionComposer";
 import {
   hasChatLockPasscode,
   isConversationLocked,
@@ -180,6 +187,7 @@ interface SubmitMessageParams {
   messageType?: string;
   duration?: number;
   replyToMessageId?: string;
+  clientMessageId?: string;
   replyToMessage?: ChatMessage | null;
 }
 
@@ -237,6 +245,101 @@ const buildLocationMessage = (query: string): string => {
   const cleanQuery = String(query || "").trim();
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanQuery)}`;
   return `${LOCATION_MESSAGE_LABEL} ${cleanQuery}\n${mapsUrl}`;
+};
+
+const buildCoordinateLocationMessage = (latitude: number, longitude: number): string => {
+  const coordinateLabel = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coordinateLabel)}`;
+  return `${LOCATION_MESSAGE_LABEL} Current location\n${mapsUrl}`;
+};
+
+const getCurrentDeviceLocation = async (): Promise<{ latitude: number; longitude: number }> => {
+  const nativeLocation = (NativeModules as any)?.AlineLocationModule;
+  if (Platform.OS === "android" && nativeLocation?.getCurrentPosition) {
+    const position = await nativeLocation.getCurrentPosition(15000);
+    return {
+      latitude: Number(position?.latitude),
+      longitude: Number(position?.longitude),
+    };
+  }
+
+  const geolocation = (globalThis as any)?.navigator?.geolocation;
+  if (!geolocation?.getCurrentPosition) {
+    throw new Error("Current location is unavailable on this device.");
+  }
+
+  const position: any = await new Promise((resolve, reject) => {
+    geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 30000,
+    });
+  });
+
+  return {
+    latitude: Number(position?.coords?.latitude),
+    longitude: Number(position?.coords?.longitude),
+  };
+};
+
+const requestAndroidLocationPermission = async (): Promise<boolean> => {
+  if (Platform.OS !== "android") {
+    return true;
+  }
+
+  const permissions = [
+    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+    PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+  ];
+  const currentStatuses = await Promise.all(
+    permissions.map((permission) => PermissionsAndroid.check(permission)),
+  );
+  if (currentStatuses.some(Boolean)) {
+    return true;
+  }
+
+  const results = await PermissionsAndroid.requestMultiple(permissions);
+  return permissions.some((permission) => results[permission] === PermissionsAndroid.RESULTS.GRANTED);
+};
+
+const getExtensionForMimeType = (mimeType = ""): string => {
+  const normalizedMimeType = String(mimeType || "").trim().toLowerCase();
+  if (normalizedMimeType.includes("jpeg")) return ".jpg";
+  if (normalizedMimeType.includes("png")) return ".png";
+  if (normalizedMimeType.includes("gif")) return ".gif";
+  if (normalizedMimeType.includes("webp")) return ".webp";
+  if (normalizedMimeType.includes("mp4")) return ".mp4";
+  if (normalizedMimeType.includes("quicktime")) return ".mov";
+  if (normalizedMimeType.includes("webm")) return ".webm";
+  return "";
+};
+
+const ensurePickedFileName = (name: string | undefined | null, fallbackBase: string, mimeType = ""): string => {
+  const cleanName = String(name || fallbackBase || `media_${Date.now()}`).trim();
+  const extension = getExtensionForMimeType(mimeType);
+
+  if (/\.[a-z0-9]{2,5}$/i.test(cleanName) || !extension) {
+    return cleanName;
+  }
+
+  return `${cleanName}${extension}`;
+};
+
+const inferPickedMimeType = (asset: any): string => {
+  const explicitType = String(asset?.type || "").trim();
+  if (explicitType) {
+    return explicitType;
+  }
+
+  const source = String(asset?.fileName || asset?.uri || "").trim().toLowerCase();
+  if (/\.(mp4|mov|webm|mkv|avi)$/.test(source)) {
+    return "video/mp4";
+  }
+  if (/\.(jpg|jpeg|png|gif|webp|heic|heif)$/.test(source)) {
+    return "image/jpeg";
+  }
+
+  return "application/octet-stream";
 };
 
 const padDatePart = (value: number): string => String(value).padStart(2, "0");
@@ -493,7 +596,8 @@ const isNearDuplicateMessage = (leftMessage: any, rightMessage: any): boolean =>
 
   const leftTimestamp = getMessageTimestamp(leftMessage);
   const rightTimestamp = getMessageTimestamp(rightMessage);
-  if (leftTimestamp && rightTimestamp && Math.abs(leftTimestamp - rightTimestamp) > 8000) {
+  const duplicateWindowMs = leftMessage?._optimistic || rightMessage?._optimistic ? 120000 : 30000;
+  if (leftTimestamp && rightTimestamp && Math.abs(leftTimestamp - rightTimestamp) > duplicateWindowMs) {
     return false;
   }
 
@@ -529,6 +633,7 @@ const buildOptimisticMessage = ({
   return {
     localId: optimisticId,
     optimisticId,
+    clientMessageId: optimisticId,
     text: String(text || "").trim(),
     messageType: resolvedMessageType,
     mediaUrl: mediaUrl || file?.uri || "",
@@ -748,6 +853,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const isGroupConversation = resolvedConversationType === "group";
   const [user, setUser] = useState<ChatUser | null>(null);
   const [text, setText] = useState("");
+  const [groupMentionCandidates, setGroupMentionCandidates] = useState<MentionCandidate[]>([]);
   const [showTools, setShowTools] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
@@ -769,6 +875,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [lockingBusy, setLockingBusy] = useState(false);
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
+  const [locatingCurrentPosition, setLocatingCurrentPosition] = useState(false);
   const [showScheduleCallComposer, setShowScheduleCallComposer] = useState(false);
   const [scheduleCallType, setScheduleCallType] = useState<"audio" | "video">("audio");
   const [scheduleCallDateTime, setScheduleCallDateTime] = useState(() => buildLocalDateTimeInputValue());
@@ -800,7 +907,12 @@ const ChatScreen = ({ navigation, route }: any) => {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textSendLockRef = useRef(false);
   const composerSendPressLockRef = useRef(false);
+  const pendingAttachmentSendLockRef = useRef(false);
   const recentOutgoingSendRef = useRef<{ key: string; timestamp: number }>({ key: "", timestamp: 0 });
+  const activeOutgoingSendKeysRef = useRef<Set<string>>(new Set());
+  const stickerSendLockRef = useRef(false);
+  const recentStickerSendRef = useRef<{ key: string; timestamp: number }>({ key: "", timestamp: 0 });
+  const stickerSendUnlockTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Feature state: voice, stickers, message context menu
   const [showStickerPicker, setShowStickerPicker] = useState(false);
@@ -835,6 +947,9 @@ const ChatScreen = ({ navigation, route }: any) => {
   useEffect(() => () => {
     if (replyHighlightTimeoutRef.current) {
       clearTimeout(replyHighlightTimeoutRef.current);
+    }
+    if (stickerSendUnlockTimeoutRef.current) {
+      clearTimeout(stickerSendUnlockTimeoutRef.current);
     }
   }, []);
 
@@ -875,11 +990,20 @@ const ChatScreen = ({ navigation, route }: any) => {
           !hasChanged
           && (
             (
+              normalizedMessage?.clientMessageId
+              && (
+                String(normalizedMessage.clientMessageId) === String(item?.clientMessageId || "")
+                || String(normalizedMessage.clientMessageId) === String(item?.optimisticId || item?.localId || "")
+              )
+            )
+            || (
+            (
               item?._optimistic
               && String(getMessageSenderId(item) || "") === String(currentUserId || "")
               && buildMessageSignature(item) === nextSignature
             )
             || isNearDuplicateMessage(item, normalizedMessage)
+            )
           )
         ) {
           hasChanged = true;
@@ -978,11 +1102,18 @@ const ChatScreen = ({ navigation, route }: any) => {
         };
 
         setGroupMeta(nextGroupMeta);
+        setGroupMentionCandidates(
+          (Array.isArray(nextConversation?.members) ? nextConversation.members : [])
+            .map(mapMentionCandidate)
+            .filter(Boolean) as MentionCandidate[],
+        );
         navigation.setParams({
           groupName: nextGroupMeta.groupName,
           groupAvatar: nextGroupMeta.groupAvatar,
           memberCount: nextGroupMeta.memberCount,
         });
+      } else {
+        setGroupMentionCandidates([]);
       }
     } catch (error: any) {
       console.log("Fetch conversation details error:", error?.response?.data || error);
@@ -1219,7 +1350,12 @@ const ChatScreen = ({ navigation, route }: any) => {
       groupMessagePermission: (groupConversation?.groupMessagePermission || "everyone") as "everyone" | "admins",
       isGroupAdmin: Boolean(groupConversation?.isGroupOwner || groupConversation?.isGroupAdmin),
     });
-  }, [groupAvatar, groupConversation?.groupMessagePermission, groupConversation?.groupVisibility, groupConversation?.isGroupAdmin, groupConversation?.isGroupOwner, groupConversation?.isPublicGroup, groupConversation?.type, groupName, memberCount]);
+    setGroupMentionCandidates(
+      (Array.isArray(groupConversation?.members) ? groupConversation.members : [])
+        .map(mapMentionCandidate)
+        .filter(Boolean) as MentionCandidate[],
+    );
+  }, [groupAvatar, groupConversation?.groupMessagePermission, groupConversation?.groupVisibility, groupConversation?.isGroupAdmin, groupConversation?.isGroupOwner, groupConversation?.isPublicGroup, groupConversation?.members, groupConversation?.type, groupName, memberCount]);
 
   useEffect(() => {
     let mounted = true;
@@ -1483,8 +1619,27 @@ const ChatScreen = ({ navigation, route }: any) => {
       throw new Error(isChannelConversation ? "Only admins can send messages in this channel." : "Only admins can send messages in this group.");
     }
 
+    const preliminaryGuardKey = buildOutgoingSendGuardKey({
+      conversationId: currentConversationId,
+      text: nextText,
+      file,
+      mediaUrl,
+      messageType,
+      duration,
+      replyToMessageId,
+    });
+    if (preliminaryGuardKey && activeOutgoingSendKeysRef.current.has(preliminaryGuardKey)) {
+      return;
+    }
+    if (preliminaryGuardKey) {
+      activeOutgoingSendKeysRef.current.add(preliminaryGuardKey);
+    }
+
     const resolvedConversationId = await ensureConversation();
     if (!resolvedConversationId) {
+      if (preliminaryGuardKey) {
+        activeOutgoingSendKeysRef.current.delete(preliminaryGuardKey);
+      }
       throw new Error("Unable to start this conversation right now.");
     }
 
@@ -1503,9 +1658,15 @@ const ChatScreen = ({ navigation, route }: any) => {
       && recentOutgoingSendRef.current.key === sendGuardKey
       && sendAttemptedAt - recentOutgoingSendRef.current.timestamp < 1400
     ) {
+      if (preliminaryGuardKey) {
+        activeOutgoingSendKeysRef.current.delete(preliminaryGuardKey);
+      }
       return;
     }
     recentOutgoingSendRef.current = { key: sendGuardKey, timestamp: sendAttemptedAt };
+    if (sendGuardKey) {
+      activeOutgoingSendKeysRef.current.add(sendGuardKey);
+    }
 
     const optimisticId = `local:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
     mergeMessage(
@@ -1533,6 +1694,7 @@ const ChatScreen = ({ navigation, route }: any) => {
         messageType,
         duration,
         replyToMessageId,
+        clientMessageId: optimisticId,
       });
 
       if (res?.message) {
@@ -1553,8 +1715,15 @@ const ChatScreen = ({ navigation, route }: any) => {
       removeLocalMessage(optimisticId);
       setReplyingToMessage(replyToMessage || null);
       throw error;
+    } finally {
+      if (preliminaryGuardKey) {
+        activeOutgoingSendKeysRef.current.delete(preliminaryGuardKey);
+      }
+      if (sendGuardKey) {
+        activeOutgoingSendKeysRef.current.delete(sendGuardKey);
+      }
     }
-  }, [currentUserId, ensureConversation, groupMeta.groupMessagePermission, groupMeta.groupVisibility, groupMeta.isGroupAdmin, isGroupConversation, mergeMessage, removeLocalMessage, scrollToLatestMessage]);
+  }, [currentConversationId, currentUserId, ensureConversation, groupMeta.groupMessagePermission, groupMeta.groupVisibility, groupMeta.isGroupAdmin, isGroupConversation, mergeMessage, removeLocalMessage, scrollToLatestMessage]);
 
   const replyingToMessageId = useMemo(() => getMessageIdentity(replyingToMessage), [replyingToMessage]);
 
@@ -1649,6 +1818,22 @@ const ChatScreen = ({ navigation, route }: any) => {
     || groupMeta.groupMessagePermission !== "admins"
     || groupMeta.isGroupAdmin;
   const hideChannelComposer = isChannelConversation && !canComposeGroupMessage;
+  const activeGroupMentionQuery = isGroupConversation ? getActiveMentionQuery(text) : null;
+  const visibleGroupMentionCandidates = useMemo(() => {
+    if (activeGroupMentionQuery === null) {
+      return [];
+    }
+
+    const query = activeGroupMentionQuery.trim().toLowerCase();
+    return groupMentionCandidates
+      .filter((candidate) => {
+        if (!query) {
+          return true;
+        }
+        return candidate.username.toLowerCase().includes(query) || String(candidate.name || "").toLowerCase().includes(query);
+      })
+      .slice(0, 6);
+  }, [activeGroupMentionQuery, groupMentionCandidates]);
   const groupComposeLockedText = isGroupConversation && !canComposeGroupMessage
     ? isChannelConversation
       ? "Only admins can send messages in this channel."
@@ -1855,16 +2040,26 @@ const ChatScreen = ({ navigation, route }: any) => {
 
   const queueAttachmentPreview = useCallback((assetsInput: any[] | any) => {
     const assets = Array.isArray(assetsInput) ? assetsInput : [assetsInput];
-    const nextAttachments = assets.filter((asset) => asset?.uri).map((asset, index) => {
-      const mimeType = String(asset.type || "application/octet-stream").trim();
-      const kind = mimeType.startsWith("video/") ? "video" : "image";
-      return {
-        uri: asset.uri,
-        name: asset.fileName || `${kind}_${Date.now()}_${index + 1}`,
-        type: mimeType,
-        kind,
-      } as PendingAttachment;
-    });
+    const seenAssetKeys = new Set<string>();
+    const nextAttachments = assets
+      .filter((asset) => {
+        const assetKey = String(asset?.uri || asset?.fileName || "").trim();
+        if (!assetKey || seenAssetKeys.has(assetKey)) {
+          return false;
+        }
+        seenAssetKeys.add(assetKey);
+        return true;
+      })
+      .map((asset, index) => {
+        const mimeType = inferPickedMimeType(asset);
+        const kind = mimeType.startsWith("video/") ? "video" : "image";
+        return {
+          uri: asset.uri,
+          name: ensurePickedFileName(asset.fileName, `${kind}_${Date.now()}_${index + 1}`, mimeType),
+          type: mimeType,
+          kind,
+        } as PendingAttachment;
+      });
 
     if (!nextAttachments.length) {
       return;
@@ -1878,7 +2073,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const sendImageAttachment = useCallback(async () => {
     try {
       const response = await launchImageLibrary({
-        mediaType: "photo",
+        mediaType: "mixed",
         selectionLimit: 10,
       });
 
@@ -1935,11 +2130,12 @@ const ChatScreen = ({ navigation, route }: any) => {
   }, [queueAttachmentPreview]);
 
   const sendPendingAttachment = useCallback(async () => {
-    if (!pendingAttachments.length) {
+    if (!pendingAttachments.length || pendingAttachmentSendLockRef.current || uploading) {
       return;
     }
 
     try {
+      pendingAttachmentSendLockRef.current = true;
       setUploading(true);
       for (const attachment of pendingAttachments) {
         await checkChatMediaModeration({
@@ -1961,6 +2157,7 @@ const ChatScreen = ({ navigation, route }: any) => {
             name: attachment.name,
             type: attachment.type,
           },
+          messageType: attachment.kind,
           replyToMessageId: index === 0 ? replyingToMessageId : undefined,
           replyToMessage: index === 0 ? replyingToMessage : undefined,
         });
@@ -1974,9 +2171,10 @@ const ChatScreen = ({ navigation, route }: any) => {
       }
       Alert.alert("Error", getReadableApiErrorMessage(error, "Failed to send attachment"));
     } finally {
+      pendingAttachmentSendLockRef.current = false;
       setUploading(false);
     }
-  }, [pendingAttachments, replyingToMessage, replyingToMessageId, submitMessage, text]);
+  }, [pendingAttachments, replyingToMessage, replyingToMessageId, submitMessage, text, uploading]);
 
   const sendDocumentAttachment = useCallback(async () => {
     try {
@@ -2099,7 +2297,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     const cleanLocation = String(locationDraft || "").trim();
 
     if (!cleanLocation) {
-      Alert.alert("Add a place", "Enter a place, address, or landmark to share.");
+      Alert.sheet("Add a place", "Enter a place, address, or landmark to share.");
       return;
     }
 
@@ -2120,6 +2318,45 @@ const ChatScreen = ({ navigation, route }: any) => {
       setUploading(false);
     }
   }, [locationDraft, replyingToMessage, replyingToMessageId, submitMessage]);
+
+  const useCurrentLocation = useCallback(async () => {
+    if (locatingCurrentPosition || uploading) {
+      return;
+    }
+
+    try {
+      setLocatingCurrentPosition(true);
+
+      if (Platform.OS === "android") {
+        const granted = await requestAndroidLocationPermission();
+        if (!granted) {
+          Alert.sheet("Location permission needed", "Allow location access or enter a place manually.");
+          return;
+        }
+      }
+
+      const { latitude, longitude } = await getCurrentDeviceLocation();
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        throw new Error("Could not detect current location.");
+      }
+
+      setUploading(true);
+      await submitMessage({
+        text: buildCoordinateLocationMessage(latitude, longitude),
+        replyToMessageId: replyingToMessageId,
+        replyToMessage: replyingToMessage,
+      });
+      setLocationDraft("");
+      setShowLocationComposer(false);
+      setShowTools(false);
+    } catch (error: any) {
+      console.log("current location send error:", error);
+      Alert.sheet("Location unavailable", getReadableApiErrorMessage(error, "Enter a place manually or try current location again."));
+    } finally {
+      setUploading(false);
+      setLocatingCurrentPosition(false);
+    }
+  }, [locatingCurrentPosition, replyingToMessage, replyingToMessageId, submitMessage, uploading]);
 
   const resetScheduleCallComposer = useCallback(() => {
     setShowScheduleCallComposer(false);
@@ -2450,6 +2687,14 @@ const ChatScreen = ({ navigation, route }: any) => {
     });
   }, [scrollToLatestMessage]);
 
+  const openMentionedGroupMember = useCallback((username: string) => {
+    const normalizedUsername = String(username || "").replace(/^@/, "").trim().toLowerCase();
+    const matchedMember = groupMentionCandidates.find((candidate) => candidate.username.toLowerCase() === normalizedUsername);
+    if (matchedMember?.id) {
+      navigation.navigate("ProfilePreviewScreen", { userId: matchedMember.id });
+    }
+  }, [groupMentionCandidates, navigation]);
+
   // ─── Render message ───────────────────────────────────────────────────────
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
@@ -2672,11 +2917,9 @@ const ChatScreen = ({ navigation, route }: any) => {
               <TouchableOpacity
                 activeOpacity={0.9}
                 onPress={() => {
-                  if (sharedContent?.kind === "post" && sharedContent?.postId) {
-                    navigation.navigate("PostDetail", { postId: sharedContent.postId });
-                  }
-                  if (sharedContent?.kind === "swipe" && sharedContent?.swipeId) {
-                    navigation.navigate("Swipes", { swipeId: sharedContent.swipeId });
+                  if (sharedContent?.kind === "post" || sharedContent?.kind === "swipe") {
+                    openSharedContent(navigation, sharedContent);
+                    return;
                   }
                   if (sharedContent?.kind === "story" && sharedContent?.storyId) {
                     navigation.navigate("StoryViewer", {
@@ -2714,6 +2957,12 @@ const ChatScreen = ({ navigation, route }: any) => {
                   </View>
                 </View>
 
+                {sharedContent?.kind === "story" && sharedContent?.interaction?.text ? (
+                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, styles.sharedStoryReplyText, { fontSize: chatMetrics.metaFontSize + 0.5, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={2}>
+                    {sharedContent.interaction.text}
+                  </Text>
+                ) : null}
+
                 {sharedMedia?.url || sharedMedia?.thumbnailUrl ? (
                   <Image
                     source={{ uri: normalizeMediaUrl(sharedMedia?.thumbnailUrl || sharedMedia?.url || "") }}
@@ -2728,11 +2977,6 @@ const ChatScreen = ({ navigation, route }: any) => {
                   </Text>
                 ) : null}
 
-                {sharedContent?.kind === "story" && sharedContent?.interaction?.text ? (
-                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, { fontSize: chatMetrics.metaFontSize + 0.5, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={2}>
-                    {sharedContent.interaction.text}
-                  </Text>
-                ) : null}
               </TouchableOpacity>
             ) : null}
 
@@ -2861,7 +3105,7 @@ const ChatScreen = ({ navigation, route }: any) => {
             ) : null}
 
             {shouldRenderMessageText && (
-              <Text
+              <InteractiveText
                 style={[
                   styles.messageText,
                   isMine && styles.myMessageText,
@@ -2872,13 +3116,15 @@ const ChatScreen = ({ navigation, route }: any) => {
                     lineHeight: isEmojiOnly ? Math.max(chatMetrics.bodyLineHeight + 8, 26) : chatMetrics.bodyLineHeight,
                   },
                 ]}
+                mentionStyle={[styles.messageMentionText, isMine && styles.myMessageMentionText]}
+                onPressMention={isGroupConversation ? openMentionedGroupMember : undefined}
+                text={textValue}
                 textBreakStrategy="simple"
               >
-                {textValue}
                 {item?.isEdited ? (
                   <Text style={{ fontSize: 11, fontStyle: "italic", opacity: 0.6 }}> edited</Text>
                 ) : null}
-              </Text>
+              </InteractiveText>
             )}
 
             {!locationPayload && !sharedContent && !callEvent && !scheduledCall && !isMediaBubble && !isEmojiOnly && linkPreview?.url ? (
@@ -3261,13 +3507,51 @@ const ChatScreen = ({ navigation, route }: any) => {
           </TouchableOpacity>
         </Modal>
 
-        <Modal visible={showLocationComposer} transparent animationType="fade">
-          <View style={styles.locationComposerOverlay}>
-            <View style={styles.locationComposerCard}>
+        <DraggableBottomSheet
+          visible={showLocationComposer}
+          onClose={() => {
+            if (!uploading && !locatingCurrentPosition) {
+              setShowLocationComposer(false);
+              setLocationDraft("");
+            }
+          }}
+          snapPoints={[0.62, 0.78, 0.9]}
+          initialSnapIndex={0}
+          minHeight={460}
+        >
+          <View style={styles.locationComposerSheet}>
               <Text style={styles.locationComposerTitle}>Share location</Text>
               <Text style={styles.locationComposerText}>
-                Enter a place, address, or landmark. We will send a Maps link in chat.
+                Pick current location, choose a nearby place, or type any address. We will send a Maps link in chat.
               </Text>
+              <View style={styles.locationQuickActions}>
+                <TouchableOpacity
+                  style={styles.locationQuickAction}
+                  onPress={useCurrentLocation}
+                  disabled={uploading || locatingCurrentPosition}
+                >
+                  <Icon name="navigate-outline" size={16} color="#fff" />
+                  <Text style={styles.locationQuickActionText}>
+                    {locatingCurrentPosition ? "Detecting..." : "Current"}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.locationQuickAction}
+                  onPress={() => setLocationDraft("Nearby places")}
+                  disabled={uploading}
+                >
+                  <Icon name="map-outline" size={16} color="#fff" />
+                  <Text style={styles.locationQuickActionText}>Nearby</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.locationQuickAction}
+                  onPress={() => setLocationDraft("")}
+                  disabled={uploading}
+                >
+                  <Icon name="create-outline" size={16} color="#fff" />
+                  <Text style={styles.locationQuickActionText}>Manual</Text>
+                </TouchableOpacity>
+              </View>
               <TextInput
                 style={styles.locationComposerInput}
                 value={locationDraft}
@@ -3296,8 +3580,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
-        </Modal>
+        </DraggableBottomSheet>
 
         <Modal visible={showScheduleCallComposer} transparent animationType="fade">
           <View style={styles.locationComposerOverlay}>
@@ -3391,7 +3674,32 @@ const ChatScreen = ({ navigation, route }: any) => {
           preferredMode={stickerPickerMode}
           onClose={() => setShowStickerPicker(false)}
           onSend={async (sticker) => {
+            const stickerSendKey = [
+              String(currentConversationId || userId || "").trim(),
+              String(sticker?._id || "").trim(),
+              String(sticker?.type || "").trim(),
+              String(sticker?.emoji || "").trim(),
+              normalizeMediaUrl(sticker?.imageUrl || ""),
+            ].join("::");
+            const now = Date.now();
+            if (
+              stickerSendLockRef.current
+              || (
+                stickerSendKey
+                && recentStickerSendRef.current.key === stickerSendKey
+                && now - recentStickerSendRef.current.timestamp < 12000
+              )
+            ) {
+              return;
+            }
+
             try {
+              setShowStickerPicker(false);
+              stickerSendLockRef.current = true;
+              recentStickerSendRef.current = { key: stickerSendKey, timestamp: now };
+              if (stickerSendUnlockTimeoutRef.current) {
+                clearTimeout(stickerSendUnlockTimeoutRef.current);
+              }
               setUploading(true);
               if (sticker.emoji && !sticker.imageUrl) {
                 await submitMessage({
@@ -3418,7 +3726,13 @@ const ChatScreen = ({ navigation, route }: any) => {
               });
             } catch (err) {
               console.log("sticker send error:", err);
+              if (recentStickerSendRef.current.key === stickerSendKey) {
+                recentStickerSendRef.current = { key: "", timestamp: 0 };
+              }
             } finally {
+              stickerSendUnlockTimeoutRef.current = setTimeout(() => {
+                stickerSendLockRef.current = false;
+              }, 12000);
               setUploading(false);
             }
           }}
@@ -3556,11 +3870,11 @@ const ChatScreen = ({ navigation, route }: any) => {
                   <View style={styles.attachmentPreviewMeta}>
                     <Text style={[styles.attachmentPreviewTitle, { color: colors.text }]} numberOfLines={1}>
                       {pendingAttachments.length > 1
-                        ? `${pendingAttachments.length} photos ready to send`
+                        ? `${pendingAttachments.length} attachments ready to send`
                         : pendingAttachment.kind === "image" ? "Image ready to send" : "Video ready to send"}
                     </Text>
                     <Text style={[styles.attachmentPreviewSubtitle, { color: colors.mutedText }]} numberOfLines={1}>
-                      {pendingAttachments.length > 1 ? "Each photo will pass safety checks before sending." : pendingAttachment.name}
+                      {pendingAttachments.length > 1 ? "Each attachment will be prepared before sending." : pendingAttachment.name}
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -3604,6 +3918,15 @@ const ChatScreen = ({ navigation, route }: any) => {
                   {groupComposeLockedText}
                 </Text>
               </View>
+            ) : null}
+            {!hideChannelComposer ? (
+              <MentionSuggestionList
+                visible={activeGroupMentionQuery !== null}
+                candidates={visibleGroupMentionCandidates}
+                onSelect={(candidate) => {
+                  setText((current) => insertMentionAtCursorEnd(current, candidate.username));
+                }}
+              />
             ) : null}
             {!hideChannelComposer ? (
               <View style={styles.composerRow}>
@@ -4262,6 +4585,9 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 17,
   },
+  sharedStoryReplyText: {
+    fontFamily: appFonts.semibold,
+  },
   sharedPostCaptionMine: {
     color: "rgba(255,255,255,0.92)",
   },
@@ -4364,6 +4690,14 @@ const styles = StyleSheet.create({
   },
   myMessageText: {
     color: "#fff"
+  },
+  messageMentionText: {
+    color: "#2563eb",
+    fontFamily: appFonts.semibold,
+  },
+  myMessageMentionText: {
+    color: "#ffffff",
+    textDecorationLine: "underline",
   },
   myMessage: {
     backgroundColor: PRIMARY
@@ -4779,6 +5113,12 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 18,
   },
+  locationComposerSheet: {
+    flex: 1,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 18,
+  },
   locationComposerTitle: {
     fontSize: 18,
     fontWeight: "800",
@@ -4788,6 +5128,26 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: "#555",
     lineHeight: 20,
+  },
+  locationQuickActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 14,
+  },
+  locationQuickAction: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 14,
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  locationQuickActionText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
   },
   scheduleTypeRow: {
     marginTop: 14,

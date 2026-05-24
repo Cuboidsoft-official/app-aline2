@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DarkTheme, DefaultTheme } from "@react-navigation/native";
 
 const STORAGE_KEY = "darkMode";
+const LIGHT_DEFAULT_MIGRATION_KEY = "darkModeLightDefaultMigrated";
 
 const lightColors = {
   primary: "#9b4dff",
@@ -42,14 +43,27 @@ type ThemeValue = {
 const AppThemeContext = createContext<ThemeValue | undefined>(undefined);
 
 export const AppThemeProvider = ({ children }: { children: React.ReactNode }) => {
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   useEffect(() => {
     let mounted = true;
 
     const loadThemePreference = async () => {
       try {
-        const storedValue = await AsyncStorage.getItem(STORAGE_KEY);
+        const [storedValue, migrationValue] = await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEY),
+          AsyncStorage.getItem(LIGHT_DEFAULT_MIGRATION_KEY),
+        ]);
+        if (migrationValue !== "true") {
+          await AsyncStorage.setItem(LIGHT_DEFAULT_MIGRATION_KEY, "true");
+          if (storedValue === "true") {
+            await AsyncStorage.setItem(STORAGE_KEY, "false");
+            if (mounted) {
+              setIsDarkMode(false);
+            }
+            return;
+          }
+        }
         if (mounted && storedValue !== null) {
           setIsDarkMode(storedValue === "true");
         }

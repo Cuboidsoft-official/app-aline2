@@ -497,13 +497,7 @@ class RemoteSocialApi implements SocialApi {
       };
     }
 
-    const stories = Array.from(this.storyCache.values());
-    const sameUserStories = stories.filter((item) => item.user.id === story.user.id);
-    const remainingUserIds = Array.from(
-      new Set(stories.filter((item) => item.user.id !== story.user.id).map((item) => item.user.id)),
-    );
-    const others = remainingUserIds.flatMap((userId) => stories.filter((item) => item.user.id === userId));
-    const list = [...sameUserStories, ...others].map((item) => ({
+    const list = Array.from(this.storyCache.values()).filter((item) => item.user.id === story.user.id).map((item) => ({
       ...item,
       user: { ...item.user },
       media: item.media ? { ...item.media } : undefined,
@@ -664,6 +658,8 @@ class RemoteSocialApi implements SocialApi {
             color: item?.style?.color,
             backgroundColor: item?.style?.backgroundColor,
             fontSize: item?.style?.fontSize,
+            fontFamily: item?.style?.fontFamily,
+            fontStyle: item?.style?.fontStyle === "italic" ? "italic" : item?.style?.fontStyle === "normal" ? "normal" : undefined,
             alignment: item?.style?.alignment,
           },
         })),
@@ -683,6 +679,7 @@ class RemoteSocialApi implements SocialApi {
   private mapReel(post: any, overrides: Partial<Reel> = {}): Reel {
     const media = this.getPostMedia(post);
     const primary = media[0] || this.mapMediaAsset(post, 0, "reel_media");
+    const stickers = Array.isArray(post?.stickers) ? post.stickers : [];
 
     return {
       id: this.getId(post),
@@ -694,6 +691,29 @@ class RemoteSocialApi implements SocialApi {
       hashtags: Array.isArray(post?.hashtags) ? post.hashtags : [],
       mentions: this.mapMentionNames(post?.mentions),
       location: typeof post?.location === "string" ? post.location : post?.location?.name,
+      stickers: stickers
+        .filter((item: any) => item?.type === "text" || item?.type === "emoji")
+        .map((item: any, index: number) => ({
+          id: this.getId(item) || `${this.getId(post)}_swipe_sticker_${index}`,
+          type: item?.type === "emoji" ? "emoji" : "text",
+          text: String(item?.text || "").trim(),
+          position: {
+            x: typeof item?.position?.x === "number" ? item.position.x : 0.18,
+            y: typeof item?.position?.y === "number" ? item.position.y : 0.22 + index * 0.12,
+            width: typeof item?.position?.width === "number" ? item.position.width : item?.type === "emoji" ? 0.18 : 0.56,
+            height: typeof item?.position?.height === "number" ? item.position.height : item?.type === "emoji" ? 0.14 : 0.12,
+            rotation: typeof item?.position?.rotation === "number" ? item.position.rotation : 0,
+            scale: typeof item?.position?.scale === "number" ? item.position.scale : 1,
+          },
+          style: {
+            color: item?.style?.color,
+            backgroundColor: item?.style?.backgroundColor,
+            fontSize: item?.style?.fontSize,
+            fontFamily: item?.style?.fontFamily,
+            fontStyle: item?.style?.fontStyle === "italic" ? "italic" : item?.style?.fontStyle === "normal" ? "normal" : undefined,
+            alignment: item?.style?.alignment,
+          },
+        })),
       createdAt: this.toTimestamp(post?.createdAt),
       likesCount: typeof post?.likes === "number" ? post.likes : 0,
       commentsCount: typeof post?.comments === "number" ? post.comments : 0,
@@ -1059,6 +1079,27 @@ class RemoteSocialApi implements SocialApi {
     };
   }
 
+  async getUserFeed(userId: string): Promise<FeedResponse> {
+    await loadModerationPrefs();
+    const normalizedUserId = String(userId || "").trim();
+    if (!normalizedUserId) {
+      return { stories: [], posts: [] };
+    }
+
+    const res = await API.get(`/posts/user/${normalizedUserId}`);
+    const postPayload = Array.isArray(res?.data?.posts) ? res.data.posts : [];
+    const posts = this.cachePosts(
+      postPayload
+        .filter((post: any) => String(post?.postType || "post").trim() !== "reel")
+        .map((post: any) => this.mapPost(post)),
+    );
+
+    return {
+      stories: [],
+      posts: applyContentVisibilityFilters(posts, "post"),
+    };
+  }
+
   async getReels(): Promise<Reel[]> {
     return this.getSwipes();
   }
@@ -1094,6 +1135,32 @@ class RemoteSocialApi implements SocialApi {
         : [];
     const reelLikes = await this.getLikeStatusMap(reelPayload.map((reel: any) => this.getId(reel)), "postId");
 
+    const reels = this.cacheReels(
+      reelPayload.map((reel: any) =>
+        this.mapReel(reel, {
+          liked: !!reelLikes.get(this.getId(reel)),
+          saved: savedIds.has(this.getId(reel)),
+        }),
+      ),
+    );
+
+    return applyContentVisibilityFilters(reels, "swipe");
+  }
+
+  async getUserSwipes(userId: string): Promise<Reel[]> {
+    await loadModerationPrefs();
+    const normalizedUserId = String(userId || "").trim();
+    if (!normalizedUserId) {
+      return [];
+    }
+
+    const [res, savedIds] = await Promise.all([
+      API.get(`/posts/user/${normalizedUserId}`),
+      this.getSavedPostIds(),
+    ]);
+    const postPayload = Array.isArray(res?.data?.posts) ? res.data.posts : [];
+    const reelPayload = postPayload.filter((post: any) => String(post?.postType || "").trim() === "reel");
+    const reelLikes = await this.getLikeStatusMap(reelPayload.map((reel: any) => this.getId(reel)), "postId");
     const reels = this.cacheReels(
       reelPayload.map((reel: any) =>
         this.mapReel(reel, {
@@ -1155,15 +1222,13 @@ class RemoteSocialApi implements SocialApi {
       throw new Error("Story not found or no longer available.");
     }
 
-    const orderedGroups = [targetGroup, ...groups.filter((group: any) => group !== targetGroup)];
-    const storyPayload = orderedGroups.flatMap((group: any) => Array.isArray(group?.stories) ? group.stories : []);
+    const storyPayload = Array.isArray(targetGroup?.stories) ? targetGroup.stories : [];
     const likes = await this.getLikeStatusMap(storyPayload.map((story: any) => this.getId(story)), "storyId");
     const stories = this.cacheStories(
       storyPayload.map((story: any) =>
         this.mapStory(story, {
           liked: !!likes.get(this.getId(story)),
           viewed:
-            targetGroup === orderedGroups[0] &&
             this.getId(story?.user) === this.getId(targetGroup?.user) &&
             !targetGroup?.hasUnseenStories,
           isOwner: this.getId(story?.user) === currentUserId,
@@ -1708,6 +1773,12 @@ class RemoteSocialApi implements SocialApi {
     this.postCache.delete(postId);
   }
 
+  async deleteSwipe(swipeId: string): Promise<void> {
+    this.assertSyncedPostId(swipeId);
+    await API.delete(`/posts/delete/${swipeId}`);
+    this.reelCache.delete(swipeId);
+  }
+
   async toggleReelLike(reelId: string): Promise<Reel> {
     return this.toggleSwipeLike(reelId);
   }
@@ -2163,6 +2234,19 @@ class RemoteSocialApi implements SocialApi {
       hashtags: payload.hashtags,
       mentions: payload.mentions,
       taggedUsers: mapTaggedUsersForRequest(payload.taggedUsers),
+      stickers: (payload.stickers || []).map((sticker) => ({
+        type: sticker.type,
+        text: sticker.text,
+        position: {
+          x: sticker.position.x,
+          y: sticker.position.y,
+          width: sticker.position.width,
+          height: sticker.position.height,
+          rotation: sticker.position.rotation || 0,
+          scale: sticker.position.scale || 1,
+        },
+        style: sticker.style,
+      })),
       ...buildMusicRequestPayload(payload.music),
     }, {
       timeout: 120000,

@@ -11,6 +11,7 @@ import android.os.Build
 import com.aline2.arfilters.AlineArProcessorRegistry
 import com.aline2.arfilters.ArFilterPackage
 import com.aline2.callaudio.CallAudioPackage
+import com.aline2.location.AlineLocationPackage
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -26,6 +27,7 @@ class MainApplication : Application(), ReactApplication {
         PackageList(this).packages.apply {
           add(ArFilterPackage())
           add(CallAudioPackage())
+          add(AlineLocationPackage())
         },
     )
   }

@@ -274,12 +274,16 @@ const SettingsScreen = ({ navigation }: any) => {
             <Text style={[styles.heroText, { color: colors.mutedText }]}>{heroSubtitle}</Text>
 
             <View style={styles.heroStats}>
-              <View style={[styles.statCard, { backgroundColor: alpha(colors.primary, isDarkMode ? "1A" : "10"), borderColor: alpha(colors.primary, isDarkMode ? "36" : "24") }]}>
+              <TouchableOpacity
+                activeOpacity={0.86}
+                onPress={() => navigation.navigate("Profile")}
+                style={[styles.statCard, { backgroundColor: alpha(colors.primary, isDarkMode ? "1A" : "10"), borderColor: alpha(colors.primary, isDarkMode ? "36" : "24") }]}
+              >
                 <Text style={[styles.statLabel, { color: colors.mutedText }]}>Bank setup</Text>
                 <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={2}>
                   {bankSummary}
                 </Text>
-              </View>
+              </TouchableOpacity>
               <View style={[styles.statCard, { backgroundColor: alpha(colors.surface, isDarkMode ? "F0" : "F7"), borderColor: alpha(colors.border, isDarkMode ? "70" : "B4") }]}>
                 <Text style={[styles.statLabel, { color: colors.mutedText }]}>Theme</Text>
                 <Text style={[styles.statValue, { color: colors.text }]}>{isDarkMode ? "Dark mode on" : "Light mode on"}</Text>

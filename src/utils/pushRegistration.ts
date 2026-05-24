@@ -2,6 +2,7 @@ import { PermissionsAndroid, Platform } from "react-native";
 import { API } from "../api/api";
 import { getStoredUserId } from "./authSession";
 import { getMutedConversationIds } from "./chatMute";
+import { openPostInFeed } from "./socialNavigation";
 
 let Notifications: any = null;
 let Device: any = null;
@@ -152,7 +153,7 @@ function navigateFromNotificationData(data: any, navigationRef?: any) {
     case "tag_post":
     case "post_share":
       if (data.postId) {
-        navigation.navigate("PostDetail", { postId: data.postId });
+        openPostInFeed(navigation, { postId: data.postId });
       }
       break;
 

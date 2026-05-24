@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -61,7 +61,7 @@ const FALLBACK_STICKER_ITEMS: ChatSticker[] = [
 interface StickerPickerSheetProps {
   visible: boolean;
   onClose: () => void;
-  onSend: (sticker: ChatSticker) => void;
+  onSend: (sticker: ChatSticker) => void | Promise<void>;
   preferredMode?: "emoji" | "gifs" | "stickers";
 }
 
@@ -72,6 +72,7 @@ const StickerPickerSheet = ({ visible, onClose, onSend, preferredMode = "emoji" 
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [query, setQuery] = useState("");
   const [emojiPack, setEmojiPack] = useState<EmojiPackId>("fluent");
+  const sendLockRef = useRef(false);
 
   const categoryOptions = useMemo(() => {
     if (activeMode === "emoji") {
@@ -154,6 +155,7 @@ const StickerPickerSheet = ({ visible, onClose, onSend, preferredMode = "emoji" 
     setActiveMode(preferredMode);
     setActiveCategory("all");
     setQuery("");
+    sendLockRef.current = false;
   }, [preferredMode, visible]);
 
   useEffect(() => {
@@ -177,8 +179,14 @@ const StickerPickerSheet = ({ visible, onClose, onSend, preferredMode = "emoji" 
       <TouchableOpacity
         style={[styles.itemCell, isGif ? styles.gifCell : styles.defaultCell]}
         onPress={() => {
-          onSend(item);
+          if (sendLockRef.current) {
+            return;
+          }
+          sendLockRef.current = true;
           onClose();
+          Promise.resolve(onSend(item)).catch(() => {
+            sendLockRef.current = false;
+          });
         }}
         activeOpacity={0.86}
       >

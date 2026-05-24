@@ -136,6 +136,8 @@ export interface StorySticker {
     color?: string;
     backgroundColor?: string;
     fontSize?: number;
+    fontFamily?: string;
+    fontStyle?: "normal" | "italic";
     alignment?: "left" | "center" | "right";
   };
 }
@@ -186,6 +188,7 @@ export interface Reel {
   hashtags: string[];
   mentions: string[];
   location?: string;
+  stickers?: StorySticker[];
   createdAt: number;
   likesCount: number;
   commentsCount: number;
@@ -347,6 +350,7 @@ export interface CreateReelInput {
   mentions?: string[];
   taggedUsers?: TaggedUserInput[];
   location?: string;
+  stickers?: StorySticker[];
 }
 
 export type CreateSwipeInput = CreateReelInput;
@@ -379,9 +383,11 @@ export interface DeleteCommentResult {
 
 export interface SocialApi {
   getFeed(page?: number): Promise<FeedResponse>;
+  getUserFeed(userId: string): Promise<FeedResponse>;
   getReels(): Promise<Reel[]>;
   getReel(reelId: string): Promise<Reel>;
   getSwipes(): Promise<Swipe[]>;
+  getUserSwipes(userId: string): Promise<Swipe[]>;
   getSwipe(swipeId: string): Promise<Swipe>;
   getStorySequence(storyId: string, options?: GetStorySequenceOptions): Promise<StorySequenceResponse>;
   getPost(postId: string): Promise<Post>;
@@ -426,6 +432,7 @@ export interface SocialApi {
   toggleSwipeCommentLike(swipeId: string, commentId: string): Promise<SwipeComment>;
   deleteReelComment(reelId: string, commentId: string): Promise<DeleteCommentResult>;
   deleteSwipeComment(swipeId: string, commentId: string): Promise<DeleteCommentResult>;
+  deleteSwipe(swipeId: string): Promise<void>;
 
   createPost(input: CreatePostInput): Promise<Post>;
   createStory(input: CreateStoryInput): Promise<Story>;

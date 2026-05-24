@@ -30,9 +30,10 @@ const replaceUrlHostname = (rawUrl, nextHostname) => {
 };
 const buildCandidateUrls = (rawUrl, fallbackUrl) => {
   const baseUrl = trimTrailingSlash(rawUrl || fallbackUrl);
+  const normalizedFallbackUrl = trimTrailingSlash(fallbackUrl || "");
 
   if (Platform.OS !== "android") {
-    return [baseUrl];
+    return dedupe([baseUrl, normalizedFallbackUrl]);
   }
 
   try {
@@ -44,9 +45,9 @@ const buildCandidateUrls = (rawUrl, fallbackUrl) => {
           ? ANDROID_EMULATOR_HOSTS.map((host) => replaceUrlHostname(baseUrl, host))
           : [];
 
-    return dedupe([baseUrl, ...extraCandidates]);
+    return dedupe([normalizedFallbackUrl, ...extraCandidates, baseUrl]);
   } catch {
-    return [baseUrl];
+    return dedupe([baseUrl, normalizedFallbackUrl]);
   }
 };
 

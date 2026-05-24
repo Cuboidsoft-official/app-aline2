@@ -77,6 +77,7 @@ import { alpha, appFonts, appShadows } from "../theme/designSystem";
 import { getChatLayoutMetrics } from "../theme/chatUi";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { showModerationBlockedSheet } from "../utils/moderationNotice";
+import { openSharedContent } from "../utils/socialNavigation";
 import VoiceMessageBubble from "../components/chat/VoiceMessageBubble";
 import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 import AISupportSheet from "../components/chat/AISupportSheet";
@@ -2002,11 +2003,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               <TouchableOpacity
                 activeOpacity={0.9}
                 onPress={() => {
-                  if (sharedContent?.kind === "post" && sharedContent?.postId) {
-                    navigation.navigate("PostDetail", { postId: sharedContent.postId });
-                  }
-                  if (sharedContent?.kind === "swipe" && sharedContent?.swipeId) {
-                    navigation.navigate("Swipes", { swipeId: sharedContent.swipeId });
+                  if (sharedContent?.kind === "post" || sharedContent?.kind === "swipe") {
+                    openSharedContent(navigation, sharedContent);
+                    return;
                   }
                   if (sharedContent?.kind === "story" && sharedContent?.storyId) {
                     navigation.navigate("StoryViewer", {

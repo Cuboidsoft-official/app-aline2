@@ -69,8 +69,9 @@ import { AppThemeProvider, useAppTheme } from './src/theme/AppThemeContext';
 import { installReadableUiDefaults } from './src/theme/readability';
 import { connectSocket, disconnectSocket, socket, updateSocketPresence } from './src/socket';
 import { Alert } from './src/utils/appAlert';
-import { getStoredToken, setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
+import { getStoredToken, getStoredUserId, setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
 import { registerPushToken, setupNotificationListeners } from './src/utils/pushRegistration';
+import { openPostInFeed } from './src/utils/socialNavigation';
 
 installReadableUiDefaults();
 
@@ -81,6 +82,15 @@ const transparentSheetOptions = {
   presentation: 'transparentModal' as const,
   animation: 'fade' as const,
   contentStyle: { backgroundColor: 'transparent' },
+};
+
+const getNotificationReceiverId = (payload: any): string =>
+  String(payload?.receiver?._id || payload?.receiver?.id || payload?.receiver || payload?.receiverId || '').trim();
+
+const isNotificationForCurrentUser = async (payload: any): Promise<boolean> => {
+  const receiverId = getNotificationReceiverId(payload);
+  const currentUserId = String(await getStoredUserId() || '').trim();
+  return !receiverId || !currentUserId || receiverId === currentUserId;
 };
 
 function AppNavigator() {
@@ -110,7 +120,7 @@ function AppNavigator() {
       case 'tag_post':
       case 'post_share':
         if (postId) {
-          (navigationRef as any).navigate('PostDetail', { postId });
+          openPostInFeed(navigationRef as any, { postId });
           return;
         }
         break;
@@ -310,8 +320,12 @@ function AppNavigator() {
   }, []);
 
   useEffect(() => {
-    const handleRealtimeNotification = (payload: any) => {
+    const handleRealtimeNotification = async (payload: any) => {
       if (!navigationRef.isReady()) {
+        return;
+      }
+
+      if (!(await isNotificationForCurrentUser(payload))) {
         return;
       }
 

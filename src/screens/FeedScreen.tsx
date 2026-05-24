@@ -33,7 +33,7 @@ import { CommentAudioFile, FeedResponse, Post, Story } from "../features/social/
 import { dismissPublishQueueTask, getPublishQueueSnapshot, PublishQueueTask, subscribePublishQueue } from "../features/social/publishQueue";
 import { toUserSafeMessage } from "../features/social/validation";
 import { API } from "../api/api";
-import { getStoredUser } from "../utils/authSession";
+import { getStoredUser, getStoredUserId } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../hooks/useSegmentedMusicPlayback";
@@ -44,6 +44,7 @@ import { resolveMentionUserId } from "../utils/mentionLinks";
 import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 import { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import AppAvatar from "../components/AppAvatar";
+import FeaturedProfilesCarousel from "../components/FeaturedProfilesCarousel";
 import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
 import { downloadImageAsset } from "../utils/mediaDownload";
 import { connectSocket, socket } from "../socket";
@@ -202,7 +203,7 @@ type SellerAccountSummary = {
   availabilityStatus: boolean;
 };
 
-function FeedScreen({ navigation }: any) {
+function FeedScreen({ navigation, route }: any) {
   const { width, height } = useWindowDimensions();
   const { colors, isDarkMode } = useAppTheme();
   const isScreenFocused = useIsFocused();
@@ -218,6 +219,7 @@ function FeedScreen({ navigation }: any) {
   const [activeSheet, setActiveSheet] = useState<null | "comments" | "share" | "actions">(null);
   const [currentUser, setCurrentUser] = useState<CurrentUserSummary | null>(null);
   const [sellerAccount, setSellerAccount] = useState<SellerAccountSummary | null>(null);
+  const [featuredCarouselIndex, setFeaturedCarouselIndex] = useState(3);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [walletCoinBalance, setWalletCoinBalance] = useState(0);
   const [availabilityUpdating, setAvailabilityUpdating] = useState(false);
@@ -234,6 +236,7 @@ function FeedScreen({ navigation }: any) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [publishTasks, setPublishTasks] = useState<PublishQueueTask[]>(() => getPublishQueueSnapshot());
   const slideAnim = useRef(new Animated.Value(0)).current;
+  const feedListRef = useRef<FlatList<Post> | null>(null);
   const hasFeedContentRef = useRef(false);
   const feedScrollTransitionRef = useRef(false);
   const feedScrollResumeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -244,6 +247,19 @@ function FeedScreen({ navigation }: any) {
     timeout: null,
   });
   const isTabletLayout = width >= 768;
+  const focusedPostId = String(route?.params?.postId || "").trim();
+  const focusUserId = String(route?.params?.userId || "").trim();
+  const isFocusedPostFeed = Boolean(focusedPostId || focusUserId);
+  const feedListItems = useMemo(() => {
+    if (isFocusedPostFeed || !feed.posts.length) {
+      return feed.posts;
+    }
+
+    const insertionIndex = Math.min(Math.max(1, featuredCarouselIndex), feed.posts.length);
+    const nextItems: any[] = [...feed.posts];
+    nextItems.splice(insertionIndex, 0, { id: "featured-profiles-carousel", __featuredProfiles: true });
+    return nextItems;
+  }, [feed.posts, featuredCarouselIndex, isFocusedPostFeed]);
   const isCompactPhone = width < 360;
   const isMediumPhone = width < 430;
   const feedHorizontalInset = isTabletLayout ? 18 : isCompactPhone ? 8 : 10;
@@ -363,7 +379,7 @@ function FeedScreen({ navigation }: any) {
         title: "Account",
         data: [
           { icon: "person-outline", label: "My Profile", screen: "ProfileView" },
-          { icon: "wallet-outline", label: "User Dashboard", screen: "WalletScreen" },
+          { icon: "wallet-outline", label: "User Wallet", screen: "WalletScreen" },
           { icon: "notifications-outline", label: "Notifications", screen: "NotificationScreen" },
         ],
       },
@@ -399,7 +415,7 @@ function FeedScreen({ navigation }: any) {
 
   const loadFeedSnapshot = useCallback(async () => {
     const [data, storedUser, seller, unreadNotifications, liveStreamsResponse, walletBalance] = await Promise.all([
-      socialApi.getFeed(),
+      focusUserId ? socialApi.getUserFeed(focusUserId) : socialApi.getFeed(),
       getStoredUser(),
       readSellerAccount(),
       readUnreadNotificationCount(),
@@ -415,7 +431,7 @@ function FeedScreen({ navigation }: any) {
       walletBalance,
       liveStories: Array.isArray(liveStreamsResponse?.liveStreams) ? liveStreamsResponse.liveStreams : [],
     };
-  }, [readSellerAccount, readUnreadNotificationCount, readWalletBalance]);
+  }, [focusUserId, readSellerAccount, readUnreadNotificationCount, readWalletBalance]);
 
   const applyFeedSnapshot = useCallback((snapshot: any) => {
     const { data, liveStories: nextLiveStories, seller, storedUser, unreadNotifications, walletBalance } = snapshot;
@@ -447,6 +463,50 @@ function FeedScreen({ navigation }: any) {
     const snapshot = await loadFeedSnapshot();
     applyFeedSnapshot(snapshot);
   }, [applyFeedSnapshot, loadFeedSnapshot]);
+
+  useEffect(() => {
+    let active = true;
+
+    const ensureFocusedPostVisible = async () => {
+      if (!focusedPostId || feed.posts.some((item) => item.id === focusedPostId)) {
+        return;
+      }
+
+      try {
+        const post = await socialApi.getPost(focusedPostId);
+        if (active) {
+          setFeed((prev) => ({
+            ...prev,
+            posts: buildMixedLatestFeedPosts([post, ...prev.posts]),
+          }));
+        }
+      } catch (error) {
+        console.log("focused post lookup error:", error);
+      }
+    };
+
+    ensureFocusedPostVisible();
+
+    return () => {
+      active = false;
+    };
+  }, [focusedPostId, feed.posts]);
+
+  useEffect(() => {
+    if (!focusedPostId || !feed.posts.length) {
+      return;
+    }
+
+    const targetIndex = feed.posts.findIndex((item) => item.id === focusedPostId);
+    if (targetIndex < 0) {
+      return;
+    }
+
+    setActivePostId(focusedPostId);
+    requestAnimationFrame(() => {
+      feedListRef.current?.scrollToIndex?.({ index: targetIndex, animated: false });
+    });
+  }, [focusedPostId, feed.posts]);
 
   useFocusEffect(
     useCallback(() => {
@@ -495,6 +555,17 @@ function FeedScreen({ navigation }: any) {
   }, [feed.posts.length]);
 
   useEffect(() => {
+    if (isFocusedPostFeed || feed.posts.length < 3) {
+      return;
+    }
+
+    const maxInsertionIndex = Math.min(feed.posts.length - 1, 7);
+    const minInsertionIndex = Math.min(2, maxInsertionIndex);
+    const nextIndex = minInsertionIndex + Math.floor(Math.random() * Math.max(1, maxInsertionIndex - minInsertionIndex + 1));
+    setFeaturedCarouselIndex(nextIndex);
+  }, [feed.posts.length, isFocusedPostFeed]);
+
+  useEffect(() => {
     return subscribePublishQueue(setPublishTasks);
   }, []);
 
@@ -516,7 +587,14 @@ function FeedScreen({ navigation }: any) {
       console.log("feed socket connect error:", error);
     });
 
-    const handleRealtimeNotification = () => {
+    const handleRealtimeNotification = async (payload: any) => {
+      const receiverId = String(payload?.receiver?._id || payload?.receiver?.id || payload?.receiver || payload?.receiverId || "").trim();
+      const currentUserId = String(await getStoredUserId() || "").trim();
+
+      if (receiverId && currentUserId && receiverId !== currentUserId) {
+        return;
+      }
+
       setUnreadNotificationCount((current) => current + 1);
       listLiveStreams()
         .then((response) => {
@@ -656,7 +734,6 @@ function FeedScreen({ navigation }: any) {
     }
 
     feedScrollTransitionRef.current = false;
-    setActivePostId("");
   }, []);
 
   const scheduleRestoreActiveVisiblePost = useCallback((delay = 80) => {
@@ -774,12 +851,8 @@ function FeedScreen({ navigation }: any) {
   };
 
   const openPostDetail = useCallback((post: Post) => {
-    if (String(post?.user?.id || "") !== String(currentUser?.id || "")) {
-      return;
-    }
-
-    navigation.navigate("PostDetail", { postId: post.id });
-  }, [currentUser?.id, navigation]);
+    setActivePostId(post.id);
+  }, []);
 
   const openUserProfile = useCallback((userId: string) => {
     const normalizedUserId = String(userId || "");
@@ -848,7 +921,7 @@ function FeedScreen({ navigation }: any) {
         : null,
       musicLabel
         ? (
-          <TouchableOpacity key={`music_${item.id}`} style={styles.metaChip} onPress={() => navigation.navigate("PostDetail", { postId: item.id })}>
+          <TouchableOpacity key={`music_${item.id}`} style={styles.metaChip} onPress={() => setActivePostId(item.id)}>
             <Icon name="musical-notes-outline" size={12} color={colors.mutedText} />
             <Text style={[styles.metaChipText, { color: colors.text }]} numberOfLines={1}>
               {musicLabel}
@@ -1124,7 +1197,7 @@ function FeedScreen({ navigation }: any) {
     return (
       <TouchableOpacity
         style={[styles.storyItem, { width: storyItemWidth }]}
-        onPress={() => navigation.navigate("StoryViewer", { storyId: item.id })}
+        onPress={() => navigation.navigate("StoryViewer", { storyId: item.id, storyUserId: item.user.id })}
       >
         {item.viewed ? (
           <View
@@ -1399,6 +1472,8 @@ function FeedScreen({ navigation }: any) {
                   styles.postTextStickerText,
                   sticker.style?.color ? { color: sticker.style.color } : null,
                   sticker.style?.fontSize ? { fontSize: sticker.style.fontSize } : null,
+                  sticker.style?.fontFamily ? { fontFamily: sticker.style.fontFamily } : null,
+                  sticker.style?.fontStyle ? { fontStyle: sticker.style.fontStyle } : null,
                   sticker.style?.alignment ? { textAlign: sticker.style.alignment } : null,
                 ]}
               >
@@ -1715,6 +1790,10 @@ function FeedScreen({ navigation }: any) {
   };
 
   const renderInstagramPost = ({ item }: { item: Post }) => {
+    if ((item as any)?.__featuredProfiles) {
+      return <FeaturedProfilesCarousel navigation={navigation} title="Featured profiles to follow" />;
+    }
+
     const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
     const musicLabel = formatPostMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
@@ -2237,7 +2316,7 @@ function FeedScreen({ navigation }: any) {
               style={[styles.storyItem, { width: storyItemWidth }]}
               onPress={() => {
                 if (ownStory) {
-                  navigation.navigate("StoryViewer", { storyId: ownStory.id });
+                  navigation.navigate("StoryViewer", { storyId: ownStory.id, storyUserId: ownStory.user.id });
                   return;
                 }
 
@@ -2296,12 +2375,8 @@ function FeedScreen({ navigation }: any) {
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
     const firstVisiblePost = viewableItems.find((entry) => entry.isViewable && entry.item?.id)?.item;
-    const previousVisiblePostId = lastViewablePostIdRef.current;
     lastViewablePostIdRef.current = firstVisiblePost?.id || "";
     if (firstVisiblePost?.id) {
-      if (previousVisiblePostId && previousVisiblePostId !== firstVisiblePost.id) {
-        stopAllSegmentedMusicPlayback();
-      }
       setActivePostId(firstVisiblePost.id);
     }
   }).current;
@@ -2318,10 +2393,11 @@ function FeedScreen({ navigation }: any) {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
       <View style={styles.screenShell}>
         <FlatList
-          data={feed.posts}
+          ref={feedListRef}
+          data={feedListItems}
           keyExtractor={(item) => item.id}
           renderItem={renderInstagramPost}
-          ListHeaderComponent={renderHeader}
+          ListHeaderComponent={isFocusedPostFeed ? null : renderHeader}
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS === "android"}
@@ -2347,7 +2423,7 @@ function FeedScreen({ navigation }: any) {
           }
           onEndReachedThreshold={0.5}
           onEndReached={() => {
-            if (!loadingMore && hasMore) {
+            if (!isFocusedPostFeed && !loadingMore && hasMore) {
               const nextPage = page + 1;
               setLoadingMore(true);
               socialApi.getFeed(nextPage).then((data) => {
@@ -2360,6 +2436,12 @@ function FeedScreen({ navigation }: any) {
                 }
               }).catch(() => { }).finally(() => setLoadingMore(false));
             }
+          }}
+          onScrollToIndexFailed={(info) => {
+            feedListRef.current?.scrollToOffset?.({
+              offset: Math.max(0, info.averageItemLength * info.index),
+              animated: false,
+            });
           }}
           ListFooterComponent={
             loadingMore ? <ActivityIndicator size="small" color={colors.primary} style={styles.loadingMoreFooter} /> : null
@@ -2448,6 +2530,23 @@ function FeedScreen({ navigation }: any) {
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sidebarContent}>
+            <TouchableOpacity
+              activeOpacity={0.86}
+              style={[styles.sidebarWalletPreview, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => navigateFromMenu("WalletScreen")}
+            >
+              <View style={[styles.sidebarWalletIcon, { backgroundColor: feedAccentSoft }]}>
+                <Icon name="wallet-outline" size={22} color={FEED_ACCENT} />
+              </View>
+              <View style={styles.sidebarWalletCopy}>
+                <Text style={[styles.sidebarWalletLabel, { color: colors.mutedText }]}>User wallet</Text>
+                <Text style={[styles.sidebarWalletValue, { color: colors.text }]}>
+                  {formatCompactCoinBalance(walletCoinBalance)}
+                </Text>
+              </View>
+              <Icon name="chevron-forward" size={18} color={colors.mutedText} />
+            </TouchableOpacity>
+
             <View style={[styles.sidebarReleaseCard, { borderColor: colors.border, backgroundColor: colors.surface }]}>
               <View style={styles.sidebarReleaseCopy}>
                 <Text style={[styles.sidebarReleaseLabel, { color: colors.mutedText }]}>App version</Text>
@@ -2557,7 +2656,7 @@ function FeedScreen({ navigation }: any) {
               }));
             }
 
-            if (action === "archive") {
+            if (action === "archive" || action === "delete") {
               setFeed((prev) => ({
                 ...prev,
                 posts: prev.posts.filter((item) => item.id !== selectedPost.id),
@@ -2809,6 +2908,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 16,
     paddingBottom: 12,
+  },
+  sidebarWalletPreview: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+  },
+  sidebarWalletIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  sidebarWalletCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sidebarWalletLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  sidebarWalletValue: {
+    marginTop: 3,
+    fontSize: 18,
+    fontWeight: "900",
   },
   sidebarReleaseCard: {
     borderWidth: StyleSheet.hairlineWidth,

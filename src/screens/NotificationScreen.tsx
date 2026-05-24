@@ -22,6 +22,7 @@ import { connectSocket, socket } from "../socket";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getStoredUserId } from "../utils/authSession";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
+import { openPostInFeed } from "../utils/socialNavigation";
 
 type NotificationKind =
   | "follow"
@@ -58,6 +59,7 @@ interface AppNotification {
   read?: boolean;
   text?: string;
   sender?: NotificationUser | null;
+  receiver?: NotificationTarget | string | null;
   conversation?: NotificationTarget | string | null;
   liveStream?: NotificationTarget | string | null;
   post?: NotificationTarget | string | null;
@@ -135,6 +137,11 @@ const getTargetId = (value?: NotificationTarget | string | null): string => {
   }
 
   return value._id || value.id || "";
+};
+
+const isNotificationForUser = (item: AppNotification, currentUserId: string): boolean => {
+  const receiverId = getTargetId(item.receiver || null);
+  return !receiverId || !currentUserId || receiverId === currentUserId;
 };
 
 const getNotificationText = (item: AppNotification): string => {
@@ -274,10 +281,14 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
         setLoading(true);
       }
 
-      const res = await API.get("/notifications");
-      const nextNotifications = normalizeMediaFieldsDeep(res.data?.notifications || []) as AppNotification[];
+      const [res, currentUserId] = await Promise.all([
+        API.get("/notifications"),
+        getStoredUserId(),
+      ]);
+      const nextNotifications = (normalizeMediaFieldsDeep(res.data?.notifications || []) as AppNotification[])
+        .filter((item) => isNotificationForUser(item, currentUserId));
       setNotifications(nextNotifications);
-      setUnreadCount(Number(res.data?.unreadCount) || 0);
+      setUnreadCount(nextNotifications.filter((item) => item.read === false).length);
       setErrorMessage("");
     } catch (err) {
       console.log("Notification fetch error:", err);
@@ -300,8 +311,13 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
       console.log("Notification socket connect error:", error);
     });
 
-    const handleRealtimeNotification = (data: AppNotification) => {
+    const handleRealtimeNotification = async (data: AppNotification) => {
       const normalizedNotification = normalizeMediaFieldsDeep(data) as AppNotification;
+      const currentUserId = await getStoredUserId();
+
+      if (!isNotificationForUser(normalizedNotification, currentUserId)) {
+        return;
+      }
 
       setNotifications((prev) => {
         if (prev.some((item) => item._id === normalizedNotification._id)) {
@@ -403,7 +419,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
 
       const postId = getTargetId(item.post);
       if (postId) {
-        navigation.navigate("PostDetail", { postId });
+        openPostInFeed(navigation, { postId });
       }
       return;
     }
@@ -411,7 +427,7 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
     if (item.type === "comment") {
       const postId = getTargetId(item.post);
       if (postId) {
-        navigation.navigate("PostDetail", { postId });
+        openPostInFeed(navigation, { postId });
       }
       return;
     }

@@ -134,8 +134,8 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
     paddingBottom: Math.max(insets.bottom + 20, 30),
   };
   const sheetHeroIconStyle = {
-    backgroundColor: isDarkMode ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.12)",
-    borderColor: isDarkMode ? "rgba(248,113,113,0.28)" : "rgba(239,68,68,0.18)",
+    backgroundColor: isDarkMode ? "rgba(123,63,228,0.16)" : "rgba(123,63,228,0.10)",
+    borderColor: isDarkMode ? "rgba(168,85,247,0.28)" : "rgba(123,63,228,0.18)",
   };
   const sheetBodyCardStyle = {
     backgroundColor: isDarkMode ? "rgba(15,23,42,0.28)" : "#FFFFFF",
@@ -176,7 +176,7 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
                 <View style={[styles.sheetHeroIconWrap, sheetHeroIconStyle]}>
                   <Icon name="shield-checkmark-outline" size={26} color={colors.primary} />
                 </View>
-                <Text style={[styles.sheetHeroLabel, { color: colors.mutedText }]}>Safety check</Text>
+                <Text style={[styles.sheetHeroLabel, { color: colors.mutedText }]}>Notice</Text>
               </View>
             ) : null}
 
@@ -271,9 +271,9 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
       <DraggableBottomSheet
         visible={sheetVisible}
         onClose={handleBackdropPress}
-        snapPoints={[0.42, 0.52, 0.64, 0.78]}
-        initialSnapIndex={2}
-        minHeight={352}
+        snapPoints={[0.3, 0.42, 0.56]}
+        initialSnapIndex={0}
+        minHeight={246}
         maxHeightRatio={0.86}
       >
         {renderAlertContent(true)}
@@ -337,13 +337,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sheetHeroIconWrap: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   sheetHeroLabel: {
     fontSize: 12,
@@ -365,8 +365,8 @@ const styles = StyleSheet.create({
     lineHeight: 23,
   },
   sheetTitle: {
-    fontSize: 20,
-    lineHeight: 26,
+    fontSize: 18,
+    lineHeight: 24,
   },
   message: {
     textAlign: "center",
@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   sheetButton: {
-    minHeight: 56,
+    minHeight: 50,
     borderRadius: 18,
     marginBottom: 2,
   },

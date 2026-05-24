@@ -17,6 +17,7 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import { openPostInFeed, openSwipeInSwipes } from "../utils/socialNavigation";
 
 type HashtagPost = {
   _id: string;
@@ -104,7 +105,13 @@ function HashtagResultsScreen({ route, navigation }: any) {
   const renderPost = ({ item }: { item: HashtagPost }) => (
     <TouchableOpacity
       style={styles.card}
-      onPress={() => navigation.navigate("PostDetail", { postId: item._id })}
+      onPress={() => {
+        if (item.postType === "reel") {
+          openSwipeInSwipes(navigation, { swipeId: item._id, userId: item.user?._id });
+          return;
+        }
+        openPostInFeed(navigation, { postId: item._id, userId: item.user?._id });
+      }}
     >
       <View style={styles.cardHeader}>
         <Image

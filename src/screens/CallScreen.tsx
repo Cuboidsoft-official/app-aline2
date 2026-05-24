@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  AppState,
   Image,
   StatusBar,
   StyleSheet,
@@ -850,28 +849,6 @@ const CallScreen = ({ navigation, route }: any) => {
 
     return unsubscribe;
   }, [callSession?.status, callSessionId, cleanupAllPeers, hasActiveCall, leaveCallRoom, mode, navigation, releaseLocalMedia]);
-
-  useEffect(() => {
-    if (!hasActiveCall) {
-      return undefined;
-    }
-
-    const subscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active" || closingRef.current || ending) {
-        return;
-      }
-
-      cleanupAllPeers();
-      releaseLocalMedia();
-      leaveCallRoom();
-
-      endCallSession(callSessionId, "disconnect").catch(() => {});
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [callSessionId, cleanupAllPeers, ending, hasActiveCall, leaveCallRoom, releaseLocalMedia]);
 
   useEffect(() => () => {
     if (durationTimerRef.current) {

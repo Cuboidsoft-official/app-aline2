@@ -23,6 +23,7 @@ import { useAppTheme } from "../theme/AppThemeContext";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import AppAvatar from "../components/AppAvatar";
 import DraggableBottomSheet from "../components/DraggableBottomSheet";
+import FeaturedProfilesCarousel, { type FeaturedProfileItem } from "../components/FeaturedProfilesCarousel";
 
 type UserItem = {
   _id: string;
@@ -90,6 +91,7 @@ const SearchScreen = ({ navigation, route }: any) => {
   const [discoverServices, setDiscoverServices] = useState<ServiceItem[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [trendingHashtags, setTrendingHashtags] = useState<TrendingHashtag[]>([]);
+  const [featuredProfiles, setFeaturedProfiles] = useState<FeaturedProfileItem[]>([]);
   const [search, setSearch] = useState(String(route?.params?.initialQuery || "").trim());
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -125,12 +127,13 @@ const SearchScreen = ({ navigation, route }: any) => {
       const id = await getStoredUserId();
       setCurrentUserId(id);
 
-      const [usersRes, sellersRes, servicesRes, suggestedRes, hashtagsRes] = await Promise.all([
+      const [usersRes, sellersRes, servicesRes, suggestedRes, hashtagsRes, featuredRes] = await Promise.all([
         API.get("/auth/users"),
         API.get("/seller/all"),
         API.get("/service/discover", { params: { limit: 20 } }),
         API.get("/search/suggested/users", { params: { limit: 6 } }),
         API.get("/search/trending/hashtags", { params: { limit: 8 } }),
+        API.get("/featured-profiles", { params: { limit: 20 } }).catch(() => ({ data: null })),
       ]);
 
       applyUserResults(usersRes.data?.users || [], id);
@@ -138,6 +141,7 @@ const SearchScreen = ({ navigation, route }: any) => {
       applyServiceResults(Array.isArray(servicesRes.data?.services) ? servicesRes.data.services : []);
       setSuggestedUsers((suggestedRes.data?.users || []).filter((item: UserItem) => item?._id !== id));
       setTrendingHashtags(hashtagsRes.data?.hashtags || []);
+      setFeaturedProfiles(Array.isArray(featuredRes.data?.profiles) ? featuredRes.data.profiles : []);
       setErrorMessage("");
     } catch (error) {
       console.log("search init error:", error);
@@ -150,6 +154,7 @@ const SearchScreen = ({ navigation, route }: any) => {
       setDiscoverServices([]);
       setServices([]);
       setTrendingHashtags([]);
+      setFeaturedProfiles([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -264,6 +269,14 @@ const SearchScreen = ({ navigation, route }: any) => {
   }, [activeTab, sellers, services, users]);
 
   const activeResultsCount = currentData.length;
+  const featuredUserIds = useMemo(
+    () => new Set(featuredProfiles.map((profile) => String(profile.userId || "")).filter(Boolean)),
+    [featuredProfiles],
+  );
+  const featuredSellerIds = useMemo(
+    () => new Set(featuredProfiles.map((profile) => String(profile.sellerId || "")).filter(Boolean)),
+    [featuredProfiles],
+  );
 
   const renderUser = ({ item }: { item: UserItem }) => (
     <TouchableOpacity
@@ -288,6 +301,12 @@ const SearchScreen = ({ navigation, route }: any) => {
             <View style={[styles.privateBadge, { backgroundColor: accentSoft }]}>
               <Icon name="lock-closed" size={12} color={accentColor} />
               <Text style={styles.privateText}>Private</Text>
+            </View>
+          ) : null}
+          {featuredUserIds.has(String(item._id || "")) ? (
+            <View style={[styles.featuredBadge, { backgroundColor: accentColor }]}>
+              <Icon name="star" size={11} color="#fff" />
+              <Text style={styles.featuredText}>Featured</Text>
             </View>
           ) : null}
         </View>
@@ -325,6 +344,12 @@ const SearchScreen = ({ navigation, route }: any) => {
               {item.availabilityStatus ? "Available" : "Busy"}
             </Text>
           </View>
+          {featuredSellerIds.has(String(item._id || "")) ? (
+            <View style={[styles.featuredBadge, { backgroundColor: accentColor }]}>
+              <Icon name="star" size={11} color="#fff" />
+              <Text style={styles.featuredText}>Featured</Text>
+            </View>
+          ) : null}
         </View>
         <Text style={[styles.name, { color: colors.mutedText }]} numberOfLines={1}>{item.specialization || "Service provider"}</Text>
         {!!item.bio && (
@@ -440,6 +465,15 @@ const SearchScreen = ({ navigation, route }: any) => {
     );
   };
 
+  const renderListHeader = () => (
+    <View>
+      {!search.trim() ? (
+        <FeaturedProfilesCarousel navigation={navigation} title="Featured profiles" compact limit={12} />
+      ) : null}
+      {activeTab === "services" ? renderServiceHeader() : renderDiscoverHeader()}
+    </View>
+  );
+
   if (loading) {
     return (
       <View style={styles.screen}>
@@ -508,7 +542,7 @@ const SearchScreen = ({ navigation, route }: any) => {
                 ? renderSeller
                 : renderService
           }
-          ListHeaderComponent={activeTab === "services" ? renderServiceHeader : renderDiscoverHeader}
+          ListHeaderComponent={renderListHeader}
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Text style={[styles.emptyTitle, { color: colors.text }]}>
@@ -847,6 +881,20 @@ const styles = StyleSheet.create({
     color: "#7B4DFF",
     fontSize: 11,
     fontWeight: "600",
+  },
+  featuredBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    marginLeft: 8,
+    gap: 3,
+  },
+  featuredText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "900",
   },
   statusBadge: {
     borderRadius: 999,

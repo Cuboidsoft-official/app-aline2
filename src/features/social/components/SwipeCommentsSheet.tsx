@@ -12,14 +12,21 @@ import {
   View
 } from "react-native";
 import { Alert } from "../../../utils/appAlert";
+import Icon from "react-native-vector-icons/Ionicons";
+import { useNavigation } from "@react-navigation/native";
+import { API } from "../../../api/api";
+import MentionSuggestionList from "../../../components/MentionSuggestionList";
 
 import CommentThreadSheet from "./CommentThreadSheet";
 import CommentAudioBubble from "./CommentAudioBubble";
+import InteractiveText from "./InteractiveText";
 import { socialApi } from "../socialApi";
 import { CommentAudioFile, Swipe, SwipeComment } from "../types";
 import { toUserSafeMessage } from "../validation";
 import VoiceRecorderButton from "../../../components/chat/VoiceRecorderButton";
 import { normalizeMediaUrl } from "../../../utils/mediaUrls";
+import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../../../utils/mentionComposer";
+import { resolveMentionUserId } from "../../../utils/mentionLinks";
 
 const formatAgo = (timestamp: number): string => {
   const mins = Math.max(1, Math.floor((Date.now() - timestamp) / (1000 * 60)));
@@ -46,12 +53,58 @@ function SwipeCommentsSheet({
   onOpenFull,
   showOpenFull = true,
 }: SwipeCommentsSheetProps) {
+  const navigation = useNavigation<any>();
   const [comments, setComments] = useState<SwipeComment[]>([]);
   const [draft, setDraft] = useState("");
+  const [mentionSuggestions, setMentionSuggestions] = useState<MentionCandidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
   const [threadComment, setThreadComment] = useState<SwipeComment | null>(null);
+  const [pendingVoice, setPendingVoice] = useState<CommentAudioFile | null>(null);
+  const mentionQuery = getActiveMentionQuery(draft);
+
+  useEffect(() => {
+    if (mentionQuery === null) {
+      setMentionSuggestions([]);
+      return;
+    }
+
+    let mounted = true;
+    const query = mentionQuery.trim();
+
+    const loadMentions = async () => {
+      try {
+        const response = query
+          ? await API.get("/auth/search", { params: { query } })
+          : await API.get("/search/suggested/users", { params: { limit: 8 } });
+        const users = Array.isArray(response?.data?.users) ? response.data.users : [];
+        if (mounted) {
+          setMentionSuggestions(users.map(mapMentionCandidate).filter(Boolean) as MentionCandidate[]);
+        }
+      } catch {
+        if (mounted) {
+          setMentionSuggestions([]);
+        }
+      }
+    };
+
+    const timeout = setTimeout(() => {
+      loadMentions().catch(() => undefined);
+    }, query ? 180 : 0);
+
+    return () => {
+      mounted = false;
+      clearTimeout(timeout);
+    };
+  }, [mentionQuery]);
+
+  const openMentionProfile = async (username: string) => {
+    const userId = await resolveMentionUserId(username);
+    if (userId) {
+      navigation.navigate("ProfilePreviewScreen", { userId });
+    }
+  };
 
   useEffect(() => {
     if (!visible || !swipe) {
@@ -61,6 +114,7 @@ function SwipeCommentsSheet({
       setSubmitting(false);
       setBusyIds({});
       setThreadComment(null);
+      setPendingVoice(null);
       return;
     }
 
@@ -105,6 +159,7 @@ function SwipeCommentsSheet({
       setComments((prev) => [added, ...prev]);
       onSwipeUpdate({ ...swipe, commentsCount: swipe.commentsCount + 1 });
       setDraft("");
+      setPendingVoice(null);
     } catch (error) {
       Alert.alert("Could not comment", toUserSafeMessage(error));
     } finally {
@@ -203,7 +258,16 @@ function SwipeCommentsSheet({
                       <Text style={styles.username}>@{item.user.username}</Text>
                       <Text style={styles.time}>{formatAgo(item.createdAt)}</Text>
                     </View>
-                    {item.text ? <Text style={styles.commentText}>{item.text}</Text> : null}
+                    {item.text ? (
+                      <InteractiveText
+                        style={styles.commentText}
+                        mentionStyle={styles.commentMentionText}
+                        onPressMention={(mention) => {
+                          openMentionProfile(mention).catch(() => undefined);
+                        }}
+                        text={item.text}
+                      />
+                    ) : null}
                     {item.audioUrl ? (
                       <CommentAudioBubble audioUrl={item.audioUrl} audioDuration={item.audioDuration} />
                     ) : null}
@@ -232,26 +296,51 @@ function SwipeCommentsSheet({
             />
           )}
 
+          <MentionSuggestionList
+            visible={mentionQuery !== null}
+            candidates={mentionSuggestions}
+            onSelect={(candidate) => {
+              setDraft((current) => insertMentionAtCursorEnd(current, candidate.username));
+              setMentionSuggestions([]);
+            }}
+          />
           <View style={styles.composer}>
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Add a comment..."
-              placeholderTextColor="#8a8a8a"
-              style={styles.input}
-            />
-            <TouchableOpacity disabled={!draft.trim() || submitting} onPress={onSubmit}>
-              <Text style={[styles.sendText, (!draft.trim() || submitting) && styles.sendTextDisabled]}>Post</Text>
-            </TouchableOpacity>
-            <VoiceRecorderButton
-              color="#2563eb"
-              disabled={submitting}
-              onSend={(voiceFile) => {
-                submitComment(voiceFile).catch((error) => {
-                  Alert.alert("Could not send voice comment", toUserSafeMessage(error));
-                });
-              }}
-            />
+            {!pendingVoice ? (
+              <TextInput
+                value={draft}
+                onChangeText={setDraft}
+                placeholder="Add a comment..."
+                placeholderTextColor="#8a8a8a"
+                style={styles.input}
+              />
+            ) : null}
+            {pendingVoice ? (
+              <View style={styles.voicePreviewWrap}>
+                <CommentAudioBubble audioUrl={pendingVoice.uri} audioDuration={pendingVoice.duration} />
+                <TouchableOpacity style={styles.voiceDeleteButton} onPress={() => setPendingVoice(null)} disabled={submitting}>
+                  <Icon name="close-circle" size={22} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            {draft.trim() || pendingVoice ? (
+              <TouchableOpacity
+                style={styles.sendIconButton}
+                disabled={submitting}
+                onPress={() => {
+                  submitComment(pendingVoice || undefined).catch((error) => {
+                    Alert.alert("Could not send comment", toUserSafeMessage(error));
+                  });
+                }}
+              >
+                <Icon name="send" size={17} color="#fff" />
+              </TouchableOpacity>
+            ) : (
+              <VoiceRecorderButton
+                color="#2563eb"
+                disabled={submitting}
+                onSend={(voiceFile) => setPendingVoice(voiceFile)}
+              />
+            )}
           </View>
 
           <CommentThreadSheet
@@ -323,6 +412,7 @@ const styles = StyleSheet.create({
   composer: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
     paddingTop: 10,
     paddingBottom: 18,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -337,8 +427,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     color: "#111827",
   },
+  sendIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2563eb",
+  },
+  voicePreviewWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  voiceDeleteButton: {
+    width: 30,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   sendText: { color: "#2563eb", fontWeight: "700", paddingHorizontal: 12 },
   sendTextDisabled: { color: "#9ca3af" },
+  commentMentionText: { color: "#2563eb", fontWeight: "800" },
 });
 
 export default SwipeCommentsSheet;

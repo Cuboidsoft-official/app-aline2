@@ -27,10 +27,6 @@ export const showModerationBlockedSheet = (
           onChooseAnotherFile?.();
         },
       },
-      {
-        text: "Got it",
-        style: "cancel",
-      },
     ],
     { cancelable: true },
   );

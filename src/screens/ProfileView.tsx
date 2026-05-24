@@ -25,6 +25,7 @@ import { useAppTheme } from "../theme/AppThemeContext";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
+import { openPostInFeed, openSwipeInSwipes } from "../utils/socialNavigation";
 
 interface ProfilePost {
  _id: string;
@@ -268,10 +269,16 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
  };
 
  const renderPost = ({ item }: { item: ProfilePost }) => (
-  <TouchableOpacity
+ <TouchableOpacity
    activeOpacity={0.9}
    style={styles.postCard}
-   onPress={() => navigation.navigate("PostDetail", { postId: item._id })}
+   onPress={() => {
+    if (isReelPost(item)) {
+     openSwipeInSwipes(navigation, { swipeId: item._id, userId: user?._id });
+     return;
+    }
+    openPostInFeed(navigation, { postId: item._id, userId: user?._id });
+   }}
   >
    {getPostPreviewUrl(item) ? (
     <Image
