@@ -65,6 +65,7 @@ export function useAudioTrimPreview() {
     endTime: number,
     options?: { rawUrl?: string; normalizedUrl?: string },
   ) => {
+    const shouldResumeAfterSeek = isPlaying;
     setTrimWindow(startTime, endTime);
     setIsPlaying(false);
     setIsLoading(false);
@@ -86,8 +87,12 @@ export function useAudioTrimPreview() {
 
     if (isReady) {
       await seekToSeconds(startTime).catch(() => undefined);
+      if (shouldResumeAfterSeek) {
+        await playerRef.current.resumePlayer().catch(() => undefined);
+        setIsPlaying(true);
+      }
     }
-  }, [isReady, seekToSeconds, setTrimWindow]);
+  }, [isPlaying, isReady, seekToSeconds, setTrimWindow]);
 
   const togglePlayback = useCallback(async () => {
     const { rawUrl, normalizedUrl } = sourceRef.current;
@@ -103,17 +108,24 @@ export function useAudioTrimPreview() {
     stopAllSegmentedMusicPlayback();
     setIsLoading(true);
 
-    await startManagedAudioClipPlayback(playerRef.current, {
-      rawValue: rawUrl,
-      normalizedValue: normalizedUrl,
-      startPositionMs: Math.round(trimWindowRef.current.startTime * 1000),
-      volume: 1,
-      seekSettleDelayMs: 24,
-    });
-    setIsReady(true);
+    try {
+      await startManagedAudioClipPlayback(playerRef.current, {
+        rawValue: rawUrl,
+        normalizedValue: normalizedUrl,
+        startPositionMs: Math.round(trimWindowRef.current.startTime * 1000),
+        volume: 1,
+        seekSettleDelayMs: 80,
+      });
+      setIsReady(true);
 
-    setIsPlaying(true);
-    setIsLoading(false);
+      setIsPlaying(true);
+    } catch (error) {
+      setIsReady(false);
+      setIsPlaying(false);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
   }, [isPlaying, stopPlayback]);
 
   useEffect(() => registerGlobalMusicPlaybackStopper(forceStopPlayback), [forceStopPlayback]);

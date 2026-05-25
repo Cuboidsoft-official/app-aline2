@@ -105,7 +105,9 @@ export const ensureAudioClipStartPosition = async (
   startPositionMs: number,
   seekSettleDelayMs = 70,
 ): Promise<void> => {
-  if (!(startPositionMs > 0)) {
+  const safeStartPositionMs = Math.max(0, Math.round(Number(startPositionMs) || 0));
+
+  if (!Number.isFinite(safeStartPositionMs)) {
     return;
   }
 
@@ -115,7 +117,7 @@ export const ensureAudioClipStartPosition = async (
     await wait(seekSettleDelayMs);
 
     try {
-      await player.seekToPlayer(startPositionMs);
+      await player.seekToPlayer(safeStartPositionMs);
       return;
     } catch (error) {
       lastError = error;

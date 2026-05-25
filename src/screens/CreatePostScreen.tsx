@@ -949,7 +949,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [musicLoading, setMusicLoading] = useState(false);
   const [musicUploading, setMusicUploading] = useState(false);
   const [musicImportingId, setMusicImportingId] = useState("");
-  const [_musicError, setMusicError] = useState("");
+  const [musicError, setMusicError] = useState("");
   const [activeMusicPreviewId, setActiveMusicPreviewId] = useState("");
   const [selectedMusic, setSelectedMusic] = useState<SelectedMusicClip | null>(null);
   const [pendingMusicSelection, setPendingMusicSelection] = useState<MusicResultItem | null>(null);
@@ -2061,6 +2061,7 @@ function CreatePostScreen({ navigation, route }: any) {
       try {
         setMusicError("");
         if (!playbackUrl) {
+          setMusicError("Music preview is not available for this track.");
           return;
         }
 
@@ -2078,8 +2079,8 @@ function CreatePostScreen({ navigation, route }: any) {
         });
         closeMusicSheet();
         setMusicTrimSheetVisible(true);
-      } catch {
-        setMusicError("");
+      } catch (error) {
+        setMusicError(toUserSafeMessage(error));
       }
     },
     [closeMusicSheet, mode, resetMusicPreview],
@@ -2246,7 +2247,7 @@ function CreatePostScreen({ navigation, route }: any) {
       await toggleAudioMusicPreview();
     } catch (error) {
       console.log("Player Error:", error);
-      setMusicError("");
+      setMusicError(toUserSafeMessage(error));
     }
   }, [
     canPreviewMusic,
@@ -2313,8 +2314,8 @@ function CreatePostScreen({ navigation, route }: any) {
         clipDuration: musicTrimDuration,
       });
       closeMusicTrimSheet();
-    } catch {
-      setMusicError("");
+    } catch (error) {
+      setMusicError(toUserSafeMessage(error));
     } finally {
       setMusicImportingId("");
     }
@@ -4923,6 +4924,8 @@ function CreatePostScreen({ navigation, route }: any) {
                   </Text>
                 </View>
                 ) : null}
+
+                {musicError ? <Text style={[styles.sheetError, { color: isDarkMode ? "#FCA5A5" : "#B91C1C" }]}>{musicError}</Text> : null}
 
                 <RangeSlider
                   duration={track.duration}
