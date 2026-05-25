@@ -542,6 +542,7 @@ function RangeSlider({
   const leftHandleLeft = clamp(selectedStart - handleVisualWidth / 2, 0, maxHandleLeft);
   const rightHandleLeft = clamp(selectedEnd - handleVisualWidth / 2, 0, maxHandleLeft);
   const minGapPx = trackWidth > 0 ? Math.max(18, trackWidth * (1 / safeDuration)) : 0;
+  const selectedWidth = Math.max(minGapPx, selectedEnd - selectedStart);
   const waveformBars = useMemo(() => {
     const count = clamp(Math.round(trackWidth / 9), 28, 96);
 
@@ -642,6 +643,32 @@ function RangeSlider({
     [selectedEnd, selectedStart, updateRange],
   );
 
+  const selectionResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          dragWindowRef.current = {
+            startPx: selectedStart,
+            endPx: selectedEnd,
+          };
+          setIsDraggingHandle(true);
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const width = Math.max(minGapPx, dragWindowRef.current.endPx - dragWindowRef.current.startPx);
+          const nextStart = clamp(dragWindowRef.current.startPx + gestureState.dx, 0, Math.max(0, trackWidth - width));
+          updateRange(nextStart, nextStart + width);
+        },
+        onPanResponderRelease: () => setIsDraggingHandle(false),
+        onPanResponderTerminate: () => setIsDraggingHandle(false),
+      }),
+    [minGapPx, selectedEnd, selectedStart, trackWidth, updateRange],
+  );
+
   return (
     <View style={styles.sliderWrap}>
       <View style={styles.sliderLabelsRow}>
@@ -703,11 +730,12 @@ function RangeSlider({
                 </View>
               ) : null}
               <View
+                {...selectionResponder.panHandlers}
                 style={[
                   styles.sliderSelection,
                   {
                     left: selectedStart,
-                    width: Math.max(0, selectedEnd - selectedStart),
+                    width: selectedWidth,
                     backgroundColor: accentColor,
                     opacity: showWaveform ? 0.16 : 1,
                   },

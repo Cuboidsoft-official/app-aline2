@@ -575,12 +575,47 @@ class RemoteSocialApi implements SocialApi {
       .filter(Boolean);
   }
 
+  private getFirstMediaUrl(...values: any[]): string {
+    for (const value of values) {
+      const normalizedValue = String(value || "").trim();
+      if (normalizedValue) {
+        return normalizedValue;
+      }
+    }
+
+    return "";
+  }
+
   private mapMediaAsset(item: any, index = 0, prefix = "media"): MediaAsset {
+    const primaryUrl = this.getFirstMediaUrl(
+      item?.url,
+      item?.mediaUrl,
+      item?.image,
+      item?.imageUrl,
+      item?.fileUrl,
+      item?.publicUrl,
+      item?.secureUrl,
+      item?.assetUrl,
+      item?.src,
+      item?.uri,
+      item?.location,
+      item?.path,
+    );
+    const thumbnailUrl = this.getFirstMediaUrl(
+      item?.thumbnailUrl,
+      item?.thumbnail,
+      item?.posterUrl,
+      item?.poster,
+      item?.coverImage,
+      item?.coverPic,
+      primaryUrl,
+    );
+
     return {
       id: this.getId(item) || `${prefix}_${index}`,
       mediaType: item?.type === "video" || item?.mediaType === "video" ? "video" : "image",
-      url: item?.url || item?.mediaUrl || item?.image || "",
-      thumbnailUrl: item?.thumbnailUrl,
+      url: primaryUrl,
+      thumbnailUrl,
       durationMs:
         typeof item?.durationMs === "number"
           ? item.durationMs

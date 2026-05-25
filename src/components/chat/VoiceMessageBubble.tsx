@@ -7,9 +7,9 @@ import {
   View,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
-import { createSound } from "react-native-nitro-sound";
 
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
+import { createManagedSound } from "../../utils/nitroSound";
 
 interface VoiceMessageBubbleProps {
   audioUrl?: string;
@@ -68,7 +68,7 @@ const VoiceMessageBubble = ({
   metaColor,
   label = "",
 }: VoiceMessageBubbleProps) => {
-  const soundRef = useRef(createSound());
+  const soundRef = useRef(createManagedSound());
   const [loading, setLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(0);

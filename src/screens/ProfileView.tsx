@@ -26,6 +26,7 @@ import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import { openPostInFeed, openSwipeInSwipes } from "../utils/socialNavigation";
+import ProgressiveImage from "../features/social/components/ProgressiveImage";
 
 interface ProfilePost {
  _id: string;
@@ -33,7 +34,22 @@ interface ProfilePost {
  postType?: string;
  media?: Array<{
   url?: string;
+  mediaUrl?: string;
+  image?: string;
+  imageUrl?: string;
+  fileUrl?: string;
+  publicUrl?: string;
+  secureUrl?: string;
+  assetUrl?: string;
+  src?: string;
+  uri?: string;
+  location?: string;
+  path?: string;
   thumbnailUrl?: string;
+  thumbnail?: string;
+  posterUrl?: string;
+  poster?: string;
+  coverImage?: string;
  }>;
 }
 
@@ -216,13 +232,42 @@ const ProfileScreen = ({navigation}: any) => {
   },
  ];
 
-const getPostPreviewUrl = (post: ProfilePost): string =>
-  normalizeMediaUrl(
-    post.media?.[0]?.thumbnailUrl ||
-      post.media?.[0]?.url ||
-      post.image ||
-      "",
-  );
+const firstPresentString = (...values: any[]): string => {
+ for (const value of values) {
+  const normalizedValue = String(value || "").trim();
+  if (normalizedValue) {
+   return normalizedValue;
+  }
+ }
+
+ return "";
+};
+
+const getPostPreviewUrl = (post: ProfilePost): string => {
+ const media = post.media?.[0];
+ return normalizeMediaUrl(
+  firstPresentString(
+   media?.thumbnailUrl,
+   media?.thumbnail,
+   media?.posterUrl,
+   media?.poster,
+   media?.coverImage,
+   media?.url,
+   media?.mediaUrl,
+   media?.image,
+   media?.imageUrl,
+   media?.fileUrl,
+   media?.publicUrl,
+   media?.secureUrl,
+   media?.assetUrl,
+   media?.src,
+   media?.uri,
+   media?.location,
+   media?.path,
+   post.image,
+  ),
+ );
+};
 
  const togglePrivateProfile = async () => {
   if (privateLoading) {
@@ -280,14 +325,13 @@ const getPostPreviewUrl = (post: ProfilePost): string =>
     openPostInFeed(navigation, { postId: item._id, userId: user?._id });
    }}
   >
-   {getPostPreviewUrl(item) ? (
-    <Image
-     source={{
-      uri: getPostPreviewUrl(item)
-     }}
-     style={styles.postImage}
-    />
-   ) : (
+	   {getPostPreviewUrl(item) ? (
+	    <ProgressiveImage
+	     uri={getPostPreviewUrl(item)}
+	     previewUri={getPostPreviewUrl(item)}
+	     style={styles.postImage}
+	    />
+	   ) : (
     <View style={[styles.postImage, styles.postFallback]}>
       <Icon name="image-outline" size={22} color={colors.mutedText} />
     </View>
