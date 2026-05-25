@@ -30,6 +30,7 @@ function ProgressiveImage({
   fallbackColor = "#0f172a",
 }: ProgressiveImageProps) {
   const imageOpacity = useRef(new Animated.Value(0)).current;
+  const imageFailedRef = useRef(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const resolvedUri = String(uri || "").trim();
@@ -39,6 +40,7 @@ function ProgressiveImage({
   useEffect(() => {
     imageOpacity.stopAnimation();
     imageOpacity.setValue(0);
+    imageFailedRef.current = false;
     setPreviewFailed(false);
     setImageFailed(false);
   }, [imageOpacity, resolvedPreviewUri, resolvedUri]);
@@ -54,6 +56,18 @@ function ProgressiveImage({
     });
   }, [resolvedPreviewUri, resolvedUri]);
 
+  const revealLoadedImage = () => {
+    if (imageFailedRef.current) {
+      return;
+    }
+
+    Animated.timing(imageOpacity, {
+      toValue: 1,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  };
+
   if (!resolvedUri && !resolvedPreviewUri) {
     return <View style={[styles.fallback, containerStyle, { backgroundColor: fallbackColor }]} />;
   }
@@ -66,7 +80,8 @@ function ProgressiveImage({
             source={{ uri: resolvedPreviewUri }}
             style={StyleSheet.absoluteFill}
             resizeMode={resizeMode}
-            blurRadius={blurRadius}
+            resizeMethod="resize"
+            blurRadius={Math.max(blurRadius, contentBlurRadius)}
             fadeDuration={0}
             onError={() => {
               setPreviewFailed(true);
@@ -80,15 +95,13 @@ function ProgressiveImage({
           source={{ uri: resolvedUri }}
           style={[StyleSheet.absoluteFill, { opacity: imageOpacity }]}
           resizeMode={resizeMode}
+          resizeMethod="resize"
+          blurRadius={contentBlurRadius}
           fadeDuration={0}
-          onLoad={() => {
-            Animated.timing(imageOpacity, {
-              toValue: 1,
-              duration: 180,
-              useNativeDriver: true,
-            }).start();
-          }}
+          onLoad={revealLoadedImage}
+          onLoadEnd={revealLoadedImage}
           onError={() => {
+            imageFailedRef.current = true;
             imageOpacity.stopAnimation();
             imageOpacity.setValue(0);
             setImageFailed(true);

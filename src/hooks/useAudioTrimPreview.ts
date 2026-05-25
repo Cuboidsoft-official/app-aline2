@@ -83,18 +83,25 @@ export function useAudioTrimPreview() {
     setPositionMs(Math.round(Math.max(0, startTime) * 1000));
 
     if (typeof options?.rawUrl === "string" || typeof options?.normalizedUrl === "string") {
-      sourceRef.current = {
+      const nextSource = {
         rawUrl: String(options?.rawUrl || "").trim(),
         normalizedUrl: String(options?.normalizedUrl || "").trim(),
       };
-      isReadyRef.current = false;
-      setIsReady(false);
-      try {
-        await playerRef.current.stopPlayer();
-      } catch {
-        // noop
+
+      if (
+        nextSource.rawUrl !== sourceRef.current.rawUrl ||
+        nextSource.normalizedUrl !== sourceRef.current.normalizedUrl
+      ) {
+        sourceRef.current = nextSource;
+        isReadyRef.current = false;
+        setIsReady(false);
+        try {
+          await playerRef.current.stopPlayer();
+        } catch {
+          // noop
+        }
+        return;
       }
-      return;
     }
 
     if (isReadyRef.current) {
