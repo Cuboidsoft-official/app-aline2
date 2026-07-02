@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
-import { createSound } from "react-native-nitro-sound";
 
 import {
   ensureAudioClipStartPosition,
@@ -9,6 +8,7 @@ import {
   startManagedAudioClipPlayback,
   stopAllManagedAudioPlayback,
 } from "../utils/audioPlayback";
+import { createManagedSound } from "../utils/nitroSound";
 
 type UseSegmentedMusicPlaybackParams = {
   rawUrl: string;
@@ -63,7 +63,7 @@ export function useSegmentedMusicWarmup({
 
   useEffect(() => {
     if (!warmupPlayerRef.current) {
-      warmupPlayerRef.current = createSound();
+      warmupPlayerRef.current = createManagedSound();
     }
 
     const player = warmupPlayerRef.current;
@@ -157,7 +157,7 @@ export function useSegmentedMusicPlayback({
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackError, setPlaybackError] = useState<unknown>(null);
-  const audioPlayerRef = useRef(createSound());
+  const audioPlayerRef = useRef(createManagedSound());
   const ownerIdRef = useRef(`music_${Date.now()}_${Math.random().toString(36).slice(2)}`);
   const audioTrackKeyRef = useRef("");
   const audioSourceKeyRef = useRef("");

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
-import { createSound } from "react-native-nitro-sound";
 
 import {
   ensureAudioClipStartPosition,
@@ -12,6 +11,7 @@ import {
   registerGlobalMusicPlaybackStopper,
   stopAllSegmentedMusicPlayback,
 } from "./useSegmentedMusicPlayback";
+import { createManagedSound } from "../utils/nitroSound";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -21,25 +21,33 @@ type TrimWindow = {
 };
 
 export function useAudioTrimPreview() {
-  const playerRef = useRef(createSound());
+  const playerRef = useRef(createManagedSound());
   const trimWindowRef = useRef<TrimWindow>({ startTime: 0, endTime: 0 });
   const sourceRef = useRef({ rawUrl: "", normalizedUrl: "" });
+  const isReadyRef = useRef(false);
+  const isPlayingRef = useRef(false);
+  const requestIdRef = useRef(0);
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [positionMs, setPositionMs] = useState(0);
 
   const stopPlayback = useCallback(async () => {
+    requestIdRef.current += 1;
     try {
       await playerRef.current.pausePlayer();
     } catch {
       // noop
     }
+    isPlayingRef.current = false;
     setIsPlaying(false);
     setIsLoading(false);
   }, []);
 
   const forceStopPlayback = useCallback(() => {
+    requestIdRef.current += 1;
+    isPlayingRef.current = false;
+    isReadyRef.current = false;
     setIsPlaying(false);
     setIsLoading(false);
     setIsReady(false);
@@ -65,34 +73,49 @@ export function useAudioTrimPreview() {
     endTime: number,
     options?: { rawUrl?: string; normalizedUrl?: string },
   ) => {
-    const shouldResumeAfterSeek = isPlaying;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const shouldResumeAfterSeek = isPlayingRef.current;
     setTrimWindow(startTime, endTime);
+    isPlayingRef.current = false;
     setIsPlaying(false);
     setIsLoading(false);
     setPositionMs(Math.round(Math.max(0, startTime) * 1000));
 
     if (typeof options?.rawUrl === "string" || typeof options?.normalizedUrl === "string") {
-      sourceRef.current = {
+      const nextSource = {
         rawUrl: String(options?.rawUrl || "").trim(),
         normalizedUrl: String(options?.normalizedUrl || "").trim(),
       };
-      setIsReady(false);
-      try {
-        await playerRef.current.stopPlayer();
-      } catch {
-        // noop
+
+      if (
+        nextSource.rawUrl !== sourceRef.current.rawUrl ||
+        nextSource.normalizedUrl !== sourceRef.current.normalizedUrl
+      ) {
+        sourceRef.current = nextSource;
+        isReadyRef.current = false;
+        setIsReady(false);
+        try {
+          await playerRef.current.stopPlayer();
+        } catch {
+          // noop
+        }
+        return;
       }
-      return;
     }
 
-    if (isReady) {
+    if (isReadyRef.current) {
       await seekToSeconds(startTime).catch(() => undefined);
       if (shouldResumeAfterSeek) {
         await playerRef.current.resumePlayer().catch(() => undefined);
+        if (requestIdRef.current !== requestId) {
+          return;
+        }
+        isPlayingRef.current = true;
         setIsPlaying(true);
       }
     }
-  }, [isPlaying, isReady, seekToSeconds, setTrimWindow]);
+  }, [seekToSeconds, setTrimWindow]);
 
   const togglePlayback = useCallback(async () => {
     const { rawUrl, normalizedUrl } = sourceRef.current;
@@ -107,6 +130,8 @@ export function useAudioTrimPreview() {
 
     stopAllSegmentedMusicPlayback();
     setIsLoading(true);
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
 
     try {
       await startManagedAudioClipPlayback(playerRef.current, {
@@ -116,10 +141,17 @@ export function useAudioTrimPreview() {
         volume: 1,
         seekSettleDelayMs: 80,
       });
+      if (requestIdRef.current !== requestId) {
+        return;
+      }
+      isReadyRef.current = true;
+      isPlayingRef.current = true;
       setIsReady(true);
 
       setIsPlaying(true);
     } catch (error) {
+      isReadyRef.current = false;
+      isPlayingRef.current = false;
       setIsReady(false);
       setIsPlaying(false);
       throw error;
@@ -163,11 +195,13 @@ export function useAudioTrimPreview() {
           Math.round(trimWindowRef.current.startTime * 1000),
           40,
         ).catch(() => undefined);
+        isPlayingRef.current = false;
         setIsPlaying(false);
       }
     });
 
     player.addPlaybackEndListener(() => {
+      isPlayingRef.current = false;
       setIsPlaying(false);
       setIsLoading(false);
     });

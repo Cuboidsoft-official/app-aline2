@@ -27,7 +27,7 @@ let managedAudioSessionId = 0;
 let activeManagedAudioPlayer: any = null;
 
 const silenceManagedAudioPlayer = (player: any) => {
-  if (!player) {
+  if (!player || player.isDisposed?.()) {
     return;
   }
 
@@ -105,12 +105,13 @@ export const ensureAudioClipStartPosition = async (
   startPositionMs: number,
   seekSettleDelayMs = 70,
 ): Promise<void> => {
-  const safeStartPositionMs = Math.max(0, Math.round(Number(startPositionMs) || 0));
+  const numericStartPositionMs = Number(startPositionMs);
 
-  if (!Number.isFinite(safeStartPositionMs)) {
+  if (!Number.isFinite(numericStartPositionMs) || numericStartPositionMs < 0 || player?.isDisposed?.()) {
     return;
   }
 
+  const safeStartPositionMs = Math.max(0, Math.round(numericStartPositionMs));
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -171,6 +172,7 @@ export const startManagedAudioClipPlayback = async (
 
   const source = await startAudioPlaybackFromSources(player, rawValue, normalizedValue);
   playbackStarted = true;
+  await player.setVolume(0).catch(() => undefined);
   if (!isCurrentSession()) {
     silenceManagedAudioPlayer(player);
     throw new Error("Audio playback was superseded.");

@@ -965,7 +965,7 @@ function FeedScreen({ navigation, route }: any) {
         {chips}
       </View>
     );
-  }, [colors.mutedText, colors.text, navigation, openHashtagResults, openLocationSearch]);
+  }, [colors.mutedText, colors.text, openHashtagResults, openLocationSearch]);
 
   const getFeedRelationship = useCallback((postUser: Post["user"]) => {
     const viewerId = String(currentUser?.id || "");
@@ -1309,11 +1309,7 @@ function FeedScreen({ navigation, route }: any) {
         if (activeFilter && activeFilter.matrix) {
           return (
             <ColorMatrix matrix={activeFilter.matrix}>
-              <Image
-                source={{ uri: normalizeMediaUrl(primaryMedia?.url) }}
-                style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-                resizeMode={imageResizeMode}
-              />
+              {rawImage}
             </ColorMatrix>
           );
         }
@@ -1372,11 +1368,7 @@ function FeedScreen({ navigation, route }: any) {
                     return (
                       <View key={asset.id}>
                         <ColorMatrix matrix={activeFilter.matrix}>
-                          <Image
-                            source={{ uri: normalizeMediaUrl(asset.url) }}
-                            style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-                            resizeMode={imageResizeMode}
-                          />
+                          {rawImage}
                         </ColorMatrix>
                       </View>
                     );
@@ -1509,8 +1501,6 @@ function FeedScreen({ navigation, route }: any) {
     const musicLabel = formatPostMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isMuted = !!mutedPostIds[item.id];
-    const likeAvatarUrl =
-      (item.liked ? currentUser?.avatarUrl : "") || item.user.avatarUrl || DEFAULT_AVATAR_URL;
     void musicLabel;
     void hasAttachedMusic;
     void isMuted;

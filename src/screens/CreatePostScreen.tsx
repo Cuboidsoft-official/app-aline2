@@ -182,7 +182,8 @@ const MODE_COPY: Record<
 };
 const LOCATION_SEEDS = ["Nearby", "Studio", "Cafe", "Beach", "Restaurant", "Office"];
 const MUSIC_DISCOVERY_FALLBACK_QUERIES = ["love", "party", "happy", "summer"];
-const MUSIC_PICKER_PAGE_SIZE = 24;
+const PHOTO_PICKER_MAX_DIMENSION = 2160;
+const PHOTO_PICKER_QUALITY = 0.8;
 const STORY_TEXT_THEMES: Array<{
   id: StoryTextStickerTheme;
   label: string;
@@ -533,9 +534,7 @@ function RangeSlider({
   const safeDuration = Math.max(1, Math.round(duration || 1));
   const normalizedClipDuration = clamp(Math.round(Number(clipDuration || 1) || 1), 1, safeDuration);
   const endTime = clamp(startTime + normalizedClipDuration, 1, safeDuration);
-  const trackWidth = showWaveform
-    ? Math.max(viewportWidth || 0, Math.min(1920, Math.max(360, safeDuration * 18)))
-    : Math.max(viewportWidth || 0, 1);
+  const trackWidth = Math.max(viewportWidth || 0, 1);
   const selectedStart = trackWidth * (startTime / safeDuration);
   const selectedEnd = trackWidth * (endTime / safeDuration);
   const handleVisualWidth = showWaveform ? 12 : 14;
@@ -544,6 +543,7 @@ function RangeSlider({
   const leftHandleLeft = clamp(selectedStart - handleVisualWidth / 2, 0, maxHandleLeft);
   const rightHandleLeft = clamp(selectedEnd - handleVisualWidth / 2, 0, maxHandleLeft);
   const minGapPx = trackWidth > 0 ? Math.max(18, trackWidth * (1 / safeDuration)) : 0;
+  const selectedWidth = Math.max(minGapPx, selectedEnd - selectedStart);
   const waveformBars = useMemo(() => {
     const count = clamp(Math.round(trackWidth / 9), 28, 96);
 
@@ -644,6 +644,32 @@ function RangeSlider({
     [selectedEnd, selectedStart, updateRange],
   );
 
+  const selectionResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          dragWindowRef.current = {
+            startPx: selectedStart,
+            endPx: selectedEnd,
+          };
+          setIsDraggingHandle(true);
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const width = Math.max(minGapPx, dragWindowRef.current.endPx - dragWindowRef.current.startPx);
+          const nextStart = clamp(dragWindowRef.current.startPx + gestureState.dx, 0, Math.max(0, trackWidth - width));
+          updateRange(nextStart, nextStart + width);
+        },
+        onPanResponderRelease: () => setIsDraggingHandle(false),
+        onPanResponderTerminate: () => setIsDraggingHandle(false),
+      }),
+    [minGapPx, selectedEnd, selectedStart, trackWidth, updateRange],
+  );
+
   return (
     <View style={styles.sliderWrap}>
       <View style={styles.sliderLabelsRow}>
@@ -662,7 +688,7 @@ function RangeSlider({
           nestedScrollEnabled
           bounces={false}
           showsHorizontalScrollIndicator={false}
-          scrollEnabled={!isDraggingHandle && showWaveform && trackWidth > viewportWidth + 8}
+          scrollEnabled={false}
           contentContainerStyle={styles.sliderScrollContent}
         >
           <View
@@ -705,11 +731,12 @@ function RangeSlider({
                 </View>
               ) : null}
               <View
+                {...selectionResponder.panHandlers}
                 style={[
                   styles.sliderSelection,
                   {
                     left: selectedStart,
-                    width: Math.max(0, selectedEnd - selectedStart),
+                    width: selectedWidth,
                     backgroundColor: accentColor,
                     opacity: showWaveform ? 0.16 : 1,
                   },
@@ -1569,7 +1596,9 @@ function CreatePostScreen({ navigation, route }: any) {
       const [asset] = await pickComposerAssets({
         mediaType: pickerMediaType,
         selectionLimit: 1,
-        quality: 0.9,
+        quality: PHOTO_PICKER_QUALITY,
+        maxWidth: PHOTO_PICKER_MAX_DIMENSION,
+        maxHeight: PHOTO_PICKER_MAX_DIMENSION,
         presentationStyle: "fullScreen",
       });
 
@@ -1644,7 +1673,9 @@ function CreatePostScreen({ navigation, route }: any) {
       const captureOptions: Parameters<typeof captureComposerAssets>[0] = {
         mediaType: captureMediaType,
         cameraType: launcherCameraFacingMode === "user" ? "front" : "back",
-        quality: 0.9,
+        quality: PHOTO_PICKER_QUALITY,
+        maxWidth: PHOTO_PICKER_MAX_DIMENSION,
+        maxHeight: PHOTO_PICKER_MAX_DIMENSION,
         saveToPhotos: false,
         videoQuality: "high",
       };
@@ -2263,6 +2294,35 @@ function CreatePostScreen({ navigation, route }: any) {
       );
     },
     [pendingMusicSelection?.duration, resetMusicPreview],
+  );
+
+  const nudgeMusicTrimStart = useCallback(
+    (deltaSeconds: number) => {
+      if (!pendingMusicSelection) {
+        return;
+      }
+
+      const safeDuration = Math.max(1, Math.round(Number(pendingMusicSelection.duration || 0) || 1));
+      const activeDuration = clamp(
+        Math.round(Number(musicTrimDuration || pendingMusicSelection.clipDuration || defaultClipDuration(mode, safeDuration)) || 1),
+        1,
+        safeDuration,
+      );
+      const safeStart = clamp(
+        musicTrimStartTime + deltaSeconds,
+        0,
+        Math.max(0, safeDuration - activeDuration),
+      );
+
+      updateMusicTrimWindow(safeStart, activeDuration);
+    },
+    [
+      mode,
+      musicTrimDuration,
+      musicTrimStartTime,
+      pendingMusicSelection,
+      updateMusicTrimWindow,
+    ],
   );
 
   const toggleMusicPreview = useCallback(async () => {
@@ -4982,6 +5042,27 @@ function CreatePostScreen({ navigation, route }: any) {
                   showWaveform
                 />
 
+                <View style={styles.trimNudgePanel}>
+                  <View>
+                    <Text style={[styles.trimNudgeLabel, { color: mutedColor }]}>Start time</Text>
+                    <Text style={[styles.trimNudgeValue, { color: textColor }]}>{formatDuration(musicTrimStartTime)}</Text>
+                  </View>
+                  <View style={styles.trimNudgeButtonRow}>
+                    {[-5, -1, 1, 5].map((delta) => (
+                      <TouchableOpacity
+                        key={`music-start-nudge-${delta}`}
+                        style={[styles.trimNudgeButton, { backgroundColor: inputBackground, borderColor }]}
+                        onPress={() => nudgeMusicTrimStart(delta)}
+                        disabled={musicImportingId === track.id}
+                      >
+                        <Text style={[styles.trimNudgeButtonText, { color: textColor }]}>
+                          {delta > 0 ? `+${delta}s` : `${delta}s`}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
                 <View style={styles.trimActionDock}>
                   <ScrollView
                     horizontal
@@ -6701,6 +6782,43 @@ const styles = StyleSheet.create({
   trimActionDock: {
     marginTop: 14,
     gap: 12,
+  },
+  trimNudgePanel: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  trimNudgeLabel: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: appFonts.medium,
+  },
+  trimNudgeValue: {
+    marginTop: 2,
+    fontSize: 15,
+    lineHeight: 19,
+    fontFamily: appFonts.semibold,
+  },
+  trimNudgeButtonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  trimNudgeButton: {
+    minWidth: 48,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+  },
+  trimNudgeButtonText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: appFonts.semibold,
   },
   videoTrimCard: {
     borderRadius: 24,

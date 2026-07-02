@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
-import { createSound } from "react-native-nitro-sound";
 
 import { normalizeMediaUrl } from "../../../utils/mediaUrls";
+import { createManagedSound } from "../../../utils/nitroSound";
 
 type CommentAudioBubbleProps = {
   audioDuration?: number;
@@ -45,7 +45,7 @@ function CommentAudioBubble({
   audioUrl,
   accentColor = "#2563eb",
 }: CommentAudioBubbleProps) {
-  const soundRef = useRef(createSound());
+  const soundRef = useRef(createManagedSound());
   const [loading, setLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(0);

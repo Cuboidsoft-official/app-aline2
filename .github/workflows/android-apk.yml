@@ -346,6 +346,7 @@ jobs:
       - name: Upload standard release artifacts
         if: steps.meta.outputs.build_aab == 'true'
         id: upload_release
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
@@ -360,6 +361,7 @@ jobs:
       - name: Upload arm64 release artifact
         if: steps.meta.outputs.build_aab != 'true'
         id: upload_release_arm64
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.meta.outputs.artifact_name }}

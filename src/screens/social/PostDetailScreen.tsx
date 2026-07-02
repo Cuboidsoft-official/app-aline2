@@ -388,7 +388,7 @@ function PostDetailScreen({ route, navigation }: any) {
       if (activeFilter?.matrix) {
         return (
           <ColorMatrix key={key || asset.id} matrix={activeFilter.matrix}>
-            <Image source={{ uri: assetUrl }} style={styles.image} resizeMode={imageResizeMode} />
+            {rawImage}
           </ColorMatrix>
         );
       }
