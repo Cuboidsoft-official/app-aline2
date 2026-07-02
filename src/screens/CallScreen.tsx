@@ -200,7 +200,7 @@ const CallScreen = ({ navigation, route }: any) => {
   const [remoteStreams, setRemoteStreams] = useState<RemoteStreamEntry[]>([]);
   const [microphoneEnabled, setMicrophoneEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(String(route.params?.callType || "audio") === "video");
-  const [speakerEnabled, setSpeakerEnabledState] = useState(String(route.params?.callType || "audio") === "video");
+  const [speakerEnabled, setSpeakerEnabledState] = useState(true);
   const [arFilterPreset, setArFilterPreset] = useState<ArFilterPreset>("none");
   const [arFiltersSupported, setArFiltersSupported] = useState(false);
   const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
@@ -210,6 +210,7 @@ const CallScreen = ({ navigation, route }: any) => {
   const answeredRef = useRef(false);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ringtoneActiveRef = useRef(false);
+  const speakerEnabledRef = useRef(true);
   const localStreamRef = useRef<any>(null);
   const peerConnectionsRef = useRef<Map<string, any>>(new Map());
   const pendingIceCandidatesRef = useRef<Map<string, any[]>>(new Map());
@@ -344,6 +345,10 @@ const CallScreen = ({ navigation, route }: any) => {
   useEffect(() => {
     callSessionRef.current = callSession;
   }, [callSession]);
+
+  useEffect(() => {
+    speakerEnabledRef.current = speakerEnabled;
+  }, [speakerEnabled]);
 
   useEffect(() => {
     setCameraEnabled(effectiveCallType === "video");
@@ -509,6 +514,12 @@ const CallScreen = ({ navigation, route }: any) => {
     peerConnection.ontrack = (event: any) => {
       const [remoteStream] = Array.isArray(event?.streams) ? event.streams : [];
       if (remoteStream) {
+        remoteStream.getAudioTracks?.().forEach((track: any) => {
+          track.enabled = true;
+        });
+        activateCommunicationAudio(speakerEnabledRef.current).catch((error) => {
+          console.log("call remote audio route error", error);
+        });
         setRemoteStreamForUser(remoteUserId, remoteStream);
       }
     };
@@ -1291,6 +1302,17 @@ const CallScreen = ({ navigation, route }: any) => {
 
       {shouldEnterMediaRoom ? (
         <View style={styles.webrtcStage}>
+          {effectiveCallType === "audio"
+            ? remoteParticipantTiles.map((entry) => (
+                <RTCView
+                  key={`remote-audio-${entry.userId}`}
+                  streamURL={entry.streamURL}
+                  style={styles.remoteAudioSink}
+                  objectFit="cover"
+                />
+              ))
+            : null}
+
           {effectiveCallType === "video" ? (
             isGroupCall ? (
               <View style={styles.groupVideoGrid}>
@@ -1478,6 +1500,12 @@ const styles = StyleSheet.create({
   webrtcStage: {
     flex: 1,
     backgroundColor: "#020617",
+  },
+  remoteAudioSink: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    opacity: 0,
   },
   header: {
     position: "absolute",

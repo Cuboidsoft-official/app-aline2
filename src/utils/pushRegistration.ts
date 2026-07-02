@@ -1,6 +1,7 @@
 import { PermissionsAndroid, Platform } from "react-native";
 import { API } from "../api/api";
 import { getStoredUserId } from "./authSession";
+import { startCallRingtone } from "./callAudio";
 import { getMutedConversationIds } from "./chatMute";
 import { openPostInFeed } from "./socialNavigation";
 
@@ -8,6 +9,8 @@ let Notifications: any = null;
 let Device: any = null;
 let FirebaseMessaging: any = null;
 let lastHandledNotificationResponseId = "";
+
+const CALL_NOTIFICATION_CHANNEL_ID = "calls_v3";
 
 try {
   Notifications = require("expo-notifications");
@@ -72,6 +75,13 @@ async function ensureAndroidChannel() {
       importance: Notifications.AndroidImportance?.MAX ?? 4,
       vibrationPattern: [0, 250, 150, 250, 150, 250],
       sound: null,
+    });
+
+    await Notifications.setNotificationChannelAsync(CALL_NOTIFICATION_CHANNEL_ID, {
+      name: "Calls",
+      importance: Notifications.AndroidImportance?.MAX ?? 4,
+      vibrationPattern: [0, 300, 160, 300, 160, 300],
+      sound: "call_ringing.mp3",
     });
 
     await Notifications.setNotificationChannelAsync("social", {
@@ -210,6 +220,20 @@ function navigateFromNotificationData(data: any, navigationRef?: any) {
 
     case "incoming_call":
       if (data.callSessionId) {
+        const currentRoute = typeof navigation.getCurrentRoute === "function"
+          ? navigation.getCurrentRoute()
+          : null;
+
+        if (
+          currentRoute?.name === "CallScreen"
+          && String(currentRoute?.params?.callSessionId || "") === String(data.callSessionId || "")
+        ) {
+          return;
+        }
+
+        startCallRingtone().catch((error) => {
+          console.log("[Push] Incoming call ringtone start error:", error);
+        });
         navigation.navigate("CallScreen", {
           callSessionId: data.callSessionId,
           mode: "incoming",
@@ -284,7 +308,7 @@ async function showForegroundNotification(remoteMessage: any) {
   }
   const channelId =
     type === "incoming_call"
-      ? "calls_v2"
+      ? CALL_NOTIFICATION_CHANNEL_ID
       : type === "chat_message"
         ? "chat"
         : "social";
@@ -343,6 +367,10 @@ async function requestPushPermission() {
       console.log("[Push] Android notification permission error:", error);
       return false;
     }
+  }
+
+  if (messaging && Platform.OS === "android") {
+    return true;
   }
 
   if (!Notifications) {
@@ -440,9 +468,6 @@ export function setupNotificationListeners(navigationRef?: any): () => void {
           const data = remoteMessage?.data || {};
 
           if (String(data.type || "").trim() === "incoming_call") {
-            showForegroundNotification(remoteMessage).catch((error) => {
-              console.log("[Push] Foreground incoming-call notification error:", error);
-            });
             navigateFromNotificationData(data, navigationRef);
             return;
           }

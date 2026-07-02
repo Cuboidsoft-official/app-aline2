@@ -188,6 +188,17 @@ const buildMixedLatestFeedPosts = (items: Post[]): Post[] => {
   ).sort((left, right) => Number(right?.createdAt || 0) - Number(left?.createdAt || 0));
 };
 
+const shuffleFeedPosts = (items: Post[]): Post[] => {
+  const shuffledItems = [...items];
+
+  for (let index = shuffledItems.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffledItems[index], shuffledItems[swapIndex]] = [shuffledItems[swapIndex], shuffledItems[index]];
+  }
+
+  return shuffledItems;
+};
+
 type CurrentUserSummary = {
   id: string;
   avatarUrl: string;
@@ -250,7 +261,7 @@ function FeedScreen({ navigation, route }: any) {
   const isTabletLayout = width >= 768;
   const focusedPostId = String(route?.params?.postId || "").trim();
   const focusUserId = String(route?.params?.userId || "").trim();
-  const isFocusedPostFeed = Boolean(focusedPostId || focusUserId);
+  const isFocusedPostFeed = Boolean(focusUserId);
   const feedListItems = useMemo(() => {
     if (isFocusedPostFeed || !feed.posts.length) {
       return feed.posts;
@@ -434,10 +445,16 @@ function FeedScreen({ navigation, route }: any) {
     };
   }, [focusUserId, readSellerAccount, readUnreadNotificationCount, readWalletBalance]);
 
-  const applyFeedSnapshot = useCallback((snapshot: any) => {
+  const applyFeedSnapshot = useCallback((snapshot: any, options: { shufflePosts?: boolean } = {}) => {
     const { data, liveStories: nextLiveStories, seller, storedUser, unreadNotifications, walletBalance } = snapshot;
+    const nextPosts = buildMixedLatestFeedPosts(data.posts);
 
-    setFeed({ ...data, posts: buildMixedLatestFeedPosts(data.posts) });
+    setFeed({
+      ...data,
+      posts: options.shufflePosts && !isFocusedPostFeed
+        ? shuffleFeedPosts(nextPosts)
+        : nextPosts,
+    });
     setLiveStories(nextLiveStories);
     setPage(1);
     setHasMore(data.posts.length >= 20);
@@ -458,11 +475,11 @@ function FeedScreen({ navigation, route }: any) {
     setUnreadNotificationCount(unreadNotifications);
     setWalletCoinBalance(walletBalance);
     setErrorMessage("");
-  }, []);
+  }, [isFocusedPostFeed]);
 
-  const loadFeed = useCallback(async () => {
+  const loadFeed = useCallback(async (options: { shufflePosts?: boolean } = {}) => {
     const snapshot = await loadFeedSnapshot();
-    applyFeedSnapshot(snapshot);
+    applyFeedSnapshot(snapshot, options);
   }, [applyFeedSnapshot, loadFeedSnapshot]);
 
   useEffect(() => {
@@ -498,7 +515,7 @@ function FeedScreen({ navigation, route }: any) {
       return;
     }
 
-    const targetIndex = feed.posts.findIndex((item) => item.id === focusedPostId);
+    const targetIndex = feedListItems.findIndex((item) => item.id === focusedPostId);
     if (targetIndex < 0) {
       return;
     }
@@ -507,7 +524,7 @@ function FeedScreen({ navigation, route }: any) {
     requestAnimationFrame(() => {
       feedListRef.current?.scrollToIndex?.({ index: targetIndex, animated: false });
     });
-  }, [focusedPostId, feed.posts]);
+  }, [focusedPostId, feed.posts.length, feedListItems]);
 
   useFocusEffect(
     useCallback(() => {
@@ -634,7 +651,7 @@ function FeedScreen({ navigation, route }: any) {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await loadFeed();
+      await loadFeed({ shufflePosts: true });
     } finally {
       setRefreshing(false);
     }
@@ -2715,9 +2732,9 @@ const styles = StyleSheet.create({
   brand: {
     fontSize: 24,
     color: "#FFFFFF",
-    fontWeight: "800",
-    letterSpacing: -0.8,
-    fontFamily: Platform.select({ ios: "Georgia-Bold", android: "serif", default: undefined }),
+    fontWeight: "400",
+    letterSpacing: 0,
+    fontFamily: "Lobster Two",
   },
   brandCompact: { fontSize: 19 },
   brandSubline: { marginTop: 2, fontSize: 12.5, fontWeight: "700", letterSpacing: 0.3 },

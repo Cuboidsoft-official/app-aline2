@@ -71,6 +71,7 @@ import { installReadableUiDefaults } from './src/theme/readability';
 import { connectSocket, disconnectSocket, socket, updateSocketPresence } from './src/socket';
 import { Alert } from './src/utils/appAlert';
 import { getStoredToken, getStoredUserId, setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
+import { startCallRingtone } from './src/utils/callAudio';
 import { registerPushToken, setupNotificationListeners } from './src/utils/pushRegistration';
 import { openPostInFeed } from './src/utils/socialNavigation';
 
@@ -296,6 +297,10 @@ function AppNavigator() {
         return;
       }
 
+      startCallRingtone().catch((error) => {
+        console.log("global incoming call ringtone error", error);
+      });
+
       (navigationRef as any).navigate("CallScreen", {
         callSessionId: nextCallSessionId,
         mode: "incoming",
@@ -327,6 +332,10 @@ function AppNavigator() {
       }
 
       if (!(await isNotificationForCurrentUser(payload))) {
+        return;
+      }
+
+      if (String(payload?.type || '').trim() === 'chat_message') {
         return;
       }
 

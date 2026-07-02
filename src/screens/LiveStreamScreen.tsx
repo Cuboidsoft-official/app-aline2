@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   AppState,
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -30,6 +31,7 @@ import { useAppTheme } from "../theme/AppThemeContext";
 import { ensureCameraPermission, ensureMicrophonePermission } from "../utils/permissions";
 import { activateCommunicationAudio, resetCallAudioRoute } from "../utils/callAudio";
 import { endLiveStream, getLiveStream } from "../utils/liveStreamApi";
+import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 
 const DEFAULT_ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
 const LIVE_REACTION_OPTIONS = ["❤️", "🔥", "👏", "😂", "😍"];
@@ -104,9 +106,22 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const pendingIceCandidatesRef = useRef<Map<string, any[]>>(new Map());
   const hasJoinedRoomRef = useRef(false);
   const leavingRef = useRef(false);
+  const mediaTornDownRef = useRef(false);
 
   const isHost = useMemo(() => Boolean(liveStream?.isHost || mode === "host"), [liveStream?.isHost, mode]);
   const currentUserId = String(currentUser?._id || currentUser?.id || "").trim();
+  const currentViewers = useMemo(
+    () =>
+      (Array.isArray(liveStream?.currentViewers) ? liveStream.currentViewers : [])
+        .map((viewer: any) => ({
+          ...viewer,
+          id: String(viewer?._id || viewer?.id || "").trim(),
+          label: String(viewer?.name || viewer?.username || "Viewer").trim() || "Viewer",
+          avatarUrl: String(viewer?.profilePic || "").trim() || DEFAULT_AVATAR_URL,
+        }))
+        .filter((viewer: any) => viewer.id),
+    [liveStream?.currentViewers],
+  );
   const approvedGuestIds = Array.isArray(liveStream?.approvedGuestIds)
     ? liveStream.approvedGuestIds
       .map((entry: any) => String(entry?._id || entry?.id || entry || "").trim())
@@ -122,7 +137,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const canBroadcast = isHost || isApprovedGuest;
   const hasPendingGuestRequest = pendingGuestRequestIds.includes(currentUserId);
   const liveStatus = String(liveStream?.status || "").trim() || "live";
-  const viewerCount = Number(liveStream?.viewerCount) || 0;
+  const viewerCount = currentViewers.length || Number(liveStream?.viewerCount) || 0;
   const normalizedIceServers = useMemo(() => normalizeIceServers(iceServers), [iceServers]);
 
   const leaveLiveRoom = useCallback(() => {
@@ -157,6 +172,23 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const cleanupAllPeers = useCallback(() => {
     Array.from(peerConnectionsRef.current.keys()).forEach((remoteUserId) => cleanupPeerConnection(remoteUserId));
   }, [cleanupPeerConnection]);
+
+  const teardownLiveMedia = useCallback(() => {
+    if (mediaTornDownRef.current) {
+      return;
+    }
+
+    mediaTornDownRef.current = true;
+    cleanupAllPeers();
+    stopMediaStream(localStreamRef.current);
+    localStreamRef.current = null;
+    pendingIceCandidatesRef.current.clear();
+    setLocalStreamURL(null);
+    setRemoteStreamURL(null);
+    setRequestingGuestSlot(false);
+    setProcessingGuestUserId("");
+    resetCallAudioRoute().catch(() => {});
+  }, [cleanupAllPeers]);
 
   const attachLocalTracksToPeer = useCallback((peerConnection: any) => {
     if (!peerConnection || !localStreamRef.current || typeof localStreamRef.current.getTracks !== "function") {
@@ -265,6 +297,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       return;
     }
 
+    mediaTornDownRef.current = false;
     const hasMicrophonePermission = await ensureMicrophonePermission("Allow Aline2 to use your microphone for live streaming.");
     if (!hasMicrophonePermission) {
       throw new Error("Microphone permission is required for live streaming.");
@@ -441,7 +474,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       setRequestingGuestSlot(false);
       setLiveStream(payload.liveStream);
       if (String(payload?.liveStream?.status || "") === "ended") {
-        setRemoteStreamURL(null);
+        teardownLiveMedia();
       }
     };
 
@@ -553,6 +586,16 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       }
     };
 
+    const handleViewerJoined = (payload: any) => {
+      if (String(payload?.liveStreamId || "") !== String(liveStreamId)) {
+        return;
+      }
+
+      if (payload?.liveStream) {
+        setLiveStream(payload.liveStream);
+      }
+    };
+
     const handleReaction = (payload: any) => {
       if (String(payload?.liveStreamId || "") !== String(liveStreamId) || !payload?.emoji) {
         return;
@@ -612,6 +655,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     socket.on("live-stream:answer", handleAnswer);
     socket.on("live-stream:ice-candidate", handleIceCandidate);
     socket.on("live-stream:chat", handleChat);
+    socket.on("live-stream:viewer-joined", handleViewerJoined);
     socket.on("live-stream:viewer-left", handleViewerLeft);
     socket.on("live-stream:reaction", handleReaction);
     socket.on("live-stream:guest-requested", handleGuestRequested);
@@ -625,23 +669,20 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       socket.off("live-stream:answer", handleAnswer);
       socket.off("live-stream:ice-candidate", handleIceCandidate);
       socket.off("live-stream:chat", handleChat);
+      socket.off("live-stream:viewer-joined", handleViewerJoined);
       socket.off("live-stream:viewer-left", handleViewerLeft);
       socket.off("live-stream:reaction", handleReaction);
       socket.off("live-stream:guest-requested", handleGuestRequested);
       socket.off("live-stream:guest-response", handleGuestResponse);
     };
-  }, [cleanupPeerConnection, createOfferForViewer, currentUserId, ensurePeerConnection, flushPendingIceCandidates, isHost, liveStreamId]);
+  }, [cleanupPeerConnection, createOfferForViewer, currentUserId, ensurePeerConnection, flushPendingIceCandidates, isHost, liveStreamId, teardownLiveMedia]);
 
   useEffect(() => () => {
     leavingRef.current = true;
 
     leaveLiveRoom();
-
-    cleanupAllPeers();
-    stopMediaStream(localStreamRef.current);
-    localStreamRef.current = null;
-    resetCallAudioRoute().catch(() => {});
-  }, [cleanupAllPeers, leaveLiveRoom]);
+    teardownLiveMedia();
+  }, [leaveLiveRoom, teardownLiveMedia]);
 
   useEffect(() => {
     if (!isHost || !liveStreamId || liveStatus !== "live") {
@@ -660,6 +701,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
           console.log("live stream background end error:", error);
         })
         .finally(() => {
+          teardownLiveMedia();
           leaveLiveRoom();
         });
     });
@@ -667,17 +709,19 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     return () => {
       subscription.remove();
     };
-  }, [ending, isHost, leaveLiveRoom, liveStatus, liveStreamId]);
+  }, [ending, isHost, leaveLiveRoom, liveStatus, liveStreamId, teardownLiveMedia]);
 
   useEffect(() => {
     if (liveStatus === "ended") {
+      teardownLiveMedia();
+      leaveLiveRoom();
       return;
     }
 
     activateCommunicationAudio(speakerEnabled).catch((error) => {
       console.log("live stream audio activate error:", error);
     });
-  }, [liveStatus, speakerEnabled]);
+  }, [leaveLiveRoom, liveStatus, speakerEnabled, teardownLiveMedia]);
 
   const sendChatMessage = useCallback(() => {
     const nextText = String(draft || "").trim();
@@ -777,11 +821,14 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const handleLeave = useCallback(async () => {
     try {
       setEnding(true);
+      leavingRef.current = true;
+      teardownLiveMedia();
+      leaveLiveRoom();
 
       if (isHost && liveStreamId) {
+        setLiveStream((current: any) => (current ? { ...current, status: "ended" } : current));
         await endLiveStream(liveStreamId);
       }
-      leaveLiveRoom();
 
       navigation.goBack();
     } catch (error) {
@@ -789,10 +836,10 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
     } finally {
       setEnding(false);
     }
-  }, [isHost, leaveLiveRoom, liveStreamId, navigation]);
+  }, [isHost, leaveLiveRoom, liveStreamId, navigation, teardownLiveMedia]);
 
   const statusLabel = liveStatus === "ended" ? "Stream ended" : canBroadcast ? (isHost ? "You are live" : "You are live with host") : "Watching live";
-  const mainStageStreamURL = remoteStreamURL || (canBroadcast ? localStreamURL : null);
+  const mainStageStreamURL = liveStatus === "ended" ? null : remoteStreamURL || (canBroadcast ? localStreamURL : null);
   const shouldMirrorMainStage = !remoteStreamURL && canBroadcast && cameraFacingMode === "user";
   const showLocalPreview = Boolean(remoteStreamURL && localStreamURL && canBroadcast);
 
@@ -827,7 +874,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
             ) : null}
 
           <View style={styles.topOverlay}>
-            <TouchableOpacity style={styles.iconButton} onPress={() => navigation.goBack()}>
+            <TouchableOpacity style={[styles.iconButton, ending && styles.iconButtonDisabled]} onPress={handleLeave} disabled={ending}>
               <Icon name="arrow-back" size={20} color="#fff" />
             </TouchableOpacity>
 
@@ -894,6 +941,34 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
           <View style={styles.chatHeader}>
             <Text style={[styles.chatTitle, { color: colors.text }]}>Live Chat</Text>
           </View>
+
+          {isHost ? (
+            <View style={[styles.viewerRosterCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.viewerRosterHeader}>
+                <Text style={[styles.viewerRosterTitle, { color: colors.text }]}>Watching now</Text>
+                <Text style={[styles.viewerRosterCount, { color: colors.mutedText }]}>{viewerCount}</Text>
+              </View>
+
+              {currentViewers.length ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.viewerRosterList}
+                >
+                  {currentViewers.slice(0, 24).map((viewer: any) => (
+                    <View key={viewer.id} style={styles.viewerChip}>
+                      <Image source={{ uri: viewer.avatarUrl }} style={styles.viewerAvatar} />
+                      <Text style={[styles.viewerName, { color: colors.text }]} numberOfLines={1}>
+                        {viewer.label}
+                      </Text>
+                    </View>
+                  ))}
+                </ScrollView>
+              ) : (
+                <Text style={[styles.viewerEmptyText, { color: colors.mutedText }]}>No viewers yet.</Text>
+              )}
+            </View>
+          ) : null}
 
           {!isHost && !isApprovedGuest ? (
             <View style={[styles.guestRequestCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -1161,6 +1236,52 @@ const styles = StyleSheet.create({
   chatHeader: { marginBottom: 10 },
   chatTitle: { fontSize: 16, fontWeight: "900" },
   chatHint: { marginTop: 4, fontSize: 12, lineHeight: 18 },
+  viewerRosterCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  viewerRosterHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  viewerRosterTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  viewerRosterCount: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  viewerRosterList: {
+    paddingRight: 8,
+  },
+  viewerChip: {
+    width: 70,
+    alignItems: "center",
+    marginRight: 12,
+  },
+  viewerAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(148,163,184,0.18)",
+  },
+  viewerName: {
+    marginTop: 6,
+    width: 68,
+    textAlign: "center",
+    fontSize: 11.5,
+    fontWeight: "700",
+  },
+  viewerEmptyText: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
   guestRequestCard: {
     flexDirection: "row",
     alignItems: "center",

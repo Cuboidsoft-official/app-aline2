@@ -14,6 +14,7 @@ import {
   PermissionsAndroid,
   NativeModules,
   Linking,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   useWindowDimensions,
@@ -881,6 +882,19 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [scheduleCallDateTime, setScheduleCallDateTime] = useState(() => buildLocalDateTimeInputValue());
   const [scheduleCallDurationMinutes, setScheduleCallDurationMinutes] = useState("30");
   const [scheduleCallAgenda, setScheduleCallAgenda] = useState("");
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, () => setIsKeyboardVisible(true));
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setIsKeyboardVisible(false));
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     const normalized = String(conversationTypeParam || "").trim().toLowerCase();
@@ -3403,8 +3417,8 @@ const ChatScreen = ({ navigation, route }: any) => {
       <KeyboardAvoidingView
         style={styles.flexFill}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
-        enabled={Platform.OS === "ios"}
-        keyboardVerticalOffset={0}
+        enabled
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
       >
         <View style={[styles.chatBackground, { backgroundColor: colors.surface }]}>
           {chatWallpaper ? (
@@ -3811,7 +3825,7 @@ const ChatScreen = ({ navigation, route }: any) => {
               backgroundColor: alpha(colors.background, "FA"),
               borderColor: alpha(colors.border, "70"),
               paddingTop: 6,
-              paddingBottom: Math.max(7, insets.bottom - 2),
+              paddingBottom: isKeyboardVisible ? 8 : Math.max(7, insets.bottom - 2),
               paddingHorizontal: Math.max(8, chatMetrics.listPadding - 2),
             },
           ]}

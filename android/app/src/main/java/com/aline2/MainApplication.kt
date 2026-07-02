@@ -4,9 +4,11 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Application
+import android.content.ContentResolver
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import com.aline2.arfilters.AlineArProcessorRegistry
 import com.aline2.arfilters.ArFilterPackage
@@ -47,9 +49,16 @@ class MainApplication : Application(), ReactApplication {
     val notificationManager =
       getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
     val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+    val callSoundUri =
+      Uri.parse("${ContentResolver.SCHEME_ANDROID_RESOURCE}://$packageName/${R.raw.call_ringing}")
     val soundAttributes =
       AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .build()
+    val callSoundAttributes =
+      AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
 
@@ -94,14 +103,14 @@ class MainApplication : Application(), ReactApplication {
 
     val callsChannel =
       NotificationChannel(
-        "calls_v2",
+        "calls_v3",
         "Calls",
         NotificationManager.IMPORTANCE_HIGH,
       ).apply {
         description = "Incoming call alerts"
         enableVibration(true)
         vibrationPattern = longArrayOf(0, 300, 160, 300, 160, 300)
-        setSound(null, null)
+        setSound(callSoundUri, callSoundAttributes)
         lockscreenVisibility = Notification.VISIBILITY_PUBLIC
       }
 

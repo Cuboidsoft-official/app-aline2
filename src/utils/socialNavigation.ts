@@ -1,6 +1,3 @@
-const getSharedUserId = (sharedContent: any): string =>
-  String(sharedContent?.user?.id || sharedContent?.userId || "").trim();
-
 export const openPostInFeed = (navigation: any, params: { postId?: string; userId?: string } = {}) => {
   const postId = String(params.postId || "").trim();
   const userId = String(params.userId || "").trim();
@@ -35,7 +32,6 @@ export const openSharedContent = (navigation: any, sharedContent: any) => {
   if (sharedContent?.kind === "post" && sharedContent?.postId) {
     openPostInFeed(navigation, {
       postId: sharedContent.postId,
-      userId: getSharedUserId(sharedContent),
     });
     return;
   }
@@ -43,7 +39,6 @@ export const openSharedContent = (navigation: any, sharedContent: any) => {
   if (sharedContent?.kind === "swipe" && sharedContent?.swipeId) {
     openSwipeInSwipes(navigation, {
       swipeId: sharedContent.swipeId,
-      userId: getSharedUserId(sharedContent),
     });
   }
 };

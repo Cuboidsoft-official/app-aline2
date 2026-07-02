@@ -166,6 +166,8 @@ const getNotificationText = (item: AppNotification): string => {
       return "updated your service request";
     case "live_stream_started":
       return "is live now";
+    case "chat_message":
+      return item.text ? `sent: ${item.text}` : "sent you a message";
     case "group_join":
       return "joined your group";
     case "group_leave":
@@ -209,6 +211,8 @@ const getNotificationIcon = (type: NotificationKind): string => {
       return "checkmark-done";
     case "live_stream_started":
       return "radio";
+    case "chat_message":
+      return "chatbubble-ellipses";
     case "group_join":
       return "person-add";
     case "group_leave":
@@ -248,6 +252,8 @@ const getNotificationHint = (item: AppNotification): string => {
       return "Open requests";
     case "live_stream_started":
       return "Watch live";
+    case "chat_message":
+      return "Open chat";
     case "swipe":
       return "Open swipes";
     case "group_join":
@@ -463,6 +469,20 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
         navigation.navigate("LiveStreamScreen", { liveStreamId, mode: "viewer" });
       } else {
         navigation.navigate("LiveStreamsScreen");
+      }
+      return;
+    }
+
+    if (item.type === "chat_message") {
+      const conversationId = getTargetId(item.conversation || null);
+      if (conversationId) {
+        navigation.navigate("ChatScreen", {
+          conversationId,
+          conversationType:
+            typeof item.conversation === "object"
+              ? item.conversation?.conversationType || "direct"
+              : "direct",
+        });
       }
       return;
     }

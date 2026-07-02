@@ -4,6 +4,7 @@ import {
   Animated,
   AppState,
   BackHandler,
+  FlatList,
   Image,
   KeyboardAvoidingView,
   PanResponder,
@@ -181,6 +182,7 @@ const MODE_COPY: Record<
 };
 const LOCATION_SEEDS = ["Nearby", "Studio", "Cafe", "Beach", "Restaurant", "Office"];
 const MUSIC_DISCOVERY_FALLBACK_QUERIES = ["love", "party", "happy", "summer"];
+const MUSIC_PICKER_PAGE_SIZE = 24;
 const STORY_TEXT_THEMES: Array<{
   id: StoryTextStickerTheme;
   label: string;
@@ -947,6 +949,9 @@ function CreatePostScreen({ navigation, route }: any) {
   const [musicQuery, setMusicQuery] = useState("");
   const [musicResults, setMusicResults] = useState<MusicResultItem[]>([]);
   const [musicLoading, setMusicLoading] = useState(false);
+  const [musicLoadingMore, setMusicLoadingMore] = useState(false);
+  const [musicPage, setMusicPage] = useState(1);
+  const [musicHasMore, setMusicHasMore] = useState(true);
   const [musicUploading, setMusicUploading] = useState(false);
   const [musicImportingId, setMusicImportingId] = useState("");
   const [musicError, setMusicError] = useState("");
@@ -1773,32 +1778,32 @@ function CreatePostScreen({ navigation, route }: any) {
     setVideoTrimPreviewPositionMs(videoTrimStartTime * 1000);
   }, [selectedAsset?.mediaType, videoTrimPreviewLoaded, videoTrimSheetVisible, videoTrimStartTime]);
 
-  const fetchMusicResults = useCallback(async (query: string) => {
+  const fetchMusicResults = useCallback(async (query: string, page = 1) => {
     const trimmedQuery = String(query || "").trim();
     const catalogResults = trimmedQuery
-      ? await searchMusicCatalog(trimmedQuery, 12)
-      : await getTrendingMusicCatalog(12);
+      ? await searchMusicCatalog(trimmedQuery, MUSIC_PICKER_PAGE_SIZE, page)
+      : await getTrendingMusicCatalog(MUSIC_PICKER_PAGE_SIZE, page);
 
     let combinedResults = (catalogResults as MusicResultItem[]).filter(hasPlayableMusicClip);
 
-    if (combinedResults.length < 8) {
+    if (page === 1 && combinedResults.length < 8) {
       const fallbackQueries = trimmedQuery
         ? [trimmedQuery, ...MUSIC_DISCOVERY_FALLBACK_QUERIES]
         : MUSIC_DISCOVERY_FALLBACK_QUERIES;
 
       for (const fallbackQuery of fallbackQueries) {
-        const nextResults = (await searchMusicCatalog(fallbackQuery, 12)).filter(
+        const nextResults = (await searchMusicCatalog(fallbackQuery, MUSIC_PICKER_PAGE_SIZE, 1)).filter(
           hasPlayableMusicClip,
         ) as MusicResultItem[];
 
         combinedResults = dedupeMusicResults([...combinedResults, ...nextResults]);
-        if (combinedResults.length >= 12) {
+        if (combinedResults.length >= MUSIC_PICKER_PAGE_SIZE) {
           break;
         }
       }
     }
 
-    return prioritizeFreshMusicResults(dedupeMusicResults(combinedResults)).slice(0, 12);
+    return prioritizeFreshMusicResults(dedupeMusicResults(combinedResults));
   }, []);
 
   const runMusicSearch = useCallback(async () => {
@@ -1808,8 +1813,11 @@ function CreatePostScreen({ navigation, route }: any) {
       setMusicLoading(true);
       setMusicError("");
       setMusicResults([]);
-      const nextResults = await fetchMusicResults(query);
+      setMusicPage(1);
+      setMusicHasMore(true);
+      const nextResults = await fetchMusicResults(query, 1);
       setMusicResults(nextResults);
+      setMusicHasMore(nextResults.length >= MUSIC_PICKER_PAGE_SIZE);
 
       if (!nextResults.length) {
         setMusicError("");
@@ -1823,10 +1831,34 @@ function CreatePostScreen({ navigation, route }: any) {
     }
   }, [fetchMusicResults, musicQuery]);
 
+  const loadMoreMusicResults = useCallback(async () => {
+    if (musicLoading || musicLoadingMore || !musicHasMore) {
+      return;
+    }
+
+    const nextPage = musicPage + 1;
+
+    try {
+      setMusicLoadingMore(true);
+      const nextResults = await fetchMusicResults(musicQuery.trim(), nextPage);
+      setMusicResults((current) => prioritizeFreshMusicResults(dedupeMusicResults([...current, ...nextResults])));
+      setMusicPage(nextPage);
+      setMusicHasMore(nextResults.length >= MUSIC_PICKER_PAGE_SIZE);
+    } catch (error) {
+      console.log("music load more error:", error);
+      setMusicHasMore(false);
+    } finally {
+      setMusicLoadingMore(false);
+    }
+  }, [fetchMusicResults, musicHasMore, musicLoading, musicLoadingMore, musicPage, musicQuery]);
+
   useEffect(() => {
     if (!musicSheetVisible) {
       musicSeedLoadedRef.current = false;
       setActiveMusicPreviewId("");
+      setMusicPage(1);
+      setMusicHasMore(true);
+      setMusicLoadingMore(false);
       resetListMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
     }
   }, [musicSheetVisible, resetListMusicPreview]);
@@ -4745,9 +4777,22 @@ function CreatePostScreen({ navigation, route }: any) {
           </View>
         ) : null}
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetList}>
-          {!musicLoading && !musicResults.length ? <View style={styles.musicResultSpacer} /> : null}
-          {musicResults.map((item) => {
+        <FlatList
+          data={musicResults}
+          keyExtractor={(item) => item.id}
+          style={styles.musicResultsList}
+          contentContainerStyle={styles.sheetList}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          onEndReached={loadMoreMusicResults}
+          onEndReachedThreshold={0.55}
+          ListEmptyComponent={!musicLoading ? <View style={styles.musicResultSpacer} /> : null}
+          ListFooterComponent={musicLoadingMore ? (
+            <View style={styles.musicLoadingMoreFooter}>
+              <ActivityIndicator size="small" color={accentColor} />
+            </View>
+          ) : null}
+          renderItem={({ item }) => {
             const isSelected = selectedMusic?.externalId === item.externalId || selectedMusic?.title === item.title;
             const isImporting = musicImportingId === item.id;
             const hasPreview = !!normalizeMediaUrl(getMusicClipPlaybackUrl(item));
@@ -4805,8 +4850,8 @@ function CreatePostScreen({ navigation, route }: any) {
                 </View>
               </View>
             );
-          })}
-        </ScrollView>
+          }}
+        />
       </View>
     </DraggableBottomSheet>
   );
@@ -6277,6 +6322,9 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 12,
   },
+  musicResultsList: {
+    flex: 1,
+  },
   friendRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -6757,6 +6805,11 @@ const styles = StyleSheet.create({
   },
   musicResultSpacer: {
     height: 8,
+  },
+  musicLoadingMoreFooter: {
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
   },
   resultPlayButton: {
     width: 32,

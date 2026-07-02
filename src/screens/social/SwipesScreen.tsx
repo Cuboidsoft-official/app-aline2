@@ -131,7 +131,7 @@ function SwipesScreen({ navigation, route }: any) {
   const activeSwipeIndexRef = useRef(0);
   const focusedSwipeId = String(route?.params?.swipeId || "").trim();
   const focusUserId = String(route?.params?.userId || "").trim();
-  const isFocusedSwipeFeed = Boolean(focusedSwipeId || focusUserId);
+  const isFocusedSwipeFeed = Boolean(focusUserId);
 
   const activeSwipe = swipes[activeSwipeIndex] || null;
   const nextSwipe = swipes[activeSwipeIndex + 1] || null;

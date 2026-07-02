@@ -2520,8 +2520,8 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        enabled={Platform.OS === "ios"}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        enabled
         keyboardVerticalOffset={0}
       >
         <View style={[styles.timelineShell, { backgroundColor: sellerChatColors.background, borderTopColor: sellerChatColors.border }]}>

@@ -2,6 +2,7 @@ package com.aline2.callaudio
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
@@ -21,6 +22,7 @@ class CallAudioModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
   private var previousMicrophoneMute = false
   private var previousVoiceCallVolume: Int? = null
   private var previousMusicVolume: Int? = null
+  private var previousRingVolume: Int? = null
   private val audioManager: AudioManager? =
     reactContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
@@ -56,6 +58,7 @@ class CallAudioModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
     previousMicrophoneMute = manager.isMicrophoneMute
     previousVoiceCallVolume = manager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
     previousMusicVolume = manager.getStreamVolume(AudioManager.STREAM_MUSIC)
+    previousRingVolume = manager.getStreamVolume(AudioManager.STREAM_RING)
     didCaptureAudioState = true
   }
 
@@ -104,7 +107,26 @@ class CallAudioModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
     requestCommunicationAudioFocus()
     manager.mode = AudioManager.MODE_IN_COMMUNICATION
     manager.isMicrophoneMute = false
-    manager.isSpeakerphoneOn = useSpeaker
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val preferredDeviceType =
+        if (useSpeaker) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+      val fallbackDeviceType =
+        if (useSpeaker) AudioDeviceInfo.TYPE_BUILTIN_EARPIECE else AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+      val targetDevice =
+        manager.availableCommunicationDevices.firstOrNull { it.type == preferredDeviceType }
+          ?: manager.availableCommunicationDevices.firstOrNull { it.type == fallbackDeviceType }
+
+      if (targetDevice != null) {
+        manager.setCommunicationDevice(targetDevice)
+      } else {
+        @Suppress("DEPRECATION")
+        manager.isSpeakerphoneOn = useSpeaker
+      }
+    } else {
+      @Suppress("DEPRECATION")
+      manager.isSpeakerphoneOn = useSpeaker
+    }
 
     boostStreamVolume(AudioManager.STREAM_VOICE_CALL, 1.0)
     if (useSpeaker) {
@@ -131,16 +153,17 @@ class CallAudioModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
         player.setAudioAttributes(
           AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
         )
       } else {
         @Suppress("DEPRECATION")
-        player.setAudioStreamType(AudioManager.STREAM_MUSIC)
+        player.setAudioStreamType(AudioManager.STREAM_RING)
       }
 
-      player.setVolume(0.62f, 0.62f)
+      boostStreamVolume(AudioManager.STREAM_RING, 0.72)
+      player.setVolume(1.0f, 1.0f)
       player.isLooping = true
       player.setOnErrorListener { failedPlayer, _, _ ->
         try {
@@ -197,12 +220,18 @@ class CallAudioModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
   fun resetAudioRoute(promise: Promise) {
     try {
       audioManager?.let { manager ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          manager.clearCommunicationDevice()
+        }
+
+        @Suppress("DEPRECATION")
         manager.isSpeakerphoneOn = previousSpeakerphoneOn
         manager.isMicrophoneMute = previousMicrophoneMute
         manager.mode = previousMode
 
         previousVoiceCallVolume?.let { manager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, it, 0) }
         previousMusicVolume?.let { manager.setStreamVolume(AudioManager.STREAM_MUSIC, it, 0) }
+        previousRingVolume?.let { manager.setStreamVolume(AudioManager.STREAM_RING, it, 0) }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
           audioFocusRequest?.let(manager::abandonAudioFocusRequest)
@@ -215,6 +244,7 @@ class CallAudioModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
       didCaptureAudioState = false
       previousVoiceCallVolume = null
       previousMusicVolume = null
+      previousRingVolume = null
       promise.resolve(true)
     } catch (error: Exception) {
       promise.reject("CALL_AUDIO_RESET_FAILED", error)

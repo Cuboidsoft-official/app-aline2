@@ -50,6 +50,8 @@ const getId = (value: any): string => {
 };
 
 const MUSIC_CLIP_MAX_SECONDS = 30;
+const MUSIC_FETCH_LIMIT_MULTIPLIER = 2;
+const MUSIC_FETCH_MAX_LIMIT = 50;
 
 const containsJamendoUrl = (...values: Array<string | undefined>) =>
   values.some((value) => /jamendo/i.test(String(value || "")));
@@ -96,7 +98,8 @@ const ensureValidMusicItem = (item: MusicCatalogItem): MusicCatalogItem | null =
   return item;
 };
 
-export const getTrendingMusicCatalog = async (limit = 10): Promise<MusicCatalogItem[]> => {
+export const getTrendingMusicCatalog = async (limit = 10, page = 1): Promise<MusicCatalogItem[]> => {
+  const fetchLimit = Math.min(MUSIC_FETCH_MAX_LIMIT, Math.max(limit, limit * MUSIC_FETCH_LIMIT_MULTIPLIER));
   const load = async (path: string, params: Record<string, any>) => {
     const res = await API.get(path, { params });
     return getMusicPayloadList(res)
@@ -107,7 +110,8 @@ export const getTrendingMusicCatalog = async (limit = 10): Promise<MusicCatalogI
   };
 
   return load("/music/catalog/trending", {
-    limit,
+    limit: fetchLimit,
+    offset: Math.max(0, page - 1) * fetchLimit,
     includeExternal: true,
     provider: "jamendo",
     source: "jamendo",
@@ -127,13 +131,14 @@ export const getUserOriginalSounds = async (userId: string, limit = 12): Promise
     .filter(Boolean) as MusicCatalogItem[];
 };
 
-export const searchMusicCatalog = async (query: string, limit = 12): Promise<MusicCatalogItem[]> => {
+export const searchMusicCatalog = async (query: string, limit = 12, page = 1): Promise<MusicCatalogItem[]> => {
   const trimmedQuery = String(query || "").trim();
 
   if (!trimmedQuery) {
     return [];
   }
 
+  const fetchLimit = Math.min(MUSIC_FETCH_MAX_LIMIT, Math.max(limit, limit * MUSIC_FETCH_LIMIT_MULTIPLIER));
   const load = async (path: string, params: Record<string, any>) => {
     const res = await API.get(path, { params });
     return getMusicPayloadList(res)
@@ -145,7 +150,8 @@ export const searchMusicCatalog = async (query: string, limit = 12): Promise<Mus
 
   return load("/music/catalog", {
     query: trimmedQuery,
-    limit,
+    limit: fetchLimit,
+    offset: Math.max(0, page - 1) * fetchLimit,
     includeExternal: true,
     provider: "jamendo",
     source: "jamendo",

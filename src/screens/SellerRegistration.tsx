@@ -256,6 +256,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const durationMinutes = Number(serviceDurationMinutes) || 0;
   const rateLimit = Math.floor((selectedPlan.maxHourlyRate * durationMinutes) / 60);
   const specializationValue = specialization === "Other" ? customSpecialization.trim() : specialization;
+  const areProfessionalDetailsOptional = specialization === "Other";
 
   const hydrateSellerProfile = useCallback((seller: SellerProfileResponse) => {
     setName(seller?.sellerName || "");
@@ -568,6 +569,12 @@ const SellerRegistration = ({ navigation, route }: any) => {
   };
 
   const handleDegreeCheck = () => {
+    if (areProfessionalDetailsOptional) {
+      setDegreeChecked(true);
+      Alert.alert("Optional", "Professional documents are optional for Other specialization.");
+      return;
+    }
+
     if (!degree || !certificateType || !registrationNumber.trim() || !degreeDoc || !licenseDoc) {
       Alert.alert("Professional details", "Complete the dropdowns, registration number, and uploads first.");
       return;
@@ -620,6 +627,10 @@ const SellerRegistration = ({ navigation, route }: any) => {
     }
 
     if (step === 3) {
+      if (areProfessionalDetailsOptional) {
+        return true;
+      }
+
       if (!experience || !degree || !certificateType || !registrationNumber.trim()) {
         Alert.alert("Validation", "Please complete professional details.");
         return false;
@@ -804,6 +815,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
         subscriptionId,
         premiumPlanAmount: selectedPlan.amount,
         maxHourlyRate: selectedPlan.maxHourlyRate,
+        professionalDetailsOptional: areProfessionalDetailsOptional,
         experience,
         degree,
         certificateType,
@@ -1138,13 +1150,19 @@ const SellerRegistration = ({ navigation, route }: any) => {
       return (
         <>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Professional details</Text>
-          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Use dropdowns for experience, degree, and certificate type.</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
+            {areProfessionalDetailsOptional
+              ? "Optional for Other specialization. Add credentials only if they apply to your profession."
+              : "Use dropdowns for experience, degree, and certificate type."}
+          </Text>
 
-          {renderDropdownField("Experience", "experience", experience, "Select experience")}
-          {renderDropdownField("Degree", "degree", degree, "Select degree")}
-          {renderDropdownField("Certificate type", "certificate", certificateType, "Select certificate type")}
+          {renderDropdownField(areProfessionalDetailsOptional ? "Experience (optional)" : "Experience", "experience", experience, "Select experience")}
+          {renderDropdownField(areProfessionalDetailsOptional ? "Degree (optional)" : "Degree", "degree", degree, "Select degree")}
+          {renderDropdownField(areProfessionalDetailsOptional ? "Certificate type (optional)" : "Certificate type", "certificate", certificateType, "Select certificate type")}
 
-          <Text style={[styles.label, { color: colors.text }]}>Registration number</Text>
+          <Text style={[styles.label, { color: colors.text }]}>
+            {areProfessionalDetailsOptional ? "Registration number (optional)" : "Registration number"}
+          </Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
             value={registrationNumber}
@@ -1156,11 +1174,11 @@ const SellerRegistration = ({ navigation, route }: any) => {
             placeholderTextColor={colors.placeholder}
           />
 
-          {renderUpload("Degree upload", degreeDoc, (file) => {
+          {renderUpload(areProfessionalDetailsOptional ? "Degree upload (optional)" : "Degree upload", degreeDoc, (file) => {
             setDegreeDoc(file);
             setDegreeChecked(false);
           })}
-          {renderUpload("Certificate upload", licenseDoc, (file) => {
+          {renderUpload(areProfessionalDetailsOptional ? "Certificate upload (optional)" : "Certificate upload", licenseDoc, (file) => {
             setLicenseDoc(file);
             setDegreeChecked(false);
           })}

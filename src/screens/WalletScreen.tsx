@@ -71,8 +71,10 @@ function WalletScreen({ navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [addingMoney, setAddingMoney] = useState(false);
   const [applyingCode, setApplyingCode] = useState(false);
+  const [savingBankAccount, setSavingBankAccount] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [walletData, setWalletData] = useState<any>(null);
+  const [bankAccount, setBankAccount] = useState<any>(null);
   const [recentRequests, setRecentRequests] = useState<LedgerRequest[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<WalletTxn[]>([]);
   const [recentDeposits, setRecentDeposits] = useState<DepositEntry[]>([]);
@@ -80,6 +82,10 @@ function WalletScreen({ navigation }: any) {
   const [referredByCode, setReferredByCode] = useState("");
   const [applyCode, setApplyCode] = useState("");
   const [topUpAmount, setTopUpAmount] = useState("500");
+  const [bankAccountName, setBankAccountName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankIfsc, setBankIfsc] = useState("");
+  const [bankName, setBankName] = useState("");
 
   const accent = colors.primary;
   const bg = isDarkMode ? "#070B14" : "#F4F1FF";
@@ -105,6 +111,12 @@ function WalletScreen({ navigation }: any) {
       setSummary(summaryRes.data?.summary || null);
       setRecentRequests((requestsRes.data?.requests || []).slice(0, 8));
       setWalletData(walletRes.data?.wallet || null);
+      const nextBankAccount = walletRes.data?.bankAccount || null;
+      setBankAccount(nextBankAccount);
+      setBankAccountName(nextBankAccount?.accountName || "");
+      setBankIfsc(nextBankAccount?.ifsc || "");
+      setBankName(nextBankAccount?.bankName || "");
+      setBankAccountNumber("");
       setReferralCode(walletRes.data?.referralCode || "");
       setReferredByCode(walletRes.data?.referredByCode || "");
       setRecentTransactions(walletRes.data?.recentTransactions || []);
@@ -189,6 +201,36 @@ function WalletScreen({ navigation }: any) {
       setApplyingCode(false);
     }
   }, [applyCode]);
+
+  const saveBankAccount = useCallback(async () => {
+    try {
+      const accountName = bankAccountName.trim();
+      const accountNumber = bankAccountNumber.replace(/\s+/g, "").trim();
+      const ifsc = bankIfsc.trim().toUpperCase();
+      const nextBankName = bankName.trim();
+
+      if (!accountName || !accountNumber || !ifsc || !nextBankName) {
+        Alert.alert("Bank account", "Fill account holder name, account number, IFSC, and bank name.");
+        return;
+      }
+
+      setSavingBankAccount(true);
+      const res = await API.put("/wallet/bank-account", {
+        accountName,
+        accountNumber,
+        ifsc,
+        bankName: nextBankName,
+      });
+
+      setBankAccount(res.data?.bankAccount || null);
+      setBankAccountNumber("");
+      Alert.alert("Bank account saved", "Your bank account details have been saved.");
+    } catch (error: any) {
+      Alert.alert("Bank account", getReadableApiErrorMessage(error, "Bank account could not be saved."));
+    } finally {
+      setSavingBankAccount(false);
+    }
+  }, [bankAccountName, bankAccountNumber, bankIfsc, bankName]);
 
   const cardStyle = useMemo(
     () => [
@@ -326,6 +368,89 @@ function WalletScreen({ navigation }: any) {
               <>
                 <Icon name="flash-outline" size={18} color={white} />
                 <Text style={styles.primaryButtonText}>Recharge coins</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={cardStyle}>
+          <View style={styles.sectionHeaderRow}>
+            <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+              <Icon name="business-outline" size={18} color={accent} />
+            </View>
+            <View style={styles.sectionHeaderCopy}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Bank Account</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Add your payout bank account for withdrawals and settlement support.</Text>
+            </View>
+          </View>
+
+          {bankAccount?.hasBankAccount ? (
+            <View style={[styles.bankSavedCard, { backgroundColor: panelAlt, borderColor: border }]}>
+              <Icon name="checkmark-circle-outline" size={18} color="#22C55E" />
+              <View style={styles.bankSavedCopy}>
+                <Text style={[styles.bankSavedTitle, { color: colors.text }]}>{bankAccount.bankName || "Bank account"}</Text>
+                <Text style={[styles.bankSavedMeta, { color: textSecondary }]}>
+                  {bankAccount.accountNumber || "Account saved"} {bankAccount.ifsc ? `- ${bankAccount.ifsc}` : ""}
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
+          <View style={[styles.bankField, { backgroundColor: panelAlt, borderColor: border }]}>
+            <Icon name="person-outline" size={18} color={accent} />
+            <RNTextInput
+              style={[styles.bankInput, { color: colors.text }]}
+              placeholder="Account holder name"
+              placeholderTextColor={textSecondary}
+              value={bankAccountName}
+              onChangeText={setBankAccountName}
+              autoCapitalize="words"
+            />
+          </View>
+          <View style={[styles.bankField, { backgroundColor: panelAlt, borderColor: border }]}>
+            <Icon name="keypad-outline" size={18} color={accent} />
+            <RNTextInput
+              style={[styles.bankInput, { color: colors.text }]}
+              placeholder={bankAccount?.accountNumber ? "Enter new account number to update" : "Account number"}
+              placeholderTextColor={textSecondary}
+              value={bankAccountNumber}
+              onChangeText={setBankAccountNumber}
+              keyboardType="number-pad"
+            />
+          </View>
+          <View style={styles.bankTwoColumnRow}>
+            <View style={[styles.bankField, styles.bankHalfField, { backgroundColor: panelAlt, borderColor: border }]}>
+              <Icon name="barcode-outline" size={18} color={accent} />
+              <RNTextInput
+                style={[styles.bankInput, { color: colors.text }]}
+                placeholder="IFSC"
+                placeholderTextColor={textSecondary}
+                value={bankIfsc}
+                onChangeText={(value) => setBankIfsc(value.toUpperCase())}
+                autoCapitalize="characters"
+              />
+            </View>
+            <View style={[styles.bankField, styles.bankHalfField, { backgroundColor: panelAlt, borderColor: border }]}>
+              <Icon name="business-outline" size={18} color={accent} />
+              <RNTextInput
+                style={[styles.bankInput, { color: colors.text }]}
+                placeholder="Bank name"
+                placeholderTextColor={textSecondary}
+                value={bankName}
+                onChangeText={setBankName}
+              />
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: accent }, savingBankAccount && styles.buttonDisabled]}
+            onPress={saveBankAccount}
+            disabled={savingBankAccount}
+          >
+            {savingBankAccount ? <ActivityIndicator color={white} /> : (
+              <>
+                <Icon name="save-outline" size={18} color={white} />
+                <Text style={styles.primaryButtonText}>Save bank account</Text>
               </>
             )}
           </TouchableOpacity>
@@ -661,6 +786,50 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontSize: 15,
     fontWeight: "700",
+  },
+  bankSavedCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  bankSavedCopy: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  bankSavedTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  bankSavedMeta: {
+    marginTop: 3,
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+  bankField: {
+    borderWidth: 1,
+    borderRadius: 16,
+    minHeight: 50,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  bankInput: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  bankTwoColumnRow: {
+    flexDirection: "row",
+    marginHorizontal: -4,
+  },
+  bankHalfField: {
+    flex: 1,
+    marginHorizontal: 4,
   },
   primaryButton: {
     marginTop: 14,
