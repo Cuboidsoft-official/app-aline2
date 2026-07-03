@@ -1,0 +1,2 @@
+e5305b6247adca02f4afdbd511d6f3ea6fa7edce44effd31988acc74191050ea  ../release-artifacts/aline2-android-20260526-738b904/Aline2-v1.0.4-20260526-738b904.aab
+fd57331bd1b682f9c8e355ea81489a9e65e5933fca708b17cbb20447b3958f34  ../release-artifacts/aline2-android-20260526-738b904/Aline2-v1.0.4-20260526-738b904.apk

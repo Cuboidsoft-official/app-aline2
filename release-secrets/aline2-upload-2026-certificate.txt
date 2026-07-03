@@ -1,0 +1,12 @@
+Alias name: aline2-upload-2026
+Creation date: May 25, 2026
+Entry type: PrivateKeyEntry
+Certificate chain length: 1
+Certificate[1]:
+Owner: CN=Aline2 Upload, OU=CuboidSoft, O=CuboidSoft, L=Balaghat, ST=Madhya Pradesh, C=IN
+Issuer: CN=Aline2 Upload, OU=CuboidSoft, O=CuboidSoft, L=Balaghat, ST=Madhya Pradesh, C=IN
+Serial number: a8df22b69772807
+Valid from: Mon May 25 23:11:32 IST 2026 until: Fri Oct 10 23:11:32 IST 2053
+Certificate fingerprints:
+	 SHA1: BA:FE:C2:C6:4F:E0:3C:68:7B:0A:2B:E5:9E:64:61:7A:C4:AE:0B:6E
+	 SHA256: 4E:CC:84:30:64:63:89:D5:93:0B:89:89:04:99:C5:56:9C:95:56:FB:68:4E:92:D3:83:41:35:53:28:1A:0C:4A

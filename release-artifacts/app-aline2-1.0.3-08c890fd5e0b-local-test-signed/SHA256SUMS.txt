@@ -1,0 +1,2 @@
+3ac945fccef5770292fa30061c5ea21020a79628ecd041c5f1f725a2b3094e14  /workspace/projects/company projects/cuboidsoft/client-projects/aline2/release-artifacts/app-aline2-1.0.3-08c890fd5e0b-local-test-signed/Aline2-1.0.3-08c890fd5e0b-local-test-signed.apk
+62bc7d3471821748d4207fb8329632d997e92cafba3ba10a3212a621ebd2ec93  /workspace/projects/company projects/cuboidsoft/client-projects/aline2/release-artifacts/app-aline2-1.0.3-08c890fd5e0b-local-test-signed/Aline2-1.0.3-08c890fd5e0b-local-test-signed.aab
