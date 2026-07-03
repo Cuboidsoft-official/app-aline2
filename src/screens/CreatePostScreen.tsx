@@ -181,6 +181,7 @@ const MODE_COPY: Record<
   },
 };
 const LOCATION_SEEDS = ["Nearby", "Studio", "Cafe", "Beach", "Restaurant", "Office"];
+const MUSIC_PICKER_PAGE_SIZE = 24;
 const MUSIC_DISCOVERY_FALLBACK_QUERIES = ["love", "party", "happy", "summer"];
 const PHOTO_PICKER_MAX_DIMENSION = 2160;
 const PHOTO_PICKER_QUALITY = 0.8;
@@ -1834,7 +1835,7 @@ function CreatePostScreen({ navigation, route }: any) {
       }
     }
 
-    return prioritizeFreshMusicResults(dedupeMusicResults(combinedResults));
+    return prioritizeFreshMusicResults(dedupeMusicResults(combinedResults)).slice(0, MUSIC_PICKER_PAGE_SIZE);
   }, []);
 
   const runMusicSearch = useCallback(async () => {
@@ -1848,7 +1849,7 @@ function CreatePostScreen({ navigation, route }: any) {
       setMusicHasMore(true);
       const nextResults = await fetchMusicResults(query, 1);
       setMusicResults(nextResults);
-      setMusicHasMore(nextResults.length >= MUSIC_PICKER_PAGE_SIZE);
+      setMusicHasMore(true);
 
       if (!nextResults.length) {
         setMusicError("");
@@ -1874,7 +1875,7 @@ function CreatePostScreen({ navigation, route }: any) {
       const nextResults = await fetchMusicResults(musicQuery.trim(), nextPage);
       setMusicResults((current) => prioritizeFreshMusicResults(dedupeMusicResults([...current, ...nextResults])));
       setMusicPage(nextPage);
-      setMusicHasMore(nextResults.length >= MUSIC_PICKER_PAGE_SIZE);
+      setMusicHasMore(nextResults.length > 0);
     } catch (error) {
       console.log("music load more error:", error);
       setMusicHasMore(false);

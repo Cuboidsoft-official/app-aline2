@@ -1482,7 +1482,6 @@ function FeedScreen({ navigation, route }: any) {
                   styles.postTextStickerText,
                   sticker.style?.color ? { color: sticker.style.color } : null,
                   sticker.style?.fontSize ? { fontSize: sticker.style.fontSize } : null,
-                  sticker.style?.fontFamily ? { fontFamily: sticker.style.fontFamily } : null,
                   sticker.style?.fontStyle ? { fontStyle: sticker.style.fontStyle } : null,
                   sticker.style?.alignment ? { textAlign: sticker.style.alignment } : null,
                 ]}
@@ -2210,9 +2209,15 @@ function FeedScreen({ navigation, route }: any) {
                 <Image source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }} style={styles.logo} />
               </TouchableOpacity>
               <View style={styles.brandCopy}>
-                <Text
-                  style={[styles.brand, isCompactHeader && styles.brandCompact, { color: headerBrandColor }]}
-                  numberOfLines={1}
+               <Text
+                  style={[
+                    styles.brand,
+                    {
+                      color: headerBrandColor,
+                      fontSize: 25,
+                      fontWeight: '500',
+                    },
+                  ]}
                 >
                   Aline2
                 </Text>
@@ -2724,7 +2729,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "400",
     letterSpacing: 0,
-    fontFamily: "Lobster Two",
   },
   brandCompact: { fontSize: 19 },
   brandSubline: { marginTop: 2, fontSize: 12.5, fontWeight: "700", letterSpacing: 0.3 },

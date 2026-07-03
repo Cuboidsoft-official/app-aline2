@@ -98,6 +98,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
   const [iceServers, setIceServers] = useState<any[]>(Array.isArray(initialIceServers) ? initialIceServers : []);
   const [floatingReactions, setFloatingReactions] = useState<any[]>([]);
+  const [viewerJoinToasts, setViewerJoinToasts] = useState<any[]>([]);
   const [requestingGuestSlot, setRequestingGuestSlot] = useState(false);
   const [processingGuestUserId, setProcessingGuestUserId] = useState("");
 
@@ -594,6 +595,28 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
       if (payload?.liveStream) {
         setLiveStream(payload.liveStream);
       }
+
+      const joinedUserId = String(payload?.viewer?._id || payload?.viewer?.id || payload?.userId || "").trim();
+      if (!joinedUserId || joinedUserId === currentUserId) {
+        return;
+      }
+
+      const viewer = payload?.viewer || {};
+      const toastId = `${joinedUserId}-${Date.now()}`;
+      const label = String(viewer?.name || viewer?.username || "Viewer").trim() || "Viewer";
+      setViewerJoinToasts((current) => [
+        {
+          id: toastId,
+          userId: joinedUserId,
+          label,
+          avatarUrl: String(viewer?.profilePic || "").trim() || DEFAULT_AVATAR_URL,
+        },
+        ...current.filter((entry) => entry.userId !== joinedUserId),
+      ].slice(0, 2));
+
+      setTimeout(() => {
+        setViewerJoinToasts((current) => current.filter((entry) => entry.id !== toastId));
+      }, 3200);
     };
 
     const handleReaction = (payload: any) => {
@@ -919,6 +942,19 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
             </View>
           ) : null}
 
+          {viewerJoinToasts.length ? (
+            <View pointerEvents="none" style={styles.viewerJoinToastStack}>
+              {viewerJoinToasts.map((toast) => (
+                <View key={toast.id} style={styles.viewerJoinToast}>
+                  <Image source={{ uri: toast.avatarUrl }} style={styles.viewerJoinToastAvatar} />
+                  <Text style={styles.viewerJoinToastText} numberOfLines={1}>
+                    {toast.label} joined
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
           <View pointerEvents="none" style={styles.reactionStage}>
             {floatingReactions.map((reaction, index) => (
               <View
@@ -1225,6 +1261,40 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   errorText: { color: "#fff", fontSize: 12.5, lineHeight: 18 },
+  viewerJoinToastStack: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    top: 138,
+    alignItems: "flex-start",
+  },
+  viewerJoinToast: {
+    maxWidth: 230,
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 999,
+    paddingLeft: 5,
+    paddingRight: 14,
+    paddingVertical: 5,
+    marginBottom: 8,
+    backgroundColor: "rgba(15,23,42,0.84)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  viewerJoinToastAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 9,
+    backgroundColor: "rgba(148,163,184,0.35)",
+  },
+  viewerJoinToastText: {
+    flexShrink: 1,
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "800",
+  },
   chatPanel: {
     maxHeight: 360,
     borderTopLeftRadius: 22,

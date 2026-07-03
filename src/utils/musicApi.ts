@@ -50,8 +50,8 @@ const getId = (value: any): string => {
 };
 
 const MUSIC_CLIP_MAX_SECONDS = 30;
-const MUSIC_FETCH_LIMIT_MULTIPLIER = 2;
-const MUSIC_FETCH_MAX_LIMIT = 50;
+const MUSIC_FETCH_LIMIT_MULTIPLIER = 3;
+const MUSIC_FETCH_MAX_LIMIT = 100;
 
 const containsJamendoUrl = (...values: Array<string | undefined>) =>
   values.some((value) => /jamendo/i.test(String(value || "")));
@@ -106,7 +106,6 @@ export const getTrendingMusicCatalog = async (limit = 10, page = 1): Promise<Mus
       .map(mapMusicItem)
       .map(ensureValidMusicItem)
       .filter((item): item is MusicCatalogItem => !!item && isJamendoMusicItem(item))
-      .slice(0, limit);
   };
 
   return load("/music/catalog/trending", {
@@ -145,7 +144,6 @@ export const searchMusicCatalog = async (query: string, limit = 12, page = 1): P
       .map(mapMusicItem)
       .map(ensureValidMusicItem)
       .filter((item): item is MusicCatalogItem => !!item && isJamendoMusicItem(item))
-      .slice(0, limit);
   };
 
   return load("/music/catalog", {

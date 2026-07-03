@@ -11,6 +11,7 @@ type SocialVideoProps = {
   muted?: boolean;
   repeat?: boolean;
   controls?: boolean;
+  preload?: boolean;
   resizeMode?: "cover" | "contain" | "stretch" | "none";
   onEnd?: () => void;
   contentBlurRadius?: number;
@@ -25,6 +26,7 @@ function SocialVideo({
   muted = false,
   repeat = false,
   controls = false,
+  preload = false,
   resizeMode = "cover",
   onEnd,
   contentBlurRadius = 0,
@@ -36,7 +38,7 @@ function SocialVideo({
   const resolvedUri = String(uri || "").trim();
   const resolvedPosterUri = String(posterUri || "").trim();
   const containerStyle = useMemo(() => stripBackgroundColorFromStyle(style), [style]);
-  const shouldMountVideo = !!resolvedUri && !videoFailed && (!paused || controls);
+  const shouldMountVideo = !!resolvedUri && !videoFailed && (!paused || controls || preload);
 
   useEffect(() => {
     placeholderOpacity.stopAnimation();
@@ -82,7 +84,7 @@ function SocialVideo({
             style={StyleSheet.absoluteFill}
             resizeMode={resizeMode}
             paused={paused}
-            muted={muted}
+            muted={muted || preload}
             repeat={repeat}
             controls={controls}
             onEnd={onEnd}

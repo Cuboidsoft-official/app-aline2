@@ -10,6 +10,7 @@ import LoginScreen from './src/screens/LoginScreen';
 import SplashScreen from './src/screens/SplashScreen';
 import SignupScreen from './src/screens/SignupScreen';
 import OtpVerifyScreen from './src/screens/OtpVerifyScreen';
+import CompleteProfileScreen from './src/screens/CompleteProfileScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import FeedScreen from './src/screens/FeedScreen';
 import ProfileView from './src/screens/ProfileView';
@@ -408,6 +409,7 @@ function AppNavigator() {
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Signup" component={SignupScreen} />
         <Stack.Screen name="OtpVerify" component={OtpVerifyScreen} />
+        <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
         <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
         <Stack.Screen name="ForgotPasswordScreen" component={ForgotPasswordScreen} />
 

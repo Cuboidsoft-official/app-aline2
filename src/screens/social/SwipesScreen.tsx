@@ -807,6 +807,7 @@ function SwipesScreen({ navigation, route }: any) {
 
   const renderSwipe = ({ item, index }: { item: Swipe; index: number }) => {
     const isActive = index === activeSwipeIndex;
+    const isPreloadCandidate = index > activeSwipeIndex && index <= activeSwipeIndex + 2;
     const musicLabel = formatSwipeMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
 
@@ -820,6 +821,7 @@ function SwipesScreen({ navigation, route }: any) {
             paused={!isActive || !!activeSheet || !isScreenFocused}
             muted={!isActive || !isSwipePlaybackEnabled || hasAttachedMusic}
             repeat
+            preload={isPreloadCandidate && !activeSheet && isScreenFocused}
             contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
           />
           {item.media.sensitiveContent?.isSensitive ? (
@@ -981,9 +983,9 @@ function SwipesScreen({ navigation, route }: any) {
         decelerationRate="fast"
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS === "android"}
-        initialNumToRender={2}
-        maxToRenderPerBatch={2}
-        windowSize={3}
+        initialNumToRender={3}
+        maxToRenderPerBatch={3}
+        windowSize={5}
         updateCellsBatchingPeriod={16}
         scrollEventThrottle={16}
         getItemLayout={(_, index) => ({

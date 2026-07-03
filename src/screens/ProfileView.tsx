@@ -217,7 +217,8 @@ const ProfileScreen = ({navigation}: any) => {
    onPress: () =>
     navigation.navigate("FollowersFollowingScreen", {
      userId: user?._id,
-     type: "followers"
+     type: "followers",
+     expectedIds: user?.followers || [],
     }),
   },
   {
@@ -227,7 +228,8 @@ const ProfileScreen = ({navigation}: any) => {
    onPress: () =>
     navigation.navigate("FollowersFollowingScreen", {
      userId: user?._id,
-     type: "following"
+     type: "following",
+     expectedIds: user?.following || [],
     }),
   },
  ];
