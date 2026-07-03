@@ -45,6 +45,7 @@ import {
   type ArFilterPreset,
 } from "../utils/arFilters";
 import { ensureCameraPermission, ensureMicrophonePermission } from "../utils/permissions";
+import { safeDecodeURIComponent } from "../utils/safeDecode";
 
 const TERMINAL_STATUSES = new Set(["rejected", "ended", "cancelled", "missed", "failed"]);
 const DEFAULT_ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
@@ -269,8 +270,8 @@ const CallScreen = ({ navigation, route }: any) => {
   }, [participantLookup]);
 
   const displayName = isGroupCall
-    ? callSession?.conversation?.groupName || title || "Group call"
-    : otherParticipant?.name || otherParticipant?.username || title || "Aline2 call";
+    ? safeDecodeURIComponent(callSession?.conversation?.groupName || title) || "Group call"
+    : safeDecodeURIComponent(otherParticipant?.name || otherParticipant?.username || title) || "Aline2 call";
   const displayAvatar = isGroupCall
     ? callSession?.conversation?.groupAvatar || avatarUrl || DEFAULT_AVATAR_URL
     : otherParticipant?.profilePic || avatarUrl || DEFAULT_AVATAR_URL;

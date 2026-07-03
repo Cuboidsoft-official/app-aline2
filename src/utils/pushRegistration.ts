@@ -3,6 +3,7 @@ import { API } from "../api/api";
 import { getStoredUserId } from "./authSession";
 import { startCallRingtone } from "./callAudio";
 import { getMutedConversationIds } from "./chatMute";
+import { safeDecodeURIComponent } from "./safeDecode";
 import { openPostInFeed } from "./socialNavigation";
 
 let Notifications: any = null;
@@ -11,14 +12,6 @@ let FirebaseMessaging: any = null;
 let lastHandledNotificationResponseId = "";
 
 const CALL_NOTIFICATION_CHANNEL_ID = "calls_v3";
-
-const safeDecode = (value: string): string => {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-};
 
 try {
   Notifications = require("expo-notifications");
@@ -247,7 +240,7 @@ function navigateFromNotificationData(data: any, navigationRef?: any) {
           callSessionId: data.callSessionId,
           mode: "incoming",
           callType: data.callType || "audio",
-          title: safeDecode(String(data.title || "")) || "Incoming call",
+          title: safeDecodeURIComponent(data.title) || "Incoming call",
           avatarUrl: data.avatarUrl || "",
         });
       } else {
@@ -297,7 +290,7 @@ async function showForegroundNotification(remoteMessage: any) {
   }
 
   const data = remoteMessage?.data || remoteMessage?.notification?.data || {};
-  const title = safeDecode(String(remoteMessage?.notification?.title || data.title || "New notification").trim());
+  const title = safeDecodeURIComponent(remoteMessage?.notification?.title || data.title || "New notification");
   const body = String(remoteMessage?.notification?.body || data.body || "").trim();
   const type = String(data.type || "").trim();
   const conversationId = String(data.conversationId || "").trim();

@@ -50,6 +50,7 @@ import { downloadImageAsset } from "../utils/mediaDownload";
 import { connectSocket, socket } from "../socket";
 import { listLiveStreams } from "../utils/liveStreamApi";
 import { APP_RELEASE_DATE, APP_VERSION } from "../config/appMeta";
+import { isFeedVideoSoundOn, shouldMuteFeedVideo } from "../utils/feedMediaSound";
 
 let ColorMatrix: any;
 try {
@@ -1280,7 +1281,12 @@ function FeedScreen({ navigation, route }: any) {
               posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || primaryMedia.url)}
               style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
               paused={!isPostActive}
-              muted={!isPostActive || (!isVideoSoundEnabled && (isMuted || hasAttachedMusic))}
+              muted={shouldMuteFeedVideo({
+                isPostActive,
+                isVideoSoundEnabled,
+                isPostMuted: isMuted,
+                hasAttachedMusic,
+              })}
               repeat
               resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
               contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
@@ -1339,7 +1345,13 @@ function FeedScreen({ navigation, route }: any) {
                   posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
                   style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
                   paused={!isPostActive || currentCarouselIndex !== index}
-                  muted={!isPostActive || currentCarouselIndex !== index || (!isVideoSoundEnabled && (isMuted || hasAttachedMusic))}
+                  muted={shouldMuteFeedVideo({
+                    isPostActive,
+                    isCarouselItemActive: currentCarouselIndex === index,
+                    isVideoSoundEnabled,
+                    isPostMuted: isMuted,
+                    hasAttachedMusic,
+                  })}
                   repeat
                   resizeMode={getImageResizeMode(asset, frameAspectRatio)}
                   contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
@@ -1805,6 +1817,11 @@ function FeedScreen({ navigation, route }: any) {
     const musicLabel = formatPostMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isMuted = !!mutedPostIds[item.id];
+    const isVideoSoundOn = isFeedVideoSoundOn({
+      isVideoSoundEnabled,
+      isPostMuted: isMuted,
+      hasAttachedMusic,
+    });
     const likePreviewUsers =
       Array.isArray(item.likePreviewUsers) && item.likePreviewUsers.length
         ? item.likePreviewUsers.slice(0, 3)
@@ -1910,9 +1927,9 @@ function FeedScreen({ navigation, route }: any) {
             ) : null}
             {(hasVideoMedia || hasAttachedMusic) ? (
               <View style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
-                <Icon name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color="#fff" />
+                <Icon name={isVideoSoundOn ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
                 <Text style={[styles.mediaSoundHintText, { fontSize: mediaChipFontSize }]}>
-                  {isMuted ? "Muted" : "Sound on"}
+                  {isVideoSoundOn ? "Sound on" : "Muted"}
                 </Text>
               </View>
             ) : null}

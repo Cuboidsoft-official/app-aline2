@@ -29,10 +29,38 @@ interface FollowUser {
  isVerified?: boolean;
 }
 
+type ExpectedIdsByTab = Partial<Record<FollowTab, unknown[]>>;
+
+export const normalizeIdList = (list: unknown): string[] => {
+ if (!Array.isArray(list)) {
+  return [];
+ }
+
+ const seen = new Set<string>();
+ const ids: string[] = [];
+
+ for (const entry of list) {
+  const id = String(
+   typeof entry === "object" && entry
+    ? (entry as any)._id || (entry as any).id
+    : entry || "",
+  ).trim();
+
+  if (!id || seen.has(id)) {
+   continue;
+  }
+
+  seen.add(id);
+  ids.push(id);
+ }
+
+ return ids;
+};
+
 const getSearchableText = (user: FollowUser) =>
  `${user.username || ""} ${user.name || ""}`.trim().toLowerCase();
 
-const normalizeFollowUsers = (list: unknown): FollowUser[] => {
+export const normalizeFollowUsers = (list: unknown): FollowUser[] => {
  if (!Array.isArray(list)) {
   return [];
  }
@@ -65,12 +93,39 @@ const normalizeFollowUsers = (list: unknown): FollowUser[] => {
  return normalized;
 };
 
+export const filterFollowUsersByExpectedIds = (users: FollowUser[], expectedIds: string[] | null | undefined): FollowUser[] => {
+ if (!Array.isArray(expectedIds)) {
+  return users;
+ }
+
+ return expectedIds
+  .map((id) => users.find((user) => user._id === id))
+  .filter((user): user is FollowUser => !!user);
+};
+
 const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigation: any }) => {
  const { colors } = useAppTheme();
- const { userId, type } = route.params as {
+ const { userId, type, expectedIds: routeExpectedIds, expectedIdsByTab: routeExpectedIdsByTab } = route.params as {
   userId: string;
   type: FollowTab;
+  expectedIds?: unknown[];
+  expectedIdsByTab?: ExpectedIdsByTab;
  };
+ const expectedIdsByTab = useMemo(() => {
+  const byTab = routeExpectedIdsByTab || {};
+  return {
+   followers: Array.isArray(byTab.followers)
+    ? normalizeIdList(byTab.followers)
+    : type === "followers"
+     ? normalizeIdList(routeExpectedIds)
+     : null,
+   following: Array.isArray(byTab.following)
+    ? normalizeIdList(byTab.following)
+    : type === "following"
+     ? normalizeIdList(routeExpectedIds)
+     : null,
+  };
+ }, [routeExpectedIds, routeExpectedIdsByTab, type]);
  const [users, setUsers] = useState<FollowUser[]>([]);
  const [activeTab, setActiveTab] = useState<FollowTab>(type);
  const [search, setSearch] = useState("");
@@ -99,7 +154,8 @@ const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigatio
    const res = await API.get(`/auth/${tabType}/${userId}`);
    const list = tabType === "followers" ? res.data?.followers : res.data?.following;
    const normalizedUsers = normalizeFollowUsers(list);
-   const relationshipUsers = normalizedUsers;
+   const expectedIds = expectedIdsByTab[tabType];
+   const relationshipUsers = filterFollowUsersByExpectedIds(normalizedUsers, expectedIds);
 
    setUsers(relationshipUsers);
    setErrorMessage("");
@@ -113,7 +169,7 @@ const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigatio
     setLoading(false);
    }
   }
- }, [userId]);
+ }, [expectedIdsByTab, userId]);
 
  useEffect(() => {
   fetchUsers(activeTab).catch(() => {});

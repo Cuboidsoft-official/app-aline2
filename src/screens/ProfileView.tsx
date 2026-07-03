@@ -219,6 +219,10 @@ const ProfileScreen = ({navigation}: any) => {
      userId: user?._id,
      type: "followers",
      expectedIds: user?.followers || [],
+     expectedIdsByTab: {
+      followers: user?.followers || [],
+      following: user?.following || [],
+     },
     }),
   },
   {
@@ -230,6 +234,10 @@ const ProfileScreen = ({navigation}: any) => {
      userId: user?._id,
      type: "following",
      expectedIds: user?.following || [],
+     expectedIdsByTab: {
+      followers: user?.followers || [],
+      following: user?.following || [],
+     },
     }),
   },
  ];

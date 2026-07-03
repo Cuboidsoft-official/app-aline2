@@ -74,6 +74,7 @@ import { Alert } from './src/utils/appAlert';
 import { getStoredToken, getStoredUserId, setSessionInvalidationHandler, subscribeSessionChanges } from './src/utils/authSession';
 import { startCallRingtone } from './src/utils/callAudio';
 import { registerPushToken, setupNotificationListeners } from './src/utils/pushRegistration';
+import { safeDecodeURIComponent } from './src/utils/safeDecode';
 import { openPostInFeed } from './src/utils/socialNavigation';
 
 installReadableUiDefaults();
@@ -310,8 +311,8 @@ function AppNavigator() {
         callRuntime: payload?.callRuntime || null,
         title:
           nextCallSession?.conversation?.conversationType === "group"
-            ? nextCallSession?.conversation?.groupName || "Incoming group call"
-            : nextCallSession?.otherParticipant?.name || nextCallSession?.otherParticipant?.username || "Incoming call",
+            ? safeDecodeURIComponent(nextCallSession?.conversation?.groupName) || "Incoming group call"
+            : safeDecodeURIComponent(nextCallSession?.otherParticipant?.name || nextCallSession?.otherParticipant?.username) || "Incoming call",
         avatarUrl:
           nextCallSession?.conversation?.conversationType === "group"
             ? nextCallSession?.conversation?.groupAvatar || ""
