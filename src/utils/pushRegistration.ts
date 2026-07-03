@@ -211,6 +211,7 @@ function navigateFromNotificationData(data: any, navigationRef?: any) {
     case "group_admin_demoted":
     case "group_owner_transferred":
     case "group_updated":
+    case "group_deleted":
       if (data.conversationId) {
         navigation.navigate("ChatScreen", { conversationId: data.conversationId, conversationType: "group" });
       } else {

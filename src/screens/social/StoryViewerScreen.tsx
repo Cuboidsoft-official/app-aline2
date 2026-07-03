@@ -4,7 +4,6 @@ import {
   Image,
   Linking,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +12,7 @@ import {
 } from "react-native";
 import { Alert } from "../../utils/appAlert";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
 
@@ -100,6 +100,7 @@ function StoryViewerScreen({ route, navigation }: any) {
   const storyId = typeof route?.params?.storyId === "string" ? route.params.storyId : "";
   const storyUserId = typeof route?.params?.storyUserId === "string" ? route.params.storyUserId : undefined;
   const isScreenFocused = useIsFocused();
+  const insets = useSafeAreaInsets();
 
   const [stories, setStories] = useState<Story[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -893,7 +894,7 @@ function StoryViewerScreen({ route, navigation }: any) {
         onPressOut={() => setPaused(false)}
       />
 
-      <View style={styles.bottomSheet}>
+      <View style={[styles.bottomSheet, { paddingBottom: Math.max(insets.bottom + 34, 58) }]}>
         {renderStoryOverlay()}
 
         {!currentStory.isOwner && canReplyToCurrentStory ? (

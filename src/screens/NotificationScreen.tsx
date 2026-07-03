@@ -34,6 +34,8 @@ type NotificationKind =
   | "service_request"
   | "service_request_update"
   | "live_stream_started"
+  | "incoming_call"
+  | "missed_call"
   | "swipe"
   | string;
 
@@ -50,6 +52,7 @@ interface NotificationTarget {
   groupName?: string;
   groupAvatar?: string;
   conversationType?: string;
+  callType?: string;
 }
 
 interface AppNotification {
@@ -62,6 +65,7 @@ interface AppNotification {
   receiver?: NotificationTarget | string | null;
   conversation?: NotificationTarget | string | null;
   liveStream?: NotificationTarget | string | null;
+  callSession?: NotificationTarget | string | null;
   post?: NotificationTarget | string | null;
   story?: NotificationTarget | string | null;
 }
@@ -166,6 +170,10 @@ const getNotificationText = (item: AppNotification): string => {
       return "updated your service request";
     case "live_stream_started":
       return "is live now";
+    case "incoming_call":
+      return item.text || "is calling you";
+    case "missed_call":
+      return "tried to call you";
     case "chat_message":
       return item.text ? `sent: ${item.text}` : "sent you a message";
     case "group_join":
@@ -184,6 +192,8 @@ const getNotificationText = (item: AppNotification): string => {
       return "transferred group ownership";
     case "group_updated":
       return "updated a group";
+    case "group_deleted":
+      return "deleted a group";
     default:
       return "sent you an update";
   }
@@ -211,6 +221,10 @@ const getNotificationIcon = (type: NotificationKind): string => {
       return "checkmark-done";
     case "live_stream_started":
       return "radio";
+    case "incoming_call":
+      return "call";
+    case "missed_call":
+      return "call";
     case "chat_message":
       return "chatbubble-ellipses";
     case "group_join":
@@ -229,6 +243,8 @@ const getNotificationIcon = (type: NotificationKind): string => {
       return "swap-horizontal";
     case "group_updated":
       return "settings";
+    case "group_deleted":
+      return "trash";
     default:
       return "notifications";
   }
@@ -252,6 +268,10 @@ const getNotificationHint = (item: AppNotification): string => {
       return "Open requests";
     case "live_stream_started":
       return "Watch live";
+    case "incoming_call":
+      return "Open call";
+    case "missed_call":
+      return "Open chat";
     case "chat_message":
       return "Open chat";
     case "swipe":
@@ -264,6 +284,7 @@ const getNotificationHint = (item: AppNotification): string => {
     case "group_admin_demoted":
     case "group_owner_transferred":
     case "group_updated":
+    case "group_deleted":
       return "Open group";
     default:
       return "View";
@@ -471,6 +492,38 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
         navigation.navigate("LiveStreamsScreen");
       }
       return;
+    }
+
+    if (item.type === "incoming_call") {
+      const callSessionId = getTargetId(item.callSession || null);
+      if (callSessionId) {
+        const callType =
+          typeof item.callSession === "object" && item.callSession?.callType === "video"
+            ? "video"
+            : "audio";
+        navigation.navigate("CallScreen", {
+          callSessionId,
+          mode: "incoming",
+          callType,
+          title: item.sender?.username ? `@${item.sender.username}` : "Incoming call",
+          avatarUrl: item.sender?.profilePic || "",
+        });
+        return;
+      }
+    }
+
+    if (item.type === "missed_call") {
+      const conversationId = getTargetId(item.conversation || null);
+      if (conversationId) {
+        navigation.navigate("ChatScreen", {
+          conversationId,
+          conversationType:
+            typeof item.conversation === "object"
+              ? item.conversation?.conversationType || "direct"
+              : "direct",
+        });
+        return;
+      }
     }
 
     if (item.type === "chat_message") {
