@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
- ActivityIndicator,
- FlatList,
- Image,
- RefreshControl,
- StyleSheet,
- Text,
- TextInput,
- TouchableOpacity,
- View,
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
@@ -29,32 +28,6 @@ interface FollowUser {
  profilePic?: string;
  isVerified?: boolean;
 }
-
-const normalizeIdList = (list: unknown): string[] => {
- if (!Array.isArray(list)) {
-  return [];
- }
-
- const seen = new Set<string>();
- const ids: string[] = [];
-
- for (const entry of list) {
-  const id = String(
-   typeof entry === "object" && entry
-    ? (entry as any)._id || (entry as any).id
-    : entry || "",
-  ).trim();
-
-  if (!id || seen.has(id)) {
-   continue;
-  }
-
-  seen.add(id);
-  ids.push(id);
- }
-
- return ids;
-};
 
 const getSearchableText = (user: FollowUser) =>
  `${user.username || ""} ${user.name || ""}`.trim().toLowerCase();
@@ -94,14 +67,10 @@ const normalizeFollowUsers = (list: unknown): FollowUser[] => {
 
 const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigation: any }) => {
  const { colors } = useAppTheme();
- const { userId, type, expectedIds: routeExpectedIds } = route.params as {
+ const { userId, type } = route.params as {
   userId: string;
   type: FollowTab;
-  expectedIds?: unknown[];
  };
- const expectedIds = useMemo(() => normalizeIdList(routeExpectedIds), [routeExpectedIds]);
- const hasExpectedIds = Array.isArray(routeExpectedIds);
-
  const [users, setUsers] = useState<FollowUser[]>([]);
  const [activeTab, setActiveTab] = useState<FollowTab>(type);
  const [search, setSearch] = useState("");
@@ -130,11 +99,7 @@ const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigatio
    const res = await API.get(`/auth/${tabType}/${userId}`);
    const list = tabType === "followers" ? res.data?.followers : res.data?.following;
    const normalizedUsers = normalizeFollowUsers(list);
-   const relationshipUsers = hasExpectedIds
-    ? expectedIds
-      .map((id) => normalizedUsers.find((user) => user._id === id))
-      .filter((user): user is FollowUser => !!user)
-    : normalizedUsers;
+   const relationshipUsers = normalizedUsers;
 
    setUsers(relationshipUsers);
    setErrorMessage("");
@@ -148,7 +113,7 @@ const FollowersFollowingScreen = ({ route, navigation }: { route: any; navigatio
     setLoading(false);
    }
   }
- }, [expectedIds, hasExpectedIds, userId]);
+ }, [userId]);
 
  useEffect(() => {
   fetchUsers(activeTab).catch(() => {});

@@ -686,7 +686,6 @@ function RangeSlider({
         <ScrollView
           ref={sliderScrollRef}
           horizontal
-          nestedScrollEnabled
           bounces={false}
           showsHorizontalScrollIndicator={false}
           scrollEnabled={false}

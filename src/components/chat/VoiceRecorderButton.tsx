@@ -238,7 +238,7 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             if (pendingStopSendRef.current !== null) {
                 const shouldSend = pendingStopSendRef.current;
                 pendingStopSendRef.current = null;
-                stopRecording(shouldSend);
+                stopRecordingRef.current(shouldSend);
             }
         } catch (err) {
             Sound.removeRecordBackListener();
@@ -297,12 +297,23 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
         }
     };
 
+    const disabledRef = useRef(disabled);
+    disabledRef.current = disabled;
+    const startingRef = useRef(starting);
+    startingRef.current = starting;
+    const stoppingRef = useRef(stopping);
+    stoppingRef.current = stopping;
+    const startRecordingRef = useRef(startRecording);
+    startRecordingRef.current = startRecording;
+    const stopRecordingRef = useRef(stopRecording);
+    stopRecordingRef.current = stopRecording;
+
     const panResponder = useRef(
         PanResponder.create({
-            onStartShouldSetPanResponder: () => !disabled && !starting && !stopping,
-            onMoveShouldSetPanResponder: () => !disabled && !starting && !stopping,
+            onStartShouldSetPanResponder: () => !disabledRef.current && !startingRef.current && !stoppingRef.current,
+            onMoveShouldSetPanResponder: () => !disabledRef.current && !startingRef.current && !stoppingRef.current,
             onPanResponderGrant: () => {
-                startRecording();
+                startRecordingRef.current();
             },
             onPanResponderMove: (_, gestureState) => {
                 const dx = Math.min(0, gestureState.dx);
@@ -320,13 +331,13 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
             },
             onPanResponderRelease: () => {
                 if (cancelledRef.current) {
-                    stopRecording(false);
+                    stopRecordingRef.current(false);
                 } else {
-                    stopRecording(true);
+                    stopRecordingRef.current(true);
                 }
             },
             onPanResponderTerminate: () => {
-                stopRecording(false);
+                stopRecordingRef.current(false);
             },
         }),
     ).current;

@@ -87,6 +87,13 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
       return;
     }
 
+    const isTabScreen = screen === "Feed" || screen === "Create" || screen === "Chats" || screen === "ProfileView";
+
+    if (isTabScreen && Array.isArray(routeNames) && routeNames.includes("MainApp")) {
+      navigation.navigate("MainApp", { screen });
+      return;
+    }
+
     if (Array.isArray(routeNames) && routeNames.includes(screen)) {
       navigation.navigate(screen);
       return;

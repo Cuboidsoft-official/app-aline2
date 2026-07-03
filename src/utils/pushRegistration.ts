@@ -12,6 +12,14 @@ let lastHandledNotificationResponseId = "";
 
 const CALL_NOTIFICATION_CHANNEL_ID = "calls_v3";
 
+const safeDecode = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
 try {
   Notifications = require("expo-notifications");
 } catch {
@@ -239,7 +247,7 @@ function navigateFromNotificationData(data: any, navigationRef?: any) {
           callSessionId: data.callSessionId,
           mode: "incoming",
           callType: data.callType || "audio",
-          title: data.title || "Incoming call",
+          title: safeDecode(String(data.title || "")) || "Incoming call",
           avatarUrl: data.avatarUrl || "",
         });
       } else {
@@ -289,7 +297,7 @@ async function showForegroundNotification(remoteMessage: any) {
   }
 
   const data = remoteMessage?.data || remoteMessage?.notification?.data || {};
-  const title = String(remoteMessage?.notification?.title || data.title || "New notification").trim();
+  const title = safeDecode(String(remoteMessage?.notification?.title || data.title || "New notification").trim());
   const body = String(remoteMessage?.notification?.body || data.body || "").trim();
   const type = String(data.type || "").trim();
   const conversationId = String(data.conversationId || "").trim();

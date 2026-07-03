@@ -1280,7 +1280,7 @@ function FeedScreen({ navigation, route }: any) {
               posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || primaryMedia.url)}
               style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
               paused={!isPostActive}
-              muted={!isPostActive || isMuted || hasAttachedMusic}
+              muted={!isPostActive || (!isVideoSoundEnabled && (isMuted || hasAttachedMusic))}
               repeat
               resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
               contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
@@ -1339,7 +1339,7 @@ function FeedScreen({ navigation, route }: any) {
                   posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
                   style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
                   paused={!isPostActive || currentCarouselIndex !== index}
-                  muted={!isPostActive || currentCarouselIndex !== index || isMuted || hasAttachedMusic}
+                  muted={!isPostActive || currentCarouselIndex !== index || (!isVideoSoundEnabled && (isMuted || hasAttachedMusic))}
                   repeat
                   resizeMode={getImageResizeMode(asset, frameAspectRatio)}
                   contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
