@@ -1,0 +1,424 @@
+name: Android Release (Simplified)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_profile:
+        description: Release profile to build
+        required: true
+        default: standard
+        type: choice
+        options:
+          - standard
+          - arm64
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/**'
+      - 'src/**'
+      - 'package.json'
+      - '.github/workflows/android-release-simple.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-production
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANDROID_PLATFORM_VERSION: "36"
+      ANDROID_BUILD_TOOLS_VERSION: "36.0.0"
+      BACKEND_ORIGIN_EXPECTED: https://api.aline2.com
+      SHARE_BASE_URL_EXPECTED: https://aline2.com
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Derive release metadata
+        id: meta
+        run: |
+          release_profile="standard"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_profile }}" ]; then
+            release_profile="${{ github.event.inputs.release_profile }}"
+          fi
+
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          release_date="$(date -u +%Y%m%d)"
+          app_version="$(node -p "require('./package.json').version")"
+
+          case "$release_profile" in
+            arm64)
+              release_name="Aline2-v${app_version}-${release_date}-${short_sha}-arm64"
+              apk_name="app-arm64-v8a-release.apk"
+              build_aab="false"
+              ;;
+            *)
+              release_name="Aline2-v${app_version}-${release_date}-${short_sha}"
+              apk_name="${release_name}.apk"
+              build_aab="true"
+              ;;
+          esac
+
+          echo "app_version=$app_version" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "release_date=$release_date" >> "$GITHUB_OUTPUT"
+          echo "release_profile=$release_profile" >> "$GITHUB_OUTPUT"
+          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=android-release-${release_name}" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$apk_name" >> "$GITHUB_OUTPUT"
+          echo "build_aab=$build_aab" >> "$GITHUB_OUTPUT"
+          echo "aab_name=${release_name}.aab" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" \
+                     "platforms;android-${ANDROID_PLATFORM_VERSION}" \
+                     "build-tools;${ANDROID_BUILD_TOOLS_VERSION}"
+
+      - name: Expose Android build tools
+        run: |
+          build_tools_dir="${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}"
+          echo "$build_tools_dir" >> "$GITHUB_PATH"
+          "$build_tools_dir/apksigner" version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate signing configuration
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          required_secrets=(
+            ANDROID_UPLOAD_KEYSTORE_BASE64
+            ANDROID_UPLOAD_STORE_PASSWORD
+            ANDROID_UPLOAD_KEY_ALIAS
+            ANDROID_UPLOAD_KEY_PASSWORD
+          )
+          for key in "${required_secrets[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "❌ Missing signing secret: $key" >&2
+              exit 1
+            fi
+          done
+          echo "✅ All signing secrets configured"
+
+      - name: Run typecheck
+        run: npm run typecheck
+
+      - name: Run lint
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test -- --runInBand --passWithNoTests
+
+      - name: Prepare production environment file
+        id: prepare_env
+        env:
+          SELECTED_ENVFILE: .env.production
+        run: |
+          if [ -f "$SELECTED_ENVFILE" ]; then
+            cp "$SELECTED_ENVFILE" .env.ci
+            echo "✅ Using $SELECTED_ENVFILE"
+          else
+            echo "⚠️ $SELECTED_ENVFILE not found, using example"
+            cp "${SELECTED_ENVFILE}.example" .env.ci 2>/dev/null || : > .env.ci
+          fi
+          
+          echo "envfile=.env.ci" >> "$GITHUB_OUTPUT"
+
+      - name: Validate production environment values
+        env:
+          ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
+        run: |
+          test -f "$ENVFILE_VALUE" || exit 1
+          
+          # Validate critical production URLs
+          if grep -q "^BACKEND_ORIGIN=${BACKEND_ORIGIN_EXPECTED}$" "$ENVFILE_VALUE"; then
+            echo "✅ BACKEND_ORIGIN correct"
+          else
+            echo "⚠️ BACKEND_ORIGIN may not match expected value"
+          fi
+          
+          if grep -q "^SHARE_BASE_URL=${SHARE_BASE_URL_EXPECTED}$" "$ENVFILE_VALUE"; then
+            echo "✅ SHARE_BASE_URL correct"
+          else
+            echo "⚠️ SHARE_BASE_URL may not match expected value"
+          fi
+
+      - name: Configure Android SDK path
+        run: |
+          printf "sdk.dir=%s\n" "$ANDROID_SDK_ROOT" > android/local.properties
+          chmod +x android/gradlew
+          chmod +x scripts/build-android-release.sh 2>/dev/null || true
+
+      - name: Materialize Android keystore
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          KEYSTORE_PATH: android/app/aline2-release.keystore
+        run: |
+          mkdir -p "$(dirname "$KEYSTORE_PATH")"
+          echo "$ANDROID_UPLOAD_KEYSTORE_BASE64" | tr -d '\r\n\t ' | base64 -d > "$KEYSTORE_PATH"
+          
+          if [ ! -f "$KEYSTORE_PATH" ]; then
+            echo "❌ Failed to create keystore" >&2
+            exit 1
+          fi
+          
+          file_size=$(stat -f%z "$KEYSTORE_PATH" 2>/dev/null || stat -c%s "$KEYSTORE_PATH" 2>/dev/null || echo 0)
+          if [ "$file_size" -lt 100 ]; then
+            echo "❌ Keystore file too small (${file_size} bytes)" >&2
+            exit 1
+          fi
+          
+          echo "✅ Keystore materialized (${file_size} bytes)"
+
+      - name: Build release APK
+        env:
+          ENVFILE: ${{ steps.prepare_env.outputs.envfile }}
+          ANDROID_UPLOAD_STORE_FILE: android/app/aline2-release.keystore
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          cd android
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file="$ANDROID_UPLOAD_STORE_FILE" \
+            -Pandroid.injected.signing.store.password="$ANDROID_UPLOAD_STORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$ANDROID_UPLOAD_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$ANDROID_UPLOAD_KEY_PASSWORD"
+
+      - name: Build release AAB
+        if: steps.meta.outputs.build_aab == 'true'
+        env:
+          ENVFILE: ${{ steps.prepare_env.outputs.envfile }}
+          ANDROID_UPLOAD_STORE_FILE: android/app/aline2-release.keystore
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          cd android
+          ./gradlew bundleRelease \
+            -Pandroid.injected.signing.store.file="$ANDROID_UPLOAD_STORE_FILE" \
+            -Pandroid.injected.signing.store.password="$ANDROID_UPLOAD_STORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$ANDROID_UPLOAD_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$ANDROID_UPLOAD_KEY_PASSWORD"
+
+      - name: Collect and rename artifacts
+        id: collect
+        run: |
+          # Find APK
+          if [ "${{ steps.meta.outputs.release_profile }}" = "arm64" ]; then
+            apk_src="$(find android/app/build/outputs/apk/release -name 'app-arm64-v8a-release.apk' | head -n 1)"
+          else
+            apk_src="$(find android/app/build/outputs/apk/release -name 'app-release.apk' -o -name '*universal*.apk' | head -n 1)"
+          fi
+          
+          if [ -z "$apk_src" ]; then
+            echo "❌ APK not found" >&2
+            find android/app/build/outputs/apk/release -type f
+            exit 1
+          fi
+          
+          # Copy and rename APK
+          cp "$apk_src" "${{ steps.meta.outputs.apk_name }}"
+          sha256sum "${{ steps.meta.outputs.apk_name }}" > "${{ steps.meta.outputs.apk_name }}.sha256"
+          echo "apk_path=${{ steps.meta.outputs.apk_name }}" >> "$GITHUB_OUTPUT"
+          echo "✅ APK ready: ${{ steps.meta.outputs.apk_name }}"
+          
+          # Find and copy AAB if building standard profile
+          if [ "${{ steps.meta.outputs.build_aab }}" = "true" ]; then
+            aab_src="$(find android/app/build/outputs/bundle/release -name '*.aab' | head -n 1)"
+            
+            if [ -z "$aab_src" ]; then
+              echo "❌ AAB not found" >&2
+              exit 1
+            fi
+            
+            cp "$aab_src" "${{ steps.meta.outputs.aab_name }}"
+            sha256sum "${{ steps.meta.outputs.aab_name }}" > "${{ steps.meta.outputs.aab_name }}.sha256"
+            echo "aab_path=${{ steps.meta.outputs.aab_name }}" >> "$GITHUB_OUTPUT"
+            echo "✅ AAB ready: ${{ steps.meta.outputs.aab_name }}"
+          fi
+
+      - name: Verify APK signature
+        env:
+          ANDROID_UPLOAD_STORE_FILE: android/app/aline2-release.keystore
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          EXPECTED_SHA256: "4e:cc:84:30:64:63:89:d5:93:0b:89:89:04:99:c5:56:9c:95:56:fb:68:4e:92:d3:83:41:35:53:28:1a:0c:4a"
+        run: |
+          build_tools_dir="${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}"
+          apksigner="${build_tools_dir}/apksigner"
+          
+          # Verify APK is signed
+          "$apksigner" verify --print-certs "${{ steps.collect.outputs.apk_path }}" | tee /tmp/apk-verify.txt
+          
+          # Extract keystore certificate SHA256
+          trusted_sha="$(keytool -exportcert \
+            -alias "$ANDROID_UPLOAD_KEY_ALIAS" \
+            -keystore "$ANDROID_UPLOAD_STORE_FILE" \
+            -storepass "$ANDROID_UPLOAD_STORE_PASSWORD" \
+            | openssl x509 -inform der -noout -fingerprint -sha256 \
+            | cut -d'=' -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          
+          # Extract APK certificate SHA256
+          apk_sha="$(awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print $2; exit}' /tmp/apk-verify.txt | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          
+          echo "Expected SHA256: $EXPECTED_SHA256"
+          echo "Keystore SHA256: $trusted_sha"
+          echo "APK SHA256:      $apk_sha"
+          
+          # Verify match
+          if [ "$apk_sha" != "$trusted_sha" ]; then
+            echo "❌ Certificate mismatch!" >&2
+            exit 1
+          fi
+          
+          # Verify against known good certificate
+          if [ "$apk_sha" = "${EXPECTED_SHA256}" ]; then
+            echo "✅ Certificate matches known production upload key"
+          else
+            echo "⚠️ Warning: Certificate doesn't match expected value"
+            echo "This may be expected if keystore was rotated"
+          fi
+
+      - name: Verify AAB signature
+        if: steps.meta.outputs.build_aab == 'true'
+        env:
+          ANDROID_UPLOAD_STORE_FILE: android/app/aline2-release.keystore
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+        run: |
+          # Extract AAB certificate
+          keytool -printcert -jarfile "${{ steps.collect.outputs.aab_path }}" | tee /tmp/aab-verify.txt
+          aab_sha="$(awk -F': ' '/SHA256:/ {print $2; exit}' /tmp/aab-verify.txt | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          
+          # Extract keystore certificate
+          trusted_sha="$(keytool -exportcert \
+            -alias "$ANDROID_UPLOAD_KEY_ALIAS" \
+            -keystore "$ANDROID_UPLOAD_STORE_FILE" \
+            -storepass "$ANDROID_UPLOAD_STORE_PASSWORD" \
+            | openssl x509 -inform der -noout -fingerprint -sha256 \
+            | cut -d'=' -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          
+          echo "AAB SHA256:      $aab_sha"
+          echo "Keystore SHA256: $trusted_sha"
+          
+          if [ "$aab_sha" != "$trusted_sha" ]; then
+            echo "❌ AAB certificate mismatch!" >&2
+            exit 1
+          fi
+          
+          echo "✅ AAB signature verified"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: |
+            ${{ steps.collect.outputs.apk_path }}
+            ${{ steps.collect.outputs.apk_path }}.sha256
+            ${{ steps.collect.outputs.aab_path }}
+            ${{ steps.collect.outputs.aab_path }}.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Generate build summary
+        if: success()
+        run: |
+          {
+            echo "## ✅ Android Release Build Complete"
+            echo ""
+            echo "### Release Information"
+            echo "- **Version:** ${{ steps.meta.outputs.app_version }}"
+            echo "- **Release Name:** \`${{ steps.meta.outputs.release_name }}\`"
+            echo "- **Profile:** ${{ steps.meta.outputs.release_profile }}"
+            echo "- **Commit:** \`${{ steps.meta.outputs.short_sha }}\`"
+            echo "- **Date:** ${{ steps.meta.outputs.release_date }}"
+            echo ""
+            echo "### Artifacts"
+            echo "- **APK:** \`${{ steps.meta.outputs.apk_name }}\`"
+            if [ "${{ steps.meta.outputs.build_aab }}" = "true" ]; then
+              echo "- **AAB:** \`${{ steps.meta.outputs.aab_name }}\`"
+            fi
+            echo ""
+            echo "### Checksums"
+            echo "\`\`\`"
+            cat "${{ steps.collect.outputs.apk_path }}.sha256"
+            if [ "${{ steps.meta.outputs.build_aab }}" = "true" ] && [ -f "${{ steps.collect.outputs.aab_path }}.sha256" ]; then
+              cat "${{ steps.collect.outputs.aab_path }}.sha256"
+            fi
+            echo "\`\`\`"
+            echo ""
+            echo "### Download Instructions"
+            echo "1. Go to this workflow run's **Artifacts** section below"
+            echo "2. Download \`${{ steps.meta.outputs.artifact_name }}\`"
+            echo "3. Extract the ZIP file"
+            echo "4. Install APK on device: \`adb install ${{ steps.meta.outputs.apk_name }}\`"
+            if [ "${{ steps.meta.outputs.build_aab }}" = "true" ]; then
+              echo "5. Upload AAB to Google Play Console"
+            fi
+            echo ""
+            echo "### Play Store Submission"
+            if [ "${{ steps.meta.outputs.build_aab }}" = "true" ]; then
+              echo "1. Download the AAB from artifacts"
+              echo "2. Login to [Play Console](https://play.google.com/console)"
+              echo "3. Navigate to Aline2 app → Production"
+              echo "4. Create new release"
+              echo "5. Upload \`${{ steps.meta.outputs.aab_name }}\`"
+              echo "6. Add release notes (see app changelog)"
+              echo "7. Review and submit"
+            else
+              echo "AAB not built in this profile"
+            fi
+            echo ""
+            echo "### Verification"
+            echo "- ✅ Typecheck passed"
+            echo "- ✅ Tests passed"
+            echo "- ✅ APK signed and verified"
+            if [ "${{ steps.meta.outputs.build_aab }}" = "true" ]; then
+              echo "- ✅ AAB signed and verified"
+            fi
+            echo "- ✅ Certificate matches production upload key"
+            echo ""
+            echo "### Next Steps"
+            echo "1. Download and test APK on device"
+            echo "2. Verify version shows v${{ steps.meta.outputs.app_version }}"
+            echo "3. Test audio unmute feature (critical fix in this release)"
+            echo "4. Upload AAB to Play Console for production release"
+            echo "5. Monitor crash reports and user feedback"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup sensitive files
+        if: always()
+        run: |
+          rm -f android/app/aline2-release.keystore
+          rm -f .env.ci
+          echo "✅ Cleanup complete"

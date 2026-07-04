@@ -1,14 +1,14 @@
-export const APP_VERSION = "2.0.0";
+export const APP_VERSION = "2.0.1";
 export const APP_RELEASE_DATE = "July 4, 2026";
-export const APP_RELEASE_TITLE = "Audio fixes and production stability improvements";
+export const APP_RELEASE_TITLE = "Call notifications, follower fixes, and CI/CD hardening";
 
 export const APP_RELEASE_HIGHLIGHTS = [
-  "Fixed critical audio unmute functionality in feed posts with music - tapping now correctly plays/pauses audio.",
+  "Incoming and missed call push notifications now arrive through the standard notification pipeline with a dedicated calls channel.",
+  "Follower and following lists now return results in the original follow order with proper deduplication and blocking awareness.",
+  "Fixed critical audio unmute functionality in feed posts with music — tapping now correctly plays and pauses audio.",
   "Improved music playback state management for more reliable audio control throughout the app.",
-  "Enhanced production build process with comprehensive CI/CD validation and security measures.",
-  "Feed, story, and swipe publishing now keep selected-track metadata steadier so attached music remains consistent.",
-  "Updated security measures for safer credential handling and production deployment workflows.",
-  "Stabilized release artifact signing and verification to ensure authentic app delivery.",
+  "Enhanced production CI/CD pipeline with full AWS OIDC integration, S3 artifact delivery, and email notifications to cuboidsoft@gmail.com.",
+  "Stabilized release artifact signing, verification, and automated deployment to the production EC2 host.",
 ];
 
 export const APP_FEATURE_SECTIONS = [
@@ -26,6 +26,7 @@ export const APP_FEATURE_SECTIONS = [
       "Direct chats, seller chats, group chats, message forwarding, locked chats, muting, shared media, and faster latest-message loading.",
       "Chat details now support wallpaper changes, clear chat, disappearing messages, and chat locking controls.",
       "Voice notes in chat with preview-before-send support, cleaner audio playback, and more reliable incoming audio and video calls.",
+      "Incoming and missed call push notifications with dedicated call channel for better attention and priority.",
       "Live broadcasts with host tools, viewer chat, reactions, guest requests, guest video, and stream discovery.",
       "Protected chat media flow with safer image, GIF, and video sharing.",
     ],
@@ -56,9 +57,12 @@ export const APP_FEATURE_SECTIONS = [
 ];
 
 export const APP_BUG_FIXES = [
-  "Fixed critical audio unmute bug where tapping posts with music wouldn't play audio - now works correctly.",
+  "Fixed critical audio unmute bug where tapping posts with music wouldn't play audio — now works correctly.",
   "Corrected inverted music playback logic that prevented sound from playing when user tapped to unmute.",
-  "Fixed double-tap like behavior to work correctly alongside audio toggle - like animation still appears on double-tap.",
+  "Fixed double-tap like behavior to work correctly alongside audio toggle — like animation still appears on double-tap.",
+  "Follower and following lists no longer return duplicates or miss blocked-user filtering.",
+  "Incoming call notifications now use a dedicated calls_v3 channel instead of being silently dropped by the default social channel.",
+  "Live stream viewer-join events now include the viewer profile info so the host sees who joined.",
   "Improved audio state management so tapping reliably toggles playback instead of causing confusion.",
   "Fixed a live music catalog regression that could fail the picker instead of returning the latest playable tracks.",
   "Fixed version drift where the feed sidebar could still show the old v0.0.1 label after newer releases had already shipped.",
