@@ -1,14 +1,14 @@
-export const APP_VERSION = "1.0.3";
-export const APP_RELEASE_DATE = "April 30, 2026";
-export const APP_RELEASE_TITLE = "Live music fixes, refreshed Firebase sync, and cleaner release visibility";
+export const APP_VERSION = "2.0.0";
+export const APP_RELEASE_DATE = "July 4, 2026";
+export const APP_RELEASE_TITLE = "Audio fixes and production stability improvements";
 
 export const APP_RELEASE_HIGHLIGHTS = [
-  "Attached music now refreshes from the live royalty-free catalog more reliably after the latest parser and catalog recovery fixes.",
-  "Feed, story, and swipe publishing now keep selected-track metadata steadier so attached music is less likely to disappear between picker, publish, and playback.",
-  "Android Google services have been refreshed for the current signed release so Firebase-backed flows stay aligned with the latest production certificate.",
-  "The feed menu, settings, and release-notes screen now all show the same current build details instead of drifting to stale version labels.",
-  "The latest stable signed APK remains the public install target while the matching private AAB stays ready for store and verification workflows.",
-  "Music source details now read more clearly in-app, including royalty-free playback expectations and visible artist credit where available.",
+  "Fixed critical audio unmute functionality in feed posts with music - tapping now correctly plays/pauses audio.",
+  "Improved music playback state management for more reliable audio control throughout the app.",
+  "Enhanced production build process with comprehensive CI/CD validation and security measures.",
+  "Feed, story, and swipe publishing now keep selected-track metadata steadier so attached music remains consistent.",
+  "Updated security measures for safer credential handling and production deployment workflows.",
+  "Stabilized release artifact signing and verification to ensure authentic app delivery.",
 ];
 
 export const APP_FEATURE_SECTIONS = [
@@ -56,16 +56,16 @@ export const APP_FEATURE_SECTIONS = [
 ];
 
 export const APP_BUG_FIXES = [
+  "Fixed critical audio unmute bug where tapping posts with music wouldn't play audio - now works correctly.",
+  "Corrected inverted music playback logic that prevented sound from playing when user tapped to unmute.",
+  "Fixed double-tap like behavior to work correctly alongside audio toggle - like animation still appears on double-tap.",
+  "Improved audio state management so tapping reliably toggles playback instead of causing confusion.",
   "Fixed a live music catalog regression that could fail the picker instead of returning the latest playable tracks.",
   "Fixed version drift where the feed sidebar could still show the old v0.0.1 label after newer releases had already shipped.",
   "Refreshed Firebase Android configuration for the current release certificate so Google-services-backed flows stay in sync with the production build.",
   "Improved Jamendo-backed track parsing so catalog responses return safer playback URLs, track titles, and artist details more consistently.",
-  "Kept the latest public APK and the matching versioned Android bundle delivery paths aligned for release and verification workflows.",
   "Preserved attached-audio metadata more reliably across create-post, story, and swipe publishing.",
   "Reduced false generic network errors during video publishing by keeping backup backend retry behavior in place.",
-  "Improved attached-audio acceptance for common MP3, M4A, AAC, WAV, and OGG uploads before trim and publish.",
-  "Returned richer playback fields from the music catalog so published posts, stories, and swipes can resolve selected tracks more consistently.",
-  "Refreshed in-app release-note copy so the current build, settings version, and release summary all stay aligned.",
 ];
 
 export const APP_UPCOMING_CHANGES = [

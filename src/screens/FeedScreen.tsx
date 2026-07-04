@@ -326,7 +326,7 @@ function FeedScreen({ navigation, route }: any) {
     ? `${activePost.id}:${activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
     : "";
   const activePostShouldPlayMusic = !!activePostId
-    && !mutedPostIds[activePostId]
+    && mutedPostIds[activePostId] !== false
     && !activeSheet
     && isScreenFocused
     && !!activePostMusicUrl;
