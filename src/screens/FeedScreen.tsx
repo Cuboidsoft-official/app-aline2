@@ -50,7 +50,7 @@ import { downloadImageAsset } from "../utils/mediaDownload";
 import { connectSocket, socket } from "../socket";
 import { listLiveStreams } from "../utils/liveStreamApi";
 import { APP_RELEASE_DATE, APP_VERSION } from "../config/appMeta";
-import { isFeedVideoSoundOn, shouldMuteFeedVideo } from "../utils/feedMediaSound";
+import { isFeedVideoSoundOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../utils/feedMediaSound";
 
 let ColorMatrix: any;
 try {
@@ -259,6 +259,7 @@ function FeedScreen({ navigation, route }: any) {
     time: 0,
     timeout: null,
   });
+  const [isFeedScrollSettling, setIsFeedScrollSettling] = useState(false);
   const isTabletLayout = width >= 768;
   const focusedPostId = String(route?.params?.postId || "").trim();
   const focusUserId = String(route?.params?.userId || "").trim();
@@ -329,6 +330,7 @@ function FeedScreen({ navigation, route }: any) {
     && mutedPostIds[activePostId] !== false
     && !activeSheet
     && isScreenFocused
+    && !isFeedScrollSettling
     && !!activePostMusicUrl;
   useSegmentedMusicPlayback({
     rawUrl: activePostRawMusicUrl,
@@ -736,6 +738,7 @@ function FeedScreen({ navigation, route }: any) {
     }
 
     feedScrollTransitionRef.current = false;
+    setIsFeedScrollSettling(false);
 
     if (!isScreenFocused || activeSheet) {
       setActivePostId("");
@@ -752,7 +755,9 @@ function FeedScreen({ navigation, route }: any) {
       feedScrollResumeTimeoutRef.current = null;
     }
 
-    feedScrollTransitionRef.current = false;
+    feedScrollTransitionRef.current = true;
+    setIsFeedScrollSettling(true);
+    setActivePostId("");
   }, []);
 
   const scheduleRestoreActiveVisiblePost = useCallback((delay = 80) => {
@@ -770,7 +775,6 @@ function FeedScreen({ navigation, route }: any) {
     const lastTap = postTapRef.current;
     const hasAudioLayer =
       post.media.some((asset) => asset.mediaType === "video")
-      || !!getMusicPlaybackUrl(post.music)
       || !!getMusicPlaybackUrl(post.music);
 
     if (lastTap.id === post.id && now - lastTap.time < 260) {
@@ -1261,6 +1265,12 @@ function FeedScreen({ navigation, route }: any) {
     const hasAttachedMusic = !!getMusicPlaybackUrl(post.music);
     const isMuted = !!mutedPostIds[post.id];
     const isPostActive = activePostId === post.id && isScreenFocused && !activeSheet;
+    const shouldMountVideo = (isCarouselItemActive = true) => shouldMountFeedVideo({
+      isPostActive,
+      isCarouselItemActive,
+      isScreenFocused,
+      isScrolling: isFeedScrollSettling,
+    });
     const renderSensitiveBadge = (label?: string) => (
       <View pointerEvents="none" style={styles.sensitiveBadge}>
         <Text style={styles.sensitiveBadgeText}>{label ? `${label} sensitive content` : "Sensitive content"}</Text>
@@ -1278,9 +1288,10 @@ function FeedScreen({ navigation, route }: any) {
           <View>
             <SocialVideo
               uri={normalizeMediaUrl(primaryMedia.url)}
-              posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || primaryMedia.url)}
+              posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || "")}
               style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-              paused={!isPostActive}
+              paused={!shouldMountVideo()}
+              preload={false}
               muted={shouldMuteFeedVideo({
                 isPostActive,
                 isVideoSoundEnabled,
@@ -1342,9 +1353,10 @@ function FeedScreen({ navigation, route }: any) {
               <View key={asset.id}>
                 <SocialVideo
                   uri={normalizeMediaUrl(asset.url)}
-                  posterUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
+                  posterUri={normalizeMediaUrl(asset.thumbnailUrl || "")}
                   style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-                  paused={!isPostActive || currentCarouselIndex !== index}
+                  paused={!shouldMountVideo(currentCarouselIndex === index)}
+                  preload={false}
                   muted={shouldMuteFeedVideo({
                     isPostActive,
                     isCarouselItemActive: currentCarouselIndex === index,
@@ -2406,6 +2418,9 @@ function FeedScreen({ navigation, route }: any) {
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
     const firstVisiblePost = viewableItems.find((entry) => entry.isViewable && entry.item?.id)?.item;
     lastViewablePostIdRef.current = firstVisiblePost?.id || "";
+    if (feedScrollTransitionRef.current) {
+      return;
+    }
     if (firstVisiblePost?.id) {
       setActivePostId(firstVisiblePost.id);
     }
@@ -2431,10 +2446,10 @@ function FeedScreen({ navigation, route }: any) {
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS === "android"}
-          initialNumToRender={4}
-          maxToRenderPerBatch={5}
-          updateCellsBatchingPeriod={24}
-          windowSize={5}
+          initialNumToRender={3}
+          maxToRenderPerBatch={3}
+          updateCellsBatchingPeriod={40}
+          windowSize={4}
           decelerationRate="fast"
           scrollEventThrottle={16}
           keyboardDismissMode="on-drag"

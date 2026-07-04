@@ -40,6 +40,7 @@ import AISupportSheet from "../components/chat/AISupportSheet";
 import ChatLockModal from "../components/chat/ChatLockModal";
 import AppBottomDock, { getAppBottomDockHeight } from "../components/AppBottomDock";
 import AppAvatar from "../components/AppAvatar";
+import FeaturedProfilesCarousel from "../components/FeaturedProfilesCarousel";
 import {
   getLockedConversationIds,
   hasChatLockPasscode,
@@ -1368,6 +1369,22 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       }),
     [assistantContextItems],
   );
+  const renderListHeader = useCallback(() => {
+    if (activeTab !== "regular" || isForwardMode) {
+      return null;
+    }
+
+    return (
+      <View style={styles.featuredProfilesHeader}>
+        <FeaturedProfilesCarousel
+          navigation={navigation}
+          title="Featured profiles"
+          compact
+          limit={10}
+        />
+      </View>
+    );
+  }, [activeTab, isForwardMode, navigation]);
 
   if (loading) {
     return (
@@ -1565,6 +1582,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         initialNumToRender={12}
         maxToRenderPerBatch={10}
         windowSize={6}
+        ListHeaderComponent={renderListHeader}
         contentContainerStyle={[
           styles.listContent,
           {
@@ -2017,6 +2035,9 @@ const styles = StyleSheet.create({
   },
   listContentEmpty: {
     flexGrow: 1,
+  },
+  featuredProfilesHeader: {
+    marginBottom: 2,
   },
   chatCard: {
     flexDirection: "row",

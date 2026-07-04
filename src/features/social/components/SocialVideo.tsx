@@ -18,6 +18,12 @@ type SocialVideoProps = {
   fallbackColor?: string;
 };
 
+const isLikelyVideoUri = (value: string): boolean =>
+  /\.(mp4|m4v|mov|webm|m3u8)(?:[?#].*)?$/i.test(value);
+
+const isUsablePosterUri = (posterUri: string, videoUri: string): boolean =>
+  !!posterUri && posterUri !== videoUri && !isLikelyVideoUri(posterUri);
+
 function SocialVideo({
   uri,
   posterUri,
@@ -37,35 +43,37 @@ function SocialVideo({
   const [videoFailed, setVideoFailed] = useState(false);
   const resolvedUri = String(uri || "").trim();
   const resolvedPosterUri = String(posterUri || "").trim();
+  const usablePosterUri = isUsablePosterUri(resolvedPosterUri, resolvedUri) ? resolvedPosterUri : "";
   const containerStyle = useMemo(() => stripBackgroundColorFromStyle(style), [style]);
   const shouldMountVideo = !!resolvedUri && !videoFailed && (!paused || controls || preload);
+  const shouldShowPoster = !!usablePosterUri && !posterFailed;
 
   useEffect(() => {
     placeholderOpacity.stopAnimation();
     placeholderOpacity.setValue(1);
     setPosterFailed(false);
     setVideoFailed(false);
-  }, [placeholderOpacity, resolvedPosterUri, resolvedUri]);
+  }, [placeholderOpacity, usablePosterUri, resolvedUri]);
 
   useEffect(() => {
-    [resolvedPosterUri]
+    [usablePosterUri]
       .filter(Boolean)
       .filter((value) => /^https?:\/\//i.test(value))
       .forEach((value) => {
         Image.prefetch(value).catch(() => undefined);
       });
-  }, [resolvedPosterUri]);
+  }, [usablePosterUri]);
 
-  if (!resolvedUri && !resolvedPosterUri) {
+  if (!resolvedUri && !usablePosterUri) {
     return <View style={[styles.fallback, containerStyle, { backgroundColor: fallbackColor }]} />;
   }
 
   return (
     <View style={[styles.container, containerStyle, { backgroundColor: fallbackColor }]}>
-      {resolvedPosterUri && !posterFailed ? (
+      {shouldShowPoster ? (
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: placeholderOpacity }]}>
           <Image
-            source={{ uri: resolvedPosterUri }}
+            source={{ uri: usablePosterUri }}
             style={StyleSheet.absoluteFill}
             resizeMode={resizeMode}
             blurRadius={14}
@@ -88,7 +96,7 @@ function SocialVideo({
             repeat={repeat}
             controls={controls}
             onEnd={onEnd}
-            poster={resolvedPosterUri || undefined}
+            poster={usablePosterUri || undefined}
             onLoad={() => {
               Animated.timing(placeholderOpacity, {
                 toValue: 0,
@@ -104,10 +112,10 @@ function SocialVideo({
             playWhenInactive={false}
             ignoreSilentSwitch="ignore"
           />
-          {contentBlurRadius > 0 && resolvedPosterUri ? (
+          {contentBlurRadius > 0 && usablePosterUri ? (
             <View pointerEvents="none" style={StyleSheet.absoluteFill}>
               <Image
-                source={{ uri: resolvedPosterUri }}
+                source={{ uri: usablePosterUri }}
                 style={StyleSheet.absoluteFill}
                 resizeMode={resizeMode}
                 blurRadius={contentBlurRadius}

@@ -107,6 +107,7 @@ function StoryViewerScreen({ route, navigation }: any) {
   const [replyText, setReplyText] = useState("");
   const [progress, setProgress] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [isReplyInputFocused, setIsReplyInputFocused] = useState(false);
   const [loading, setLoading] = useState(true);
   const [liking, setLiking] = useState(false);
   const [busyPollVote, setBusyPollVote] = useState(false);
@@ -123,6 +124,7 @@ function StoryViewerScreen({ route, navigation }: any) {
     time: 0,
     timeout: null,
   });
+  const replyPauseBeforeFocusRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -179,6 +181,7 @@ function StoryViewerScreen({ route, navigation }: any) {
   const shouldPlayStoryMusic = hasStoryAttachedMusic
     && isMusicEnabled
     && !paused
+    && !isReplyInputFocused
     && !showActions
     && !showOwnerActivity
     && isScreenFocused;
@@ -281,6 +284,12 @@ function StoryViewerScreen({ route, navigation }: any) {
 
     setActiveIndex((prev) => prev + 1);
   }, [activeIndex, currentStory, navigation, paused, progress, stories.length]);
+
+  useEffect(() => {
+    if (isReplyInputFocused) {
+      stopAllSegmentedMusicPlayback();
+    }
+  }, [isReplyInputFocused]);
 
   const closeStoryViewer = useCallback(() => {
     stopAllSegmentedMusicPlayback();
@@ -445,8 +454,21 @@ function StoryViewerScreen({ route, navigation }: any) {
     setShowOwnerActivity(true);
   };
 
+  const pauseForReplyInput = () => {
+    replyPauseBeforeFocusRef.current = paused;
+    setPaused(true);
+    setIsReplyInputFocused(true);
+    stopAllSegmentedMusicPlayback();
+  };
+
   const focusReplyInput = () => {
+    pauseForReplyInput();
     replyInputRef.current?.focus();
+  };
+
+  const handleReplyInputBlur = () => {
+    setIsReplyInputFocused(false);
+    setPaused(replyPauseBeforeFocusRef.current);
   };
 
   const openStoryLink = async () => {
@@ -557,9 +579,9 @@ function StoryViewerScreen({ route, navigation }: any) {
         <View style={styles.storyImage}>
           <SocialVideo
             uri={normalizeMediaUrl(currentStory.media?.url)}
-            posterUri={normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url)}
+            posterUri={normalizeMediaUrl(currentStory.media?.thumbnailUrl || "")}
             style={styles.storyImage}
-            paused={paused || showActions || showOwnerActivity || !isScreenFocused}
+            paused={paused || isReplyInputFocused || showActions || showOwnerActivity || !isScreenFocused}
             muted={!isScreenFocused || !isMusicEnabled || hasStoryAttachedMusic}
             onEnd={next}
             contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}
@@ -937,6 +959,8 @@ function StoryViewerScreen({ route, navigation }: any) {
               placeholderTextColor="#a7a7a7"
               value={replyText}
               onChangeText={setReplyText}
+              onFocus={pauseForReplyInput}
+              onBlur={handleReplyInputBlur}
               editable={currentStory.allowReplies !== false}
             />
 

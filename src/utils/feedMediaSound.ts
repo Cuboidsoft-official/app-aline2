@@ -6,6 +6,13 @@ type FeedVideoMuteOptions = {
   hasAttachedMusic: boolean;
 };
 
+type FeedVideoMountOptions = {
+  isPostActive: boolean;
+  isCarouselItemActive?: boolean;
+  isScreenFocused: boolean;
+  isScrolling?: boolean;
+};
+
 export const shouldMuteFeedVideo = ({
   isPostActive,
   isCarouselItemActive = true,
@@ -25,3 +32,14 @@ export const isFeedVideoSoundOn = ({
   hasAttachedMusic,
 }: Pick<FeedVideoMuteOptions, "isVideoSoundEnabled" | "isPostMuted" | "hasAttachedMusic">): boolean =>
   isVideoSoundEnabled && !isPostMuted && !hasAttachedMusic;
+
+export const shouldMountFeedVideo = ({
+  isPostActive,
+  isCarouselItemActive = true,
+  isScreenFocused,
+  isScrolling = false,
+}: FeedVideoMountOptions): boolean =>
+  isScreenFocused
+  && !isScrolling
+  && isPostActive
+  && isCarouselItemActive;
