@@ -334,6 +334,7 @@ export function useSegmentedMusicPlayback({
         if (!isCurrentRequest()) {
           return;
         }
+        await audioPlayerRef.current.setVolume(1).catch(() => undefined);
         await audioPlayerRef.current.resumePlayer().catch(() => undefined);
         if (isCurrentRequest()) {
           setIsLoading(false);
@@ -349,6 +350,7 @@ export function useSegmentedMusicPlayback({
           if (!isCurrentRequest()) {
             return;
           }
+          await audioPlayerRef.current.setVolume(1).catch(() => undefined);
           await audioPlayerRef.current.resumePlayer().catch(() => undefined);
           if (isCurrentRequest()) {
             setIsLoading(false);

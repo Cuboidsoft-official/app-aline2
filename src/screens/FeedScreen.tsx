@@ -723,12 +723,9 @@ function FeedScreen({ navigation, route }: any) {
   const togglePostMute = useCallback((postId: string) => {
     setMutedPostIds((prev) => {
       const nextMuted = !prev[postId];
-      if (nextMuted && postId === activePostId) {
-        stopAllSegmentedMusicPlayback();
-      }
       return { ...prev, [postId]: nextMuted };
     });
-  }, [activePostId]);
+  }, []);
 
   const triggerLikeBurst = useCallback((postId: string) => {
     setLikeBurstPostId(postId);
