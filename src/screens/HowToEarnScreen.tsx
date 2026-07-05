@@ -19,13 +19,11 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { appConfig } from "../config/env";
 import { getStoredUser } from "../utils/authSession";
-import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import { useAppTheme } from "../theme/AppThemeContext";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 
 type EarnSection = "referral" | "feature";
 
-const FEATURE_AMOUNT = 100;
 const FEATURE_DAYS = 30;
 
 function HowToEarnScreen({ navigation }: any) {
@@ -109,30 +107,20 @@ function HowToEarnScreen({ navigation }: any) {
 
     try {
       setActivatingFeature(true);
-      const orderRes = await API.post("/featured-profiles/order", {
-        amount: FEATURE_AMOUNT,
+      const featureRes = await API.post("/featured-profiles/order", {
         durationDays: FEATURE_DAYS,
       });
-      const order = orderRes.data?.featuredProfile;
-      const payment = orderRes.data?.payment;
-      const featuredProfileId = String(order?._id || "");
+      const nextFeaturedProfile = featureRes.data?.featuredProfile;
 
-      if (!featuredProfileId || !payment) {
-        throw new Error("Could not create featured profile order.");
+      if (!nextFeaturedProfile || String(nextFeaturedProfile.status || "").toLowerCase() !== "active") {
+        throw new Error("Profile feature was not confirmed.");
       }
 
-      const checkoutResult = await openRazorpayCheckout(payment);
-      const verifyRes = await API.post(`/featured-profiles/${featuredProfileId}/verify`, checkoutResult);
-
-      if (!verifyRes.data?.featuredProfile || verifyRes.data.featuredProfile.paymentStatus !== "paid") {
-        throw new Error("Payment completed but profile feature was not confirmed.");
-      }
-
-      setFeaturedProfile(verifyRes.data.featuredProfile);
+      setFeaturedProfile(nextFeaturedProfile);
       setActiveSection("feature");
-      Alert.alert("Profile featured", "Your profile is now featured for this month.");
+      Alert.alert("Profile featured", "Your profile is now featured.");
     } catch (error) {
-      console.log("feature profile payment error:", error);
+      console.log("feature profile activation error:", error);
       Alert.alert("Could not feature profile", getReadableApiErrorMessage(error, "Please try again."));
     } finally {
       setActivatingFeature(false);
@@ -145,7 +133,7 @@ function HowToEarnScreen({ navigation }: any) {
         <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.detailTitle, { color: colors.text }]}>Feature your profile</Text>
           <Text style={[styles.detailBody, { color: colors.mutedText }]}>
-            Pay INR {FEATURE_AMOUNT}/month to show your profile inside feed and search. It becomes visible only after payment success.
+            Feature your profile inside feed, chat discovery, and search. No payment is required.
           </Text>
 
           <View style={[styles.featureStatusBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -170,9 +158,9 @@ function HowToEarnScreen({ navigation }: any) {
               <ActivityIndicator size="small" color="#fff" />
             ) : (
               <>
-                <Icon name={isFeatureActive ? "checkmark-circle-outline" : "card-outline"} size={18} color={isFeatureActive ? colors.primary : "#fff"} />
+                <Icon name={isFeatureActive ? "checkmark-circle-outline" : "sparkles-outline"} size={18} color={isFeatureActive ? colors.primary : "#fff"} />
                 <Text style={[styles.primaryButtonText, isFeatureActive ? { color: colors.primary } : null]}>
-                  {isFeatureActive ? "Profile featured" : "Pay and feature profile"}
+                  {isFeatureActive ? "Profile featured" : "Feature profile"}
                 </Text>
               </>
             )}
@@ -270,7 +258,7 @@ function HowToEarnScreen({ navigation }: any) {
               <View style={styles.actionCopy}>
                 <Text style={[styles.actionTitle, { color: colors.text }]}>Feature your profile</Text>
                 <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>
-                  INR {FEATURE_AMOUNT}/month. Visible after payment success.
+                  Free profile boost for feed, chats, and search.
                 </Text>
               </View>
               <Icon name="chevron-down" size={18} color={colors.mutedText} />

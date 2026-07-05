@@ -327,7 +327,7 @@ function FeedScreen({ navigation, route }: any) {
     ? `${activePost.id}:${activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
     : "";
   const activePostShouldPlayMusic = !!activePostId
-    && mutedPostIds[activePostId] !== false
+    && !mutedPostIds[activePostId]
     && !activeSheet
     && isScreenFocused
     && !isFeedScrollSettling
@@ -721,8 +721,14 @@ function FeedScreen({ navigation, route }: any) {
   };
 
   const togglePostMute = useCallback((postId: string) => {
-    setMutedPostIds((prev) => ({ ...prev, [postId]: !prev[postId] }));
-  }, []);
+    setMutedPostIds((prev) => {
+      const nextMuted = !prev[postId];
+      if (nextMuted && postId === activePostId) {
+        stopAllSegmentedMusicPlayback();
+      }
+      return { ...prev, [postId]: nextMuted };
+    });
+  }, [activePostId]);
 
   const triggerLikeBurst = useCallback((postId: string) => {
     setLikeBurstPostId(postId);
@@ -787,10 +793,11 @@ function FeedScreen({ navigation, route }: any) {
       return;
     }
 
+    if (hasAudioLayer) {
+      togglePostMute(post.id);
+    }
+
     const timeout = setTimeout(() => {
-      if (hasAudioLayer) {
-        togglePostMute(post.id);
-      }
       postTapRef.current = { id: "", time: 0, timeout: null };
     }, 260);
 
