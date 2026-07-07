@@ -908,7 +908,7 @@ function FilterPreview({
     >
       <View style={styles.filterThumbFrame}>
         {ColorMatrix && filter.id !== "none" ? (
-          <ColorMatrix matrix={filter.matrix}>
+          <ColorMatrix matrix={filter.matrix} style={styles.filterMatrixFill}>
             <Image source={{ uri: imageUri }} style={styles.filterThumbImage} resizeMode="cover" />
           </ColorMatrix>
         ) : (
@@ -3687,7 +3687,10 @@ function CreatePostScreen({ navigation, route }: any) {
       >
         {ColorMatrix && selectedFilterId !== "none" ? (
           <View style={styles.previewMediaFill}>
-            <ColorMatrix matrix={(PHOTO_FILTER_LIST.find((item) => item.id === selectedFilterId) || PHOTO_FILTER_LIST[0]).matrix}>
+            <ColorMatrix
+              matrix={(PHOTO_FILTER_LIST.find((item) => item.id === selectedFilterId) || PHOTO_FILTER_LIST[0]).matrix}
+              style={styles.previewMediaFill}
+            >
               <Image source={{ uri: selectedAsset.uri }} style={styles.previewMedia} resizeMode={imageResizeMode} />
             </ColorMatrix>
           </View>
@@ -6086,6 +6089,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#0f172a",
   },
   filterThumbImage: {
+    width: "100%",
+    height: "100%",
+  },
+  filterMatrixFill: {
     width: "100%",
     height: "100%",
   },

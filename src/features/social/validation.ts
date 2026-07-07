@@ -26,6 +26,27 @@ const MAX_STORY_EMOJI_STICKERS = 8;
 
 const URL_PROTOCOL_PATTERN = /^https?:\/\//i;
 const USERNAME_TOKEN = /^[a-zA-Z0-9_.]{1,30}$/;
+const ALLOWED_POST_FILTER_PRESETS = new Set([
+  "none",
+  "vivid",
+  "vintage",
+  "warm",
+  "warmth",
+  "cool",
+  "noir",
+  "mono",
+  "sepia",
+  "fade",
+  "dramatic",
+  "golden",
+  "sunset",
+  "dream",
+  "dreamy",
+  "bloom",
+  "contrast",
+  "beauty",
+]);
+const ALLOWED_STORY_FILTER_PRESETS = new Set(["none", "warm", "cool", "noir", "dream"]);
 
 export class SocialValidationError extends Error {
   code: string;
@@ -228,6 +249,7 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
   const caption = cleanText(input.caption);
   const location = cleanText(input.location);
   const music = normalizeSelectedMusic(input.music);
+  const filterPreset = input.filterPreset ? cleanText(input.filterPreset).toLowerCase() : undefined;
 
   assertLength(caption, MAX_CAPTION_LENGTH, "Caption");
   assertLength(location, MAX_LOCATION_LENGTH, "Location");
@@ -240,6 +262,10 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
 
   if (media.length > 10) {
     throw new SocialValidationError("validation_error", "Maximum 10 media items are allowed.");
+  }
+
+  if (filterPreset !== undefined && !ALLOWED_POST_FILTER_PRESETS.has(filterPreset)) {
+    throw new SocialValidationError("validation_error", "Invalid post filter.");
   }
 
   const hashtags = normalizeTagList(input.hashtags, MAX_HASHTAGS, "hashtags");
@@ -260,6 +286,7 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
     mentions,
     taggedUsers,
     collaboratorIds,
+    filterPreset,
   };
 };
 
@@ -321,7 +348,7 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
     throw new SocialValidationError("validation_error", "Story link must be http/https.");
   }
 
-  if (filterPreset !== undefined && !["none", "warm", "cool", "noir", "dream"].includes(filterPreset)) {
+  if (filterPreset !== undefined && !ALLOWED_STORY_FILTER_PRESETS.has(filterPreset)) {
     throw new SocialValidationError("validation_error", "Invalid story filter.");
   }
 
@@ -646,7 +673,7 @@ export const normalizeUpdateStoryInput = (input: UpdateStoryInput): UpdateStoryI
     assertLength(text, MAX_STORY_TEXT_LENGTH, "Story text");
   }
 
-  if (filterPreset !== undefined && !["none", "warm", "cool", "noir", "dream"].includes(filterPreset)) {
+  if (filterPreset !== undefined && !ALLOWED_STORY_FILTER_PRESETS.has(filterPreset)) {
     throw new SocialValidationError("validation_error", "Invalid story filter.");
   }
 

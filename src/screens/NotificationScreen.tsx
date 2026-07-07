@@ -22,7 +22,7 @@ import { connectSocket, socket } from "../socket";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { getStoredUserId } from "../utils/authSession";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
-import { openPostInFeed } from "../utils/socialNavigation";
+import { openNotificationContentTarget } from "../utils/socialNavigation";
 
 type NotificationKind =
   | "follow"
@@ -49,6 +49,7 @@ interface NotificationUser {
 interface NotificationTarget {
   _id?: string;
   id?: string;
+  postType?: string;
   groupName?: string;
   groupAvatar?: string;
   conversationType?: string;
@@ -142,6 +143,14 @@ const getTargetId = (value?: NotificationTarget | string | null): string => {
 
   return value._id || value.id || "";
 };
+
+const POST_NOTIFICATION_TYPES = new Set([
+  "comment",
+  "comment_reply",
+  "mention_post",
+  "tag_post",
+  "post_share",
+]);
 
 const isNotificationForUser = (item: AppNotification, currentUserId: string): boolean => {
   const receiverId = getTargetId(item.receiver || null);
@@ -446,15 +455,15 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
 
       const postId = getTargetId(item.post);
       if (postId) {
-        openPostInFeed(navigation, { postId });
+        openNotificationContentTarget(navigation, item);
       }
       return;
     }
 
-    if (item.type === "comment") {
+    if (POST_NOTIFICATION_TYPES.has(String(item.type || ""))) {
       const postId = getTargetId(item.post);
       if (postId) {
-        openPostInFeed(navigation, { postId });
+        openNotificationContentTarget(navigation, item);
       }
       return;
     }
@@ -470,7 +479,9 @@ const NotificationScreen = ({ navigation }: NotificationScreenProps) => {
     }
 
     if (item.type === "swipe") {
-      navigation.navigate("Swipes");
+      if (!openNotificationContentTarget(navigation, item)) {
+        navigation.navigate("Swipes");
+      }
       return;
     }
 

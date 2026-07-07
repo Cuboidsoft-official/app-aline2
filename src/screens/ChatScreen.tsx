@@ -102,6 +102,7 @@ import {
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const PRIMARY = "#7b3fe4";
+const DEFAULT_CHAT_WALLPAPER = require("../assets/chat/default-whatsapp-doodle.jpeg");
 const LOCATION_MESSAGE_LABEL = "Shared location:";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -1091,9 +1092,7 @@ const ChatScreen = ({ navigation, route }: any) => {
         setResolvedConversationType(apiType as "direct" | "seller" | "group");
       }
 
-      if (nextConversation?.chatTheme) {
-        setChatTheme(nextConversation.chatTheme);
-      }
+      setChatTheme(nextConversation?.chatTheme || "default");
       setChatWallpaper(String(nextConversation?.chatWallpaper || ""));
       setConversationListing(
         nextConversation?.service
@@ -1154,9 +1153,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       const nextConversationId = nextConversation?._id || null;
       if (nextConversationId) {
         setCurrentConversationId(nextConversationId);
-        if (nextConversation?.chatTheme) {
-          setChatTheme(nextConversation.chatTheme);
-        }
+        setChatTheme(nextConversation?.chatTheme || "default");
         setErrorMessage("");
       }
       return nextConversationId;
@@ -3421,13 +3418,11 @@ const ChatScreen = ({ navigation, route }: any) => {
         keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
       >
         <View style={[styles.chatBackground, { backgroundColor: colors.surface }]}>
-          {chatWallpaper ? (
-            <Image
-              source={{ uri: normalizeMediaUrl(chatWallpaper) }}
-              style={styles.wallpaperBackground}
-              resizeMode="cover"
-            />
-          ) : null}
+          <Image
+            source={chatWallpaper ? { uri: normalizeMediaUrl(chatWallpaper) } : DEFAULT_CHAT_WALLPAPER}
+            style={[styles.wallpaperBackground, !chatWallpaper && styles.defaultWallpaperBackground]}
+            resizeMode="cover"
+          />
           <FlatList
             ref={messageListRef}
             data={messages}
@@ -4281,6 +4276,9 @@ const styles = StyleSheet.create({
   wallpaperBackground: {
     ...StyleSheet.absoluteFillObject,
     opacity: 0.16,
+  },
+  defaultWallpaperBackground: {
+    opacity: 0.5,
   },
   listContent: {
     padding: 14,

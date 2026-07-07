@@ -4,7 +4,7 @@ import { getStoredUserId } from "./authSession";
 import { startCallRingtone } from "./callAudio";
 import { getMutedConversationIds } from "./chatMute";
 import { safeDecodeURIComponent } from "./safeDecode";
-import { openPostInFeed } from "./socialNavigation";
+import { openNotificationContentTarget } from "./socialNavigation";
 
 let Notifications: any = null;
 let Device: any = null;
@@ -163,8 +163,8 @@ function navigateFromNotificationData(data: any, navigationRef?: any) {
     case "mention_post":
     case "tag_post":
     case "post_share":
-      if (data.postId) {
-        openPostInFeed(navigation, { postId: data.postId });
+      if (openNotificationContentTarget(navigation, data)) {
+        return;
       }
       break;
 

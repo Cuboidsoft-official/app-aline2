@@ -75,7 +75,7 @@ import { getStoredToken, getStoredUserId, setSessionInvalidationHandler, subscri
 import { startCallRingtone } from './src/utils/callAudio';
 import { registerPushToken, setupNotificationListeners } from './src/utils/pushRegistration';
 import { safeDecodeURIComponent } from './src/utils/safeDecode';
-import { openPostInFeed } from './src/utils/socialNavigation';
+import { openNotificationContentTarget } from './src/utils/socialNavigation';
 
 installReadableUiDefaults();
 
@@ -107,7 +107,6 @@ function AppNavigator() {
 
     const type = String(payload?.type || '').trim();
     const senderId = String(payload?.sender?._id || payload?.sender?.id || payload?.senderId || '').trim();
-    const postId = String(payload?.post?._id || payload?.post?.id || payload?.postId || '').trim();
     const storyId = String(payload?.story?._id || payload?.story?.id || payload?.storyId || '').trim();
 
     switch (type) {
@@ -123,8 +122,7 @@ function AppNavigator() {
       case 'mention_post':
       case 'tag_post':
       case 'post_share':
-        if (postId) {
-          openPostInFeed(navigationRef as any, { postId });
+        if (openNotificationContentTarget(navigationRef as any, payload)) {
           return;
         }
         break;
