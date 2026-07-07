@@ -38,6 +38,7 @@ jest.mock('../src/screens/AddServiceScreen', () => () => null);
 jest.mock('../src/screens/SellerSettingsScreen', () => () => null);
 jest.mock('../src/screens/WalletScreen', () => () => null);
 jest.mock('../src/screens/HowToEarnScreen', () => () => null);
+jest.mock('../src/screens/CompanyAdPreviewScreen', () => () => null);
 jest.mock('../src/screens/EditServiceScreen', () => () => null);
 jest.mock('../src/screens/SellerPreviewScreen', () => () => null);
 jest.mock('../src/screens/SellerChatScreen', () => () => null);

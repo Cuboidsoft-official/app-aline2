@@ -4,6 +4,35 @@ require("react-native-gesture-handler/jestSetup");
 
 jest.mock("react-native-linear-gradient", () => "LinearGradient");
 jest.mock("react-native-vector-icons/Ionicons", () => "Ionicons");
+jest.mock("react-native-nitro-sound", () => {
+  const createMockSound = () => ({
+    startRecorder: jest.fn(async () => "mock-recording.m4a"),
+    pauseRecorder: jest.fn(async () => "Recorder paused"),
+    resumeRecorder: jest.fn(async () => "Recorder resumed"),
+    stopRecorder: jest.fn(async () => "mock-recording.m4a"),
+    startPlayer: jest.fn(async () => "Player started"),
+    stopPlayer: jest.fn(async () => "Player stopped"),
+    pausePlayer: jest.fn(async () => "Player paused"),
+    resumePlayer: jest.fn(async () => "Player resumed"),
+    seekToPlayer: jest.fn(async () => "Seek complete"),
+    setVolume: jest.fn(async () => "Volume set"),
+    setPlaybackSpeed: jest.fn(async () => "Playback speed set"),
+    setSubscriptionDuration: jest.fn(),
+    addRecordBackListener: jest.fn(),
+    removeRecordBackListener: jest.fn(),
+    addPlayBackListener: jest.fn(),
+    removePlayBackListener: jest.fn(),
+    addPlaybackEndListener: jest.fn(),
+    removePlaybackEndListener: jest.fn(),
+    mmss: jest.fn(() => "00:00"),
+    mmssss: jest.fn(() => "00:00:00"),
+    dispose: jest.fn(),
+  });
+
+  return {
+    createSound: jest.fn(createMockSound),
+  };
+});
 jest.mock("@react-native-clipboard/clipboard", () => ({
   getString: jest.fn(async () => ""),
   setString: jest.fn(),
