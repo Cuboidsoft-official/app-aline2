@@ -20,7 +20,8 @@ type TrimWindow = {
   endTime: number;
 };
 
-export function useAudioTrimPreview() {
+export function useAudioTrimPreview(options: { trackPosition?: boolean } = {}) {
+  const trackPosition = options.trackPosition !== false;
   const playerRef = useRef(createManagedSound());
   const trimWindowRef = useRef<TrimWindow>({ startTime: 0, endTime: 0 });
   const sourceRef = useRef({ rawUrl: "", normalizedUrl: "" });
@@ -177,10 +178,12 @@ export function useAudioTrimPreview() {
   useEffect(() => {
     const player = playerRef.current;
 
-    player.setSubscriptionDuration(0.1);
+    player.setSubscriptionDuration(trackPosition ? 0.1 : 0.35);
     player.addPlayBackListener((event: any) => {
       const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
-      setPositionMs(currentPosition);
+      if (trackPosition) {
+        setPositionMs(currentPosition);
+      }
       setIsLoading(false);
 
       const endMs = Math.max(
@@ -222,7 +225,7 @@ export function useAudioTrimPreview() {
       player.stopPlayer().catch(() => undefined);
       player.dispose();
     };
-  }, []);
+  }, [trackPosition]);
 
   return {
     playerRef,

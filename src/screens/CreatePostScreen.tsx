@@ -873,7 +873,7 @@ function ValueSlider({
   );
 }
 
-function FilterPreview({
+const FilterPreview = React.memo(function FilterPreview({
   filterId,
   imageUri,
   active,
@@ -908,7 +908,7 @@ function FilterPreview({
     >
       <View style={styles.filterThumbFrame}>
         {ColorMatrix && filter.id !== "none" ? (
-          <ColorMatrix matrix={filter.matrix} style={styles.filterMatrixFill}>
+          <ColorMatrix matrix={filter.matrix}>
             <Image source={{ uri: imageUri }} style={styles.filterThumbImage} resizeMode="cover" />
           </ColorMatrix>
         ) : (
@@ -918,7 +918,7 @@ function FilterPreview({
       <Text style={[styles.filterName, { color: active ? textColor : mutedColor }]}>{filter.name}</Text>
     </TouchableOpacity>
   );
-}
+});
 
 function CreatePostScreen({ navigation, route }: any) {
   const { colors, isDarkMode } = useAppTheme();
@@ -1035,6 +1035,9 @@ function CreatePostScreen({ navigation, route }: any) {
   const stageAnimation = useRef(new Animated.Value(1)).current;
   const tagRequestIdRef = useRef(0);
   const musicSeedLoadedRef = useRef(false);
+  const musicSearchRequestIdRef = useRef(0);
+  const musicResultsCacheRef = useRef(new Map<string, MusicResultItem[]>());
+  const listPreviewRequestIdRef = useRef(0);
   const videoTrimVideoRef = useRef<any>(null);
   const launcherCameraStreamRef = useRef<any>(null);
   const launcherLongPressTriggeredRef = useRef(false);
@@ -1056,7 +1059,7 @@ function CreatePostScreen({ navigation, route }: any) {
     isPlaying: listMusicPreviewPlaying,
     resetPreview: resetListMusicPreview,
     togglePlayback: toggleListMusicPreview,
-  } = useAudioTrimPreview();
+  } = useAudioTrimPreview({ trackPosition: false });
 
   const activeAspect = useMemo(() => findAspectOption(mode, aspectId[mode]), [aspectId, mode]);
   const videoDurationLimit = useMemo(() => VIDEO_DURATION_LIMITS[mode], [mode]);
@@ -1811,6 +1814,12 @@ function CreatePostScreen({ navigation, route }: any) {
 
   const fetchMusicResults = useCallback(async (query: string, page = 1) => {
     const trimmedQuery = String(query || "").trim();
+    const cacheKey = `${trimmedQuery.toLowerCase()}::${page}`;
+    const cachedResults = musicResultsCacheRef.current.get(cacheKey);
+    if (cachedResults) {
+      return cachedResults;
+    }
+
     const catalogResults = trimmedQuery
       ? await searchMusicCatalog(trimmedQuery, MUSIC_PICKER_PAGE_SIZE, page)
       : await getTrendingMusicCatalog(MUSIC_PICKER_PAGE_SIZE, page);
@@ -1834,11 +1843,15 @@ function CreatePostScreen({ navigation, route }: any) {
       }
     }
 
-    return prioritizeFreshMusicResults(dedupeMusicResults(combinedResults)).slice(0, MUSIC_PICKER_PAGE_SIZE);
+    const nextResults = prioritizeFreshMusicResults(dedupeMusicResults(combinedResults)).slice(0, MUSIC_PICKER_PAGE_SIZE);
+    musicResultsCacheRef.current.set(cacheKey, nextResults);
+    return nextResults;
   }, []);
 
   const runMusicSearch = useCallback(async () => {
     const query = musicQuery.trim();
+    const requestId = musicSearchRequestIdRef.current + 1;
+    musicSearchRequestIdRef.current = requestId;
 
     try {
       setMusicLoading(true);
@@ -1847,18 +1860,26 @@ function CreatePostScreen({ navigation, route }: any) {
       setMusicPage(1);
       setMusicHasMore(true);
       const nextResults = await fetchMusicResults(query, 1);
+      if (musicSearchRequestIdRef.current !== requestId) {
+        return;
+      }
       setMusicResults(nextResults);
-      setMusicHasMore(true);
+      setMusicHasMore(nextResults.length >= MUSIC_PICKER_PAGE_SIZE);
 
       if (!nextResults.length) {
         setMusicError("");
       }
     } catch (error) {
+      if (musicSearchRequestIdRef.current !== requestId) {
+        return;
+      }
       console.log("music search error:", error);
       setMusicResults([]);
       setMusicError("");
     } finally {
-      setMusicLoading(false);
+      if (musicSearchRequestIdRef.current === requestId) {
+        setMusicLoading(false);
+      }
     }
   }, [fetchMusicResults, musicQuery]);
 
@@ -1868,24 +1889,34 @@ function CreatePostScreen({ navigation, route }: any) {
     }
 
     const nextPage = musicPage + 1;
+    const requestId = musicSearchRequestIdRef.current;
 
     try {
       setMusicLoadingMore(true);
       const nextResults = await fetchMusicResults(musicQuery.trim(), nextPage);
+      if (musicSearchRequestIdRef.current !== requestId) {
+        return;
+      }
       setMusicResults((current) => prioritizeFreshMusicResults(dedupeMusicResults([...current, ...nextResults])));
       setMusicPage(nextPage);
-      setMusicHasMore(nextResults.length > 0);
+      setMusicHasMore(nextResults.length >= MUSIC_PICKER_PAGE_SIZE);
     } catch (error) {
+      if (musicSearchRequestIdRef.current !== requestId) {
+        return;
+      }
       console.log("music load more error:", error);
       setMusicHasMore(false);
     } finally {
-      setMusicLoadingMore(false);
+      if (musicSearchRequestIdRef.current === requestId) {
+        setMusicLoadingMore(false);
+      }
     }
   }, [fetchMusicResults, musicHasMore, musicLoading, musicLoadingMore, musicPage, musicQuery]);
 
   useEffect(() => {
     if (!musicSheetVisible) {
       musicSeedLoadedRef.current = false;
+      listPreviewRequestIdRef.current += 1;
       setActiveMusicPreviewId("");
       setMusicPage(1);
       setMusicHasMore(true);
@@ -2250,23 +2281,35 @@ function CreatePostScreen({ navigation, route }: any) {
         return;
       }
 
+      let previewRequestId = 0;
       try {
         if (activeMusicPreviewId === item.id && listMusicPreviewPlaying) {
+          listPreviewRequestIdRef.current += 1;
           await toggleListMusicPreview();
           setActiveMusicPreviewId("");
           return;
         }
 
+        previewRequestId = listPreviewRequestIdRef.current + 1;
+        listPreviewRequestIdRef.current = previewRequestId;
         setActiveMusicPreviewId(item.id);
         await resetListMusicPreview(
           0,
           Math.max(1, Math.min(Number(item.duration || 0) || 1, 30)),
           { rawUrl: rawPlaybackUrl, normalizedUrl: playbackUrl },
         );
+        if (listPreviewRequestIdRef.current !== previewRequestId) {
+          return;
+        }
         await toggleListMusicPreview();
+        if (listPreviewRequestIdRef.current !== previewRequestId) {
+          setActiveMusicPreviewId("");
+        }
       } catch (error) {
         console.log("music list preview error:", error);
-        setActiveMusicPreviewId("");
+        if (previewRequestId && listPreviewRequestIdRef.current === previewRequestId) {
+          setActiveMusicPreviewId("");
+        }
       }
     },
     [activeMusicPreviewId, listMusicPreviewPlaying, resetListMusicPreview, toggleListMusicPreview],
@@ -3687,10 +3730,7 @@ function CreatePostScreen({ navigation, route }: any) {
       >
         {ColorMatrix && selectedFilterId !== "none" ? (
           <View style={styles.previewMediaFill}>
-            <ColorMatrix
-              matrix={(PHOTO_FILTER_LIST.find((item) => item.id === selectedFilterId) || PHOTO_FILTER_LIST[0]).matrix}
-              style={styles.previewMediaFill}
-            >
+            <ColorMatrix matrix={(PHOTO_FILTER_LIST.find((item) => item.id === selectedFilterId) || PHOTO_FILTER_LIST[0]).matrix}>
               <Image source={{ uri: selectedAsset.uri }} style={styles.previewMedia} resizeMode={imageResizeMode} />
             </ColorMatrix>
           </View>
@@ -3908,31 +3948,39 @@ function CreatePostScreen({ navigation, route }: any) {
     </View>
   );
 
+  const selectFilter = useCallback((filterId: string) => {
+    setSelectedFilterId((current) => (current === filterId ? current : filterId));
+  }, []);
+
   const renderFilterSelector = () => {
     if (!selectedAsset || selectedAsset.mediaType !== "image") {
       return null;
     }
 
     return (
-      <ScrollView
+      <FlatList
         horizontal
+        data={PHOTO_FILTER_LIST}
+        keyExtractor={(filter) => filter.id}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterRow}
-      >
-        {PHOTO_FILTER_LIST.map((filter) => (
+        initialNumToRender={6}
+        maxToRenderPerBatch={4}
+        windowSize={5}
+        removeClippedSubviews
+        renderItem={({ item: filter }) => (
           <FilterPreview
-            key={filter.id}
             filterId={filter.id}
-            imageUri={selectedAsset.uri}
+            imageUri={selectedAsset.thumbnailUrl || selectedAsset.uri}
             active={selectedFilterId === filter.id}
-            onPress={() => setSelectedFilterId(filter.id)}
+            onPress={() => selectFilter(filter.id)}
             accentColor={accentColor}
             backgroundColor={surfaceColor}
             textColor={textColor}
             mutedColor={mutedColor}
           />
-        ))}
-      </ScrollView>
+        )}
+      />
     );
   };
 
@@ -6089,10 +6137,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#0f172a",
   },
   filterThumbImage: {
-    width: "100%",
-    height: "100%",
-  },
-  filterMatrixFill: {
     width: "100%",
     height: "100%",
   },
