@@ -178,13 +178,10 @@ function StoryViewerScreen({ route, navigation }: any) {
     ? `${currentStory.id}:${storyMusicUrl}:${storyMusicStartMs}:${storyMusicDurationMs}`
     : "";
   const hasStoryAttachedMusic = !!storyMusicUrl;
+  const isStoryPaused = paused || isReplyInputFocused || showActions || showOwnerActivity || !isScreenFocused;
   const shouldPlayStoryMusic = hasStoryAttachedMusic
     && isMusicEnabled
-    && !paused
-    && !isReplyInputFocused
-    && !showActions
-    && !showOwnerActivity
-    && isScreenFocused;
+    && !isStoryPaused;
   useSegmentedMusicPlayback({
     rawUrl: storyMusicRawUrl,
     normalizedUrl: storyMusicUrl,
@@ -244,7 +241,7 @@ function StoryViewerScreen({ route, navigation }: any) {
   }, [currentStory]);
 
   useEffect(() => {
-    if (!currentStory || paused) {
+    if (!currentStory || isStoryPaused) {
       return;
     }
 
@@ -260,7 +257,7 @@ function StoryViewerScreen({ route, navigation }: any) {
     }, 100);
 
     return () => clearInterval(timer);
-  }, [currentStory, paused, storyDuration]);
+  }, [currentStory, isStoryPaused, storyDuration]);
 
   useEffect(() => {
     return () => {
@@ -272,7 +269,7 @@ function StoryViewerScreen({ route, navigation }: any) {
   }, []);
 
   useEffect(() => {
-    if (!currentStory || paused || progress < 1) {
+    if (!currentStory || isStoryPaused || progress < 1) {
       return;
     }
 
@@ -283,7 +280,7 @@ function StoryViewerScreen({ route, navigation }: any) {
     }
 
     setActiveIndex((prev) => prev + 1);
-  }, [activeIndex, currentStory, navigation, paused, progress, stories.length]);
+  }, [activeIndex, currentStory, navigation, isStoryPaused, progress, stories.length]);
 
   useEffect(() => {
     if (isReplyInputFocused) {
@@ -581,7 +578,7 @@ function StoryViewerScreen({ route, navigation }: any) {
             uri={normalizeMediaUrl(currentStory.media?.url)}
             posterUri={normalizeMediaUrl(currentStory.media?.thumbnailUrl || "")}
             style={styles.storyImage}
-            paused={paused || isReplyInputFocused || showActions || showOwnerActivity || !isScreenFocused}
+            paused={isStoryPaused}
             muted={!isScreenFocused || !isMusicEnabled || hasStoryAttachedMusic}
             onEnd={next}
             contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}

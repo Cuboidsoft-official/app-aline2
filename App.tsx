@@ -371,15 +371,8 @@ function AppNavigator() {
         return;
       }
 
-      const senderName =
-        String(payload?.sender?.name || payload?.sender?.username || '').trim()
-        || 'New message';
-      const body =
-        String(payload?.text || '').trim()
-        || (payload?.messageType ? `Sent a ${String(payload.messageType).trim()}` : 'Open chat');
-
       showRealtimeBanner(
-        `${senderName}: ${body}`,
+        'Kisi ne message kiya hai',
         () => {
           (navigationRef as any).navigate('ChatScreen', { conversationId });
         },

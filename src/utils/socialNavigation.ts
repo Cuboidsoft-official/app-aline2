@@ -58,6 +58,7 @@ export const openNotificationContentTarget = (navigation: any, data: any) => {
   const postType = getContentType(data?.post);
   const contentId = getEntityId(data?.contentId || data?.content || data?.targetId);
   const postId = getEntityId(data?.post || data?.postId || data?.post_id);
+  const userId = getEntityId(data?.post?.user || data?.post?.userId || data?.userId);
   const swipeId =
     getEntityId(data?.swipe || data?.swipeId || data?.reel || data?.reelId)
     || (["swipe", "reel"].includes(contentType) ? contentId || postId : "")
@@ -70,7 +71,7 @@ export const openNotificationContentTarget = (navigation: any, data: any) => {
 
   const resolvedPostId = postId || (contentType === "post" ? contentId : "");
   if (resolvedPostId) {
-    openPostDetail(navigation, { postId: resolvedPostId });
+    openPostInFeed(navigation, { postId: resolvedPostId, userId });
     return true;
   }
 

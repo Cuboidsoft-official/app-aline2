@@ -291,9 +291,12 @@ async function showForegroundNotification(remoteMessage: any) {
 
   const data = remoteMessage?.data || remoteMessage?.notification?.data || {};
   const title = safeDecodeURIComponent(remoteMessage?.notification?.title || data.title || "New notification");
-  const body = String(remoteMessage?.notification?.body || data.body || "").trim();
   const type = String(data.type || "").trim();
   const conversationId = String(data.conversationId || "").trim();
+  const body =
+    type === "chat_message"
+      ? "Kisi ne message kiya hai"
+      : String(remoteMessage?.notification?.body || data.body || "").trim();
 
   if (conversationId && (type === "chat_message" || type.startsWith("group_"))) {
     try {

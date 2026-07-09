@@ -184,7 +184,7 @@ const getNotificationText = (item: AppNotification): string => {
     case "missed_call":
       return "tried to call you";
     case "chat_message":
-      return item.text ? `sent: ${item.text}` : "sent you a message";
+      return "sent you a message";
     case "group_join":
       return "joined your group";
     case "group_leave":
