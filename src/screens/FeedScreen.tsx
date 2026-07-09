@@ -50,7 +50,7 @@ import { downloadImageAsset } from "../utils/mediaDownload";
 import { connectSocket, socket } from "../socket";
 import { listLiveStreams } from "../utils/liveStreamApi";
 import { APP_RELEASE_DATE, APP_VERSION } from "../config/appMeta";
-import { isFeedVideoSoundOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../utils/feedMediaSound";
+import { isFeedPostAudioOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../utils/feedMediaSound";
 
 let ColorMatrix: any;
 try {
@@ -726,6 +726,24 @@ function FeedScreen({ navigation, route }: any) {
       return { ...prev, [postId]: nextMuted };
     });
   }, []);
+
+  const handlePostAudioToggle = useCallback((post: Post) => {
+    const hasAttachedMusic = !!getMusicPlaybackUrl(post.music);
+    const hasVideoMedia = post.media.some((asset) => asset.mediaType === "video");
+    const isMuted = !!mutedPostIds[post.id];
+
+    if (hasAttachedMusic || isMuted) {
+      togglePostMute(post.id);
+      if (hasVideoMedia && isMuted) {
+        setIsVideoSoundEnabled(true);
+      }
+      return;
+    }
+
+    if (hasVideoMedia) {
+      setIsVideoSoundEnabled((current) => !current);
+    }
+  }, [mutedPostIds, togglePostMute]);
 
   const triggerLikeBurst = useCallback((postId: string) => {
     setLikeBurstPostId(postId);
@@ -1666,7 +1684,7 @@ function FeedScreen({ navigation, route }: any) {
             <Icon name="paper-plane-outline" size={22} color={FEED_ACCENT} />
           </TouchableOpacity>
 
-          {hasVideoMedia ? (
+          {(hasVideoMedia || hasAttachedMusic) ? (
             <TouchableOpacity
               style={[
                 styles.actionButton,
@@ -1678,10 +1696,15 @@ function FeedScreen({ navigation, route }: any) {
                   borderColor: feedAccentBorder,
                 },
               ]}
-              onPress={() => setIsVideoSoundEnabled((current) => !current)}
+              onPress={() => handlePostAudioToggle(item)}
             >
               <Icon
-                name={isVideoSoundEnabled ? "volume-high-outline" : "volume-mute-outline"}
+                name={isFeedPostAudioOn({
+                  hasVideoMedia,
+                  hasAttachedMusic,
+                  isVideoSoundEnabled,
+                  isPostMuted: isMuted,
+                }) ? "volume-high-outline" : "volume-mute-outline"}
                 size={22}
                 color={FEED_ACCENT}
               />
@@ -1833,10 +1856,11 @@ function FeedScreen({ navigation, route }: any) {
     const musicLabel = formatPostMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isMuted = !!mutedPostIds[item.id];
-    const isVideoSoundOn = isFeedVideoSoundOn({
+    const isPostAudioOn = isFeedPostAudioOn({
+      hasVideoMedia,
+      hasAttachedMusic,
       isVideoSoundEnabled,
       isPostMuted: isMuted,
-      hasAttachedMusic,
     });
     const likePreviewUsers =
       Array.isArray(item.likePreviewUsers) && item.likePreviewUsers.length
@@ -1943,9 +1967,9 @@ function FeedScreen({ navigation, route }: any) {
             ) : null}
             {(hasVideoMedia || hasAttachedMusic) ? (
               <View style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
-                <Icon name={isVideoSoundOn ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
+                <Icon name={isPostAudioOn ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
                 <Text style={[styles.mediaSoundHintText, { fontSize: mediaChipFontSize }]}>
-                  {isVideoSoundOn ? "Sound on" : "Muted"}
+                  {isPostAudioOn ? "Sound on" : "Muted"}
                 </Text>
               </View>
             ) : null}

@@ -1,4 +1,4 @@
-import { isFeedVideoSoundOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../src/utils/feedMediaSound";
+import { isFeedPostAudioOn, isFeedVideoSoundOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../src/utils/feedMediaSound";
 
 describe("feed video sound state", () => {
   const baseOptions = {
@@ -24,6 +24,12 @@ describe("feed video sound state", () => {
     expect(isFeedVideoSoundOn(baseOptions)).toBe(true);
     expect(isFeedVideoSoundOn({ ...baseOptions, isPostMuted: true })).toBe(false);
     expect(isFeedVideoSoundOn({ ...baseOptions, hasAttachedMusic: true })).toBe(false);
+  });
+
+  it("reports attached music as audible when the post itself is not muted", () => {
+    expect(isFeedPostAudioOn({ ...baseOptions, hasVideoMedia: false, hasAttachedMusic: true })).toBe(true);
+    expect(isFeedPostAudioOn({ ...baseOptions, hasVideoMedia: false, hasAttachedMusic: true, isPostMuted: true })).toBe(false);
+    expect(isFeedPostAudioOn({ ...baseOptions, hasVideoMedia: true, isVideoSoundEnabled: false })).toBe(false);
   });
 
   it("mounts only the focused, active visible carousel video while scrolling is idle", () => {

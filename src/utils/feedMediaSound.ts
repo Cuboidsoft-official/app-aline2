@@ -33,6 +33,25 @@ export const isFeedVideoSoundOn = ({
 }: Pick<FeedVideoMuteOptions, "isVideoSoundEnabled" | "isPostMuted" | "hasAttachedMusic">): boolean =>
   isVideoSoundEnabled && !isPostMuted && !hasAttachedMusic;
 
+export const isFeedPostAudioOn = ({
+  hasVideoMedia,
+  hasAttachedMusic,
+  isVideoSoundEnabled,
+  isPostMuted,
+}: Pick<FeedVideoMuteOptions, "isVideoSoundEnabled" | "isPostMuted" | "hasAttachedMusic"> & {
+  hasVideoMedia: boolean;
+}): boolean => {
+  if (isPostMuted) {
+    return false;
+  }
+
+  if (hasAttachedMusic) {
+    return true;
+  }
+
+  return hasVideoMedia && isVideoSoundEnabled;
+};
+
 export const shouldMountFeedVideo = ({
   isPostActive,
   isCarouselItemActive = true,
