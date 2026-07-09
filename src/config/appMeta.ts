@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.0.2";
+export const APP_VERSION = "2.0.3";
 export const APP_RELEASE_DATE = "July 4, 2026";
 export const APP_RELEASE_TITLE = "Call notifications, follower fixes, and CI/CD hardening";
 
