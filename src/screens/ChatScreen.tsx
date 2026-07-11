@@ -847,7 +847,7 @@ const buildScheduledCallPreview = (message: ChatMessage): ScheduledCallPreview |
 const ChatScreen = ({ navigation, route }: any) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height: windowHeight } = useWindowDimensions();
   const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
   const { userId, conversationId, conversationType: conversationTypeParam, serviceId, groupName, groupAvatar, memberCount, groupConversation, openScheduleCallComposer, openScheduleCallType } = route.params || {};
   const initialConversationType = (String(conversationTypeParam || "").trim().toLowerCase() || "direct") as "direct" | "seller" | "group";
@@ -890,8 +890,15 @@ const ChatScreen = ({ navigation, route }: any) => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
     const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      const endCoordinates = event?.endCoordinates;
+      const keyboardTop = Number(endCoordinates?.screenY || 0);
+      const measuredHeight = Math.max(
+        0,
+        Number(endCoordinates?.height || 0),
+        keyboardTop > 0 ? windowHeight - keyboardTop : 0,
+      );
       setIsKeyboardVisible(true);
-      setKeyboardHeight(Math.max(0, Number(event?.endCoordinates?.height || 0)));
+      setKeyboardHeight(measuredHeight);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       setIsKeyboardVisible(false);
@@ -902,7 +909,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       showSubscription.remove();
       hideSubscription.remove();
     };
-  }, []);
+  }, [windowHeight]);
 
   useEffect(() => {
     const normalized = String(conversationTypeParam || "").trim().toLowerCase();
@@ -3957,6 +3964,9 @@ const ChatScreen = ({ navigation, route }: any) => {
                   style={[styles.input, { color: colors.text, fontSize: chatMetrics.bodyFontSize, lineHeight: chatMetrics.bodyLineHeight, minHeight: chatMetrics.headerAction }]}
                   value={text}
                   onChangeText={handleTextChange}
+                  multiline
+                  blurOnSubmit={false}
+                  textAlignVertical="center"
                   onFocus={() => {
                     setTimeout(() => scrollToLatestMessage(false), 80);
                   }}
@@ -4972,6 +4982,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     minHeight: 32,
+    maxHeight: 96,
     paddingTop: 3,
     paddingBottom: 3,
     paddingRight: 2,

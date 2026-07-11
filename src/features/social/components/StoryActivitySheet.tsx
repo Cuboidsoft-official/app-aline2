@@ -3,7 +3,9 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -76,17 +78,24 @@ function StoryActivitySheet({
       throw new Error("Story activity is only available for your own stories.");
     }
 
-    const [nextViewers, nextLikers, nextComments] = await Promise.all([
+    const [viewersResult, likersResult, commentsResult] = await Promise.allSettled([
       socialApi.getStoryViewers(storyId),
       socialApi.getStoryLikers(storyId),
       socialApi.getStoryReplies(storyId),
     ]);
+    const nextViewers = viewersResult.status === "fulfilled" ? viewersResult.value : [];
+    const nextLikers = likersResult.status === "fulfilled" ? likersResult.value : [];
+    const nextComments = commentsResult.status === "fulfilled" ? commentsResult.value : [];
 
     setStory(nextStory);
     setViewers(nextViewers);
     setLikers(nextLikers);
     setComments(nextComments);
-    setErrorMessage("");
+    setErrorMessage(
+      viewersResult.status === "rejected" && likersResult.status === "rejected" && commentsResult.status === "rejected"
+        ? "Story settings loaded, but activity could not be loaded right now."
+        : "",
+    );
     onStoryUpdate?.(nextStory);
   }, [onStoryUpdate, storyId]);
 
@@ -355,9 +364,14 @@ function StoryActivitySheet({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={styles.sheetWrap}>
-        <View style={styles.handle} />
-        <View style={styles.sheetContent}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoider}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+      >
+        <View style={styles.sheetWrap}>
+          <View style={styles.handle} />
+          <View style={styles.sheetContent}>
           <View style={styles.header}>
             <TouchableOpacity onPress={onClose}>
               <Icon name="chevron-down" size={22} color="#111" />
@@ -499,8 +513,9 @@ function StoryActivitySheet({
               )}
             />
           )}
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -509,6 +524,10 @@ const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  keyboardAvoider: {
+    flex: 1,
+    justifyContent: "flex-end",
   },
   sheetWrap: {
     marginTop: "auto",

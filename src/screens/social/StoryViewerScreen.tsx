@@ -2,12 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   Linking,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View
 } from "react-native";
 import { Alert } from "../../utils/appAlert";
@@ -101,6 +104,7 @@ function StoryViewerScreen({ route, navigation }: any) {
   const storyUserId = typeof route?.params?.storyUserId === "string" ? route.params.storyUserId : undefined;
   const isScreenFocused = useIsFocused();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
 
   const [stories, setStories] = useState<Story[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -119,6 +123,7 @@ function StoryViewerScreen({ route, navigation }: any) {
   const [loadError, setLoadError] = useState("This story may have expired or is no longer visible to you.");
   const [isMusicEnabled, setIsMusicEnabled] = useState(true);
   const [showLikeBurst, setShowLikeBurst] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const replyInputRef = useRef<TextInput | null>(null);
   const storyTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     time: 0,
@@ -217,6 +222,27 @@ function StoryViewerScreen({ route, navigation }: any) {
   );
 
   useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      const endCoordinates = event?.endCoordinates;
+      const keyboardTop = Number(endCoordinates?.screenY || 0);
+      const measuredHeight = Math.max(
+        0,
+        Number(endCoordinates?.height || 0),
+        keyboardTop > 0 ? windowHeight - keyboardTop : 0,
+      );
+      setKeyboardHeight(measuredHeight);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [windowHeight]);
+
+  useEffect(() => {
     setProgress(0);
     setReplyText("");
   }, [activeIndex]);
@@ -292,6 +318,7 @@ function StoryViewerScreen({ route, navigation }: any) {
     stopAllSegmentedMusicPlayback();
     navigation.goBack();
   }, [navigation]);
+  const storyKeyboardInset = Math.max(0, keyboardHeight - insets.bottom);
 
   const next = () => {
     if (activeIndex >= stories.length - 1) {
@@ -913,7 +940,7 @@ function StoryViewerScreen({ route, navigation }: any) {
         onPressOut={() => setPaused(false)}
       />
 
-      <View style={[styles.bottomSheet, { paddingBottom: Math.max(insets.bottom + 34, 58) }]}>
+      <View style={[styles.bottomSheet, { paddingBottom: Math.max(insets.bottom + 34, 58), marginBottom: storyKeyboardInset }]}>
         {renderStoryOverlay()}
 
         {!currentStory.isOwner && canReplyToCurrentStory ? (

@@ -251,6 +251,17 @@ function FeedScreen({ navigation, route }: any) {
   const slideAnim = useRef(new Animated.Value(0)).current;
   const feedListRef = useRef<FlatList<Post> | null>(null);
   const hasFeedContentRef = useRef(false);
+  const feedMetaSnapshotRef = useRef<{
+    liveStories: any[];
+    sellerAccount: SellerAccountSummary | null;
+    unreadNotificationCount: number;
+    walletCoinBalance: number;
+  }>({
+    liveStories: [],
+    sellerAccount: null,
+    unreadNotificationCount: 0,
+    walletCoinBalance: 0,
+  });
   const feedScrollTransitionRef = useRef(false);
   const feedScrollResumeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastViewablePostIdRef = useRef("");
@@ -352,7 +363,7 @@ function FeedScreen({ navigation, route }: any) {
     rawUrl: nextPostRawMusicUrl,
     normalizedUrl: nextPostMusicUrl,
     trackKey: nextPostMusicTrackKey,
-    enabled: isScreenFocused && !activeSheet && !!nextPostMusicUrl,
+    enabled: isScreenFocused && !activeSheet && !refreshing && !isFeedScrollSettling && !!nextPostMusicUrl,
   });
 
   const readSellerAccount = useCallback(async (): Promise<SellerAccountSummary | null> => {
@@ -428,7 +439,7 @@ function FeedScreen({ navigation, route }: any) {
     }
   }, []);
 
-  const loadFeedSnapshot = useCallback(async () => {
+  const loadFeedSnapshot = useCallback(async (options: { lightweight?: boolean } = {}) => {
     if (isFocusedPostFeed) {
       const [data, storedUser] = await Promise.all([
         focusUserId ? socialApi.getUserFeed(focusUserId) : socialApi.getFeed(),
@@ -442,6 +453,23 @@ function FeedScreen({ navigation, route }: any) {
         unreadNotifications: 0,
         walletBalance: 0,
         liveStories: [],
+      };
+    }
+
+    if (options.lightweight) {
+      const [data, storedUser] = await Promise.all([
+        socialApi.getFeed(),
+        getStoredUser(),
+      ]);
+      const metaSnapshot = feedMetaSnapshotRef.current;
+
+      return {
+        data,
+        storedUser,
+        seller: metaSnapshot.sellerAccount,
+        unreadNotifications: metaSnapshot.unreadNotificationCount,
+        walletBalance: metaSnapshot.walletCoinBalance,
+        liveStories: metaSnapshot.liveStories,
       };
     }
 
@@ -462,17 +490,30 @@ function FeedScreen({ navigation, route }: any) {
       walletBalance,
       liveStories: Array.isArray(liveStreamsResponse?.liveStreams) ? liveStreamsResponse.liveStreams : [],
     };
-  }, [focusUserId, isFocusedPostFeed, readSellerAccount, readUnreadNotificationCount, readWalletBalance]);
+  }, [
+    focusUserId,
+    isFocusedPostFeed,
+    readSellerAccount,
+    readUnreadNotificationCount,
+    readWalletBalance,
+  ]);
 
-  const applyFeedSnapshot = useCallback((snapshot: any, options: { shufflePosts?: boolean } = {}) => {
+  const applyFeedSnapshot = useCallback((snapshot: any, options: { shufflePosts?: boolean; preserveActivePostId?: string } = {}) => {
     const { data, liveStories: nextLiveStories, seller, storedUser, unreadNotifications, walletBalance } = snapshot;
     const nextPosts = buildMixedLatestFeedPosts(data.posts);
+    const preserveActivePostId = String(options.preserveActivePostId || "").trim();
+    const orderedPosts = preserveActivePostId
+      ? [
+          ...nextPosts.filter((post) => post.id === preserveActivePostId),
+          ...nextPosts.filter((post) => post.id !== preserveActivePostId),
+        ]
+      : nextPosts;
 
     setFeed({
       ...data,
       posts: options.shufflePosts && !isFocusedPostFeed
-        ? shuffleFeedPosts(nextPosts)
-        : nextPosts,
+        ? shuffleFeedPosts(orderedPosts)
+        : orderedPosts,
     });
     setLiveStories(nextLiveStories);
     setPage(1);
@@ -496,8 +537,8 @@ function FeedScreen({ navigation, route }: any) {
     setErrorMessage("");
   }, [isFocusedPostFeed]);
 
-  const loadFeed = useCallback(async (options: { shufflePosts?: boolean } = {}) => {
-    const snapshot = await loadFeedSnapshot();
+  const loadFeed = useCallback(async (options: { shufflePosts?: boolean; lightweight?: boolean; preserveActivePostId?: string } = {}) => {
+    const snapshot = await loadFeedSnapshot({ lightweight: options.lightweight });
     applyFeedSnapshot(snapshot, options);
   }, [applyFeedSnapshot, loadFeedSnapshot]);
 
@@ -588,6 +629,15 @@ function FeedScreen({ navigation, route }: any) {
   );
 
   useEffect(() => {
+    feedMetaSnapshotRef.current = {
+      liveStories,
+      sellerAccount,
+      unreadNotificationCount,
+      walletCoinBalance,
+    };
+  }, [liveStories, sellerAccount, unreadNotificationCount, walletCoinBalance]);
+
+  useEffect(() => {
     hasFeedContentRef.current = feed.posts.length > 0;
   }, [feed.posts.length]);
 
@@ -668,11 +718,27 @@ function FeedScreen({ navigation, route }: any) {
   }, []);
 
   const onRefresh = async () => {
+    const postIdBeforeRefresh = activePostId || lastViewablePostIdRef.current || feed.posts[0]?.id || "";
     setRefreshing(true);
     try {
-      await loadFeed({ shufflePosts: true });
+      await loadFeed({
+        lightweight: true,
+        preserveActivePostId: postIdBeforeRefresh,
+      });
+      if (postIdBeforeRefresh) {
+        setActivePostId(postIdBeforeRefresh);
+      }
     } finally {
+      if (feedScrollResumeTimeoutRef.current) {
+        clearTimeout(feedScrollResumeTimeoutRef.current);
+        feedScrollResumeTimeoutRef.current = null;
+      }
+      feedScrollTransitionRef.current = false;
+      setIsFeedScrollSettling(false);
       setRefreshing(false);
+      if (postIdBeforeRefresh) {
+        requestAnimationFrame(() => setActivePostId(postIdBeforeRefresh));
+      }
     }
   };
 
@@ -2490,7 +2556,7 @@ function FeedScreen({ navigation, route }: any) {
           ListHeaderComponent={isFocusedPostFeed ? null : renderHeader}
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={Platform.OS === "android"}
+          removeClippedSubviews={false}
           initialNumToRender={3}
           maxToRenderPerBatch={3}
           updateCellsBatchingPeriod={40}
