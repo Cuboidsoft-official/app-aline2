@@ -122,12 +122,11 @@ const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
 const POST_ASPECTS: AspectOption[] = [
   { id: "square", label: "1:1", detail: "Square", ratio: 1 },
   { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
+  { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
 ];
 const TALL_ASPECTS: AspectOption[] = [
   { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
   { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
 ];
 const ASPECTS_BY_MODE: Record<ComposerMode, AspectOption[]> = {
   post: POST_ASPECTS,
@@ -4275,7 +4274,7 @@ function CreatePostScreen({ navigation, route }: any) {
               <Text style={[styles.sectionTitle, { color: textColor }]}>Aspect ratio</Text>
             </View>
             <Text style={[styles.sectionMeta, { color: mutedColor }]}>
-              {mode === "post" ? "1:1, 4:5, 16:9" : "9:16, 4:5, 16:9"}
+              {mode === "post" ? "1:1, 4:5, 9:16" : "9:16, 4:5"}
             </Text>
           </View>
           {renderAspectSelector()}

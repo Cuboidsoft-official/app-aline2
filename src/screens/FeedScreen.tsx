@@ -50,7 +50,7 @@ import { downloadImageAsset } from "../utils/mediaDownload";
 import { connectSocket, socket } from "../socket";
 import { listLiveStreams } from "../utils/liveStreamApi";
 import { APP_RELEASE_DATE, APP_VERSION } from "../config/appMeta";
-import { isFeedPostAudioOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../utils/feedMediaSound";
+import { FEED_VIDEO_SOUND_DEFAULT, isFeedPostAudioOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../utils/feedMediaSound";
 
 let ColorMatrix: any;
 try {
@@ -163,7 +163,7 @@ const getPostAspectRatio = (post: Post): number => {
       ? primaryMedia.width / Math.max(1, primaryMedia.height)
       : 1;
 
-  return Math.min(1.91, Math.max(0.65, assetRatio || 1));
+  return Math.min(1.91, Math.max(9 / 16, assetRatio || 1));
 };
 
 const getImageResizeMode = (
@@ -245,7 +245,7 @@ function FeedScreen({ navigation, route }: any) {
   const [mutedPostIds, setMutedPostIds] = useState<Record<string, boolean>>({});
   const [carouselIndexByPostId, setCarouselIndexByPostId] = useState<Record<string, number>>({});
   const [likeBurstPostId, setLikeBurstPostId] = useState("");
-  const [isVideoSoundEnabled, setIsVideoSoundEnabled] = useState(false);
+  const [isVideoSoundEnabled, setIsVideoSoundEnabled] = useState(FEED_VIDEO_SOUND_DEFAULT);
   const [menuOpen, setMenuOpen] = useState(false);
   const [publishTasks, setPublishTasks] = useState<PublishQueueTask[]>(() => getPublishQueueSnapshot());
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -429,6 +429,22 @@ function FeedScreen({ navigation, route }: any) {
   }, []);
 
   const loadFeedSnapshot = useCallback(async () => {
+    if (isFocusedPostFeed) {
+      const [data, storedUser] = await Promise.all([
+        focusUserId ? socialApi.getUserFeed(focusUserId) : socialApi.getFeed(),
+        getStoredUser(),
+      ]);
+
+      return {
+        data,
+        storedUser,
+        seller: null,
+        unreadNotifications: 0,
+        walletBalance: 0,
+        liveStories: [],
+      };
+    }
+
     const [data, storedUser, seller, unreadNotifications, liveStreamsResponse, walletBalance] = await Promise.all([
       focusUserId ? socialApi.getUserFeed(focusUserId) : socialApi.getFeed(),
       getStoredUser(),
@@ -446,7 +462,7 @@ function FeedScreen({ navigation, route }: any) {
       walletBalance,
       liveStories: Array.isArray(liveStreamsResponse?.liveStreams) ? liveStreamsResponse.liveStreams : [],
     };
-  }, [focusUserId, readSellerAccount, readUnreadNotificationCount, readWalletBalance]);
+  }, [focusUserId, isFocusedPostFeed, readSellerAccount, readUnreadNotificationCount, readWalletBalance]);
 
   const applyFeedSnapshot = useCallback((snapshot: any, options: { shufflePosts?: boolean } = {}) => {
     const { data, liveStories: nextLiveStories, seller, storedUser, unreadNotifications, walletBalance } = snapshot;
@@ -827,10 +843,11 @@ function FeedScreen({ navigation, route }: any) {
     const aspectRatio = getPostAspectRatio(post);
     const resolvedHeight = Math.round(postMediaWidth / aspectRatio);
     const minMediaHeight = Math.max(width < 360 ? 240 : 260, Math.round(postMediaWidth * 0.58));
+    const isVerticalFrame = aspectRatio <= 0.62;
     const maxMediaHeight = Math.round(
       Math.min(
-        isTabletLayout ? height * 0.72 : height * 0.62,
-        isTabletLayout ? 720 : 620,
+        isVerticalFrame ? height * 0.82 : isTabletLayout ? height * 0.72 : height * 0.62,
+        isVerticalFrame ? 760 : isTabletLayout ? 720 : 620,
       ),
     );
 

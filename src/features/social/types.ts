@@ -79,6 +79,7 @@ export interface Post {
   id: string;
   user: SocialUser;
   likePreviewUsers?: SocialUser[];
+  postType?: "post" | "reel";
   type: PostType;
   caption: string;
   media: MediaAsset[];

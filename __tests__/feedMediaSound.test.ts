@@ -1,4 +1,10 @@
-import { isFeedPostAudioOn, isFeedVideoSoundOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../src/utils/feedMediaSound";
+import {
+  FEED_VIDEO_SOUND_DEFAULT,
+  isFeedPostAudioOn,
+  isFeedVideoSoundOn,
+  shouldMountFeedVideo,
+  shouldMuteFeedVideo,
+} from "../src/utils/feedMediaSound";
 
 describe("feed video sound state", () => {
   const baseOptions = {
@@ -7,6 +13,11 @@ describe("feed video sound state", () => {
     isPostMuted: false,
     hasAttachedMusic: false,
   };
+
+  it("defaults feed video sound on so uploaded video audio is audible", () => {
+    expect(FEED_VIDEO_SOUND_DEFAULT).toBe(true);
+    expect(shouldMuteFeedVideo({ ...baseOptions, isVideoSoundEnabled: FEED_VIDEO_SOUND_DEFAULT })).toBe(false);
+  });
 
   it("unmutes active video only when global video sound is enabled", () => {
     expect(shouldMuteFeedVideo(baseOptions)).toBe(false);

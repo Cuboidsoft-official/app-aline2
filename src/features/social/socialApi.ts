@@ -660,6 +660,7 @@ class RemoteSocialApi implements SocialApi {
     return {
       id: this.getId(post),
       user: this.mapUser(post?.user),
+      postType: String(post?.postType || "").trim() === "reel" ? "reel" : "post",
       type,
       caption: post?.caption || "",
       media,

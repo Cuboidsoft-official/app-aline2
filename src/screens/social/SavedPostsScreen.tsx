@@ -16,9 +16,13 @@ import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { useAppTheme } from "../../theme/AppThemeContext";
-import { openPostInFeed } from "../../utils/socialNavigation";
+import { openPostInFeed, openSwipeInSwipes } from "../../utils/socialNavigation";
 
 const getSavedPostTypeLabel = (post: Post) => {
+  if (post.postType === "reel") {
+    return "Swipe";
+  }
+
   if (post.type === "carousel") {
     return "Carousel Post";
   }
@@ -78,6 +82,16 @@ function SavedPostsScreen({ navigation }: any) {
     }
   };
 
+  const openSavedItem = (item: Post) => {
+    const userId = String(item.user?.id || "").trim();
+    if (item.postType === "reel") {
+      openSwipeInSwipes(navigation, { swipeId: item.id, userId });
+      return;
+    }
+
+    openPostInFeed(navigation, { postId: item.id, userId });
+  };
+
   const renderPostItem = ({ item }: { item: Post }) => {
     const primaryMedia = item.media[0];
     const mediaUri = primaryMedia?.thumbnailUrl || primaryMedia?.url;
@@ -85,7 +99,7 @@ function SavedPostsScreen({ navigation }: any) {
     return (
       <TouchableOpacity
         style={[styles.card, { borderColor: colors.border, backgroundColor: colors.card }]}
-        onPress={() => openPostInFeed(navigation, { postId: item.id })}
+        onPress={() => openSavedItem(item)}
         activeOpacity={0.86}
       >
         {mediaUri ? <Image source={{ uri: mediaUri }} style={styles.thumb} /> : <View style={[styles.thumb, styles.thumbPlaceholder]} />}

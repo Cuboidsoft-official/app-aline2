@@ -13,6 +13,8 @@ type FeedVideoMountOptions = {
   isScrolling?: boolean;
 };
 
+export const FEED_VIDEO_SOUND_DEFAULT = true;
+
 export const shouldMuteFeedVideo = ({
   isPostActive,
   isCarouselItemActive = true,
