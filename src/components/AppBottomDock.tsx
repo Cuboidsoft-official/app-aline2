@@ -88,23 +88,26 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
     }
 
     const isTabScreen = screen === "Feed" || screen === "Create" || screen === "Chats" || screen === "ProfileView";
+    const params = screen === "Feed" && resolvedActiveKey === "Feed"
+      ? { reloadNonce: Date.now() }
+      : undefined;
 
     if (isTabScreen && Array.isArray(routeNames) && routeNames.includes("MainApp")) {
-      navigation.navigate("MainApp", { screen });
+      navigation.navigate("MainApp", { screen, params });
       return;
     }
 
     if (Array.isArray(routeNames) && routeNames.includes(screen)) {
-      navigation.navigate(screen);
+      navigation.navigate(screen, params);
       return;
     }
 
     if (Array.isArray(routeNames) && routeNames.includes("MainApp")) {
-      navigation.navigate("MainApp", { screen });
+      navigation.navigate("MainApp", { screen, params });
       return;
     }
 
-    navigation.getParent?.()?.navigate("MainApp", { screen });
+    navigation.getParent?.()?.navigate("MainApp", { screen, params });
   }, [navigation, resolvedActiveKey, routeNames]);
 
   const panResponder = useMemo(

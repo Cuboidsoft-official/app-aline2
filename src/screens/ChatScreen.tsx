@@ -847,7 +847,7 @@ const buildScheduledCallPreview = (message: ChatMessage): ScheduledCallPreview |
 const ChatScreen = ({ navigation, route }: any) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { width, height: windowHeight } = useWindowDimensions();
+  const { width } = useWindowDimensions();
   const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
   const { userId, conversationId, conversationType: conversationTypeParam, serviceId, groupName, groupAvatar, memberCount, groupConversation, openScheduleCallComposer, openScheduleCallType } = route.params || {};
   const initialConversationType = (String(conversationTypeParam || "").trim().toLowerCase() || "direct") as "direct" | "seller" | "group";

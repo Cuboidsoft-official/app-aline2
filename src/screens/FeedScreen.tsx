@@ -270,6 +270,7 @@ function FeedScreen({ navigation, route }: any) {
     time: 0,
     timeout: null,
   });
+  const homeReloadHandledRef = useRef("");
   const [isFeedScrollSettling, setIsFeedScrollSettling] = useState(false);
   const isTabletLayout = width >= 768;
   const focusedPostId = String(route?.params?.postId || "").trim();
@@ -308,6 +309,7 @@ function FeedScreen({ navigation, route }: any) {
   const isCompactSidebar = width < 360;
   const isCompactHeader = width < 430;
   const hasSellerAccount = Boolean(sellerAccount);
+  const homeReloadNonce = String(route?.params?.reloadNonce || "").trim();
   const usernameFontSize = isTabletLayout ? 13.6 : isCompactPhone ? 12.2 : 12.8;
   const postTimeFontSize = isTabletLayout ? 11.6 : isCompactPhone ? 10.1 : 10.6;
   const captionFontSize = isTabletLayout ? 13.2 : isCompactPhone ? 12.2 : 12.7;
@@ -500,7 +502,7 @@ function FeedScreen({ navigation, route }: any) {
   const applyFeedSnapshot = useCallback((snapshot: any, options: { shufflePosts?: boolean; preserveActivePostId?: string } = {}) => {
     const { data, liveStories: nextLiveStories, seller, storedUser, unreadNotifications, walletBalance } = snapshot;
     const nextPosts = buildMixedLatestFeedPosts(data.posts);
-    const preserveActivePostId = String(options.preserveActivePostId || "").trim();
+    const preserveActivePostId = String(options.preserveActivePostId || focusedPostId || "").trim();
     const orderedPosts = preserveActivePostId
       ? [
           ...nextPosts.filter((post) => post.id === preserveActivePostId),
@@ -534,7 +536,7 @@ function FeedScreen({ navigation, route }: any) {
     setUnreadNotificationCount(unreadNotifications);
     setWalletCoinBalance(walletBalance);
     setErrorMessage("");
-  }, [isFocusedPostFeed]);
+  }, [focusedPostId, isFocusedPostFeed]);
 
   const loadFeed = useCallback(async (options: { shufflePosts?: boolean; lightweight?: boolean; preserveActivePostId?: string } = {}) => {
     const snapshot = await loadFeedSnapshot({ lightweight: options.lightweight });
@@ -716,8 +718,8 @@ function FeedScreen({ navigation, route }: any) {
     };
   }, []);
 
-  const onRefresh = async () => {
-    const postIdBeforeRefresh = activePostId || lastViewablePostIdRef.current || feed.posts[0]?.id || "";
+  const onRefresh = useCallback(async () => {
+    const postIdBeforeRefresh = focusedPostId || activePostId || lastViewablePostIdRef.current || feed.posts[0]?.id || "";
     setRefreshing(true);
     try {
       await loadFeed({
@@ -739,7 +741,24 @@ function FeedScreen({ navigation, route }: any) {
         requestAnimationFrame(() => setActivePostId(postIdBeforeRefresh));
       }
     }
-  };
+  }, [activePostId, feed.posts, focusedPostId, loadFeed]);
+
+  useEffect(() => {
+    if (!homeReloadNonce || !isScreenFocused || homeReloadHandledRef.current === homeReloadNonce) {
+      return;
+    }
+
+    homeReloadHandledRef.current = homeReloadNonce;
+    const targetPostId = focusedPostId || activePostId || lastViewablePostIdRef.current || feed.posts[0]?.id || "";
+    if (targetPostId) {
+      setActivePostId(targetPostId);
+    }
+    feedListRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+    onRefresh().catch((error) => {
+      setRefreshing(false);
+      setErrorMessage(getReadableApiErrorMessage(error, "Failed to reload your feed."));
+    });
+  }, [activePostId, feed.posts, focusedPostId, homeReloadNonce, isScreenFocused, onRefresh]);
 
   const updatePost = (nextPost: Post) => {
     setFeed((prev) => ({
@@ -2551,11 +2570,11 @@ function FeedScreen({ navigation, route }: any) {
           ListHeaderComponent={isFocusedPostFeed ? null : renderHeader}
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={false}
+          removeClippedSubviews={Platform.OS === "android"}
           initialNumToRender={3}
           maxToRenderPerBatch={3}
-          updateCellsBatchingPeriod={40}
-          windowSize={4}
+          updateCellsBatchingPeriod={32}
+          windowSize={3}
           decelerationRate="fast"
           scrollEventThrottle={16}
           keyboardDismissMode="on-drag"
