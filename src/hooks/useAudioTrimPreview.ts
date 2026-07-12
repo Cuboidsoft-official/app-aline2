@@ -95,7 +95,10 @@ export function useAudioTrimPreview(options: { trackPosition?: boolean } = {}) {
       ) {
         sourceRef.current = nextSource;
         isReadyRef.current = false;
+        isPlayingRef.current = false;
         setIsReady(false);
+        setIsPlaying(false);
+        setIsLoading(false);
         try {
           await playerRef.current.stopPlayer();
         } catch {
@@ -124,7 +127,7 @@ export function useAudioTrimPreview(options: { trackPosition?: boolean } = {}) {
       throw new Error("Music preview unavailable for this track.");
     }
 
-    if (isPlaying) {
+    if (isPlayingRef.current) {
       await stopPlayback();
       return;
     }
@@ -159,7 +162,7 @@ export function useAudioTrimPreview(options: { trackPosition?: boolean } = {}) {
     } finally {
       setIsLoading(false);
     }
-  }, [isPlaying, stopPlayback]);
+  }, [stopPlayback]);
 
   useEffect(() => registerGlobalMusicPlaybackStopper(forceStopPlayback), [forceStopPlayback]);
 

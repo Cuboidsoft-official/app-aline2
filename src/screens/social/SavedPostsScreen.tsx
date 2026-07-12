@@ -83,13 +83,12 @@ function SavedPostsScreen({ navigation }: any) {
   };
 
   const openSavedItem = (item: Post) => {
-    const userId = String(item.user?.id || "").trim();
     if (item.postType === "reel") {
-      openSwipeInSwipes(navigation, { swipeId: item.id, userId });
+      openSwipeInSwipes(navigation, { swipeId: item.id });
       return;
     }
 
-    openPostInFeed(navigation, { postId: item.id, userId });
+    openPostInFeed(navigation, { postId: item.id });
   };
 
   const renderPostItem = ({ item }: { item: Post }) => {

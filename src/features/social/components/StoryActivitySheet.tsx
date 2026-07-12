@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -61,6 +61,11 @@ function StoryActivitySheet({
   const [submitting, setSubmitting] = useState(false);
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
   const [savingSettings, setSavingSettings] = useState(false);
+  const onStoryUpdateRef = useRef(onStoryUpdate);
+
+  useEffect(() => {
+    onStoryUpdateRef.current = onStoryUpdate;
+  }, [onStoryUpdate]);
 
   useEffect(() => {
     if (visible) {
@@ -96,8 +101,8 @@ function StoryActivitySheet({
         ? "Story settings loaded, but activity could not be loaded right now."
         : "",
     );
-    onStoryUpdate?.(nextStory);
-  }, [onStoryUpdate, storyId]);
+    onStoryUpdateRef.current?.(nextStory);
+  }, [storyId]);
 
   useEffect(() => {
     if (!visible) {
@@ -139,7 +144,7 @@ function StoryActivitySheet({
     return () => {
       active = false;
     };
-  }, [load, onClose, visible]);
+  }, [load, visible]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -169,7 +174,7 @@ function StoryActivitySheet({
         return prev;
       }
       const next = updater(prev);
-      onStoryUpdate?.(next);
+      onStoryUpdateRef.current?.(next);
       return next;
     });
   };
@@ -183,7 +188,7 @@ function StoryActivitySheet({
       setSavingSettings(true);
       const updated = await socialApi.updateStory(story.id, input);
       setStory(updated);
-      onStoryUpdate?.(updated);
+      onStoryUpdateRef.current?.(updated);
     } catch (error) {
       Alert.alert("Could not update story settings", toUserSafeMessage(error));
     } finally {
@@ -434,7 +439,20 @@ function StoryActivitySheet({
             <View style={styles.errorState}>
               <Text style={styles.errorTitle}>Story activity unavailable</Text>
               <Text style={styles.errorText}>{errorMessage}</Text>
-              <TouchableOpacity style={styles.retryButton} onPress={() => load().catch((error) => setErrorMessage(toUserSafeMessage(error)))}>
+              <TouchableOpacity
+                style={styles.retryButton}
+                onPress={async () => {
+                  try {
+                    setLoading(true);
+                    setErrorMessage("");
+                    await load();
+                  } catch (error) {
+                    setErrorMessage(toUserSafeMessage(error));
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+              >
                 <Text style={styles.retryButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>

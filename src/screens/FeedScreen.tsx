@@ -341,7 +341,6 @@ function FeedScreen({ navigation, route }: any) {
     && !mutedPostIds[activePostId]
     && !activeSheet
     && isScreenFocused
-    && !isFeedScrollSettling
     && !!activePostMusicUrl;
   useSegmentedMusicPlayback({
     rawUrl: activePostRawMusicUrl,
@@ -363,7 +362,7 @@ function FeedScreen({ navigation, route }: any) {
     rawUrl: nextPostRawMusicUrl,
     normalizedUrl: nextPostMusicUrl,
     trackKey: nextPostMusicTrackKey,
-    enabled: isScreenFocused && !activeSheet && !refreshing && !isFeedScrollSettling && !!nextPostMusicUrl,
+    enabled: isScreenFocused && !activeSheet && !refreshing && !!nextPostMusicUrl,
   });
 
   const readSellerAccount = useCallback(async (): Promise<SellerAccountSummary | null> => {
@@ -860,7 +859,6 @@ function FeedScreen({ navigation, route }: any) {
 
     feedScrollTransitionRef.current = true;
     setIsFeedScrollSettling(true);
-    setActivePostId("");
   }, []);
 
   const scheduleRestoreActiveVisiblePost = useCallback((delay = 80) => {
@@ -2529,9 +2527,6 @@ function FeedScreen({ navigation, route }: any) {
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
     const firstVisiblePost = viewableItems.find((entry) => entry.isViewable && entry.item?.id)?.item;
     lastViewablePostIdRef.current = firstVisiblePost?.id || "";
-    if (feedScrollTransitionRef.current) {
-      return;
-    }
     if (firstVisiblePost?.id) {
       setActivePostId(firstVisiblePost.id);
     }

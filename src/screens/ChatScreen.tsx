@@ -884,32 +884,22 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [scheduleCallDurationMinutes, setScheduleCallDurationMinutes] = useState("30");
   const [scheduleCallAgenda, setScheduleCallAgenda] = useState("");
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(showEvent, (event) => {
-      const endCoordinates = event?.endCoordinates;
-      const keyboardTop = Number(endCoordinates?.screenY || 0);
-      const measuredHeight = Math.max(
-        0,
-        Number(endCoordinates?.height || 0),
-        keyboardTop > 0 ? windowHeight - keyboardTop : 0,
-      );
+    const showSubscription = Keyboard.addListener(showEvent, () => {
       setIsKeyboardVisible(true);
-      setKeyboardHeight(measuredHeight);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       setIsKeyboardVisible(false);
-      setKeyboardHeight(0);
     });
 
     return () => {
       showSubscription.remove();
       hideSubscription.remove();
     };
-  }, [windowHeight]);
+  }, []);
 
   useEffect(() => {
     const normalized = String(conversationTypeParam || "").trim().toLowerCase();
@@ -1946,9 +1936,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   }, [currentUserId, messageMap, user?.name, user?.username]);
 
   const replyingToPreview = useMemo(() => buildReplyPreview(replyingToMessage), [buildReplyPreview, replyingToMessage]);
-  const androidKeyboardInset = Platform.OS === "android" && isKeyboardVisible
-    ? Math.max(0, keyboardHeight - insets.bottom)
-    : 0;
+  const androidKeyboardInset = 0;
 
   const highlightMessageById = useCallback((messageId: string) => {
     setHighlightedMessageId(messageId);
