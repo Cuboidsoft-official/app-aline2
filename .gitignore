@@ -6,6 +6,10 @@
 android/.gradle/
 .npm-cache/
 
+.gradle/
+android/build/
+app/build/
+
 # Xcode
 #
 build/
@@ -82,3 +86,4 @@ yarn-error.log*
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
