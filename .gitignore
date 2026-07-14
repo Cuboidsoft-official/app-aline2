@@ -9,6 +9,7 @@ android/.gradle/
 .gradle/
 android/build/
 app/build/
+android/local.properties
 
 # Xcode
 #
