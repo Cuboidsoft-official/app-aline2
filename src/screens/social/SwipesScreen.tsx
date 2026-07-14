@@ -4,6 +4,7 @@ import {
   Dimensions,
   LayoutChangeEvent,
   FlatList,
+  Image,
   ImageBackground,
   Modal,
   Platform,
@@ -30,7 +31,7 @@ import ShareTargetsList, { ShareTarget } from "../../features/social/components/
 import SocialVideo from "../../features/social/components/SocialVideo";
 import MentionSuggestionList from "../../components/MentionSuggestionList";
 import { socialApi } from "../../features/social/socialApi";
-import { ReportReason, Swipe, SwipeComment } from "../../features/social/types";
+import { ReportReason, SocialUser, Swipe, SwipeComment } from "../../features/social/types";
 import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
@@ -39,7 +40,7 @@ import { shouldShowVerifiedBadge } from "../../utils/verificationBadges";
 import { buildSharedPostMessage } from "../../utils/chatPresentation";
 import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
 import { API } from "../../api/api";
-import { getStoredUserId } from "../../utils/authSession";
+import { getStoredUser, getStoredUserId } from "../../utils/authSession";
 import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../../utils/mentionComposer";
 
 const { height } = Dimensions.get("window");
@@ -95,6 +96,13 @@ const getTrimmedMusicDurationMs = (
   return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : 0;
 };
 
+type SwipeRelationshipKind = "self" | "follow" | "follow_back" | "following";
+
+type CurrentSwipeUser = {
+  id: string;
+  followingIds: string[];
+};
+
 function SwipesScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
   const [viewportHeight, setViewportHeight] = useState(height);
@@ -119,6 +127,7 @@ function SwipesScreen({ navigation, route }: any) {
   const [activeSwipeIndex, setActiveSwipeIndex] = useState(0);
   const [likeBurstSwipeId, setLikeBurstSwipeId] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
+  const [currentUser, setCurrentUser] = useState<CurrentSwipeUser | null>(null);
   const sheetMentionQuery = getActiveMentionQuery(sheetDraft);
   const isScreenFocused = useIsFocused();
 
@@ -183,10 +192,17 @@ function SwipesScreen({ navigation, route }: any) {
   useEffect(() => {
     let active = true;
 
-    getStoredUserId()
-      .then((userId) => {
+    Promise.all([getStoredUserId(), getStoredUser().catch(() => null)])
+      .then(([userId, user]) => {
         if (active) {
-          setCurrentUserId(String(userId || ""));
+          const normalizedUserId = String(userId || user?._id || user?.id || "");
+          setCurrentUserId(normalizedUserId);
+          setCurrentUser({
+            id: normalizedUserId,
+            followingIds: Array.isArray(user?.following)
+              ? user.following.map((entry: any) => String(entry?._id || entry?.id || entry || "")).filter(Boolean)
+              : [],
+          });
         }
       })
       .catch(() => undefined);
@@ -242,6 +258,94 @@ function SwipesScreen({ navigation, route }: any) {
   const setBusy = (type: "like" | "save" | "share", swipeId: string, value: boolean) => {
     setBusyActions((prev) => ({ ...prev, [`${type}_${swipeId}`]: value }));
   };
+
+  const getSwipeRelationship = useCallback((swipeUser: SocialUser) => {
+    const viewerId = String(currentUser?.id || currentUserId || "");
+    const normalizedUserId = String(swipeUser?.id || "");
+
+    if (!viewerId || !normalizedUserId || viewerId === normalizedUserId) {
+      return { kind: "self" as SwipeRelationshipKind, label: "" };
+    }
+
+    const viewerFollowingIds = Array.isArray(currentUser?.followingIds) ? currentUser.followingIds : [];
+    const viewerFollows = typeof swipeUser?.viewerFollows === "boolean"
+      ? swipeUser.viewerFollows
+      : viewerFollowingIds.includes(normalizedUserId);
+    const followsViewer = typeof swipeUser?.followsViewer === "boolean"
+      ? swipeUser.followsViewer
+      : Array.isArray(swipeUser?.followingIds)
+        ? swipeUser.followingIds.includes(viewerId)
+        : false;
+
+    if (viewerFollows) {
+      return { kind: "following" as SwipeRelationshipKind, label: "Following" };
+    }
+
+    return {
+      kind: followsViewer ? "follow_back" as SwipeRelationshipKind : "follow" as SwipeRelationshipKind,
+      label: followsViewer ? "Follow back" : "Follow",
+    };
+  }, [currentUser?.followingIds, currentUser?.id, currentUserId]);
+
+  const handleSwipeRelationshipPress = useCallback(async (swipeUser: SocialUser) => {
+    const relationship = getSwipeRelationship(swipeUser);
+    const normalizedUserId = String(swipeUser?.id || "");
+
+    if (!normalizedUserId || relationship.kind === "self") {
+      return;
+    }
+
+    if (relationship.kind === "following") {
+      navigation.navigate("ProfilePreviewScreen", { userId: normalizedUserId });
+      return;
+    }
+
+    const busyKey = `follow_${normalizedUserId}`;
+    if (busyActions[busyKey]) {
+      return;
+    }
+
+    try {
+      setBusyActions((prev) => ({ ...prev, [busyKey]: true }));
+      await API.post(`/auth/follow/${normalizedUserId}`);
+      setCurrentUser((prev) => prev
+        ? {
+            ...prev,
+            followingIds: Array.from(new Set([...(prev.followingIds || []), normalizedUserId])),
+          }
+        : prev);
+      setSwipes((prev) =>
+        prev.map((swipe) =>
+          swipe.user.id === normalizedUserId
+            ? {
+                ...swipe,
+                user: {
+                  ...swipe.user,
+                  viewerFollows: true,
+                  followerIds: Array.from(new Set([...(swipe.user.followerIds || []), currentUserId].filter(Boolean))),
+                },
+              }
+            : swipe,
+        ),
+      );
+      setSelectedSwipe((prev) =>
+        prev?.user.id === normalizedUserId
+          ? {
+              ...prev,
+              user: {
+                ...prev.user,
+                viewerFollows: true,
+                followerIds: Array.from(new Set([...(prev.user.followerIds || []), currentUserId].filter(Boolean))),
+              },
+            }
+          : prev,
+      );
+    } catch (error) {
+      Alert.alert("Could not follow user", toUserSafeMessage(error));
+    } finally {
+      setBusyActions((prev) => ({ ...prev, [busyKey]: false }));
+    }
+  }, [busyActions, currentUserId, getSwipeRelationship, navigation]);
 
   useFocusEffect(
     useCallback(() => {
@@ -810,6 +914,8 @@ function SwipesScreen({ navigation, route }: any) {
     const isPreloadCandidate = index > activeSwipeIndex && index <= activeSwipeIndex + 2;
     const musicLabel = formatSwipeMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
+    const relationship = getSwipeRelationship(item.user);
+    const followBusy = !!busyActions[`follow_${item.user.id}`];
 
     return (
       <View style={[styles.swipeItem, { height: viewportHeight }]}>
@@ -822,6 +928,7 @@ function SwipesScreen({ navigation, route }: any) {
             muted={!isActive || !isSwipePlaybackEnabled || hasAttachedMusic}
             repeat
             preload={isPreloadCandidate && !activeSheet && isScreenFocused}
+            resizeMode="contain"
             contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
           />
           {item.media.sensitiveContent?.isSensitive ? (
@@ -852,7 +959,7 @@ function SwipesScreen({ navigation, route }: any) {
           <View style={styles.topBar}>
             <Text style={styles.screenTitle}>Swipes</Text>
             <TouchableOpacity style={styles.createButton} onPress={openSwipeComposer}>
-              <LinearGradient colors={["#00c6ff", "#7f00ff", "#ff4ecd"]} style={styles.createButtonGradient}>
+              <LinearGradient colors={["rgba(255,255,255,0.14)", "rgba(255,255,255,0.04)"]} style={styles.createButtonGradient}>
                 <Icon name="add" size={18} color="#fff" />
                 <Text style={styles.createButtonText}>New Swipe</Text>
               </LinearGradient>
@@ -860,10 +967,40 @@ function SwipesScreen({ navigation, route }: any) {
           </View>
           <View style={styles.bottomRow}>
             <View style={styles.bottomTextBlock}>
-              <TouchableOpacity style={styles.userRow} onPress={() => openUserProfile(item.user.id)}>
-                <Text style={styles.userName}>@{item.user.username}</Text>
-                {shouldShowVerifiedBadge(item.user) ? <Icon name="checkmark-circle" color="#6cbcff" size={16} /> : null}
-              </TouchableOpacity>
+              <View style={styles.userMetaBlock}>
+                <TouchableOpacity style={styles.userAvatarButton} onPress={() => openUserProfile(item.user.id)}>
+                  <Image source={{ uri: item.user.avatarUrl }} style={styles.userAvatar} />
+                </TouchableOpacity>
+                <View style={styles.userCopyBlock}>
+                  <View style={styles.userRow}>
+                    <TouchableOpacity style={styles.userNameButton} onPress={() => openUserProfile(item.user.id)}>
+                      <Text style={styles.userName} numberOfLines={1}>@{item.user.username}</Text>
+                    </TouchableOpacity>
+                    {shouldShowVerifiedBadge(item.user) ? <Icon name="checkmark-circle" color="#6cbcff" size={16} /> : null}
+                    {relationship.kind !== "self" ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.followChip,
+                          relationship.kind === "following" ? styles.followChipMuted : null,
+                        ]}
+                        onPress={() => handleSwipeRelationshipPress(item.user)}
+                        disabled={followBusy}
+                      >
+                        <Text style={styles.followChipText}>
+                          {followBusy ? "..." : relationship.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+
+                  {musicLabel ? (
+                    <View style={styles.musicInlineRow}>
+                      <Icon name="musical-notes" size={12} color="#fff" />
+                      <Text style={styles.musicInlineText} numberOfLines={1}>{musicLabel}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
 
               <InteractiveText
                 style={styles.caption}
@@ -903,23 +1040,6 @@ function SwipesScreen({ navigation, route }: any) {
                 </View>
               ) : null}
 
-              {musicLabel ? (
-                <View style={styles.musicRow}>
-                  <Icon name="musical-notes" size={13} color="#fff" />
-                  <Text style={styles.musicText}>{musicLabel}</Text>
-                </View>
-              ) : null}
-
-              <View style={styles.reelMetaRail}>
-                <View style={styles.reelMetaChip}>
-                  <Icon name="sparkles-outline" size={13} color="#fff" />
-                  <Text style={styles.reelMetaText}>Effects ready</Text>
-                </View>
-                <View style={styles.reelMetaChip}>
-                  <Icon name="cut-outline" size={13} color="#fff" />
-                  <Text style={styles.reelMetaText}>Trimmed video</Text>
-                </View>
-              </View>
             </View>
           </View>
 
@@ -1423,7 +1543,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textTransform: "capitalize",
   },
-  topGradient: { ...StyleSheet.absoluteFillObject, bottom: undefined, height: 240 },
+  topGradient: { ...StyleSheet.absoluteFillObject, bottom: undefined, height: 150 },
   bottomGradient: { ...StyleSheet.absoluteFillObject, top: undefined, height: 360 },
   overlay: {
     paddingHorizontal: 14,
@@ -1432,28 +1552,71 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "space-between",
   },
-  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 16 },
-  screenTitle: { color: "#fff", fontSize: 30, fontWeight: "900", letterSpacing: -0.8 },
+  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 12 },
+  screenTitle: { color: "rgba(255,255,255,0.82)", fontSize: 20, fontWeight: "800" },
   createButton: {
     overflow: "hidden",
     borderRadius: 999,
-    shadowColor: "#7f00ff",
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.28)",
+    backgroundColor: "rgba(0,0,0,0.16)",
   },
   createButtonGradient: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   createButtonText: { color: "#fff", fontWeight: "900", marginLeft: 5, fontSize: 12 },
   bottomRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" },
   bottomTextBlock: { flex: 1, paddingRight: 10 },
-  userRow: { flexDirection: "row", alignItems: "center" },
+  userMetaBlock: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  userAvatarButton: {
+    marginRight: 10,
+  },
+  userAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.88)",
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  userCopyBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  userRow: { flexDirection: "row", alignItems: "center", minWidth: 0 },
+  userNameButton: { maxWidth: "58%" },
   userName: { color: "#fff", fontWeight: "900", fontSize: 15, marginRight: 5 },
+  followChip: {
+    marginLeft: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.54)",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  followChipMuted: {
+    backgroundColor: "rgba(0,0,0,0.22)",
+    borderColor: "rgba(255,255,255,0.26)",
+  },
+  followChipText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  musicInlineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    maxWidth: "86%",
+  },
+  musicInlineText: { color: "#fff", marginLeft: 5, fontSize: 12.5, fontWeight: "700" },
   caption: { color: "#fff", marginTop: 8, fontSize: 14.5, lineHeight: 20, fontWeight: "600" },
   captionEntity: { color: "#a9c4ff", fontWeight: "800" },
   mentionLine: { color: "#d7e4ff", marginTop: 5, fontSize: 12.5, fontWeight: "700" },
@@ -1470,31 +1633,6 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: "700",
   },
-  musicRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    marginTop: 10,
-    backgroundColor: "rgba(255,255,255,0.14)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-  },
-  musicText: { color: "#fff", marginLeft: 6, fontSize: 12.5, fontWeight: "700" },
-  reelMetaRail: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  reelMetaChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.32)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  reelMetaText: { color: "#fff", marginLeft: 5, fontSize: 11.5, fontWeight: "800" },
   actionRail: {
     position: "absolute",
     right: 9,

@@ -70,6 +70,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
   const labelFontSize = Platform.OS === "ios" ? 8.5 : 8.2;
   const routeNames = useMemo(() => navigation?.getState?.()?.routeNames || [], [navigation]);
   const swipeLockRef = useRef(false);
+  const lastFeedTapRef = useRef(0);
   const resolvedActiveKey = activeRouteName === "SwipesLauncher" ? "Swipes" : activeRouteName;
   const activeIndex = useMemo(
     () => Math.max(0, bottomNavItems.findIndex((item) => item.key === resolvedActiveKey)),
@@ -88,9 +89,12 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
     }
 
     const isTabScreen = screen === "Feed" || screen === "Create" || screen === "Chats" || screen === "ProfileView";
-    const params = screen === "Feed" && resolvedActiveKey === "Feed"
-      ? { reloadNonce: Date.now() }
-      : undefined;
+    const now = Date.now();
+    const shouldReloadFeed = screen === "Feed" && resolvedActiveKey === "Feed" && now - lastFeedTapRef.current <= 520;
+    if (screen === "Feed") {
+      lastFeedTapRef.current = now;
+    }
+    const params = shouldReloadFeed ? { reloadNonce: now } : undefined;
 
     if (isTabScreen && Array.isArray(routeNames) && routeNames.includes("MainApp")) {
       navigation.navigate("MainApp", { screen, params });

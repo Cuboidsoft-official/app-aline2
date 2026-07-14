@@ -58,7 +58,7 @@ export function useAudioTrimPreview(options: { trackPosition?: boolean } = {}) {
   const seekToSeconds = useCallback(async (nextSeconds: number) => {
     const { startTime, endTime } = trimWindowRef.current;
     const safeTarget = clamp(nextSeconds, startTime, Math.max(startTime, endTime));
-    await ensureAudioClipStartPosition(playerRef.current, Math.round(safeTarget * 1000), 40);
+    await ensureAudioClipStartPosition(playerRef.current, Math.round(safeTarget * 1000), 24);
     setPositionMs(Math.round(safeTarget * 1000));
   }, []);
 
@@ -143,7 +143,7 @@ export function useAudioTrimPreview(options: { trackPosition?: boolean } = {}) {
         normalizedValue: normalizedUrl,
         startPositionMs: Math.round(trimWindowRef.current.startTime * 1000),
         volume: 1,
-        seekSettleDelayMs: 80,
+        seekSettleDelayMs: 24,
       });
       if (requestIdRef.current !== requestId) {
         return;
@@ -181,7 +181,7 @@ export function useAudioTrimPreview(options: { trackPosition?: boolean } = {}) {
   useEffect(() => {
     const player = playerRef.current;
 
-    player.setSubscriptionDuration(trackPosition ? 0.1 : 0.35);
+    player.setSubscriptionDuration(trackPosition ? 0.08 : 0.2);
     player.addPlayBackListener((event: any) => {
       const currentPosition = Math.max(0, Number(event?.currentPosition || 0));
       if (trackPosition) {
@@ -199,7 +199,7 @@ export function useAudioTrimPreview(options: { trackPosition?: boolean } = {}) {
         ensureAudioClipStartPosition(
           player,
           Math.round(trimWindowRef.current.startTime * 1000),
-          40,
+          24,
         ).catch(() => undefined);
         isPlayingRef.current = false;
         setIsPlaying(false);
