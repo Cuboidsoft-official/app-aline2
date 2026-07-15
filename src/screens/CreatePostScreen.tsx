@@ -1060,6 +1060,12 @@ function CreatePostScreen({ navigation, route }: any) {
     resetPreview: resetListMusicPreview,
     togglePlayback: toggleListMusicPreview,
   } = useAudioTrimPreview({ trackPosition: false });
+  const {
+    isPlaying: selectedMusicPreviewPlaying,
+    isLoading: selectedMusicPreviewLoading,
+    resetPreview: resetSelectedMusicPreview,
+    togglePlayback: toggleSelectedMusicPreviewPlayback,
+  } = useAudioTrimPreview({ trackPosition: false });
 
   const activeAspect = useMemo(() => findAspectOption(mode, aspectId[mode]), [aspectId, mode]);
   const videoDurationLimit = useMemo(() => VIDEO_DURATION_LIMITS[mode], [mode]);
@@ -1097,6 +1103,20 @@ function CreatePostScreen({ navigation, route }: any) {
       Math.max(musicTrimStartTime + 1, musicTrimStartTime + Math.max(1, musicTrimDuration)),
     );
   }, [musicTrimDuration, musicTrimStartTime, setMusicPreviewTrimWindow]);
+  useEffect(() => {
+    if (!selectedMusic) {
+      resetSelectedMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
+      return;
+    }
+
+    const startTime = Math.max(0, Number(selectedMusic.clipStartTime || 0));
+    const duration = Math.min(30, Math.max(1, Number(selectedMusic.clipDuration || 30)));
+    const rawUrl = getMusicClipPlaybackUrl(selectedMusic);
+    resetSelectedMusicPreview(startTime, startTime + duration, {
+      rawUrl,
+      normalizedUrl: normalizeMediaUrl(rawUrl),
+    }).catch(() => undefined);
+  }, [resetSelectedMusicPreview, selectedMusic]);
   const storyTextThemeStyle =
     STORY_TEXT_THEMES.find((item) => item.id === storyTextTheme) || STORY_TEXT_THEMES[0];
   const storyTextFontStyle =
@@ -1959,7 +1979,8 @@ function CreatePostScreen({ navigation, route }: any) {
     setVideoTrimPreviewPlaying(false);
     resetMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
     resetListMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
-  }, [resetListMusicPreview, resetMusicPreview]);
+    resetSelectedMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
+  }, [resetListMusicPreview, resetMusicPreview, resetSelectedMusicPreview]);
 
   useFocusEffect(
     useCallback(() => {
@@ -2053,6 +2074,8 @@ function CreatePostScreen({ navigation, route }: any) {
 
     try {
       setVideoTrimError("");
+      resetMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
+      resetSelectedMusicPreview(0, 1, { rawUrl: "", normalizedUrl: "" }).catch(() => undefined);
 
       if (videoTrimPreviewPlaying) {
         setVideoTrimPreviewPlaying(false);
@@ -2085,6 +2108,8 @@ function CreatePostScreen({ navigation, route }: any) {
     videoTrimPreviewPlaying,
     videoTrimPreviewPositionMs,
     videoTrimStartTime,
+    resetMusicPreview,
+    resetSelectedMusicPreview,
   ]);
 
   const applyVideoTrim = useCallback(async () => {
@@ -2379,6 +2404,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
     try {
       setMusicError("");
+      setVideoTrimPreviewPlaying(false);
       await toggleAudioMusicPreview();
     } catch (error) {
       console.log("Player Error:", error);
@@ -2390,6 +2416,25 @@ function CreatePostScreen({ navigation, route }: any) {
     pendingMusicSelection,
     toggleAudioMusicPreview,
   ]);
+
+  const toggleSelectedMusicPreview = useCallback(async () => {
+    if (!selectedMusic || selectedMusicPreviewLoading) {
+      return;
+    }
+
+    const rawUrl = getMusicClipPlaybackUrl(selectedMusic);
+    if (!rawUrl) {
+      setMusicError("Music preview is not available for this track.");
+      return;
+    }
+
+    try {
+      setVideoTrimPreviewPlaying(false);
+      await toggleSelectedMusicPreviewPlayback();
+    } catch (error) {
+      setMusicError(toUserSafeMessage(error));
+    }
+  }, [selectedMusic, selectedMusicPreviewLoading, toggleSelectedMusicPreviewPlayback]);
 
   const seekMusicPreviewBy = useCallback(async (deltaSeconds: number) => {
     if (!pendingMusicSelection) {
@@ -4867,6 +4912,17 @@ function CreatePostScreen({ navigation, route }: any) {
               </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.musicActionRow}>
+              <TouchableOpacity
+                style={[styles.musicActionIconButton, { backgroundColor: inputBackground, borderColor }]}
+                onPress={() => toggleSelectedMusicPreview().catch(() => undefined)}
+                disabled={selectedMusicPreviewLoading}
+              >
+                {selectedMusicPreviewLoading ? (
+                  <ActivityIndicator size="small" color={textColor} />
+                ) : (
+                  <Icon name={selectedMusicPreviewPlaying ? "pause-outline" : "play-outline"} size={18} color={textColor} />
+                )}
+              </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.musicActionIconButton, { backgroundColor: inputBackground, borderColor }]}
                 onPress={() => openMusicTrimmer(selectedMusic).catch(() => undefined)}

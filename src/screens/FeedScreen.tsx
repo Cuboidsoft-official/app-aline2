@@ -628,6 +628,10 @@ function FeedScreen({ navigation, route }: any) {
       };
     }, [applyFeedSnapshot, loadFeedSnapshot]),
   );
+  const activePostIndex = useMemo(
+    () => feed.posts.findIndex((item) => item.id === activePostId),
+    [activePostId, feed.posts],
+  );
 
   useEffect(() => {
     feedMetaSnapshotRef.current = {
@@ -1387,7 +1391,6 @@ function FeedScreen({ navigation, route }: any) {
     const hasAttachedMusic = !!getMusicPlaybackUrl(post.music);
     const isMuted = !!mutedPostIds[post.id];
     const isPostActive = activePostId === post.id && isScreenFocused && !activeSheet;
-    const activePostIndex = feed.posts.findIndex((candidate) => candidate.id === activePostId);
     const postIndex = feed.posts.findIndex((candidate) => candidate.id === post.id);
     const shouldPreloadVideo = activePostIndex >= 0 && postIndex > activePostIndex && postIndex <= activePostIndex + 1;
     const shouldMountVideo = (isCarouselItemActive = true) => shouldMountFeedVideo({
@@ -2583,10 +2586,10 @@ function FeedScreen({ navigation, route }: any) {
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS === "android"}
-          initialNumToRender={4}
-          maxToRenderPerBatch={4}
+          initialNumToRender={3}
+          maxToRenderPerBatch={3}
           updateCellsBatchingPeriod={16}
-          windowSize={5}
+          windowSize={4}
           decelerationRate="fast"
           scrollEventThrottle={16}
           keyboardDismissMode="on-drag"

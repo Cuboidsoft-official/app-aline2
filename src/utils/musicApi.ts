@@ -173,6 +173,12 @@ export const importMusicCatalogItem = async (item: MusicCatalogItem): Promise<Mu
     audioUrl: item.audioUrl,
     externalUrl: item.externalUrl,
     duration: item.duration,
+    // Ask the catalog to resolve only the clip needed by the composer.
+    clipStartTime: Math.max(0, Math.round(Number(item.clipStartTime || 0) || 0)),
+    clipDuration: Math.min(
+      MUSIC_CLIP_MAX_SECONDS,
+      Math.max(1, Math.round(Number(item.clipDuration || MUSIC_CLIP_MAX_SECONDS) || MUSIC_CLIP_MAX_SECONDS)),
+    ),
   });
 
   if (__DEV__) {
