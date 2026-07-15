@@ -847,7 +847,7 @@ const buildScheduledCallPreview = (message: ChatMessage): ScheduledCallPreview |
 const ChatScreen = ({ navigation, route }: any) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
   const { userId, conversationId, conversationType: conversationTypeParam, serviceId, groupName, groupAvatar, memberCount, groupConversation, openScheduleCallComposer, openScheduleCallType } = route.params || {};
   const initialConversationType = (String(conversationTypeParam || "").trim().toLowerCase() || "direct") as "direct" | "seller" | "group";
@@ -884,22 +884,29 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [scheduleCallDurationMinutes, setScheduleCallDurationMinutes] = useState("30");
   const [scheduleCallAgenda, setScheduleCallAgenda] = useState("");
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(showEvent, () => {
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
       setIsKeyboardVisible(true);
+      if (Platform.OS === "android") {
+        const keyboardTop = Number(event?.endCoordinates?.screenY || 0);
+        const overlap = keyboardTop > 0 ? Math.max(0, height - keyboardTop - Math.max(0, insets.bottom)) : 0;
+        setAndroidKeyboardInset(Math.min(overlap, Math.round(height * 0.45)));
+      }
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       setIsKeyboardVisible(false);
+      setAndroidKeyboardInset(0);
     });
 
     return () => {
       showSubscription.remove();
       hideSubscription.remove();
     };
-  }, []);
+  }, [height, insets.bottom]);
 
   useEffect(() => {
     const normalized = String(conversationTypeParam || "").trim().toLowerCase();
@@ -1936,8 +1943,6 @@ const ChatScreen = ({ navigation, route }: any) => {
   }, [currentUserId, messageMap, user?.name, user?.username]);
 
   const replyingToPreview = useMemo(() => buildReplyPreview(replyingToMessage), [buildReplyPreview, replyingToMessage]);
-  const androidKeyboardInset = 0;
-
   const highlightMessageById = useCallback((messageId: string) => {
     setHighlightedMessageId(messageId);
     if (replyHighlightTimeoutRef.current) {
@@ -3418,7 +3423,7 @@ const ChatScreen = ({ navigation, route }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         enabled
         keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
       >

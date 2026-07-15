@@ -121,6 +121,7 @@ type MusicPreviewMode = "audio";
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
 const POST_ASPECTS: AspectOption[] = [
   { id: "square", label: "1:1", detail: "Square", ratio: 1 },
+  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
   { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
   { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
 ];
@@ -4274,7 +4275,7 @@ function CreatePostScreen({ navigation, route }: any) {
               <Text style={[styles.sectionTitle, { color: textColor }]}>Aspect ratio</Text>
             </View>
             <Text style={[styles.sectionMeta, { color: mutedColor }]}>
-              {mode === "post" ? "1:1, 4:5, 9:16" : "9:16, 4:5"}
+              {mode === "post" ? "1:1, 16:9, 4:5, 9:16" : "9:16, 4:5"}
             </Text>
           </View>
           {renderAspectSelector()}

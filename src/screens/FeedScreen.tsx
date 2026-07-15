@@ -344,7 +344,7 @@ function FeedScreen({ navigation, route }: any) {
     && !activeSheet
     && isScreenFocused
     && !!activePostMusicUrl;
-  useSegmentedMusicPlayback({
+  const { isLoading: activePostMusicLoading } = useSegmentedMusicPlayback({
     rawUrl: activePostRawMusicUrl,
     normalizedUrl: activePostMusicUrl,
     trackKey: activePostMusicTrackKey,
@@ -1387,11 +1387,13 @@ function FeedScreen({ navigation, route }: any) {
     const hasAttachedMusic = !!getMusicPlaybackUrl(post.music);
     const isMuted = !!mutedPostIds[post.id];
     const isPostActive = activePostId === post.id && isScreenFocused && !activeSheet;
+    const activePostIndex = feed.posts.findIndex((candidate) => candidate.id === activePostId);
+    const postIndex = feed.posts.findIndex((candidate) => candidate.id === post.id);
+    const shouldPreloadVideo = activePostIndex >= 0 && postIndex > activePostIndex && postIndex <= activePostIndex + 1;
     const shouldMountVideo = (isCarouselItemActive = true) => shouldMountFeedVideo({
       isPostActive,
       isCarouselItemActive,
       isScreenFocused,
-      isScrolling: isFeedScrollSettling,
     });
     const renderSensitiveBadge = (label?: string) => (
       <View pointerEvents="none" style={styles.sensitiveBadge}>
@@ -1413,7 +1415,7 @@ function FeedScreen({ navigation, route }: any) {
               posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || "")}
               style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
               paused={!shouldMountVideo()}
-              preload={false}
+              preload={shouldPreloadVideo}
               muted={shouldMuteFeedVideo({
                 isPostActive,
                 isVideoSoundEnabled,
@@ -1478,7 +1480,7 @@ function FeedScreen({ navigation, route }: any) {
                   posterUri={normalizeMediaUrl(asset.thumbnailUrl || "")}
                   style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
                   paused={!shouldMountVideo(currentCarouselIndex === index)}
-                  preload={false}
+                  preload={shouldPreloadVideo && currentCarouselIndex === index}
                   muted={shouldMuteFeedVideo({
                     isPostActive,
                     isCarouselItemActive: currentCarouselIndex === index,
@@ -1956,6 +1958,7 @@ function FeedScreen({ navigation, route }: any) {
     const musicLabel = formatPostMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isMuted = !!mutedPostIds[item.id];
+    const isPostMusicLoading = activePostId === item.id && hasAttachedMusic && activePostMusicLoading;
     const isPostAudioOn = isFeedPostAudioOn({
       hasVideoMedia,
       hasAttachedMusic,
@@ -2067,9 +2070,13 @@ function FeedScreen({ navigation, route }: any) {
             ) : null}
             {(hasVideoMedia || hasAttachedMusic) ? (
               <View style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
-                <Icon name={isPostAudioOn ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
+                {isPostMusicLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Icon name={isPostAudioOn ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
+                )}
                 <Text style={[styles.mediaSoundHintText, { fontSize: mediaChipFontSize }]}>
-                  {isPostAudioOn ? "Sound on" : "Muted"}
+                  {isPostMusicLoading ? "Loading" : isPostAudioOn ? "Sound on" : "Muted"}
                 </Text>
               </View>
             ) : null}
@@ -2540,11 +2547,16 @@ function FeedScreen({ navigation, route }: any) {
     ? styles.sidebarStatusAvailable
     : styles.sidebarStatusUnavailable;
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 62,
-    minimumViewTime: 80,
+    itemVisiblePercentThreshold: 82,
+    minimumViewTime: 120,
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
-    const firstVisiblePost = viewableItems.find((entry) => entry.isViewable && entry.item?.id)?.item;
+    const firstVisiblePost = viewableItems.find((entry) =>
+      entry.isViewable
+      && entry.item?.id
+      && !(entry.item as any).__featuredProfiles
+      && Array.isArray(entry.item.media)
+    )?.item;
     lastViewablePostIdRef.current = firstVisiblePost?.id || "";
     if (firstVisiblePost?.id) {
       setActivePostId(firstVisiblePost.id);
@@ -2571,10 +2583,10 @@ function FeedScreen({ navigation, route }: any) {
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS === "android"}
-          initialNumToRender={3}
-          maxToRenderPerBatch={3}
-          updateCellsBatchingPeriod={32}
-          windowSize={3}
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          updateCellsBatchingPeriod={16}
+          windowSize={5}
           decelerationRate="fast"
           scrollEventThrottle={16}
           keyboardDismissMode="on-drag"

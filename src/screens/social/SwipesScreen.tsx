@@ -211,7 +211,7 @@ function SwipesScreen({ navigation, route }: any) {
       active = false;
     };
   }, []);
-  useSegmentedMusicPlayback({
+  const { isLoading: activeSwipeMusicLoading } = useSegmentedMusicPlayback({
     rawUrl: activeSwipeRawMusicUrl,
     normalizedUrl: activeSwipeMusicUrl,
     trackKey: activeSwipeMusicTrackKey,
@@ -944,14 +944,6 @@ function SwipesScreen({ navigation, route }: any) {
               <Icon name="heart" size={92} color="rgba(255,255,255,0.92)" />
             </View>
           ) : null}
-          <View style={styles.mediaSoundHint}>
-            <Icon
-              name={isSwipePlaybackEnabled ? "volume-high-outline" : "volume-mute-outline"}
-              size={16}
-              color="#fff"
-            />
-            <Text style={styles.mediaSoundHintText}>{isSwipePlaybackEnabled ? "Sound on" : "Muted"}</Text>
-          </View>
         </Pressable>
         <LinearGradient colors={["rgba(0,0,0,0.74)", "rgba(0,0,0,0.12)", "transparent"]} style={styles.topGradient} />
         <LinearGradient colors={["transparent", "rgba(0,0,0,0.42)", "rgba(0,0,0,0.88)"]} style={styles.bottomGradient} />
@@ -1060,11 +1052,15 @@ function SwipesScreen({ navigation, route }: any) {
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionButton} onPress={() => setIsSwipeSoundEnabled((current) => !current)}>
-              <Icon
-                name={isSwipePlaybackEnabled ? "volume-high-outline" : "volume-mute-outline"}
-                size={23}
-                color="#fff"
-              />
+              {isActive && hasAttachedMusic && activeSwipeMusicLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Icon
+                  name={isSwipePlaybackEnabled ? "volume-high-outline" : "volume-mute-outline"}
+                  size={23}
+                  color="#fff"
+                />
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionButton} onPress={() => handleSave(item.id)}>
