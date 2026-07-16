@@ -911,7 +911,7 @@ function SwipesScreen({ navigation, route }: any) {
 
   const renderSwipe = ({ item, index }: { item: Swipe; index: number }) => {
     const isActive = index === activeSwipeIndex;
-    const isPreloadCandidate = index > activeSwipeIndex && index <= activeSwipeIndex + 2;
+    const isPreloadCandidate = index > activeSwipeIndex && index <= activeSwipeIndex + 1;
     const musicLabel = formatSwipeMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const relationship = getSwipeRelationship(item.user);
@@ -1099,10 +1099,10 @@ function SwipesScreen({ navigation, route }: any) {
         decelerationRate="fast"
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS === "android"}
-        initialNumToRender={3}
-        maxToRenderPerBatch={3}
-        windowSize={5}
-        updateCellsBatchingPeriod={16}
+        initialNumToRender={2}
+        maxToRenderPerBatch={2}
+        windowSize={3}
+        updateCellsBatchingPeriod={32}
         scrollEventThrottle={16}
         getItemLayout={(_, index) => ({
           length: viewportHeight,

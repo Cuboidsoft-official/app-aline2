@@ -103,7 +103,7 @@ const wait = (ms: number) =>
 export const ensureAudioClipStartPosition = async (
   player: any,
   startPositionMs: number,
-  seekSettleDelayMs = 70,
+  seekSettleDelayMs = 24,
 ): Promise<void> => {
   const numericStartPositionMs = Number(startPositionMs);
 
@@ -115,7 +115,9 @@ export const ensureAudioClipStartPosition = async (
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    await wait(seekSettleDelayMs);
+    if (seekSettleDelayMs > 0 && (attempt > 0 || safeStartPositionMs > 0)) {
+      await wait(seekSettleDelayMs);
+    }
 
     try {
       await player.seekToPlayer(safeStartPositionMs);
@@ -135,7 +137,7 @@ export const startManagedAudioClipPlayback = async (
     normalizedValue,
     startPositionMs = 0,
     volume = 1,
-    seekSettleDelayMs = 140,
+    seekSettleDelayMs = 24,
   }: {
     rawValue: string;
     normalizedValue: string;

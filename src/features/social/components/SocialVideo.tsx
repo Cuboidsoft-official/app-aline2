@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Image, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
+import { ActivityIndicator, Animated, Image, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 import Video from "react-native-video";
 import { stripBackgroundColorFromStyle } from "./mediaSurfaceStyle";
 
@@ -41,6 +41,7 @@ function SocialVideo({
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
   const [posterFailed, setPosterFailed] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
   const resolvedUri = String(uri || "").trim();
   const resolvedPosterUri = String(posterUri || "").trim();
   const usablePosterUri = isUsablePosterUri(resolvedPosterUri, resolvedUri) ? resolvedPosterUri : "";
@@ -53,6 +54,7 @@ function SocialVideo({
     placeholderOpacity.setValue(1);
     setPosterFailed(false);
     setVideoFailed(false);
+    setIsBuffering(false);
   }, [placeholderOpacity, usablePosterUri, resolvedUri]);
 
   useEffect(() => {
@@ -97,21 +99,47 @@ function SocialVideo({
             controls={controls}
             onEnd={onEnd}
             poster={usablePosterUri || undefined}
+            posterResizeMode={resizeMode}
+            progressUpdateInterval={500}
+            preferredForwardBufferDuration={preload ? 1 : 2}
+            automaticallyWaitsToMinimizeStalling={false}
+            bufferConfig={{
+              minBufferMs: preload ? 500 : 1200,
+              maxBufferMs: preload ? 2500 : 5000,
+              bufferForPlaybackMs: preload ? 250 : 500,
+              bufferForPlaybackAfterRebufferMs: preload ? 500 : 1000,
+            }}
+            onLoadStart={() => {
+              setIsBuffering(true);
+            }}
             onLoad={() => {
+              setIsBuffering(false);
               Animated.timing(placeholderOpacity, {
                 toValue: 0,
                 duration: 180,
                 useNativeDriver: true,
               }).start();
             }}
+            onReadyForDisplay={() => {
+              setIsBuffering(false);
+            }}
+            onBuffer={({ isBuffering: nextIsBuffering }) => {
+              setIsBuffering(Boolean(nextIsBuffering));
+            }}
             onError={() => {
               placeholderOpacity.stopAnimation();
               placeholderOpacity.setValue(1);
+              setIsBuffering(false);
               setVideoFailed(true);
             }}
             playWhenInactive={false}
             ignoreSilentSwitch="ignore"
           />
+          {isBuffering && !preload ? (
+            <View pointerEvents="none" style={styles.loaderOverlay}>
+              <ActivityIndicator size="small" color="#fff" />
+            </View>
+          ) : null}
           {contentBlurRadius > 0 && usablePosterUri ? (
             <View pointerEvents="none" style={StyleSheet.absoluteFill}>
               <Image
@@ -138,6 +166,12 @@ const styles = StyleSheet.create({
   },
   placeholderTint: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(2, 6, 23, 0.12)",
+  },
+  loaderOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "rgba(2, 6, 23, 0.12)",
   },
 });

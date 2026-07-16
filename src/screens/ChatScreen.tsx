@@ -884,22 +884,26 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [scheduleCallDurationMinutes, setScheduleCallDurationMinutes] = useState("30");
   const [scheduleCallAgenda, setScheduleCallAgenda] = useState("");
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(showEvent, () => {
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      const keyboardHeight = Math.max(0, Number(event?.endCoordinates?.height || 0));
       setIsKeyboardVisible(true);
+      setKeyboardInset(Math.max(0, keyboardHeight - insets.bottom));
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       setIsKeyboardVisible(false);
+      setKeyboardInset(0);
     });
 
     return () => {
       showSubscription.remove();
       hideSubscription.remove();
     };
-  }, []);
+  }, [insets.bottom]);
 
   useEffect(() => {
     const normalized = String(conversationTypeParam || "").trim().toLowerCase();
@@ -3220,6 +3224,10 @@ const ChatScreen = ({ navigation, route }: any) => {
 
   // ─── Main render ──────────────────────────────────────────────────────────
 
+  const composerBottomPadding = isKeyboardVisible
+    ? Math.max(6, Math.min(8, keyboardInset || 8))
+    : Math.max(7, insets.bottom - 2);
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top"]}>
       <StatusBar backgroundColor={chatHeaderTint} barStyle="light-content" />
@@ -3416,9 +3424,9 @@ const ChatScreen = ({ navigation, route }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        enabled
-        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        enabled={Platform.OS === "ios"}
+        keyboardVerticalOffset={0}
       >
         <View style={[styles.chatBackground, { backgroundColor: colors.surface }]}>
           <Image
@@ -3823,7 +3831,7 @@ const ChatScreen = ({ navigation, route }: any) => {
               backgroundColor: alpha(colors.background, "FA"),
               borderColor: alpha(colors.border, "70"),
               paddingTop: 6,
-              paddingBottom: isKeyboardVisible ? 8 : Math.max(7, insets.bottom - 2),
+              paddingBottom: composerBottomPadding,
               paddingHorizontal: Math.max(8, chatMetrics.listPadding - 2),
             },
           ]}

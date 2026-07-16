@@ -1392,11 +1392,12 @@ function FeedScreen({ navigation, route }: any) {
     const isMuted = !!mutedPostIds[post.id];
     const isPostActive = activePostId === post.id && isScreenFocused && !activeSheet;
     const postIndex = feed.posts.findIndex((candidate) => candidate.id === post.id);
-    const shouldPreloadVideo = activePostIndex >= 0 && postIndex > activePostIndex && postIndex <= activePostIndex + 1;
+    const shouldPreloadVideo = !isFeedScrollSettling && activePostIndex >= 0 && postIndex > activePostIndex && postIndex <= activePostIndex + 1;
     const shouldMountVideo = (isCarouselItemActive = true) => shouldMountFeedVideo({
       isPostActive,
       isCarouselItemActive,
       isScreenFocused,
+      isScrolling: isFeedScrollSettling,
     });
     const renderSensitiveBadge = (label?: string) => (
       <View pointerEvents="none" style={styles.sensitiveBadge}>
@@ -2586,10 +2587,10 @@ function FeedScreen({ navigation, route }: any) {
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS === "android"}
-          initialNumToRender={3}
-          maxToRenderPerBatch={3}
-          updateCellsBatchingPeriod={16}
-          windowSize={4}
+          initialNumToRender={2}
+          maxToRenderPerBatch={2}
+          updateCellsBatchingPeriod={32}
+          windowSize={3}
           decelerationRate="fast"
           scrollEventThrottle={16}
           keyboardDismissMode="on-drag"

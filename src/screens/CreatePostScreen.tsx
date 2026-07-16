@@ -182,6 +182,7 @@ const MODE_COPY: Record<
 };
 const LOCATION_SEEDS = ["Nearby", "Studio", "Cafe", "Beach", "Restaurant", "Office"];
 const MUSIC_PICKER_PAGE_SIZE = 24;
+const MUSIC_CLIP_MAX_SECONDS = 30;
 const MUSIC_DISCOVERY_FALLBACK_QUERIES = ["love", "party", "happy", "summer"];
 const PHOTO_PICKER_MAX_DIMENSION = 2160;
 const PHOTO_PICKER_QUALITY = 0.8;
@@ -354,7 +355,7 @@ const normalizeLocalFileUri = (value: string): string => {
 const defaultClipDuration = (mode: ComposerMode, trackDuration: number): number => {
   const safe = Math.max(1, Math.round(trackDuration || 0));
 
-  return Math.min(30, safe);
+  return Math.min(MUSIC_CLIP_MAX_SECONDS, safe);
 };
 
 const findAspectOption = (mode: ComposerMode, aspectId: string | undefined) =>
@@ -1057,6 +1058,7 @@ function CreatePostScreen({ navigation, route }: any) {
   } = useAudioTrimPreview();
   const {
     isPlaying: listMusicPreviewPlaying,
+    isLoading: listMusicPreviewLoading,
     resetPreview: resetListMusicPreview,
     togglePlayback: toggleListMusicPreview,
   } = useAudioTrimPreview({ trackPosition: false });
@@ -2171,7 +2173,7 @@ function CreatePostScreen({ navigation, route }: any) {
       const nextDuration = clamp(
         Math.round(Number(item?.clipDuration || defaultClipDuration(mode, safeDuration)) || defaultClipDuration(mode, safeDuration)),
         1,
-        Math.max(1, safeDuration - nextStart),
+        Math.max(1, Math.min(MUSIC_CLIP_MAX_SECONDS, safeDuration - nextStart)),
       );
       const nextEnd = Math.min(safeDuration, nextStart + nextDuration);
       const rawPlaybackUrl = getMusicClipPlaybackUrl(item);
@@ -2344,7 +2346,7 @@ function CreatePostScreen({ navigation, route }: any) {
     (nextStartTime: number, nextDuration: number) => {
       const safeDuration = Math.max(1, Math.round(Number(pendingMusicSelection?.duration || 0) || 1));
       const safeStart = clamp(nextStartTime, 0, Math.max(0, safeDuration - 1));
-      const clampedDuration = clamp(nextDuration, 1, Math.max(1, safeDuration - safeStart));
+      const clampedDuration = clamp(nextDuration, 1, Math.max(1, Math.min(MUSIC_CLIP_MAX_SECONDS, safeDuration - safeStart)));
       const safeEnd = Math.min(safeDuration, safeStart + clampedDuration);
 
       setMusicTrimStartTime(safeStart);
@@ -2374,7 +2376,7 @@ function CreatePostScreen({ navigation, route }: any) {
       const activeDuration = clamp(
         Math.round(Number(musicTrimDuration || pendingMusicSelection.clipDuration || defaultClipDuration(mode, safeDuration)) || 1),
         1,
-        safeDuration,
+        Math.min(MUSIC_CLIP_MAX_SECONDS, safeDuration),
       );
       const safeStart = clamp(
         musicTrimStartTime + deltaSeconds,
@@ -2475,9 +2477,10 @@ function CreatePostScreen({ navigation, route }: any) {
     try {
       setMusicImportingId(pendingMusicSelection.id);
       setMusicError("");
+      const savedClipDuration = Math.min(MUSIC_CLIP_MAX_SECONDS, Math.max(1, musicTrimDuration));
       const savedEndTime = Math.min(
         Math.max(1, Number(pendingMusicSelection.duration || 1)),
-        Math.max(musicTrimStartTime + 1, musicTrimStartTime + Math.max(1, musicTrimDuration)),
+        Math.max(musicTrimStartTime + 1, musicTrimStartTime + savedClipDuration),
       );
       const imported = await importMusicCatalogItem({
         ...pendingMusicSelection,
@@ -2485,13 +2488,13 @@ function CreatePostScreen({ navigation, route }: any) {
         source: pendingMusicSelection.source || "upload",
         clipStartTime: musicTrimStartTime,
         clipEndTime: savedEndTime,
-        clipDuration: musicTrimDuration,
+        clipDuration: savedClipDuration,
       });
       setSelectedMusic({
         ...imported,
         clipStartTime: musicTrimStartTime,
         clipEndTime: savedEndTime,
-        clipDuration: musicTrimDuration,
+        clipDuration: savedClipDuration,
       });
       closeMusicTrimSheet();
     } catch (error) {
@@ -4953,7 +4956,11 @@ function CreatePostScreen({ navigation, route }: any) {
           keyboardShouldPersistTaps="handled"
           onEndReached={loadMoreMusicResults}
           onEndReachedThreshold={0.55}
-          ListEmptyComponent={!musicLoading ? <View style={styles.musicResultSpacer} /> : null}
+          ListEmptyComponent={musicLoading ? (
+            <View style={styles.musicResultSpacer}>
+              <ActivityIndicator size="small" color={accentColor} />
+            </View>
+          ) : <View style={styles.musicResultSpacer} />}
           ListFooterComponent={musicLoadingMore ? (
             <View style={styles.musicLoadingMoreFooter}>
               <ActivityIndicator size="small" color={accentColor} />
@@ -4964,6 +4971,7 @@ function CreatePostScreen({ navigation, route }: any) {
             const isImporting = musicImportingId === item.id;
             const hasPreview = !!normalizeMediaUrl(getMusicClipPlaybackUrl(item));
             const isPlayingPreview = activeMusicPreviewId === item.id && listMusicPreviewPlaying;
+            const isLoadingPreview = activeMusicPreviewId === item.id && listMusicPreviewLoading;
 
             return (
               <View
@@ -4995,13 +5003,17 @@ function CreatePostScreen({ navigation, route }: any) {
                   <TouchableOpacity
                     style={[styles.resultPlayButton, { backgroundColor: surfaceColor, borderColor }]}
                     onPress={() => toggleListPreviewForItem(item).catch(() => undefined)}
-                    disabled={isImporting || !hasPreview}
+                    disabled={isImporting || isLoadingPreview || !hasPreview}
                   >
-                    <Icon
-                      name={isPlayingPreview ? "pause-outline" : "play-outline"}
-                      size={16}
-                      color={hasPreview ? textColor : mutedColor}
-                    />
+                    {isLoadingPreview ? (
+                      <ActivityIndicator size="small" color={textColor} />
+                    ) : (
+                      <Icon
+                        name={isPlayingPreview ? "pause-outline" : "play-outline"}
+                        size={16}
+                        color={hasPreview ? textColor : mutedColor}
+                      />
+                    )}
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.selectButton, { backgroundColor: accentColor }]}
