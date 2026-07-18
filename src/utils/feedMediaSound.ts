@@ -59,8 +59,10 @@ export const shouldMountFeedVideo = ({
   isCarouselItemActive = true,
   isScreenFocused,
   isScrolling = false,
-}: FeedVideoMountOptions): boolean =>
-  isScreenFocused
-  && !isScrolling
+}: FeedVideoMountOptions): boolean => {
+  void isScrolling;
+
+  return isScreenFocused
   && isPostActive
   && isCarouselItemActive;
+};

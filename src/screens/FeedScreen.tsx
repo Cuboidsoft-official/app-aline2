@@ -243,6 +243,7 @@ function FeedScreen({ navigation, route }: any) {
   const [hasMore, setHasMore] = useState(true);
   const [activePostId, setActivePostId] = useState<string>("");
   const [mutedPostIds, setMutedPostIds] = useState<Record<string, boolean>>({});
+  const [expandedCaptionIds, setExpandedCaptionIds] = useState<Record<string, boolean>>({});
   const [carouselIndexByPostId, setCarouselIndexByPostId] = useState<Record<string, number>>({});
   const [likeBurstPostId, setLikeBurstPostId] = useState("");
   const [isVideoSoundEnabled, setIsVideoSoundEnabled] = useState(FEED_VIDEO_SOUND_DEFAULT);
@@ -1392,7 +1393,7 @@ function FeedScreen({ navigation, route }: any) {
     const isMuted = !!mutedPostIds[post.id];
     const isPostActive = activePostId === post.id && isScreenFocused && !activeSheet;
     const postIndex = feed.posts.findIndex((candidate) => candidate.id === post.id);
-    const shouldPreloadVideo = !isFeedScrollSettling && activePostIndex >= 0 && postIndex > activePostIndex && postIndex <= activePostIndex + 1;
+    const shouldPreloadVideo = activePostIndex >= 0 && postIndex > activePostIndex && postIndex <= activePostIndex + 2;
     const shouldMountVideo = (isCarouselItemActive = true) => shouldMountFeedVideo({
       isPostActive,
       isCarouselItemActive,
@@ -1963,6 +1964,8 @@ function FeedScreen({ navigation, route }: any) {
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isMuted = !!mutedPostIds[item.id];
     const isPostMusicLoading = activePostId === item.id && hasAttachedMusic && activePostMusicLoading;
+    const isCaptionExpanded = !!expandedCaptionIds[item.id];
+    const shouldTruncateCaption = item.caption.length > 110 || item.caption.includes("\n");
     const isPostAudioOn = isFeedPostAudioOn({
       hasVideoMedia,
       hasAttachedMusic,
@@ -2202,21 +2205,40 @@ function FeedScreen({ navigation, route }: any) {
         ) : null}
 
         {item.caption ? (
-          <InteractiveText
-            style={[styles.caption, { paddingHorizontal: postBodyInset, color: colors.text }]}
-            prefix={(
-              <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
-                {item.user.username}{" "}
-              </Text>
-            )}
-            mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
-            hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
-            onPressMention={(mention) => {
-              void openMentionProfile(mention);
-            }}
-            onPressHashtag={openHashtagResults}
-            text={item.caption}
-          />
+          <>
+            <InteractiveText
+              style={[styles.caption, { paddingHorizontal: postBodyInset, color: colors.text }]}
+              prefix={(
+                <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
+                  {item.user.username}{" "}
+                </Text>
+              )}
+              mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
+              hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
+              onPressMention={(mention) => {
+                void openMentionProfile(mention);
+              }}
+              onPressHashtag={openHashtagResults}
+              onPress={() => {
+                if (shouldTruncateCaption) {
+                  setExpandedCaptionIds((current) => ({ ...current, [item.id]: !current[item.id] }));
+                }
+              }}
+              numberOfLines={shouldTruncateCaption && !isCaptionExpanded ? 2 : undefined}
+              ellipsizeMode="tail"
+              text={item.caption}
+            />
+            {shouldTruncateCaption ? (
+              <TouchableOpacity
+                activeOpacity={0.75}
+                onPress={() => setExpandedCaptionIds((current) => ({ ...current, [item.id]: !current[item.id] }))}
+              >
+                <Text style={[styles.captionMoreButton, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
+                  {isCaptionExpanded ? "less" : "more"}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
         ) : null}
 
         
@@ -2551,8 +2573,8 @@ function FeedScreen({ navigation, route }: any) {
     ? styles.sidebarStatusAvailable
     : styles.sidebarStatusUnavailable;
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 82,
-    minimumViewTime: 120,
+    itemVisiblePercentThreshold: 55,
+    minimumViewTime: 40,
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
     const firstVisiblePost = viewableItems.find((entry) =>
@@ -2587,10 +2609,10 @@ function FeedScreen({ navigation, route }: any) {
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={Platform.OS === "android"}
-          initialNumToRender={2}
-          maxToRenderPerBatch={2}
-          updateCellsBatchingPeriod={32}
-          windowSize={3}
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          updateCellsBatchingPeriod={16}
+          windowSize={5}
           decelerationRate="fast"
           scrollEventThrottle={16}
           keyboardDismissMode="on-drag"
@@ -3566,6 +3588,7 @@ const styles = StyleSheet.create({
   },
   caption: { fontSize: 12.6, color: "#131313", paddingHorizontal: 18, paddingTop: 5, lineHeight: 18 },
   captionUser: { fontWeight: "700" },
+  captionMoreButton: { paddingTop: 2, fontSize: 12.2, lineHeight: 16, fontWeight: "700" },
   inlineEntity: { fontWeight: "700" },
   tagLine: { color: FEED_ACCENT, fontSize: 12.5, paddingHorizontal: 18, paddingTop: 7, fontWeight: "700" },
   tagLineMuted: { color: "#5a5a5a", fontSize: 11.5, paddingHorizontal: 18, paddingTop: 4 },

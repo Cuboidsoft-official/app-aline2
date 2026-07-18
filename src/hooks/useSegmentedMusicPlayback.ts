@@ -164,6 +164,7 @@ export function useSegmentedMusicPlayback({
   const audioEndMsRef = useRef(0);
   const audioStartMsRef = useRef(0);
   const shouldLoopRef = useRef(false);
+  const wasShouldPlayNowRef = useRef(false);
   const playbackRequestIdRef = useRef(0);
   const youtubePlayerRef = useRef<any>(null);
   const playbackEndMs = durationMs > 0 ? startMs + durationMs : 0;
@@ -297,6 +298,7 @@ export function useSegmentedMusicPlayback({
 
   useEffect(() => {
     if (!shouldPlayNow) {
+      wasShouldPlayNowRef.current = false;
       if (pauseWhenInactive && audioTrackKeyRef.current) {
         pauseAudioPlayback();
       } else {
@@ -304,6 +306,9 @@ export function useSegmentedMusicPlayback({
       }
       return;
     }
+
+    const restartFromClipStart = !wasShouldPlayNowRef.current;
+    wasShouldPlayNowRef.current = true;
 
     const resumeAudio = async () => {
       const requestId = playbackRequestIdRef.current + 1;
@@ -328,6 +333,17 @@ export function useSegmentedMusicPlayback({
       setPlaybackError(null);
       setIsLoading(true);
       setIsPlaying(false);
+
+      if (restartFromClipStart && audioTrackKeyRef.current) {
+        audioTrackKeyRef.current = "";
+        audioSourceKeyRef.current = "";
+        await audioPlayerRef.current.setVolume(0).catch(() => undefined);
+        await audioPlayerRef.current.pausePlayer().catch(() => undefined);
+        await audioPlayerRef.current.stopPlayer().catch(() => undefined);
+        if (!isCurrentRequest()) {
+          return;
+        }
+      }
 
       if (audioTrackKeyRef.current === trackKey) {
         await ensureAudioClipStartPosition(audioPlayerRef.current, startMs).catch(() => undefined);

@@ -44,6 +44,7 @@ import { getStoredUser, getStoredUserId } from "../../utils/authSession";
 import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../../utils/mentionComposer";
 
 const { height } = Dimensions.get("window");
+const SWIPE_PAGE_SIZE = 20;
 const reportReasons: ReportReason[] = [
   "spam",
   "violence",
@@ -123,6 +124,9 @@ function SwipesScreen({ navigation, route }: any) {
   const [reportNote, setReportNote] = useState("");
   const [threadComment, setThreadComment] = useState<SwipeComment | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [swipePage, setSwipePage] = useState(1);
+  const [hasMoreSwipes, setHasMoreSwipes] = useState(true);
+  const [expandedCaptionIds, setExpandedCaptionIds] = useState<Record<string, boolean>>({});
   const [isSwipeSoundEnabled, setIsSwipeSoundEnabled] = useState(true);
   const [activeSwipeIndex, setActiveSwipeIndex] = useState(0);
   const [likeBurstSwipeId, setLikeBurstSwipeId] = useState("");
@@ -236,8 +240,8 @@ function SwipesScreen({ navigation, route }: any) {
   const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
     + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 60,
-    minimumViewTime: 80,
+    itemVisiblePercentThreshold: 50,
+    minimumViewTime: 30,
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null; isViewable?: boolean }> }) => {
     const firstVisibleItem = viewableItems.find((entry) => entry.isViewable && typeof entry.index === "number");
@@ -353,9 +357,11 @@ function SwipesScreen({ navigation, route }: any) {
 
       const load = async () => {
         try {
-          const data = focusUserId ? await socialApi.getUserSwipes(focusUserId) : await socialApi.getSwipes();
+          const data = focusUserId ? await socialApi.getUserSwipes(focusUserId) : await socialApi.getSwipes(1, SWIPE_PAGE_SIZE);
           if (active) {
             setSwipes(data);
+            setSwipePage(1);
+            setHasMoreSwipes(!focusUserId && data.length >= SWIPE_PAGE_SIZE);
           }
         } finally {
           if (active) {
@@ -448,8 +454,10 @@ function SwipesScreen({ navigation, route }: any) {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      const data = focusUserId ? await socialApi.getUserSwipes(focusUserId) : await socialApi.getSwipes();
+      const data = focusUserId ? await socialApi.getUserSwipes(focusUserId) : await socialApi.getSwipes(1, SWIPE_PAGE_SIZE);
       setSwipes(data);
+      setSwipePage(1);
+      setHasMoreSwipes(!focusUserId && data.length >= SWIPE_PAGE_SIZE);
     } catch (error) {
       Alert.alert("Could not refresh swipes", toUserSafeMessage(error));
     } finally {
@@ -914,6 +922,8 @@ function SwipesScreen({ navigation, route }: any) {
     const isPreloadCandidate = index > activeSwipeIndex && index <= activeSwipeIndex + 1;
     const musicLabel = formatSwipeMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
+    const isCaptionExpanded = !!expandedCaptionIds[item.id];
+    const shouldTruncateCaption = item.caption.length > 96 || item.caption.includes("\n");
     const relationship = getSwipeRelationship(item.user);
     const followBusy = !!busyActions[`follow_${item.user.id}`];
 
@@ -1002,8 +1012,23 @@ function SwipesScreen({ navigation, route }: any) {
                   void openMentionProfile(mention);
                 }}
                 onPressHashtag={openHashtagResults}
+                onPress={() => {
+                  if (shouldTruncateCaption) {
+                    setExpandedCaptionIds((current) => ({ ...current, [item.id]: !current[item.id] }));
+                  }
+                }}
+                numberOfLines={shouldTruncateCaption && !isCaptionExpanded ? 2 : undefined}
+                ellipsizeMode="tail"
                 text={item.caption}
               />
+              {shouldTruncateCaption ? (
+                <TouchableOpacity
+                  activeOpacity={0.75}
+                  onPress={() => setExpandedCaptionIds((current) => ({ ...current, [item.id]: !current[item.id] }))}
+                >
+                  <Text style={styles.captionMoreButton}>{isCaptionExpanded ? "less" : "more"}</Text>
+                </TouchableOpacity>
+              ) : null}
 
               {item.mentions.length ? (
                 <InteractiveText
@@ -1099,10 +1124,10 @@ function SwipesScreen({ navigation, route }: any) {
         decelerationRate="fast"
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS === "android"}
-        initialNumToRender={2}
-        maxToRenderPerBatch={2}
-        windowSize={3}
-        updateCellsBatchingPeriod={32}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={5}
+        updateCellsBatchingPeriod={16}
         scrollEventThrottle={16}
         getItemLayout={(_, index) => ({
           length: viewportHeight,
@@ -1122,17 +1147,27 @@ function SwipesScreen({ navigation, route }: any) {
           activeSwipeIndexRef.current = boundedIndex;
           setActiveSwipeIndex(boundedIndex);
         }}
-        onEndReachedThreshold={0.5}
+        onEndReachedThreshold={0.75}
         onEndReached={() => {
-          if (!isFocusedSwipeFeed && !loadingMore) {
+          if (!isFocusedSwipeFeed && !loadingMore && hasMoreSwipes) {
+            const nextPage = swipePage + 1;
             setLoadingMore(true);
-            socialApi.getSwipes().then((data) => {
+            socialApi.getSwipes(nextPage, SWIPE_PAGE_SIZE).then((data) => {
+              const existingIds = new Set(swipes.map((s) => s.id));
+              const newItems = data.filter((s) => !existingIds.has(s.id));
               if (data.length > 0) {
                 setSwipes((prev) => {
-                  const existingIds = new Set(prev.map((s) => s.id));
-                  const newItems = data.filter((s) => !existingIds.has(s.id));
-                  return [...prev, ...newItems];
+                  const latestIds = new Set(prev.map((s) => s.id));
+                  const uniqueItems = newItems.filter((s) => !latestIds.has(s.id));
+                  if (!uniqueItems.length) {
+                    return prev;
+                  }
+                  return [...prev, ...uniqueItems];
                 });
+              }
+              setSwipePage(nextPage);
+              if (data.length < SWIPE_PAGE_SIZE || newItems.length === 0) {
+                setHasMoreSwipes(false);
               }
             }).catch(() => { }).finally(() => setLoadingMore(false));
           }
@@ -1614,6 +1649,7 @@ const styles = StyleSheet.create({
   },
   musicInlineText: { color: "#fff", marginLeft: 5, fontSize: 12.5, fontWeight: "700" },
   caption: { color: "#fff", marginTop: 8, fontSize: 14.5, lineHeight: 20, fontWeight: "600" },
+  captionMoreButton: { color: "rgba(255,255,255,0.72)", marginTop: 3, fontSize: 12.5, lineHeight: 16, fontWeight: "800" },
   captionEntity: { color: "#a9c4ff", fontWeight: "800" },
   mentionLine: { color: "#d7e4ff", marginTop: 5, fontSize: 12.5, fontWeight: "700" },
   hashTags: { color: "#a9c4ff", marginTop: 5, fontSize: 12.5, fontWeight: "800" },

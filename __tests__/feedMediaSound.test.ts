@@ -43,11 +43,11 @@ describe("feed video sound state", () => {
     expect(isFeedPostAudioOn({ ...baseOptions, hasVideoMedia: true, isVideoSoundEnabled: false })).toBe(false);
   });
 
-  it("mounts only the focused, active visible carousel video while scrolling is idle", () => {
+  it("keeps the focused, active visible carousel video mounted through scroll gestures", () => {
     expect(shouldMountFeedVideo({ isPostActive: true, isScreenFocused: true })).toBe(true);
     expect(shouldMountFeedVideo({ isPostActive: false, isScreenFocused: true })).toBe(false);
     expect(shouldMountFeedVideo({ isPostActive: true, isScreenFocused: false })).toBe(false);
-    expect(shouldMountFeedVideo({ isPostActive: true, isScreenFocused: true, isScrolling: true })).toBe(false);
+    expect(shouldMountFeedVideo({ isPostActive: true, isScreenFocused: true, isScrolling: true })).toBe(true);
     expect(shouldMountFeedVideo({ isPostActive: true, isCarouselItemActive: false, isScreenFocused: true })).toBe(false);
   });
 });

@@ -120,10 +120,11 @@ type MusicPreviewMode = "audio";
 
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
 const POST_ASPECTS: AspectOption[] = [
-  { id: "square", label: "1:1", detail: "Square", ratio: 1 },
-  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
+  { id: "standard", label: "4:3", detail: "Standard", ratio: 4 / 3 },
   { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
+  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
+  { id: "portrait23", label: "2:3", detail: "Portrait", ratio: 2 / 3 },
+  { id: "landscape32", label: "3:2", detail: "Classic", ratio: 3 / 2 },
 ];
 const TALL_ASPECTS: AspectOption[] = [
   { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
@@ -135,7 +136,7 @@ const ASPECTS_BY_MODE: Record<ComposerMode, AspectOption[]> = {
   swipe: TALL_ASPECTS,
 };
 const DEFAULT_ASPECT_BY_MODE: Record<ComposerMode, string> = {
-  post: "portrait",
+  post: "standard",
   story: "vertical",
   swipe: "vertical",
 };

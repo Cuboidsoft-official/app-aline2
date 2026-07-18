@@ -1136,26 +1136,26 @@ class RemoteSocialApi implements SocialApi {
     };
   }
 
-  async getReels(): Promise<Reel[]> {
-    return this.getSwipes();
+  async getReels(page = 1): Promise<Reel[]> {
+    return this.getSwipes(page);
   }
 
   async getReel(reelId: string): Promise<Reel> {
     return this.getSwipe(reelId);
   }
 
-  async getSwipes(): Promise<Reel[]> {
+  async getSwipes(page = 1, limit = 20): Promise<Reel[]> {
     await loadModerationPrefs();
     const loadSwipeFeed = async () => {
       try {
-        return await API.get("/search/swipes");
+        return await API.get("/search/swipes", { params: { page, limit } });
       } catch (error: any) {
         const statusCode = Number(error?.response?.status || 0);
         if (statusCode && statusCode !== 404) {
           throw error;
         }
 
-        return API.get("/search/reels");
+        return API.get("/search/reels", { params: { page, limit } });
       }
     };
 

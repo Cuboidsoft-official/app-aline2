@@ -385,9 +385,9 @@ export interface DeleteCommentResult {
 export interface SocialApi {
   getFeed(page?: number): Promise<FeedResponse>;
   getUserFeed(userId: string): Promise<FeedResponse>;
-  getReels(): Promise<Reel[]>;
+  getReels(page?: number): Promise<Reel[]>;
   getReel(reelId: string): Promise<Reel>;
-  getSwipes(): Promise<Swipe[]>;
+  getSwipes(page?: number, limit?: number): Promise<Swipe[]>;
   getUserSwipes(userId: string): Promise<Swipe[]>;
   getSwipe(swipeId: string): Promise<Swipe>;
   getStorySequence(storyId: string, options?: GetStorySequenceOptions): Promise<StorySequenceResponse>;
