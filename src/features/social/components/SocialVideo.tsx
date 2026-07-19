@@ -16,6 +16,7 @@ type SocialVideoProps = {
   onEnd?: () => void;
   contentBlurRadius?: number;
   fallbackColor?: string;
+  showBufferingLoader?: boolean;
 };
 
 const isLikelyVideoUri = (value: string): boolean =>
@@ -37,6 +38,7 @@ function SocialVideo({
   onEnd,
   contentBlurRadius = 0,
   fallbackColor = "#0f172a",
+  showBufferingLoader = true,
 }: SocialVideoProps) {
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
   const [posterFailed, setPosterFailed] = useState(false);
@@ -135,7 +137,7 @@ function SocialVideo({
             playWhenInactive={false}
             ignoreSilentSwitch="ignore"
           />
-          {isBuffering && !preload ? (
+          {showBufferingLoader && isBuffering && !preload ? (
             <View pointerEvents="none" style={styles.loaderOverlay}>
               <ActivityIndicator size="small" color="#fff" />
             </View>

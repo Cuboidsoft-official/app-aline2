@@ -32,7 +32,7 @@ import SocialVideo from "../../features/social/components/SocialVideo";
 import MentionSuggestionList from "../../components/MentionSuggestionList";
 import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, SocialUser, Swipe, SwipeComment } from "../../features/social/types";
-import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
@@ -81,7 +81,7 @@ const formatSwipeMusicLabel = (music?: Swipe["music"]): string => {
 };
 
 const getMusicPlaybackUrl = (music?: Swipe["music"]): string =>
-  String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
+  String(music?.previewUrl || music?.streamUrl || music?.audioUrl || "").trim();
 
 const getTrimmedMusicDurationMs = (
   music?: { duration?: number; startTime?: number; endTime?: number },
@@ -94,7 +94,7 @@ const getTrimmedMusicDurationMs = (
 
   const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
   const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
-  return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : 0;
+  return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : maxClipMs;
 };
 
 type SwipeRelationshipKind = "self" | "follow" | "follow_back" | "following";
@@ -147,7 +147,6 @@ function SwipesScreen({ navigation, route }: any) {
   const isFocusedSwipeFeed = Boolean(focusUserId);
 
   const activeSwipe = swipes[activeSwipeIndex] || null;
-  const nextSwipe = swipes[activeSwipeIndex + 1] || null;
   const activeSwipeRawMusicUrl = getMusicPlaybackUrl(activeSwipe?.music);
   const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipeRawMusicUrl);
   const activeSwipeMusicStartMs = Math.max(0, Number(activeSwipe?.music?.startTime || 0) * 1000);
@@ -215,7 +214,7 @@ function SwipesScreen({ navigation, route }: any) {
       active = false;
     };
   }, []);
-  const { isLoading: activeSwipeMusicLoading } = useSegmentedMusicPlayback({
+  useSegmentedMusicPlayback({
     rawUrl: activeSwipeRawMusicUrl,
     normalizedUrl: activeSwipeMusicUrl,
     trackKey: activeSwipeMusicTrackKey,
@@ -223,19 +222,6 @@ function SwipesScreen({ navigation, route }: any) {
     durationMs: activeSwipeMusicDurationMs,
     shouldPlay: shouldPlaySwipeMusic,
     pauseWhenInactive: true,
-  });
-  const nextSwipeRawMusicUrl = getMusicPlaybackUrl(nextSwipe?.music);
-  const nextSwipeMusicUrl = normalizeMediaUrl(nextSwipeRawMusicUrl);
-  const nextSwipeMusicStartMs = Math.max(0, Number(nextSwipe?.music?.startTime || 0) * 1000);
-  const nextSwipeMusicDurationMs = getTrimmedMusicDurationMs(nextSwipe?.music);
-  const nextSwipeMusicTrackKey = nextSwipe
-    ? `${nextSwipe.id}:${nextSwipeMusicUrl}:${nextSwipeMusicStartMs}:${nextSwipeMusicDurationMs}`
-    : "";
-  useSegmentedMusicWarmup({
-    rawUrl: nextSwipeRawMusicUrl,
-    normalizedUrl: nextSwipeMusicUrl,
-    trackKey: nextSwipeMusicTrackKey,
-    enabled: isSwipePlaybackEnabled && !!nextSwipeMusicUrl,
   });
   const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
     + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
@@ -919,7 +905,6 @@ function SwipesScreen({ navigation, route }: any) {
 
   const renderSwipe = ({ item, index }: { item: Swipe; index: number }) => {
     const isActive = index === activeSwipeIndex;
-    const isPreloadCandidate = index > activeSwipeIndex && index <= activeSwipeIndex + 1;
     const musicLabel = formatSwipeMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isCaptionExpanded = !!expandedCaptionIds[item.id];
@@ -937,9 +922,10 @@ function SwipesScreen({ navigation, route }: any) {
             paused={!isActive || !!activeSheet || !isScreenFocused}
             muted={!isActive || !isSwipePlaybackEnabled || hasAttachedMusic}
             repeat
-            preload={isPreloadCandidate && !activeSheet && isScreenFocused}
-            resizeMode="contain"
+            preload={false}
+            resizeMode="cover"
             contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
+            showBufferingLoader={false}
           />
           {item.media.sensitiveContent?.isSensitive ? (
             <View style={styles.sensitiveBadge}>
@@ -1077,15 +1063,11 @@ function SwipesScreen({ navigation, route }: any) {
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionButton} onPress={() => setIsSwipeSoundEnabled((current) => !current)}>
-              {isActive && hasAttachedMusic && activeSwipeMusicLoading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Icon
-                  name={isSwipePlaybackEnabled ? "volume-high-outline" : "volume-mute-outline"}
-                  size={23}
-                  color="#fff"
-                />
-              )}
+              <Icon
+                name={isSwipePlaybackEnabled ? "volume-high-outline" : "volume-mute-outline"}
+                size={23}
+                color="#fff"
+              />
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionButton} onPress={() => handleSave(item.id)}>

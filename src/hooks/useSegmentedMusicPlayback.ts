@@ -307,7 +307,6 @@ export function useSegmentedMusicPlayback({
       return;
     }
 
-    const restartFromClipStart = !wasShouldPlayNowRef.current;
     wasShouldPlayNowRef.current = true;
 
     const resumeAudio = async () => {
@@ -333,17 +332,6 @@ export function useSegmentedMusicPlayback({
       setPlaybackError(null);
       setIsLoading(true);
       setIsPlaying(false);
-
-      if (restartFromClipStart && audioTrackKeyRef.current) {
-        audioTrackKeyRef.current = "";
-        audioSourceKeyRef.current = "";
-        await audioPlayerRef.current.setVolume(0).catch(() => undefined);
-        await audioPlayerRef.current.pausePlayer().catch(() => undefined);
-        await audioPlayerRef.current.stopPlayer().catch(() => undefined);
-        if (!isCurrentRequest()) {
-          return;
-        }
-      }
 
       if (audioTrackKeyRef.current === trackKey) {
         await ensureAudioClipStartPosition(audioPlayerRef.current, startMs).catch(() => undefined);

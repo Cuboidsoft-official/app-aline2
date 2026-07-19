@@ -36,7 +36,7 @@ import { API } from "../api/api";
 import { getStoredUser, getStoredUserId } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../hooks/useSegmentedMusicPlayback";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
@@ -66,8 +66,11 @@ const initialFeed: FeedResponse = {
 
 const FEED_ACCENT = "#9b4dff";
 
+const POST_MUSIC_PREVIEW_MS = 30000;
+const FEED_MEDIA_ASPECT_RATIO = 16 / 9;
+
 const getMusicPlaybackUrl = (music?: Post["music"]): string =>
-  String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
+  String(music?.previewUrl || music?.streamUrl || music?.audioUrl || "").trim();
 
 const formatCount = (value: number): string => {
   if (value >= 1000000) {
@@ -145,7 +148,7 @@ const formatPostMusicLabel = (music?: Post["music"]): string => {
 const getTrimmedMusicDurationMs = (
   music?: { duration?: number; startTime?: number; endTime?: number },
 ): number => {
-  const maxClipMs = 30000;
+  const maxClipMs = POST_MUSIC_PREVIEW_MS;
   const explicitDurationMs = Math.max(0, Number(music?.duration || 0) * 1000);
   if (explicitDurationMs > 0) {
     return Math.min(maxClipMs, explicitDurationMs);
@@ -153,29 +156,21 @@ const getTrimmedMusicDurationMs = (
 
   const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
   const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
-  return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : 0;
+  return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : maxClipMs;
 };
 
 const getPostAspectRatio = (post: Post): number => {
-  const primaryMedia = post.media[0];
-  const assetRatio =
-    primaryMedia?.width && primaryMedia?.height
-      ? primaryMedia.width / Math.max(1, primaryMedia.height)
-      : 1;
-
-  return Math.min(1.91, Math.max(9 / 16, assetRatio || 1));
+  void post;
+  return FEED_MEDIA_ASPECT_RATIO;
 };
 
 const getImageResizeMode = (
   asset: Post["media"][number] | undefined,
   frameAspectRatio: number,
 ): "contain" | "cover" => {
-  const assetRatio =
-    asset?.width && asset?.height
-      ? asset.width / Math.max(1, asset.height)
-      : frameAspectRatio;
-
-  return Math.abs(assetRatio - frameAspectRatio) > 0.12 ? "contain" : "cover";
+  void asset;
+  void frameAspectRatio;
+  return "cover";
 };
 
 const buildMixedLatestFeedPosts = (items: Post[]): Post[] => {
@@ -327,10 +322,6 @@ function FeedScreen({ navigation, route }: any) {
     () => feed.posts.find((item) => item.id === activePostId) || null,
     [activePostId, feed.posts],
   );
-  const nextMusicPost = useMemo(() => {
-    const activeIndex = feed.posts.findIndex((item) => item.id === activePostId);
-    return activeIndex >= 0 ? feed.posts[activeIndex + 1] || null : feed.posts[0] || null;
-  }, [activePostId, feed.posts]);
   const activePublishTask = publishTasks[0] || null;
   const completedPublishTaskIdsRef = useRef<Set<string>>(new Set());
   const activePostRawMusicUrl = getMusicPlaybackUrl(activePost?.music);
@@ -354,20 +345,6 @@ function FeedScreen({ navigation, route }: any) {
     shouldPlay: activePostShouldPlayMusic,
     pauseWhenInactive: true,
   });
-  const nextPostRawMusicUrl = getMusicPlaybackUrl(nextMusicPost?.music);
-  const nextPostMusicUrl = normalizeMediaUrl(nextPostRawMusicUrl);
-  const nextPostMusicStartMs = Math.max(0, Number(nextMusicPost?.music?.startTime || 0) * 1000);
-  const nextPostMusicDurationMs = getTrimmedMusicDurationMs(nextMusicPost?.music);
-  const nextPostMusicTrackKey = nextMusicPost
-    ? `${nextMusicPost.id}:${nextPostMusicUrl}:${nextPostMusicStartMs}:${nextPostMusicDurationMs}`
-    : "";
-  useSegmentedMusicWarmup({
-    rawUrl: nextPostRawMusicUrl,
-    normalizedUrl: nextPostMusicUrl,
-    trackKey: nextPostMusicTrackKey,
-    enabled: isScreenFocused && !activeSheet && !refreshing && !!nextPostMusicUrl,
-  });
-
   const readSellerAccount = useCallback(async (): Promise<SellerAccountSummary | null> => {
     try {
       const res = await API.get("/seller/me");
@@ -928,22 +905,9 @@ function FeedScreen({ navigation, route }: any) {
   };
 
   const getPostMediaHeight = useCallback((post: Post) => {
-    const aspectRatio = getPostAspectRatio(post);
-    const resolvedHeight = Math.round(postMediaWidth / aspectRatio);
-    const minMediaHeight = Math.max(width < 360 ? 240 : 260, Math.round(postMediaWidth * 0.58));
-    const isVerticalFrame = aspectRatio <= 0.62;
-    const maxMediaHeight = Math.round(
-      Math.min(
-        isVerticalFrame ? height * 0.82 : isTabletLayout ? height * 0.72 : height * 0.62,
-        isVerticalFrame ? 760 : isTabletLayout ? 720 : 620,
-      ),
-    );
-
-    return Math.max(
-      minMediaHeight,
-      Math.min(maxMediaHeight, resolvedHeight || defaultPostMediaHeight),
-    );
-  }, [defaultPostMediaHeight, height, isTabletLayout, postMediaWidth, width]);
+    void post;
+    return Math.round(postMediaWidth / FEED_MEDIA_ASPECT_RATIO);
+  }, [postMediaWidth]);
 
   const submitComment = async (postId: string, audioFile?: CommentAudioFile) => {
     const draft = (commentDrafts[postId] || "").trim();
