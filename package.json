@@ -1,10 +1,10 @@
 {
   "name": "Aline2",
-  "version": "2.0.8",
+  "version": "2.1.0",
   "private": true,
   "scripts": {
-    "postinstall": "node ./scripts/patch-nitro-sound-android.js && node ./scripts/patch-react-native-keep-awake-android.js && node ./scripts/patch-webrtc-event-target-shim.js",
-    "android": "react-native run-android --appId com.aline2.debug",
+    "postinstall": "node ./scripts/patch-nitro-sound-android.js && node ./scripts/patch-react-native-keep-awake-android.js && node ./scripts/patch-webrtc-event-target-shim.js && node ./scripts/patch-color-matrix-codegen-name.js",
+    "android": "react-native run-android --active-arch-only --appId com.aline2.debug",
     "android:dev": "bash ./scripts/run-android-dev.sh",
     "android:staging": "ENVFILE=.env.staging react-native run-android --appId com.aline2.debug",
     "android:staging:apk": "cd android && ENVFILE=.env.staging ./gradlew assembleRelease",

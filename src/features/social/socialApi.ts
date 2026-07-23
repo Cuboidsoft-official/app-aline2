@@ -624,6 +624,13 @@ class RemoteSocialApi implements SocialApi {
             : undefined,
       width: item?.width,
       height: item?.height,
+      frameTransform: item?.frameTransform
+        ? {
+            scale: Math.max(1, Math.min(4, Number(item.frameTransform.scale || 1))),
+            translateX: Math.max(-1, Math.min(1, Number(item.frameTransform.translateX || 0))),
+            translateY: Math.max(-1, Math.min(1, Number(item.frameTransform.translateY || 0))),
+          }
+        : undefined,
       sensitiveContent: item?.sensitiveContent?.isSensitive || item?.mediaSensitivity?.isSensitive
         ? {
             isSensitive: true,
@@ -1073,10 +1080,10 @@ class RemoteSocialApi implements SocialApi {
     return { ...cached };
   }
 
-  async getFeed(page = 1): Promise<FeedResponse> {
+  async getFeed(page = 1, limit = 10): Promise<FeedResponse> {
     await loadModerationPrefs();
     const [postsRes, storyGroups, currentUserId] = await Promise.all([
-      API.get("/posts/feed", { params: { page } }),
+      API.get("/posts/feed", { params: { page, limit } }),
       page === 1 ? this.getStoryFeedGroups() : Promise.resolve([]),
       this.getCurrentUserId(),
     ]);
@@ -2012,6 +2019,7 @@ class RemoteSocialApi implements SocialApi {
         duration: asset.durationMs ? Math.ceil(asset.durationMs / 1000) : undefined,
         width: asset.width,
         height: asset.height,
+        frameTransform: asset.frameTransform,
         order: index,
         sensitiveContent: asset.sensitiveContent,
       })),
@@ -2261,11 +2269,13 @@ class RemoteSocialApi implements SocialApi {
           duration: payload.media.durationMs ? Math.ceil(payload.media.durationMs / 1000) : undefined,
           width: payload.media.width,
           height: payload.media.height,
+          frameTransform: payload.media.frameTransform,
           order: 0,
           sensitiveContent: payload.media.sensitiveContent,
         },
       ],
       postType: "reel",
+      hasOriginalAudio: payload.hasOriginalAudio !== false && !payload.music,
       location: payload.location ? { name: payload.location } : undefined,
       hashtags: payload.hashtags,
       mentions: payload.mentions,

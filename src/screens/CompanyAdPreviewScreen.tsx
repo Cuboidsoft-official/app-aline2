@@ -104,10 +104,12 @@ function CompanyAdPreviewScreen({ navigation, route }: any) {
             </View>
 
             <View style={[styles.panel, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.panelTitle, { color: colors.text }]}>Budgets</Text>
-              <Row icon="timer-outline" label="Story" value={`INR ${ad?.storyBudget || 0}`} />
-              <Row icon="image-outline" label="Photo" value={`INR ${ad?.photoBudget || 0}`} />
-              <Row icon="videocam-outline" label="Video" value={`INR ${ad?.videoBudgetPerMinute || 0}/min · INR ${ad?.videoBudgetPerHour || 0}/hour`} />
+              <Text style={[styles.panelTitle, { color: colors.text }]}>Campaign</Text>
+              <Row icon="albums-outline" label="Content type" value={ad?.contentType || ad?.productOrService || ""} />
+              <Row icon="people-outline" label="Minimum followers" value={`${ad?.minimumFollowers || 0}+`} />
+              <Row icon="film-outline" label="Content format" value={ad?.contentFormat || "template"} />
+              <Row icon="navigate-outline" label="Placement" value={ad?.preferredPlacement || "story"} />
+              <Row icon="cash-outline" label="Offered price" value={`INR ${ad?.offeredPrice || ad?.storyBudget || ad?.photoBudget || ad?.videoBudgetPerMinute || 0}`} />
               <Row icon="calendar-outline" label="Campaign duration" value={`${ad?.campaignDurationDays || 7} days`} />
             </View>
 
@@ -115,7 +117,7 @@ function CompanyAdPreviewScreen({ navigation, route }: any) {
               <Text style={[styles.panelTitle, { color: colors.text }]}>Brief</Text>
               <Row icon="location-outline" label="Location" value={ad?.location || "Any location"} />
               <Row icon="people-outline" label="Target audience" value={ad?.targetAudience || ""} />
-              <Row icon="film-outline" label="Media type" value={ad?.mediaType || "mixed"} />
+              <Row icon="film-outline" label="Media type" value={ad?.mediaType || ad?.preferredPlacement || "mixed"} />
               <Text style={[styles.description, { color: colors.mutedText }]}>
                 {ad?.description || "No detailed brief added yet."}
               </Text>

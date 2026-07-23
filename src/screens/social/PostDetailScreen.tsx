@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View
 } from "react-native";
 import { Alert } from "../../utils/appAlert";
@@ -76,9 +77,29 @@ const getTrimmedMusicDurationMs = (
   return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : 0;
 };
 
+const getMediaFrameTransformStyle = (
+  asset: Post["media"][number] | undefined,
+  width: number,
+  height: number,
+) => {
+  const transform = asset?.frameTransform;
+  const scale = Math.max(1, Math.min(4, Number(transform?.scale || 1)));
+  const translateX = Math.max(-1, Math.min(1, Number(transform?.translateX || 0))) * width;
+  const translateY = Math.max(-1, Math.min(1, Number(transform?.translateY || 0))) * height;
+
+  return {
+    transform: [
+      { translateX },
+      { translateY },
+      { scale },
+    ],
+  };
+};
+
 function PostDetailScreen({ route, navigation }: any) {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const isScreenFocused = useIsFocused();
   const postId = typeof route?.params?.postId === "string" ? route.params.postId : "";
 
@@ -333,9 +354,11 @@ function PostDetailScreen({ route, navigation }: any) {
   const renderMediaAsset = (asset: Post["media"][number], key?: string) => {
     const assetUrl = normalizeMediaUrl(asset?.url);
     const posterUrl = normalizeMediaUrl(asset?.thumbnailUrl || asset?.url);
+    const detailMediaWidth = Math.max(1, width);
+    const detailMediaHeight = 320;
     const imageResizeMode =
       asset?.width && asset?.height && Math.abs(asset.width / Math.max(1, asset.height) - 1) > 0.12
-        ? "contain"
+        ? "cover"
         : "cover";
 
     if (!assetUrl) {
@@ -344,15 +367,17 @@ function PostDetailScreen({ route, navigation }: any) {
 
     if (asset.mediaType === "video") {
       return (
-        <View key={key || asset.id}>
-          <SocialVideo
-            uri={assetUrl}
-            posterUri={posterUrl}
-            style={styles.image}
-            muted={!isMediaSoundEnabled || hasAttachedMusic}
-            repeat
-            contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
-          />
+        <View key={key || asset.id} style={styles.image}>
+          <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, detailMediaWidth, detailMediaHeight)]}>
+            <SocialVideo
+              uri={assetUrl}
+              posterUri={posterUrl}
+              style={StyleSheet.absoluteFill}
+              muted={!isMediaSoundEnabled || hasAttachedMusic}
+              repeat
+              contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+            />
+          </View>
           {asset.sensitiveContent?.isSensitive ? (
             <View style={styles.sensitiveBadge}>
               <Text style={styles.sensitiveBadgeText}>
@@ -365,14 +390,16 @@ function PostDetailScreen({ route, navigation }: any) {
     }
 
     const rawImage = (
-      <View key={key || asset.id}>
-        <ProgressiveImage
-          uri={assetUrl}
-          previewUri={posterUrl}
-          style={styles.image}
-          resizeMode={imageResizeMode}
-          contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
-        />
+      <View key={key || asset.id} style={styles.image}>
+        <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, detailMediaWidth, detailMediaHeight)]}>
+          <ProgressiveImage
+            uri={assetUrl}
+            previewUri={posterUrl}
+            style={StyleSheet.absoluteFill}
+            resizeMode={imageResizeMode}
+            contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+          />
+        </View>
         {asset.sensitiveContent?.isSensitive ? (
           <View style={styles.sensitiveBadge}>
             <Text style={styles.sensitiveBadgeText}>
@@ -720,7 +747,7 @@ const styles = StyleSheet.create({
   headerActionGap: { marginRight: 10, padding: 2 },
   editButton: { fontSize: 13, color: "#3345d1", fontWeight: "700" },
   mediaSurface: { position: "relative" },
-  image: { width: "100%", height: 320, backgroundColor: "#0f172a" },
+  image: { width: "100%", height: 320, backgroundColor: "#0f172a", overflow: "hidden" },
   stickerLayer: { ...StyleSheet.absoluteFillObject },
   emojiSticker: {
     position: "absolute",

@@ -491,11 +491,11 @@ const dedupeMessages = (items: ChatMessage[]): ChatMessage[] => {
       seen.add(identity);
     }
 
-    if (signature && seenSignatures.has(signature)) {
+    if (!identity && signature && seenSignatures.has(signature)) {
       return false;
     }
 
-    if (signature) {
+    if (!identity && signature) {
       seenSignatures.add(signature);
     }
 
@@ -639,7 +639,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   }), [colors, isDarkMode]);
 
   const sellerStatusColor = isDarkMode ? "rgba(255,255,255,0.78)" : colors.mutedText;
-  const canUseComposer = false;
+  const canUseComposer = seller?.availabilityStatus !== false;
   const assistantScope = "Seller chat support";
   const assistantScopeHint = `Get help with booking, payment, appointments, and chat support for ${seller?.sellerName || "this seller"}.`;
   const assistantConversationSummary = `Selected service: ${selectedService?.serviceName || serviceName || "service requests"}. Seller status: ${normalizedSellerPresenceText}.${seller?.availabilityStatus === false ? " Messaging currently locked until seller turns availability on." : ""}`;
@@ -871,7 +871,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           return { ...item, ...normalizedMessage };
         }
 
-        if (!hasChanged && buildMessageSignature(item) === nextSignature) {
+        if (!hasChanged && ((item as any)?._optimistic || !itemIdentity) && buildMessageSignature(item) === nextSignature) {
           hasChanged = true;
           return { ...item, ...normalizedMessage };
         }
@@ -2586,8 +2586,37 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               <Icon name="calendar-clear-outline" size={18} color={colors.primary} />
             </View>
             <Text style={[styles.composerLockedText, { color: sellerChatColors.text, fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]}>
-              This seller room is booking-only. Choose a highlighted service, confirm a slot, and appointment updates will stay saved here.
+              Choose a highlighted service to book, or share files and documents with the seller here.
             </Text>
+          </View>
+
+          <View style={styles.sellerAttachmentRow}>
+            {[
+              { id: "gallery", label: "Gallery", icon: "image-outline", action: sendImageAttachment },
+              { id: "document", label: "Document", icon: "document-text-outline", action: sendDocumentAttachment },
+              { id: "audio", label: "Audio", icon: "musical-notes-outline", action: sendAudioAttachment },
+              { id: "camera", label: "Camera", icon: "camera-outline", action: sendCameraAttachment },
+            ].map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[
+                  styles.sellerAttachmentButton,
+                  { borderColor: sellerChatColors.border, backgroundColor: sellerChatColors.panelAlt },
+                  (!canUseComposer || uploading) ? styles.sellerAttachmentButtonDisabled : null,
+                ]}
+                onPress={() => {
+                  item.action().catch((error) => {
+                    console.log("seller attachment action error:", error);
+                  });
+                }}
+                disabled={!canUseComposer || uploading}
+              >
+                <Icon name={item.icon} size={17} color={canUseComposer ? colors.primary : sellerChatColors.muted} />
+                <Text style={[styles.sellerAttachmentText, { color: canUseComposer ? sellerChatColors.text : sellerChatColors.muted }]}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -3702,6 +3731,30 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 19,
     fontFamily: appFonts.medium,
+  },
+  sellerAttachmentRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 8,
+  },
+  sellerAttachmentButton: {
+    flex: 1,
+    minHeight: 54,
+    borderWidth: 1,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+  },
+  sellerAttachmentButtonDisabled: {
+    opacity: 0.5,
+  },
+  sellerAttachmentText: {
+    marginTop: 5,
+    fontSize: 10.5,
+    lineHeight: 13,
+    fontFamily: appFonts.semibold,
   },
   attachmentPreviewCard: {
     width: "100%",

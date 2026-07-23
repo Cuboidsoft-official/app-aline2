@@ -24,7 +24,7 @@ import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import { useAppTheme } from "../theme/AppThemeContext";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 
-type EarnSection = "profile" | "company" | "referral";
+type EarnSection = "listedProfile" | "dropAd" | "searchProfile" | "listedAds" | "becomeSeller" | "howToEarn";
 
 const FEATURE_AMOUNT = 100;
 const FEATURE_DAYS = 30;
@@ -48,6 +48,11 @@ const initialCompanyForm = {
   contactName: "",
   contactPhone: "",
   contactEmail: "",
+  contentType: "",
+  minimumFollowersCriteria: "",
+  contentFormat: "template",
+  preferredPlacement: "story",
+  offeredPrice: "",
   productOrService: "",
   campaignGoal: "",
   location: "",
@@ -71,7 +76,8 @@ const toNumber = (value: string) => {
 function HowToEarnScreen({ navigation }: any) {
   const { colors, isDarkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const [activeSection, setActiveSection] = useState<EarnSection>("profile");
+  const [activeSection, setActiveSection] = useState<EarnSection>("listedProfile");
+  const [profileSearchQuery, setProfileSearchQuery] = useState("");
   const [referralCode, setReferralCode] = useState("");
   const [hasSellerAccount, setHasSellerAccount] = useState(false);
   const [featuredProfile, setFeaturedProfile] = useState<any>(null);
@@ -140,6 +146,21 @@ function HowToEarnScreen({ navigation }: any) {
   const isFeatureActive = String(featuredProfile?.status || "").toLowerCase() === "active"
     && String(featuredProfile?.paymentStatus || "").toLowerCase() === "paid";
   const featureExpiryLabel = featuredProfile?.expiresAt ? new Date(featuredProfile.expiresAt).toLocaleDateString() : "";
+  const filteredFeaturedProfiles = useMemo(() => {
+    const query = profileSearchQuery.trim().toLowerCase();
+
+    if (!query) {
+      return featuredProfiles;
+    }
+
+    return featuredProfiles.filter((item) => [
+      item.name,
+      item.username,
+      item.aline2Username,
+      item.location,
+      item.sellerName,
+    ].some((value) => String(value || "").toLowerCase().includes(query)));
+  }, [featuredProfiles, profileSearchQuery]);
 
   const updateProfileForm = (key: keyof typeof initialProfileForm, value: string) => {
     setProfileForm((current) => ({ ...current, [key]: value }));
@@ -170,6 +191,10 @@ function HowToEarnScreen({ navigation }: any) {
           aline2Username: profileForm.aline2Username,
           storyPrice: toNumber(profileForm.storyPrice),
           storyDurationHours: toNumber(profileForm.storyDurationHours) || 24,
+          postPrice: toNumber(profileForm.photoPrice),
+          postDurationDays: toNumber(profileForm.photoDurationDays) || 1,
+          reelPrice: toNumber(profileForm.videoPricePerMinute),
+          reelDurationSeconds: toNumber(profileForm.videoSampleDurationMinutes) || 30,
           photoPrice: toNumber(profileForm.photoPrice),
           photoDurationDays: toNumber(profileForm.photoDurationDays) || 1,
           videoPricePerMinute: toNumber(profileForm.videoPricePerMinute),
@@ -209,8 +234,8 @@ function HowToEarnScreen({ navigation }: any) {
       return;
     }
 
-    if (!companyForm.companyName.trim() || !companyForm.productOrService.trim()) {
-      Alert.alert("Missing details", "Add company name and product or service.");
+    if (!companyForm.companyName.trim() || !(companyForm.contentType.trim() || companyForm.productOrService.trim())) {
+      Alert.alert("Missing details", "Add company name and content type.");
       return;
     }
 
@@ -218,6 +243,10 @@ function HowToEarnScreen({ navigation }: any) {
       setSubmittingCompany(true);
       await API.post("/company-ads", {
         ...companyForm,
+        contentType: companyForm.contentType.trim() || companyForm.productOrService.trim(),
+        productOrService: companyForm.productOrService.trim() || companyForm.contentType.trim(),
+        minimumFollowersCriteria: toNumber(companyForm.minimumFollowersCriteria),
+        offeredPrice: toNumber(companyForm.offeredPrice),
         storyBudget: toNumber(companyForm.storyBudget),
         photoBudget: toNumber(companyForm.photoBudget),
         videoBudgetPerMinute: toNumber(companyForm.videoBudgetPerMinute),
@@ -291,7 +320,7 @@ function HowToEarnScreen({ navigation }: any) {
     <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={styles.panelHeader}>
         <View>
-          <Text style={[styles.detailTitle, { color: colors.text }]}>Feature your profile</Text>
+          <Text style={[styles.detailTitle, { color: colors.text }]}>Search your profile</Text>
           <Text style={[styles.detailBody, { color: colors.mutedText }]}>
             Add your creator rate-card, pay INR {FEATURE_AMOUNT} one time, and get listed for brands.
           </Text>
@@ -315,14 +344,13 @@ function HowToEarnScreen({ navigation }: any) {
         <View style={styles.col}><Field label="Story hours" value={profileForm.storyDurationHours} onChangeText={(value) => updateProfileForm("storyDurationHours", value)} numeric /></View>
       </View>
       <View style={styles.twoCol}>
-        <View style={styles.col}><Field label="Photo price" value={profileForm.photoPrice} onChangeText={(value) => updateProfileForm("photoPrice", value)} numeric /></View>
-        <View style={styles.col}><Field label="Photo days" value={profileForm.photoDurationDays} onChangeText={(value) => updateProfileForm("photoDurationDays", value)} numeric /></View>
+        <View style={styles.col}><Field label="Post price" value={profileForm.photoPrice} onChangeText={(value) => updateProfileForm("photoPrice", value)} numeric /></View>
+        <View style={styles.col}><Field label="Post days" value={profileForm.photoDurationDays} onChangeText={(value) => updateProfileForm("photoDurationDays", value)} numeric /></View>
       </View>
       <View style={styles.twoCol}>
-        <View style={styles.col}><Field label="Video / min" value={profileForm.videoPricePerMinute} onChangeText={(value) => updateProfileForm("videoPricePerMinute", value)} numeric /></View>
-        <View style={styles.col}><Field label="Video / hour" value={profileForm.videoPricePerHour} onChangeText={(value) => updateProfileForm("videoPricePerHour", value)} numeric /></View>
+        <View style={styles.col}><Field label="Reel price" value={profileForm.videoPricePerMinute} onChangeText={(value) => updateProfileForm("videoPricePerMinute", value)} numeric /></View>
+        <View style={styles.col}><Field label="Reel seconds" value={profileForm.videoSampleDurationMinutes} onChangeText={(value) => updateProfileForm("videoSampleDurationMinutes", value)} numeric /></View>
       </View>
-      <Field label="Sample video minutes" value={profileForm.videoSampleDurationMinutes} onChangeText={(value) => updateProfileForm("videoSampleDurationMinutes", value)} numeric />
       <Field label="Promotion notes" value={profileForm.promotionNotes} onChangeText={(value) => updateProfileForm("promotionNotes", value)} multiline placeholder="Audience niche, languages, content rules..." />
 
       <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={activateFeaturedProfile} disabled={submittingProfile || loading}>
@@ -334,12 +362,48 @@ function HowToEarnScreen({ navigation }: any) {
 
   const renderCompanySection = () => (
     <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <Text style={[styles.detailTitle, { color: colors.text }]}>Company ad requirement</Text>
+      <Text style={[styles.detailTitle, { color: colors.text }]}>Drop an Ad</Text>
       <Text style={[styles.detailBody, { color: colors.mutedText }]}>
         Brands can post product or service promotion requirements for creators to discover.
       </Text>
 
       <Field label="Company name" value={companyForm.companyName} onChangeText={(value) => updateCompanyForm("companyName", value)} />
+      <Field label="Content type" value={companyForm.contentType} onChangeText={(value) => updateCompanyForm("contentType", value)} placeholder="Beauty, food, app install, local business..." />
+      <Field label="Minimum followers criteria" value={companyForm.minimumFollowersCriteria} onChangeText={(value) => updateCompanyForm("minimumFollowersCriteria", value)} numeric />
+
+      <Text style={[styles.fieldLabel, { color: colors.mutedText, marginTop: 12 }]}>Content format</Text>
+      <View style={styles.segmentRow}>
+        {["template", "video"].map((type) => (
+          <TouchableOpacity
+            key={type}
+            style={[
+              styles.segment,
+              { borderColor: colors.border, backgroundColor: companyForm.contentFormat === type ? colors.primary : colors.surface },
+            ]}
+            onPress={() => updateCompanyForm("contentFormat", type)}
+          >
+            <Text style={[styles.segmentText, { color: companyForm.contentFormat === type ? "#fff" : colors.text }]}>{type}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <Text style={[styles.fieldLabel, { color: colors.mutedText, marginTop: 12 }]}>Preferred placement</Text>
+      <View style={styles.segmentRow}>
+        {["story", "post", "reel"].map((type) => (
+          <TouchableOpacity
+            key={type}
+            style={[
+              styles.segment,
+              { borderColor: colors.border, backgroundColor: companyForm.preferredPlacement === type ? colors.primary : colors.surface },
+            ]}
+            onPress={() => updateCompanyForm("preferredPlacement", type)}
+          >
+            <Text style={[styles.segmentText, { color: companyForm.preferredPlacement === type ? "#fff" : colors.text }]}>{type}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <Field label="Offered price" value={companyForm.offeredPrice} onChangeText={(value) => updateCompanyForm("offeredPrice", value)} numeric />
       <Field label="Product or service" value={companyForm.productOrService} onChangeText={(value) => updateCompanyForm("productOrService", value)} />
       <Field label="Campaign goal" value={companyForm.campaignGoal} onChangeText={(value) => updateCompanyForm("campaignGoal", value)} placeholder="Launch, review, awareness..." />
       <Field label="Location" value={companyForm.location} onChangeText={(value) => updateCompanyForm("location", value)} />
@@ -406,10 +470,27 @@ function HowToEarnScreen({ navigation }: any) {
   );
 
   const renderActiveSection = () => {
-    if (activeSection === "company") return renderCompanySection();
-    if (activeSection === "referral") return renderReferralSection();
+    if (activeSection === "listedProfile" || activeSection === "listedAds") return null;
+    if (activeSection === "dropAd") return renderCompanySection();
+    if (activeSection === "searchProfile") return renderProfileSection();
+    if (activeSection === "becomeSeller") {
+      return (
+        <TouchableOpacity
+          style={[styles.sellerLink, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 18 }]}
+          onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
+        >
+          <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={20} color={colors.primary} />
+          <Text style={[styles.sellerLinkText, { color: colors.text }]}>
+            {hasSellerAccount ? "Open seller dashboard" : "Become a seller"}
+          </Text>
+        </TouchableOpacity>
+      );
+    }
+    if (activeSection === "howToEarn") return renderReferralSection();
     return renderProfileSection();
   };
+  const showProfileList = activeSection === "listedProfile" || activeSection === "searchProfile";
+  const showAdsList = activeSection === "listedAds" || activeSection === "dropAd";
 
   return (
     <View style={styles.screen}>
@@ -442,9 +523,12 @@ function HowToEarnScreen({ navigation }: any) {
 
           <View style={styles.actionList}>
             {[
-              { key: "profile", icon: "sparkles-outline", title: "Featured profile", sub: `Rate-card listing for INR ${FEATURE_AMOUNT}` },
-              { key: "company", icon: "megaphone-outline", title: "Company ads", sub: "Post product or service promotion budgets" },
-              { key: "referral", icon: "gift-outline", title: "Referral rewards", sub: "Share and earn benefits" },
+              { key: "listedProfile", icon: "list-outline", title: "Listed Profile", sub: "View creators with promotion pricing" },
+              { key: "dropAd", icon: "megaphone-outline", title: "Drop an Ad", sub: "Create a campaign for creators" },
+              { key: "searchProfile", icon: "search-outline", title: "Search Your Profile", sub: `Rate-card listing for INR ${FEATURE_AMOUNT}` },
+              { key: "listedAds", icon: "newspaper-outline", title: "Listed Ads", sub: "View active advertiser campaigns" },
+              { key: "becomeSeller", icon: "storefront-outline", title: "Become a Seller", sub: "Set post, story, and reel prices" },
+              { key: "howToEarn", icon: "gift-outline", title: "How to Earn", sub: "Referral and promotion earning options" },
             ].map((item) => (
               <TouchableOpacity
                 key={item.key}
@@ -465,9 +549,18 @@ function HowToEarnScreen({ navigation }: any) {
 
           {renderActiveSection()}
 
+          {showProfileList ? (
           <View style={styles.listSection}>
             <Text style={[styles.listTitle, { color: colors.text }]}>Featured profile list</Text>
-            {featuredProfiles.length ? featuredProfiles.map((item) => (
+            {activeSection === "searchProfile" ? (
+              <Field
+                label="Search profile"
+                value={profileSearchQuery}
+                onChangeText={setProfileSearchQuery}
+                placeholder="Username, location, creator name"
+              />
+            ) : null}
+            {filteredFeaturedProfiles.length ? filteredFeaturedProfiles.map((item) => (
               <TouchableOpacity
                 key={item._id}
                 style={[styles.marketCard, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -477,7 +570,7 @@ function HowToEarnScreen({ navigation }: any) {
                   <View>
                     <Text style={[styles.marketTitle, { color: colors.text }]}>{item.name || item.aline2Username || "Aline2 creator"}</Text>
                     <Text style={[styles.marketMeta, { color: colors.mutedText }]}>
-                      @{item.aline2Username || item.username || "creator"} · {item.location || "Location not set"}
+                      @{item.aline2Username || item.username || "creator"} - {item.location || "Location not set"}
                     </Text>
                   </View>
                   <Icon name="star" size={18} color={colors.primary} />
@@ -486,17 +579,19 @@ function HowToEarnScreen({ navigation }: any) {
                   {Number(item.followerCount || 0).toLocaleString()} followers
                 </Text>
                 <Text style={[styles.rateLine, { color: colors.mutedText }]}>
-                  Story INR {item.storyPromotion?.price || 0}/{item.storyPromotion?.durationHours || 24}h · Photo INR {item.photoPromotion?.price || 0}/{item.photoPromotion?.durationDays || 1}d
+                  Story INR {item.storyPromotion?.price || 0}/{item.storyPromotion?.durationHours || 24}h - Post INR {item.postPromotion?.price || item.photoPromotion?.price || 0}
                 </Text>
                 <Text style={[styles.rateLine, { color: colors.mutedText }]}>
-                  Video INR {item.videoPromotion?.pricePerMinute || 0}/min · INR {item.videoPromotion?.pricePerHour || 0}/hour
+                  Reel INR {item.reelPromotion?.price || item.videoPromotion?.pricePerMinute || 0}
                 </Text>
               </TouchableOpacity>
             )) : (
               <Text style={[styles.emptyText, { color: colors.mutedText }]}>No featured creators yet.</Text>
             )}
           </View>
+          ) : null}
 
+          {showAdsList ? (
           <View style={styles.listSection}>
             <Text style={[styles.listTitle, { color: colors.text }]}>Featured ads list</Text>
             {companyAds.length ? companyAds.map((item) => (
@@ -508,21 +603,22 @@ function HowToEarnScreen({ navigation }: any) {
                 <View style={styles.marketHeader}>
                   <View style={styles.marketCopy}>
                     <Text style={[styles.marketTitle, { color: colors.text }]}>{item.productOrService}</Text>
-                    <Text style={[styles.marketMeta, { color: colors.mutedText }]}>{item.companyName} · {item.location || "Any location"}</Text>
+                    <Text style={[styles.marketMeta, { color: colors.mutedText }]}>{item.companyName} - {item.location || "Any location"}</Text>
                   </View>
                   <Icon name="open-outline" size={18} color={colors.primary} />
                 </View>
                 <Text style={[styles.rateLine, { color: colors.mutedText }]}>
-                  Story INR {item.storyBudget || 0} · Photo INR {item.photoBudget || 0}
+                  {item.contentType || "Campaign"} - {item.minimumFollowers || 0}+ followers - {item.contentFormat || "template"}
                 </Text>
                 <Text style={[styles.rateLine, { color: colors.mutedText }]}>
-                  Video INR {item.videoBudgetPerMinute || 0}/min · INR {item.videoBudgetPerHour || 0}/hour
+                  {item.preferredPlacement || "story"} - Offered INR {item.offeredPrice || item.storyBudget || item.photoBudget || item.videoBudgetPerMinute || 0}
                 </Text>
               </TouchableOpacity>
             )) : (
               <Text style={[styles.emptyText, { color: colors.mutedText }]}>No company ad requirements yet.</Text>
             )}
           </View>
+          ) : null}
 
           <TouchableOpacity
             style={[styles.sellerLink, { backgroundColor: colors.card, borderColor: colors.border }]}

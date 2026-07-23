@@ -59,6 +59,11 @@ export interface MediaAsset {
   durationMs?: number;
   width?: number;
   height?: number;
+  frameTransform?: {
+    scale: number;
+    translateX: number;
+    translateY: number;
+  };
   sensitiveContent?: {
     isSensitive: boolean;
     blur?: boolean;
@@ -346,6 +351,7 @@ export interface CreateReelInput {
   caption: string;
   media: MediaAsset;
   thumbnailUrl?: string;
+  hasOriginalAudio?: boolean;
   music?: SelectedMusicClip;
   hashtags?: string[];
   mentions?: string[];
@@ -383,7 +389,7 @@ export interface DeleteCommentResult {
 }
 
 export interface SocialApi {
-  getFeed(page?: number): Promise<FeedResponse>;
+  getFeed(page?: number, limit?: number): Promise<FeedResponse>;
   getUserFeed(userId: string): Promise<FeedResponse>;
   getReels(page?: number): Promise<Reel[]>;
   getReel(reelId: string): Promise<Reel>;

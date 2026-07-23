@@ -154,6 +154,11 @@ type SellerProfileResponse = {
   onboardingServiceName?: string;
   onboardingServiceDurationMinutes?: number | string;
   onboardingServiceRate?: number | string;
+  promotionPricing?: {
+    post?: number | string;
+    story?: number | string;
+    reel?: number | string;
+  };
   degreeDoc?: string;
   licenseDoc?: string;
   aadhaarDoc?: string;
@@ -248,6 +253,9 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [serviceName, setServiceName] = useState("");
   const [serviceDurationMinutes, setServiceDurationMinutes] = useState("15");
   const [serviceRate, setServiceRate] = useState("");
+  const [promotionPostPrice, setPromotionPostPrice] = useState("");
+  const [promotionStoryPrice, setPromotionStoryPrice] = useState("");
+  const [promotionReelPrice, setPromotionReelPrice] = useState("");
 
   const selectedPlan = useMemo(
     () => PLAN_OPTIONS.find((plan) => plan.key === premiumPlan) || PLAN_OPTIONS[0],
@@ -302,6 +310,9 @@ const SellerRegistration = ({ navigation, route }: any) => {
     setServiceName(seller?.onboardingServiceName || "");
     setServiceDurationMinutes(String(seller?.onboardingServiceDurationMinutes || "15"));
     setServiceRate(String(seller?.onboardingServiceRate || ""));
+    setPromotionPostPrice(String(seller?.promotionPricing?.post || ""));
+    setPromotionStoryPrice(String(seller?.promotionPricing?.story || ""));
+    setPromotionReelPrice(String(seller?.promotionPricing?.reel || ""));
   }, []);
 
   useEffect(() => {
@@ -842,6 +853,11 @@ const SellerRegistration = ({ navigation, route }: any) => {
         onboardingServiceDurationMinutes: durationMinutes,
         onboardingServiceRate: Number(serviceRate) || 0,
         onboardingServiceRateLimit: rateLimit,
+        promotionPricing: {
+          post: Number(promotionPostPrice) || 0,
+          story: Number(promotionStoryPrice) || 0,
+          reel: Number(promotionReelPrice) || 0,
+        },
       };
 
       const endpoint = mode === "edit" ? "/seller/update" : "/seller/register";
@@ -1358,6 +1374,22 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
         <Text style={[styles.label, { color: colors.text }]}>Your rate</Text>
         <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={serviceRate} onChangeText={setServiceRate} placeholder={`Max INR ${rateLimit || 0}`} placeholderTextColor={colors.placeholder} keyboardType="numeric" />
+
+        <View style={[styles.rateCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.rateLabel, { color: colors.mutedText }]}>Promotion pricing</Text>
+          <Text style={[styles.rateBody, { color: colors.mutedText }]}>
+            Set creator rates for brand promotions. These prices are shown in the promotion marketplace.
+          </Text>
+        </View>
+
+        <Text style={[styles.label, { color: colors.text }]}>Post promotion price</Text>
+        <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={promotionPostPrice} onChangeText={setPromotionPostPrice} placeholder="INR for one post" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
+
+        <Text style={[styles.label, { color: colors.text }]}>Story promotion price</Text>
+        <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={promotionStoryPrice} onChangeText={setPromotionStoryPrice} placeholder="INR for one story" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
+
+        <Text style={[styles.label, { color: colors.text }]}>Reel promotion price</Text>
+        <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={promotionReelPrice} onChangeText={setPromotionReelPrice} placeholder="INR for one reel" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
       </>
     );
   };

@@ -120,25 +120,22 @@ type MusicPreviewMode = "audio";
 
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
 const POST_ASPECTS: AspectOption[] = [
-  { id: "standard", label: "4:3", detail: "Standard", ratio: 4 / 3 },
-  { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
+  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
   { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
-  { id: "portrait23", label: "2:3", detail: "Portrait", ratio: 2 / 3 },
-  { id: "landscape32", label: "3:2", detail: "Classic", ratio: 3 / 2 },
 ];
-const TALL_ASPECTS: AspectOption[] = [
+const STORY_ASPECTS: AspectOption[] = [
   { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
   { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
 ];
 const ASPECTS_BY_MODE: Record<ComposerMode, AspectOption[]> = {
   post: POST_ASPECTS,
-  story: TALL_ASPECTS,
-  swipe: TALL_ASPECTS,
+  story: STORY_ASPECTS,
+  swipe: POST_ASPECTS,
 };
 const DEFAULT_ASPECT_BY_MODE: Record<ComposerMode, string> = {
-  post: "standard",
+  post: "portrait",
   story: "vertical",
-  swipe: "vertical",
+  swipe: "portrait",
 };
 const CREATE_DOCK_OFFSET = APP_BOTTOM_DOCK_BASE_HEIGHT + 4;
 const MODE_COPY: Record<
@@ -426,10 +423,18 @@ const buildAspectMetadata = (
   uploadedMedia: CreatePostInput["media"][number],
   sourceAsset: ComposerAsset | null,
   ratio: number,
+  frameTransform?: { scale: number; translateX: number; translateY: number },
 ) => {
   const safeRatio = Math.max(0.5, Math.min(2, Number(ratio) || 1));
   const sourceWidth = Math.max(720, Math.round(Number(sourceAsset?.width || uploadedMedia.width || 0) || 0));
   const sourceHeight = Math.max(720, Math.round(Number(sourceAsset?.height || uploadedMedia.height || 0) || 0));
+  const safeFrameTransform = frameTransform
+    ? {
+        scale: Math.max(1, Math.min(4, Number(frameTransform.scale) || 1)),
+        translateX: Math.max(-1, Math.min(1, Number(frameTransform.translateX) || 0)),
+        translateY: Math.max(-1, Math.min(1, Number(frameTransform.translateY) || 0)),
+      }
+    : undefined;
 
   if (safeRatio >= 1) {
     const width = Math.max(sourceWidth, Math.round(sourceHeight * safeRatio));
@@ -437,6 +442,7 @@ const buildAspectMetadata = (
       ...uploadedMedia,
       width,
       height: Math.round(width / safeRatio),
+      frameTransform: safeFrameTransform,
     };
   }
 
@@ -445,6 +451,7 @@ const buildAspectMetadata = (
     ...uploadedMedia,
     width: Math.round(height * safeRatio),
     height,
+    frameTransform: safeFrameTransform,
   };
 };
 
@@ -1002,6 +1009,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const [storyCreationMode, setStoryCreationMode] = useState<"media" | "text">("media");
   const [storyToolPanel, setStoryToolPanel] = useState<StoryToolPanel>("filters");
   const [storyCanvasSize, setStoryCanvasSize] = useState({ width: 0, height: 0 });
+  const [composerCanvasSize, setComposerCanvasSize] = useState({ width: 0, height: 0 });
+  const [composerMediaTransform, setComposerMediaTransform] = useState({ scale: 1, translateX: 0, translateY: 0 });
   const [storyBackgroundColor, setStoryBackgroundColor] = useState(STORY_BACKGROUND_COLORS[0]);
   const [storyText, setStoryText] = useState("");
   const [storyTextColor, setStoryTextColor] = useState(STORY_TEXT_COLOR_OPTIONS[0]);
@@ -1046,6 +1055,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const storyTextPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const storyEmojiPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const storyImagePan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const composerMediaPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const composerMediaGestureRef = useRef({ startX: 0, startY: 0, startScale: 1, startDistance: 0 });
   const lastStoryAssetUriRef = useRef("");
   const {
     isReady: musicPreviewReady,
@@ -1242,6 +1253,11 @@ function CreatePostScreen({ navigation, route }: any) {
   }, [selectedAsset, stage]);
 
   useEffect(() => {
+    setComposerMediaTransform({ scale: 1, translateX: 0, translateY: 0 });
+    composerMediaPan.setValue({ x: 0, y: 0 });
+  }, [activeAspect.id, composerMediaPan, mode, selectedAsset?.uri]);
+
+  useEffect(() => {
     const assetUri = String(selectedAsset?.uri || "");
 
     if (!assetUri || assetUri === lastStoryAssetUriRef.current) {
@@ -1284,6 +1300,23 @@ function CreatePostScreen({ navigation, route }: any) {
       y: clamp(storyImagePosition.y, 0.04, 0.84) * storyCanvasSize.height,
     });
   }, [storyCanvasSize.height, storyCanvasSize.width, storyImagePan, storyImagePosition.x, storyImagePosition.y]);
+
+  useEffect(() => {
+    if (!composerCanvasSize.width || !composerCanvasSize.height) {
+      return;
+    }
+
+    composerMediaPan.setValue({
+      x: composerMediaTransform.translateX * composerCanvasSize.width,
+      y: composerMediaTransform.translateY * composerCanvasSize.height,
+    });
+  }, [
+    composerCanvasSize.height,
+    composerCanvasSize.width,
+    composerMediaPan,
+    composerMediaTransform.translateX,
+    composerMediaTransform.translateY,
+  ]);
 
   useEffect(() => {
     if (mode !== "story" || stage !== "edit") {
@@ -2543,7 +2576,7 @@ function CreatePostScreen({ navigation, route }: any) {
     const hashtags = Array.from(new Set(captionEntities.hashtags));
     const mentions = Array.from(new Set([...selectedMentions, ...captionEntities.mentions]));
     const [uploadedMedia] = await uploadComposerAssets([selectedAsset], uploadOptions);
-    const framedMedia = buildAspectMetadata(uploadedMedia, selectedAsset, activeAspect.ratio);
+    const framedMedia = buildAspectMetadata(uploadedMedia, selectedAsset, activeAspect.ratio, composerMediaTransform);
 
     return {
       type: framedMedia.mediaType === "video" ? "video" : "photo",
@@ -2563,7 +2596,7 @@ function CreatePostScreen({ navigation, route }: any) {
       filterPreset: framedMedia.mediaType === "image" && selectedFilterId !== "none" ? selectedFilterId : undefined,
       stickers: buildComposerTextStickers(),
     };
-  }, [activeAspect.ratio, buildComposerTextStickers, caption, disableComments, hideLikeCount, location, selectedAsset, selectedFilterId, selectedMentions, selectedMusic, selectedTagPeople]);
+  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, disableComments, hideLikeCount, location, selectedAsset, selectedFilterId, selectedMentions, selectedMusic, selectedTagPeople]);
 
   const prepareStoryPayload = useCallback(async (
     uploadOptions?: UploadComposerAssetsOptions,
@@ -2680,10 +2713,13 @@ function CreatePostScreen({ navigation, route }: any) {
       throw new Error("Swipes require a video.");
     }
 
+    const framedMedia = buildAspectMetadata(uploadedMedia, selectedAsset, activeAspect.ratio, composerMediaTransform);
+
     return {
       caption: caption.trim(),
-      media: uploadedMedia,
-      thumbnailUrl: uploadedMedia.thumbnailUrl,
+      media: framedMedia,
+      thumbnailUrl: framedMedia.thumbnailUrl,
+      hasOriginalAudio: !selectedMusic,
       music: selectedMusic || undefined,
       location: location.trim() || undefined,
       hashtags,
@@ -2691,7 +2727,7 @@ function CreatePostScreen({ navigation, route }: any) {
       taggedUsers: buildTaggedUserPayload(selectedTagPeople),
       stickers: buildComposerTextStickers(),
     };
-  }, [buildComposerTextStickers, caption, location, selectedAsset, selectedMentions, selectedMusic, selectedTagPeople]);
+  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, location, selectedAsset, selectedMentions, selectedMusic, selectedTagPeople]);
 
   const publish = useCallback(async () => {
     if (publishing) {
@@ -2777,6 +2813,72 @@ function CreatePostScreen({ navigation, route }: any) {
       y: clamp(nextPosition.y, 0.04, 0.84),
     });
   }, []);
+
+  const persistComposerMediaTransform = useCallback(() => {
+    const rawX = Number((composerMediaPan.x as any)._value || 0);
+    const rawY = Number((composerMediaPan.y as any)._value || 0);
+
+    setComposerMediaTransform((current) => ({
+      scale: clamp(current.scale, 1, 4),
+      translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -1, 1) : current.translateX,
+      translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -1, 1) : current.translateY,
+    }));
+  }, [composerCanvasSize.height, composerCanvasSize.width, composerMediaPan]);
+
+  const composerMediaResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !!selectedAsset && mode !== "story",
+        onMoveShouldSetPanResponder: () => !!selectedAsset && mode !== "story",
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: (event) => {
+          const touches = event.nativeEvent.touches || [];
+          const firstTouch = touches[0];
+          const secondTouch = touches[1];
+          const distance = firstTouch && secondTouch
+            ? Math.hypot(firstTouch.pageX - secondTouch.pageX, firstTouch.pageY - secondTouch.pageY)
+            : 0;
+
+          composerMediaGestureRef.current = {
+            startX: Number((composerMediaPan.x as any)._value || 0),
+            startY: Number((composerMediaPan.y as any)._value || 0),
+            startScale: composerMediaTransform.scale,
+            startDistance: distance,
+          };
+        },
+        onPanResponderMove: (event, gestureState) => {
+          const touches = event.nativeEvent.touches || [];
+          const firstTouch = touches[0];
+          const secondTouch = touches[1];
+
+          if (firstTouch && secondTouch) {
+            const distance = Math.hypot(firstTouch.pageX - secondTouch.pageX, firstTouch.pageY - secondTouch.pageY);
+            const startDistance = composerMediaGestureRef.current.startDistance || distance || 1;
+            const nextScale = clamp(
+              composerMediaGestureRef.current.startScale * (distance / Math.max(1, startDistance)),
+              1,
+              4,
+            );
+            setComposerMediaTransform((current) => ({ ...current, scale: nextScale }));
+            return;
+          }
+
+          composerMediaPan.setValue({
+            x: composerMediaGestureRef.current.startX + gestureState.dx,
+            y: composerMediaGestureRef.current.startY + gestureState.dy,
+          });
+        },
+        onPanResponderRelease: persistComposerMediaTransform,
+        onPanResponderTerminate: persistComposerMediaTransform,
+      }),
+    [
+      composerMediaPan,
+      composerMediaTransform.scale,
+      mode,
+      persistComposerMediaTransform,
+      selectedAsset,
+    ],
+  );
 
   const storyTextResponder = useMemo(
     () =>
@@ -3153,16 +3255,14 @@ function CreatePostScreen({ navigation, route }: any) {
           {railItems.map((item) => (
             <TouchableOpacity
               key={item.id}
+              accessibilityLabel={item.label}
               style={[
                 styles.storyRailButton,
                 item.active ? { backgroundColor: accentSoft, borderColor: accentColor } : { backgroundColor: inputBackground, borderColor },
               ]}
               onPress={item.onPress}
             >
-              <Icon name={item.icon} size={17} color={accentColor} />
-              <Text style={[styles.storyRailButtonText, { color: textColor }]} numberOfLines={2}>
-                {item.label}
-              </Text>
+              <Icon name={item.icon} size={18} color={accentColor} />
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -3647,6 +3747,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const updateComposerCanvasSize = (width: number, height: number) => {
     if (width && height) {
       setStoryCanvasSize({ width, height });
+      setComposerCanvasSize({ width, height });
     }
   };
 
@@ -3735,11 +3836,16 @@ function CreatePostScreen({ navigation, route }: any) {
         aspectRatio: activeAspect.ratio,
       },
     ];
-    const imageResizeMode =
-      selectedAsset.width && selectedAsset.height && Math.abs(selectedAsset.width / Math.max(1, selectedAsset.height) - activeAspect.ratio) > 0.12
-        ? "contain"
-        : "cover";
     const interactive = !!options?.interactive;
+    const mediaTransformStyle = [
+      styles.previewMediaFill,
+      {
+        transform: [
+          ...composerMediaPan.getTranslateTransform(),
+          { scale: composerMediaTransform.scale },
+        ],
+      },
+    ];
 
     if (selectedAsset.mediaType === "video") {
       return (
@@ -3751,18 +3857,29 @@ function CreatePostScreen({ navigation, route }: any) {
             }
           }}
         >
-          <SocialVideo
-            uri={selectedAsset.uri}
-            posterUri={selectedAsset.thumbnailUrl}
-            style={StyleSheet.absoluteFill}
-            muted
-            repeat
-            paused={stage === "details"}
-          />
+          <Animated.View style={mediaTransformStyle} {...(interactive ? composerMediaResponder.panHandlers : {})}>
+            <SocialVideo
+              uri={selectedAsset.uri}
+              posterUri={selectedAsset.thumbnailUrl}
+              style={StyleSheet.absoluteFill}
+              muted={false}
+              repeat
+              paused={stage === "details"}
+            />
+          </Animated.View>
           <View style={styles.videoBadge}>
             <Icon name="videocam" size={16} color="#fff" />
             <Text style={styles.videoBadgeText}>{MODE_COPY[mode].label}</Text>
           </View>
+          {interactive ? (
+            <View pointerEvents="none" style={styles.cropFrameGuide} />
+          ) : null}
+          {interactive ? (
+            <View pointerEvents="none" style={styles.cropHintPill}>
+              <Icon name="move-outline" size={13} color="#fff" />
+              <Text style={styles.cropHintText}>Drag - pinch to zoom</Text>
+            </View>
+          ) : null}
           {renderComposerTextOverlay(interactive)}
         </View>
       );
@@ -3777,20 +3894,29 @@ function CreatePostScreen({ navigation, route }: any) {
           }
         }}
       >
-        {ColorMatrix && selectedFilterId !== "none" ? (
-          <View style={styles.previewMediaFill}>
+        <Animated.View style={mediaTransformStyle} {...(interactive ? composerMediaResponder.panHandlers : {})}>
+          {ColorMatrix && selectedFilterId !== "none" ? (
             <ColorMatrix matrix={(PHOTO_FILTER_LIST.find((item) => item.id === selectedFilterId) || PHOTO_FILTER_LIST[0]).matrix}>
-              <Image source={{ uri: selectedAsset.uri }} style={styles.previewMedia} resizeMode={imageResizeMode} />
+              <Image source={{ uri: selectedAsset.uri }} style={styles.previewMedia} resizeMode="cover" />
             </ColorMatrix>
+          ) : (
+            <ProgressiveImage
+              uri={selectedAsset.uri}
+              previewUri={selectedAsset.thumbnailUrl}
+              style={styles.previewMediaFill}
+              resizeMode="cover"
+            />
+          )}
+        </Animated.View>
+        {interactive ? (
+          <View pointerEvents="none" style={styles.cropFrameGuide} />
+        ) : null}
+        {interactive ? (
+          <View pointerEvents="none" style={styles.cropHintPill}>
+            <Icon name="move-outline" size={13} color="#fff" />
+            <Text style={styles.cropHintText}>Drag - pinch to zoom</Text>
           </View>
-        ) : (
-          <ProgressiveImage
-            uri={selectedAsset.uri}
-            previewUri={selectedAsset.thumbnailUrl}
-            style={styles.previewMediaFill}
-            resizeMode={imageResizeMode}
-          />
-        )}
+        ) : null}
         {renderComposerTextOverlay(interactive)}
       </View>
     );
@@ -4145,16 +4271,14 @@ function CreatePostScreen({ navigation, route }: any) {
           {railItems.filter((item) => !item.hidden).map((item) => (
             <TouchableOpacity
               key={item.id}
+              accessibilityLabel={item.label}
               style={[
                 styles.storyRailButton,
                 item.active ? { backgroundColor: accentSoft, borderColor: accentColor } : { backgroundColor: inputBackground, borderColor },
               ]}
               onPress={item.onPress}
             >
-              <Icon name={item.icon} size={17} color={accentColor} />
-              <Text style={[styles.storyRailButtonText, { color: textColor }]} numberOfLines={2}>
-                {item.label}
-              </Text>
+              <Icon name={item.icon} size={18} color={accentColor} />
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -5957,14 +6081,14 @@ const styles = StyleSheet.create({
   },
   storyToolRail: {
     position: "absolute",
-    right: 12,
+    right: 8,
     zIndex: 5,
-    width: 84,
-    borderRadius: 28,
+    width: 52,
+    borderRadius: 24,
     borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    gap: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    gap: 6,
     shadowColor: "#020617",
     shadowOpacity: 0.2,
     shadowRadius: 20,
@@ -5972,24 +6096,18 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   storyToolRailScroll: {
-    gap: 8,
+    gap: 6,
     paddingBottom: 2,
   },
   storyRailButton: {
-    minHeight: 64,
-    borderRadius: 18,
+    width: 38,
+    minHeight: 38,
+    borderRadius: 14,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 8,
-  },
-  storyRailButtonText: {
-    fontSize: 10,
-    lineHeight: 12,
-    textAlign: "center",
-    fontFamily: appFonts.medium,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   storyToolDock: {
     position: "absolute",
@@ -6082,7 +6200,7 @@ const styles = StyleSheet.create({
   previewFrame: {
     width: "100%",
     borderRadius: 24,
-    borderWidth: 1,
+    borderWidth: 0,
     overflow: "hidden",
     marginBottom: 12,
   },
@@ -6092,6 +6210,12 @@ const styles = StyleSheet.create({
   previewMedia: {
     width: "100%",
     height: "100%",
+  },
+  cropFrameGuide: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.55)",
+    borderRadius: 24,
   },
   emptyPreview: {
     width: "100%",
@@ -6133,6 +6257,24 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 12,
     fontFamily: appFonts.semibold,
+  },
+  cropHintPill: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(15, 23, 42, 0.58)",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  cropHintText: {
+    color: "#fff",
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: appFonts.medium,
   },
   sectionCard: {
     borderRadius: 22,

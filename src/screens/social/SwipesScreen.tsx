@@ -32,7 +32,7 @@ import SocialVideo from "../../features/social/components/SocialVideo";
 import MentionSuggestionList from "../../components/MentionSuggestionList";
 import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, SocialUser, Swipe, SwipeComment } from "../../features/social/types";
-import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
@@ -44,7 +44,8 @@ import { getStoredUser, getStoredUserId } from "../../utils/authSession";
 import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../../utils/mentionComposer";
 
 const { height } = Dimensions.get("window");
-const SWIPE_PAGE_SIZE = 20;
+const SWIPE_PAGE_SIZE = 10;
+const SWIPE_LOAD_MORE_THROTTLE_MS = 1200;
 const reportReasons: ReportReason[] = [
   "spam",
   "violence",
@@ -84,17 +85,9 @@ const getMusicPlaybackUrl = (music?: Swipe["music"]): string =>
   String(music?.previewUrl || music?.streamUrl || music?.audioUrl || "").trim();
 
 const getTrimmedMusicDurationMs = (
-  music?: { duration?: number; startTime?: number; endTime?: number },
+  _music?: { duration?: number; startTime?: number; endTime?: number },
 ): number => {
-  const maxClipMs = 30000;
-  const explicitDurationMs = Math.max(0, Number(music?.duration || 0) * 1000);
-  if (explicitDurationMs > 0) {
-    return Math.min(maxClipMs, explicitDurationMs);
-  }
-
-  const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
-  const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
-  return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : maxClipMs;
+  return 30000;
 };
 
 type SwipeRelationshipKind = "self" | "follow" | "follow_back" | "following";
@@ -142,11 +135,14 @@ function SwipesScreen({ navigation, route }: any) {
   });
   const swipeListRef = useRef<FlatList<Swipe> | null>(null);
   const activeSwipeIndexRef = useRef(0);
+  const swipeLoadMoreRequestRef = useRef(false);
+  const swipeLastLoadMoreAtRef = useRef(0);
   const focusedSwipeId = String(route?.params?.swipeId || "").trim();
   const focusUserId = String(route?.params?.userId || "").trim();
   const isFocusedSwipeFeed = Boolean(focusUserId);
 
   const activeSwipe = swipes[activeSwipeIndex] || null;
+  const nextMusicSwipe = swipes.slice(activeSwipeIndex + 1).find((item) => !!getMusicPlaybackUrl(item.music)) || null;
   const activeSwipeRawMusicUrl = getMusicPlaybackUrl(activeSwipe?.music);
   const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipeRawMusicUrl);
   const activeSwipeMusicStartMs = Math.max(0, Number(activeSwipe?.music?.startTime || 0) * 1000);
@@ -222,6 +218,19 @@ function SwipesScreen({ navigation, route }: any) {
     durationMs: activeSwipeMusicDurationMs,
     shouldPlay: shouldPlaySwipeMusic,
     pauseWhenInactive: true,
+  });
+  const nextSwipeRawMusicUrl = getMusicPlaybackUrl(nextMusicSwipe?.music);
+  const nextSwipeMusicUrl = normalizeMediaUrl(nextSwipeRawMusicUrl);
+  const nextSwipeMusicStartMs = Math.max(0, Number(nextMusicSwipe?.music?.startTime || 0) * 1000);
+  const nextSwipeMusicDurationMs = getTrimmedMusicDurationMs(nextMusicSwipe?.music);
+  const nextSwipeMusicTrackKey = nextMusicSwipe
+    ? `${nextMusicSwipe.id}:${nextSwipeMusicUrl}:${nextSwipeMusicStartMs}:${nextSwipeMusicDurationMs}`
+    : "";
+  useSegmentedMusicWarmup({
+    rawUrl: nextSwipeRawMusicUrl,
+    normalizedUrl: nextSwipeMusicUrl,
+    trackKey: nextSwipeMusicTrackKey,
+    enabled: shouldPlaySwipeMusic && isScreenFocused && !activeSheet,
   });
   const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
     + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
@@ -439,6 +448,8 @@ function SwipesScreen({ navigation, route }: any) {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    swipeLoadMoreRequestRef.current = false;
+    swipeLastLoadMoreAtRef.current = 0;
     try {
       const data = focusUserId ? await socialApi.getUserSwipes(focusUserId) : await socialApi.getSwipes(1, SWIPE_PAGE_SIZE);
       setSwipes(data);
@@ -450,6 +461,53 @@ function SwipesScreen({ navigation, route }: any) {
       setRefreshing(false);
     }
   };
+
+  const loadMoreSwipes = useCallback(() => {
+    if (isFocusedSwipeFeed || loadingMore || !hasMoreSwipes || swipeLoadMoreRequestRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - swipeLastLoadMoreAtRef.current < SWIPE_LOAD_MORE_THROTTLE_MS) {
+      return;
+    }
+
+    swipeLastLoadMoreAtRef.current = now;
+    swipeLoadMoreRequestRef.current = true;
+    const nextPage = swipePage + 1;
+    setLoadingMore(true);
+
+    socialApi.getSwipes(nextPage, SWIPE_PAGE_SIZE)
+      .then((data) => {
+        const nextSwipes = Array.isArray(data) ? data : [];
+        setSwipePage(nextPage);
+
+        if (!nextSwipes.length || nextSwipes.length < SWIPE_PAGE_SIZE) {
+          setHasMoreSwipes(false);
+        }
+
+        if (!nextSwipes.length) {
+          return;
+        }
+
+        setSwipes((prev) => {
+          const latestIds = new Set(prev.map((item) => item.id));
+          const uniqueItems = nextSwipes.filter((item) => item?.id && !latestIds.has(item.id));
+
+          if (!uniqueItems.length) {
+            setHasMoreSwipes(false);
+            return prev;
+          }
+
+          return [...prev, ...uniqueItems];
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        swipeLoadMoreRequestRef.current = false;
+        setLoadingMore(false);
+      });
+  }, [hasMoreSwipes, isFocusedSwipeFeed, loadingMore, swipePage]);
 
   useEffect(() => {
     let active = true;
@@ -920,7 +978,7 @@ function SwipesScreen({ navigation, route }: any) {
             posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
             style={styles.swipeMedia}
             paused={!isActive || !!activeSheet || !isScreenFocused}
-            muted={!isActive || !isSwipePlaybackEnabled || hasAttachedMusic}
+            muted={!isActive || !isSwipePlaybackEnabled || (hasAttachedMusic && !!activeSwipeMusicUrl)}
             repeat
             preload={false}
             resizeMode="cover"
@@ -1129,31 +1187,8 @@ function SwipesScreen({ navigation, route }: any) {
           activeSwipeIndexRef.current = boundedIndex;
           setActiveSwipeIndex(boundedIndex);
         }}
-        onEndReachedThreshold={0.75}
-        onEndReached={() => {
-          if (!isFocusedSwipeFeed && !loadingMore && hasMoreSwipes) {
-            const nextPage = swipePage + 1;
-            setLoadingMore(true);
-            socialApi.getSwipes(nextPage, SWIPE_PAGE_SIZE).then((data) => {
-              const existingIds = new Set(swipes.map((s) => s.id));
-              const newItems = data.filter((s) => !existingIds.has(s.id));
-              if (data.length > 0) {
-                setSwipes((prev) => {
-                  const latestIds = new Set(prev.map((s) => s.id));
-                  const uniqueItems = newItems.filter((s) => !latestIds.has(s.id));
-                  if (!uniqueItems.length) {
-                    return prev;
-                  }
-                  return [...prev, ...uniqueItems];
-                });
-              }
-              setSwipePage(nextPage);
-              if (data.length < SWIPE_PAGE_SIZE || newItems.length === 0) {
-                setHasMoreSwipes(false);
-              }
-            }).catch(() => { }).finally(() => setLoadingMore(false));
-          }
-        }}
+        onEndReachedThreshold={0.18}
+        onEndReached={loadMoreSwipes}
       />
       <AppBottomDock navigation={navigation} activeRouteName="Swipes" />
 

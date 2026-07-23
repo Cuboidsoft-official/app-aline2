@@ -21,6 +21,7 @@ import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 import LinearGradient from "react-native-linear-gradient";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import ContentActionSheet from "../features/social/components/ContentActionSheet";
 import InteractiveText from "../features/social/components/InteractiveText";
@@ -36,7 +37,7 @@ import { API } from "../api/api";
 import { getStoredUser, getStoredUserId } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../hooks/useSegmentedMusicPlayback";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
@@ -67,7 +68,26 @@ const initialFeed: FeedResponse = {
 const FEED_ACCENT = "#9b4dff";
 
 const POST_MUSIC_PREVIEW_MS = 30000;
-const FEED_MEDIA_ASPECT_RATIO = 16 / 9;
+const POST_AUTO_ADVANCE_MS = 30000;
+const FEED_PAGE_SIZE = 10;
+const FEED_LOAD_MORE_DELAY_MS = 180;
+const FEED_LOAD_MORE_THROTTLE_MS = 1200;
+const FEED_MEDIA_ASPECT_RATIO = 4 / 5;
+const FEED_INTEREST_STORAGE_KEY = "aline2.feed.interest.v1";
+
+type FeedInterestProfile = {
+  posts: Record<string, number>;
+  authors: Record<string, number>;
+  hashtags: Record<string, number>;
+  types: Record<string, number>;
+};
+
+const emptyFeedInterestProfile = (): FeedInterestProfile => ({
+  posts: {},
+  authors: {},
+  hashtags: {},
+  types: {},
+});
 
 const getMusicPlaybackUrl = (music?: Post["music"]): string =>
   String(music?.previewUrl || music?.streamUrl || music?.audioUrl || "").trim();
@@ -148,21 +168,73 @@ const formatPostMusicLabel = (music?: Post["music"]): string => {
 const getTrimmedMusicDurationMs = (
   music?: { duration?: number; startTime?: number; endTime?: number },
 ): number => {
-  const maxClipMs = POST_MUSIC_PREVIEW_MS;
-  const explicitDurationMs = Math.max(0, Number(music?.duration || 0) * 1000);
-  if (explicitDurationMs > 0) {
-    return Math.min(maxClipMs, explicitDurationMs);
-  }
-
-  const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
-  const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
-  return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : maxClipMs;
+  void music;
+  return POST_MUSIC_PREVIEW_MS;
 };
 
 const getPostAspectRatio = (post: Post): number => {
-  void post;
-  return FEED_MEDIA_ASPECT_RATIO;
+  const primaryMedia = Array.isArray(post.media) ? post.media[0] : null;
+  const width = Number(primaryMedia?.width || 0);
+  const height = Number(primaryMedia?.height || 0);
+  const mediaRatio = width > 0 && height > 0 ? width / height : 0;
+
+  if (!Number.isFinite(mediaRatio) || mediaRatio <= 0) {
+    return FEED_MEDIA_ASPECT_RATIO;
+  }
+
+  return Math.max(4 / 5, Math.min(16 / 9, mediaRatio));
 };
+
+const bumpFeedInterestBucket = (bucket: Record<string, number>, key: string, amount: number) => {
+  const normalizedKey = String(key || "").trim().toLowerCase();
+  if (!normalizedKey) {
+    return;
+  }
+
+  bucket[normalizedKey] = Math.min(1000, Math.max(0, Number(bucket[normalizedKey] || 0) + amount));
+};
+
+const decayFeedInterestProfile = (profile: FeedInterestProfile): FeedInterestProfile => {
+  const decayBucket = (bucket: Record<string, number>) =>
+    Object.fromEntries(
+      Object.entries(bucket)
+        .map(([key, value]) => [key, Math.round(Number(value || 0) * 0.96 * 100) / 100] as const)
+        .filter(([, value]) => value >= 0.2),
+    );
+
+  return {
+    posts: decayBucket(profile.posts || {}),
+    authors: decayBucket(profile.authors || {}),
+    hashtags: decayBucket(profile.hashtags || {}),
+    types: decayBucket(profile.types || {}),
+  };
+};
+
+const scorePostForLocalInterest = (post: Post, profile: FeedInterestProfile): number => {
+  const postKey = String(post.id || "").toLowerCase();
+  const authorKey = String(post.user?.id || "").toLowerCase();
+  const typeKey = String(post.type || post.postType || "post").toLowerCase();
+  const hashtagScore = (post.hashtags || []).reduce(
+    (total, tag) => total + Number(profile.hashtags[String(tag || "").toLowerCase()] || 0),
+    0,
+  );
+
+  return Number(profile.posts[postKey] || 0) * 0.5
+    + Number(profile.authors[authorKey] || 0) * 3
+    + Number(profile.types[typeKey] || 0) * 1.2
+    + hashtagScore * 1.6
+    + Math.min(10, Number(post.likesCount || 0) * 0.02 + Number(post.commentsCount || 0) * 0.04 + Number(post.sharesCount || 0) * 0.08);
+};
+
+const rankFeedPostsByLocalInterest = (posts: Post[], profile: FeedInterestProfile): Post[] =>
+  [...posts].sort((left, right) => {
+    const scoreDiff = scorePostForLocalInterest(right, profile) - scorePostForLocalInterest(left, profile);
+    if (Math.abs(scoreDiff) > 0.01) {
+      return scoreDiff;
+    }
+
+    return Number(right.createdAt || 0) - Number(left.createdAt || 0);
+  });
 
 const getImageResizeMode = (
   asset: Post["media"][number] | undefined,
@@ -171,6 +243,25 @@ const getImageResizeMode = (
   void asset;
   void frameAspectRatio;
   return "cover";
+};
+
+const getMediaFrameTransformStyle = (
+  asset: Post["media"][number] | undefined,
+  width: number,
+  height: number,
+) => {
+  const transform = asset?.frameTransform;
+  const scale = Math.max(1, Math.min(4, Number(transform?.scale || 1)));
+  const translateX = Math.max(-1, Math.min(1, Number(transform?.translateX || 0))) * width;
+  const translateY = Math.max(-1, Math.min(1, Number(transform?.translateY || 0))) * height;
+
+  return {
+    transform: [
+      { translateX },
+      { translateY },
+      { scale },
+    ],
+  };
 };
 
 const buildMixedLatestFeedPosts = (items: Post[]): Post[] => {
@@ -237,6 +328,7 @@ function FeedScreen({ navigation, route }: any) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [activePostId, setActivePostId] = useState<string>("");
+  const [activePostProgress, setActivePostProgress] = useState(0);
   const [mutedPostIds, setMutedPostIds] = useState<Record<string, boolean>>({});
   const [expandedCaptionIds, setExpandedCaptionIds] = useState<Record<string, boolean>>({});
   const [carouselIndexByPostId, setCarouselIndexByPostId] = useState<Record<string, number>>({});
@@ -260,6 +352,15 @@ function FeedScreen({ navigation, route }: any) {
   });
   const feedScrollTransitionRef = useRef(false);
   const feedScrollResumeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const feedLoadMoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const feedLoadMoreRequestRef = useRef(false);
+  const feedLastLoadMoreAtRef = useRef(0);
+  const activePostProgressStartRef = useRef(0);
+  const activePostAdvanceLockRef = useRef("");
+  const feedInterestRef = useRef<FeedInterestProfile>(emptyFeedInterestProfile());
+  const activePostDwellRef = useRef<{ postId: string; startedAt: number }>({ postId: "", startedAt: 0 });
+  const [_feedInterestVersion, setFeedInterestVersion] = useState(0);
+  const pendingAutoAdvancePostIdRef = useRef("");
   const lastViewablePostIdRef = useRef("");
   const postTapRef = useRef<{ id: string; time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     id: "",
@@ -282,6 +383,27 @@ function FeedScreen({ navigation, route }: any) {
     nextItems.splice(insertionIndex, 0, { id: "featured-profiles-carousel", __featuredProfiles: true });
     return nextItems;
   }, [feed.posts, featuredCarouselIndex, isFocusedPostFeed]);
+
+  useEffect(() => {
+    const pendingPostId = pendingAutoAdvancePostIdRef.current;
+    if (!pendingPostId || !feedListItems.length) {
+      return;
+    }
+
+    const targetIndex = feedListItems.findIndex((item: any) => item?.id === pendingPostId);
+    if (targetIndex < 0) {
+      return;
+    }
+
+    pendingAutoAdvancePostIdRef.current = "";
+    requestAnimationFrame(() => {
+      feedListRef.current?.scrollToIndex?.({
+        index: targetIndex,
+        animated: true,
+        viewPosition: 0,
+      });
+    });
+  }, [feedListItems]);
   const isCompactPhone = width < 360;
   const isMediumPhone = width < 430;
   const feedHorizontalInset = isTabletLayout ? 18 : isCompactPhone ? 8 : 10;
@@ -322,6 +444,15 @@ function FeedScreen({ navigation, route }: any) {
     () => feed.posts.find((item) => item.id === activePostId) || null,
     [activePostId, feed.posts],
   );
+  const nextMusicPost = useMemo(() => {
+    const currentIndex = feed.posts.findIndex((item) => item.id === activePostId);
+
+    if (currentIndex < 0) {
+      return null;
+    }
+
+    return feed.posts.slice(currentIndex + 1).find((item) => !!getMusicPlaybackUrl(item.music)) || null;
+  }, [activePostId, feed.posts]);
   const activePublishTask = publishTasks[0] || null;
   const completedPublishTaskIdsRef = useRef<Set<string>>(new Set());
   const activePostRawMusicUrl = getMusicPlaybackUrl(activePost?.music);
@@ -336,7 +467,7 @@ function FeedScreen({ navigation, route }: any) {
     && !activeSheet
     && isScreenFocused
     && !!activePostMusicUrl;
-  const { isLoading: activePostMusicLoading } = useSegmentedMusicPlayback({
+  useSegmentedMusicPlayback({
     rawUrl: activePostRawMusicUrl,
     normalizedUrl: activePostMusicUrl,
     trackKey: activePostMusicTrackKey,
@@ -344,6 +475,19 @@ function FeedScreen({ navigation, route }: any) {
     durationMs: activePostMusicDurationMs,
     shouldPlay: activePostShouldPlayMusic,
     pauseWhenInactive: true,
+  });
+  const nextPostRawMusicUrl = getMusicPlaybackUrl(nextMusicPost?.music);
+  const nextPostMusicUrl = normalizeMediaUrl(nextPostRawMusicUrl);
+  const nextPostMusicStartMs = Math.max(0, Number(nextMusicPost?.music?.startTime || 0) * 1000);
+  const nextPostMusicDurationMs = getTrimmedMusicDurationMs(nextMusicPost?.music);
+  const nextPostMusicTrackKey = nextMusicPost
+    ? `${nextMusicPost.id}:${nextPostMusicUrl}:${nextPostMusicStartMs}:${nextPostMusicDurationMs}`
+    : "";
+  useSegmentedMusicWarmup({
+    rawUrl: nextPostRawMusicUrl,
+    normalizedUrl: nextPostMusicUrl,
+    trackKey: nextPostMusicTrackKey,
+    enabled: activePostShouldPlayMusic && isScreenFocused && !activeSheet,
   });
   const readSellerAccount = useCallback(async (): Promise<SellerAccountSummary | null> => {
     try {
@@ -418,6 +562,68 @@ function FeedScreen({ navigation, route }: any) {
     }
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+
+    AsyncStorage.getItem(FEED_INTEREST_STORAGE_KEY)
+      .then((value) => {
+        if (!mounted || !value) {
+          return;
+        }
+
+        const parsed = JSON.parse(value);
+        feedInterestRef.current = {
+          ...emptyFeedInterestProfile(),
+          ...(parsed && typeof parsed === "object" ? parsed : {}),
+        };
+        setFeedInterestVersion((version) => version + 1);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const persistFeedInterestProfile = useCallback((nextProfile: FeedInterestProfile) => {
+    feedInterestRef.current = nextProfile;
+    setFeedInterestVersion((version) => version + 1);
+    AsyncStorage.setItem(FEED_INTEREST_STORAGE_KEY, JSON.stringify(nextProfile)).catch(() => undefined);
+  }, []);
+
+  const trackFeedInterest = useCallback((post: Post | undefined | null, action: "view" | "like" | "comment" | "share" | "profile", amount?: number) => {
+    if (!post?.id || isFocusedPostFeed) {
+      return;
+    }
+
+    const weightByAction = {
+      view: 0.75,
+      like: 8,
+      comment: 11,
+      share: 14,
+      profile: 10,
+    };
+    const weight = Math.max(0, amount ?? weightByAction[action]);
+    const nextProfile = decayFeedInterestProfile(feedInterestRef.current);
+
+    bumpFeedInterestBucket(nextProfile.posts, post.id, weight * 0.6);
+    bumpFeedInterestBucket(nextProfile.authors, post.user?.id, weight);
+    bumpFeedInterestBucket(nextProfile.types, post.type || post.postType || "post", weight * 0.35);
+    (post.hashtags || []).slice(0, 8).forEach((tag) => {
+      bumpFeedInterestBucket(nextProfile.hashtags, tag, weight * 0.8);
+    });
+
+    persistFeedInterestProfile(nextProfile);
+  }, [isFocusedPostFeed, persistFeedInterestProfile]);
+
+  const personalizeFeedPosts = useCallback((posts: Post[]) => {
+    if (isFocusedPostFeed || !posts.length) {
+      return posts;
+    }
+
+    return rankFeedPostsByLocalInterest(posts, feedInterestRef.current);
+  }, [isFocusedPostFeed]);
+
   const loadFeedSnapshot = useCallback(async (options: { lightweight?: boolean } = {}) => {
     if (isFocusedPostFeed) {
       const [data, storedUser] = await Promise.all([
@@ -453,7 +659,7 @@ function FeedScreen({ navigation, route }: any) {
     }
 
     const [data, storedUser, seller, unreadNotifications, liveStreamsResponse, walletBalance] = await Promise.all([
-      focusUserId ? socialApi.getUserFeed(focusUserId) : socialApi.getFeed(),
+      focusUserId ? socialApi.getUserFeed(focusUserId) : socialApi.getFeed(1, FEED_PAGE_SIZE),
       getStoredUser(),
       readSellerAccount(),
       readUnreadNotificationCount(),
@@ -484,9 +690,9 @@ function FeedScreen({ navigation, route }: any) {
     const orderedPosts = preserveActivePostId
       ? [
           ...nextPosts.filter((post) => post.id === preserveActivePostId),
-          ...nextPosts.filter((post) => post.id !== preserveActivePostId),
+          ...personalizeFeedPosts(nextPosts.filter((post) => post.id !== preserveActivePostId)),
         ]
-      : nextPosts;
+      : personalizeFeedPosts(nextPosts);
 
     setFeed({
       ...data,
@@ -496,7 +702,7 @@ function FeedScreen({ navigation, route }: any) {
     });
     setLiveStories(nextLiveStories);
     setPage(1);
-    setHasMore(data.posts.length >= 20);
+    setHasMore(data.posts.length >= FEED_PAGE_SIZE);
     setCurrentUser(
       storedUser
         ? {
@@ -514,12 +720,84 @@ function FeedScreen({ navigation, route }: any) {
     setUnreadNotificationCount(unreadNotifications);
     setWalletCoinBalance(walletBalance);
     setErrorMessage("");
-  }, [focusedPostId, isFocusedPostFeed]);
+  }, [focusedPostId, isFocusedPostFeed, personalizeFeedPosts]);
+
+  useEffect(() => {
+    if (isFocusedPostFeed || !feed.posts.length) {
+      return;
+    }
+
+    setFeed((prev) => ({
+      ...prev,
+      posts: personalizeFeedPosts(prev.posts),
+    }));
+  }, [_feedInterestVersion, isFocusedPostFeed, personalizeFeedPosts]);
 
   const loadFeed = useCallback(async (options: { shufflePosts?: boolean; lightweight?: boolean; preserveActivePostId?: string } = {}) => {
+    feedLoadMoreRequestRef.current = false;
+    feedLastLoadMoreAtRef.current = 0;
+    if (feedLoadMoreTimeoutRef.current) {
+      clearTimeout(feedLoadMoreTimeoutRef.current);
+      feedLoadMoreTimeoutRef.current = null;
+    }
     const snapshot = await loadFeedSnapshot({ lightweight: options.lightweight });
     applyFeedSnapshot(snapshot, options);
   }, [applyFeedSnapshot, loadFeedSnapshot]);
+
+  const loadMoreFeed = useCallback(() => {
+    if (isFocusedPostFeed || loadingMore || !hasMore || feedLoadMoreRequestRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - feedLastLoadMoreAtRef.current < FEED_LOAD_MORE_THROTTLE_MS) {
+      return;
+    }
+
+    feedLastLoadMoreAtRef.current = now;
+    feedLoadMoreRequestRef.current = true;
+    if (feedLoadMoreTimeoutRef.current) {
+      clearTimeout(feedLoadMoreTimeoutRef.current);
+    }
+
+    feedLoadMoreTimeoutRef.current = setTimeout(() => {
+      const nextPage = page + 1;
+      setLoadingMore(true);
+      socialApi.getFeed(nextPage, FEED_PAGE_SIZE)
+        .then((data) => {
+          const nextPosts = Array.isArray(data.posts) ? data.posts : [];
+          if (!nextPosts.length) {
+            setHasMore(false);
+            return;
+          }
+
+          pendingAutoAdvancePostIdRef.current = activePostProgress >= 1 ? nextPosts[0]?.id || "" : "";
+          setFeed((prev) => {
+            const existingIds = new Set(prev.posts.map((post) => post.id));
+            const uniqueNextPosts = nextPosts.filter((post) => post?.id && !existingIds.has(post.id));
+
+            if (!uniqueNextPosts.length) {
+              setHasMore(false);
+              return prev;
+            }
+
+            return { ...prev, posts: [...prev.posts, ...uniqueNextPosts] };
+          });
+          setPage(nextPage);
+          if (nextPosts.length < FEED_PAGE_SIZE) {
+            setHasMore(false);
+          }
+        })
+        .catch((error) => {
+          console.log("feed load more error:", error);
+        })
+        .finally(() => {
+          feedLoadMoreRequestRef.current = false;
+          feedLoadMoreTimeoutRef.current = null;
+          setLoadingMore(false);
+        });
+    }, FEED_LOAD_MORE_DELAY_MS);
+  }, [activePostProgress, hasMore, isFocusedPostFeed, loadingMore, page]);
 
   useEffect(() => {
     let active = true;
@@ -611,6 +889,88 @@ function FeedScreen({ navigation, route }: any) {
     [activePostId, feed.posts],
   );
 
+  const advanceToNextFeedPost = useCallback((completedPostId: string) => {
+    const currentListIndex = feedListItems.findIndex((item: any) => item?.id === completedPostId);
+    const nextListIndex = feedListItems.findIndex((item: any, index) =>
+      index > currentListIndex
+      && item?.id
+      && !(item as any).__featuredProfiles
+      && Array.isArray(item.media)
+    );
+
+    if (nextListIndex >= 0) {
+      feedListRef.current?.scrollToIndex?.({
+        index: nextListIndex,
+        animated: true,
+        viewPosition: 0,
+      });
+      return;
+    }
+
+    loadMoreFeed();
+  }, [feedListItems, loadMoreFeed]);
+
+  useEffect(() => {
+    const canProgress = !!activePostId && isScreenFocused && !activeSheet && !isFeedScrollSettling;
+    activePostAdvanceLockRef.current = "";
+
+    if (!canProgress) {
+      activePostProgressStartRef.current = 0;
+      setActivePostProgress(0);
+      return undefined;
+    }
+
+    activePostProgressStartRef.current = Date.now();
+    setActivePostProgress(0);
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - activePostProgressStartRef.current;
+      const nextProgress = Math.min(1, elapsed / POST_AUTO_ADVANCE_MS);
+      setActivePostProgress(nextProgress);
+
+      if (nextProgress >= 1 && activePostAdvanceLockRef.current !== activePostId) {
+        activePostAdvanceLockRef.current = activePostId;
+        advanceToNextFeedPost(activePostId);
+      }
+    }, 250);
+
+    return () => clearInterval(interval);
+  }, [activePostId, activeSheet, advanceToNextFeedPost, isFeedScrollSettling, isScreenFocused]);
+
+  useEffect(() => {
+    const previous = activePostDwellRef.current;
+    if (previous.postId && previous.startedAt) {
+      const dwellMs = Date.now() - previous.startedAt;
+      if (dwellMs >= 2000) {
+        trackFeedInterest(
+          feed.posts.find((post) => post.id === previous.postId),
+          "view",
+          Math.min(12, dwellMs / 3000),
+        );
+      }
+    }
+
+    activePostDwellRef.current = {
+      postId: activePostId,
+      startedAt: activePostId && isScreenFocused && !activeSheet ? Date.now() : 0,
+    };
+
+    return () => {
+      const current = activePostDwellRef.current;
+      if (current.postId && current.startedAt) {
+        const dwellMs = Date.now() - current.startedAt;
+        if (dwellMs >= 2000) {
+          trackFeedInterest(
+            feed.posts.find((post) => post.id === current.postId),
+            "view",
+            Math.min(12, dwellMs / 3000),
+          );
+        }
+      }
+      activePostDwellRef.current = { postId: "", startedAt: 0 };
+    };
+  }, [activePostId, activeSheet, feed.posts, isScreenFocused, trackFeedInterest]);
+
   useEffect(() => {
     feedMetaSnapshotRef.current = {
       liveStories,
@@ -697,6 +1057,11 @@ function FeedScreen({ navigation, route }: any) {
       if (feedScrollResumeTimeoutRef.current) {
         clearTimeout(feedScrollResumeTimeoutRef.current);
       }
+      if (feedLoadMoreTimeoutRef.current) {
+        clearTimeout(feedLoadMoreTimeoutRef.current);
+        feedLoadMoreTimeoutRef.current = null;
+        feedLoadMoreRequestRef.current = false;
+      }
     };
   }, []);
 
@@ -754,9 +1119,10 @@ function FeedScreen({ navigation, route }: any) {
       return;
     }
 
+    const currentPost = feed.posts.find((item) => item.id === postId);
+    trackFeedInterest(currentPost, "like");
     setIsActionBusy((prev) => ({ ...prev, [`like_${postId}`]: true }));
     try {
-      const currentPost = feed.posts.find((item) => item.id === postId);
       const updated = await socialApi.togglePostLike(postId);
       const previewUsers = Array.isArray(currentPost?.likePreviewUsers) ? currentPost.likePreviewUsers : [];
       const nextPreviewUsers = updated?.liked
@@ -905,8 +1271,7 @@ function FeedScreen({ navigation, route }: any) {
   };
 
   const getPostMediaHeight = useCallback((post: Post) => {
-    void post;
-    return Math.round(postMediaWidth / FEED_MEDIA_ASPECT_RATIO);
+    return Math.round(postMediaWidth / getPostAspectRatio(post));
   }, [postMediaWidth]);
 
   const submitComment = async (postId: string, audioFile?: CommentAudioFile) => {
@@ -915,6 +1280,7 @@ function FeedScreen({ navigation, route }: any) {
       return;
     }
 
+    trackFeedInterest(feed.posts.find((item) => item.id === postId), "comment");
     setIsActionBusy((prev) => ({ ...prev, [`comment_${postId}`]: true }));
 
     try {
@@ -965,8 +1331,9 @@ function FeedScreen({ navigation, route }: any) {
   };
 
   const openPostDetail = useCallback((post: Post) => {
+    trackFeedInterest(post, "view", 3);
     setActivePostId(post.id);
-  }, []);
+  }, [trackFeedInterest]);
 
   const openUserProfile = useCallback((userId: string) => {
     const normalizedUserId = String(userId || "");
@@ -974,13 +1341,14 @@ function FeedScreen({ navigation, route }: any) {
       return;
     }
 
+    trackFeedInterest(feed.posts.find((post) => String(post.user?.id || "") === normalizedUserId), "profile");
     if (normalizedUserId === String(currentUser?.id || "")) {
       navigation.navigate("Profile");
       return;
     }
 
     navigation.navigate("ProfilePreviewScreen", { userId: normalizedUserId });
-  }, [currentUser?.id, navigation]);
+  }, [currentUser?.id, feed.posts, navigation, trackFeedInterest]);
 
   const openMentionProfile = useCallback(async (username: string) => {
     const normalizedUsername = String(username || "").replace(/^@/, "").trim();
@@ -1276,11 +1644,13 @@ function FeedScreen({ navigation, route }: any) {
   };
 
   const openPostCommentsSheet = (post: Post) => {
+    trackFeedInterest(post, "comment", 5);
     setSelectedPost(post);
     setActiveSheet("comments");
   };
 
   const openPostShareSheet = (post: Post) => {
+    trackFeedInterest(post, "share");
     setSelectedPost(post);
     setActiveSheet("share");
   };
@@ -1378,23 +1748,25 @@ function FeedScreen({ navigation, route }: any) {
 
       if (primaryMedia?.mediaType === "video") {
         return (
-          <View>
-            <SocialVideo
-              uri={normalizeMediaUrl(primaryMedia.url)}
-              posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || "")}
-              style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-              paused={!shouldMountVideo()}
-              preload={shouldPreloadVideo}
-              muted={shouldMuteFeedVideo({
-                isPostActive,
-                isVideoSoundEnabled,
-                isPostMuted: isMuted,
-                hasAttachedMusic,
-              })}
-              repeat
-              resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
-              contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
-            />
+          <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
+            <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
+              <SocialVideo
+                uri={normalizeMediaUrl(primaryMedia.url)}
+                posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || "")}
+                style={StyleSheet.absoluteFill}
+                paused={!shouldMountVideo()}
+                preload={shouldPreloadVideo}
+                muted={shouldMuteFeedVideo({
+                  isPostActive,
+                  isVideoSoundEnabled,
+                  isPostMuted: isMuted,
+                  hasAttachedMusic,
+                })}
+                repeat
+                resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
+                contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
+              />
+            </View>
             {primaryMedia.sensitiveContent?.isSensitive ? renderSensitiveBadge(primaryMedia.sensitiveContent.label) : null}
           </View>
         );
@@ -1402,14 +1774,16 @@ function FeedScreen({ navigation, route }: any) {
 
       const imageResizeMode = getImageResizeMode(primaryMedia, frameAspectRatio);
       const rawImage = (
-        <View>
-          <ProgressiveImage
-            uri={normalizeMediaUrl(primaryMedia?.url)}
-            previewUri={normalizeMediaUrl(primaryMedia?.thumbnailUrl || primaryMedia?.url)}
-            style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-            resizeMode={imageResizeMode}
-            contentBlurRadius={primaryMedia?.sensitiveContent?.isSensitive ? 22 : 0}
-          />
+        <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
+          <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
+            <ProgressiveImage
+              uri={normalizeMediaUrl(primaryMedia?.url)}
+              previewUri={normalizeMediaUrl(primaryMedia?.thumbnailUrl || primaryMedia?.url)}
+              style={StyleSheet.absoluteFill}
+              resizeMode={imageResizeMode}
+              contentBlurRadius={primaryMedia?.sensitiveContent?.isSensitive ? 22 : 0}
+            />
+          </View>
           {primaryMedia?.sensitiveContent?.isSensitive ? renderSensitiveBadge(primaryMedia.sensitiveContent.label) : null}
         </View>
       );
@@ -1443,38 +1817,42 @@ function FeedScreen({ navigation, route }: any) {
         >
           {post.media.map((asset, index) => (
             asset.mediaType === "video" ? (
-              <View key={asset.id}>
-                <SocialVideo
-                  uri={normalizeMediaUrl(asset.url)}
-                  posterUri={normalizeMediaUrl(asset.thumbnailUrl || "")}
-                  style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-                  paused={!shouldMountVideo(currentCarouselIndex === index)}
-                  preload={shouldPreloadVideo && currentCarouselIndex === index}
-                  muted={shouldMuteFeedVideo({
-                    isPostActive,
-                    isCarouselItemActive: currentCarouselIndex === index,
-                    isVideoSoundEnabled,
-                    isPostMuted: isMuted,
-                    hasAttachedMusic,
-                  })}
-                  repeat
-                  resizeMode={getImageResizeMode(asset, frameAspectRatio)}
-                  contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
-                />
+              <View key={asset.id} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
+                <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
+                  <SocialVideo
+                    uri={normalizeMediaUrl(asset.url)}
+                    posterUri={normalizeMediaUrl(asset.thumbnailUrl || "")}
+                    style={StyleSheet.absoluteFill}
+                    paused={!shouldMountVideo(currentCarouselIndex === index)}
+                    preload={shouldPreloadVideo && currentCarouselIndex === index}
+                    muted={shouldMuteFeedVideo({
+                      isPostActive,
+                      isCarouselItemActive: currentCarouselIndex === index,
+                      isVideoSoundEnabled,
+                      isPostMuted: isMuted,
+                      hasAttachedMusic,
+                    })}
+                    repeat
+                    resizeMode={getImageResizeMode(asset, frameAspectRatio)}
+                    contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+                  />
+                </View>
                 {asset.sensitiveContent?.isSensitive ? renderSensitiveBadge(asset.sensitiveContent.label) : null}
               </View>
             ) : (
               (() => {
                 const imageResizeMode = getImageResizeMode(asset, frameAspectRatio);
                 const rawImage = (
-                  <View key={asset.id}>
-                    <ProgressiveImage
-                      uri={normalizeMediaUrl(asset.url)}
-                      previewUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
-                      style={[styles.postImage, { width: postMediaWidth, height: mediaHeight }]}
-                      resizeMode={imageResizeMode}
-                      contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
-                    />
+                  <View key={asset.id} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
+                    <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
+                      <ProgressiveImage
+                        uri={normalizeMediaUrl(asset.url)}
+                        previewUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode={imageResizeMode}
+                        contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+                      />
+                    </View>
                     {asset.sensitiveContent?.isSensitive ? renderSensitiveBadge(asset.sensitiveContent.label) : null}
                   </View>
                 );
@@ -1612,6 +1990,22 @@ function FeedScreen({ navigation, route }: any) {
     );
   };
 
+  const renderPostAutoProgress = (postId: string) => (
+    activePostId === postId ? (
+      <View pointerEvents="none" style={styles.postAutoProgressTrack}>
+        <View
+          style={[
+            styles.postAutoProgressFill,
+            {
+              width: `${Math.max(0, Math.min(100, activePostProgress * 100))}%`,
+              backgroundColor: colors.primary,
+            },
+          ]}
+        />
+      </View>
+    ) : null
+  );
+
   const renderPost = ({ item }: { item: Post }) => {
     const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
     const musicLabel = formatPostMusicLabel(item.music);
@@ -1703,6 +2097,7 @@ function FeedScreen({ navigation, route }: any) {
           onPress={() => openPostDetail(item)}
         >
           {renderPostMedia(item)}
+          {renderPostAutoProgress(item.id)}
           {renderPostStickerOverlay(item)}
         </TouchableOpacity>
 
@@ -1927,7 +2322,6 @@ function FeedScreen({ navigation, route }: any) {
     const musicLabel = formatPostMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isMuted = !!mutedPostIds[item.id];
-    const isPostMusicLoading = activePostId === item.id && hasAttachedMusic && activePostMusicLoading;
     const isCaptionExpanded = !!expandedCaptionIds[item.id];
     const shouldTruncateCaption = item.caption.length > 110 || item.caption.includes("\n");
     const isPostAudioOn = isFeedPostAudioOn({
@@ -2033,6 +2427,7 @@ function FeedScreen({ navigation, route }: any) {
         >
           <Pressable onPress={() => handlePostMediaPress(item)} style={styles.mediaPressSurface}>
             {renderPostMedia(item)}
+            {renderPostAutoProgress(item.id)}
             {renderPostStickerOverlay(item)}
             {likeBurstPostId === item.id ? (
               <View pointerEvents="none" style={styles.likeBurstOverlay}>
@@ -2041,13 +2436,9 @@ function FeedScreen({ navigation, route }: any) {
             ) : null}
             {(hasVideoMedia || hasAttachedMusic) ? (
               <View style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
-                {isPostMusicLoading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Icon name={isPostAudioOn ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
-                )}
+                <Icon name={isPostAudioOn ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
                 <Text style={[styles.mediaSoundHintText, { fontSize: mediaChipFontSize }]}>
-                  {isPostMusicLoading ? "Loading" : isPostAudioOn ? "Sound on" : "Muted"}
+                  {isPostAudioOn ? "Sound on" : "Muted"}
                 </Text>
               </View>
             ) : null}
@@ -2593,31 +2984,15 @@ function FeedScreen({ navigation, route }: any) {
               <Text style={[styles.emptyText, { color: colors.mutedText }]}>{errorMessage || "Posts from people you follow will appear here."}</Text>
             </View>
           }
-          onEndReachedThreshold={0.5}
-          onEndReached={() => {
-            if (!isFocusedPostFeed && !loadingMore && hasMore) {
-              const nextPage = page + 1;
-              setLoadingMore(true);
-              socialApi.getFeed(nextPage).then((data) => {
-                if (data.posts.length === 0) {
-                  setHasMore(false);
-                } else {
-                  setFeed((prev) => ({ ...prev, posts: buildMixedLatestFeedPosts([...prev.posts, ...data.posts]) }));
-                  setPage(nextPage);
-                  if (data.posts.length < 20) setHasMore(false);
-                }
-              }).catch(() => { }).finally(() => setLoadingMore(false));
-            }
-          }}
+          onEndReachedThreshold={0.18}
+          onEndReached={loadMoreFeed}
           onScrollToIndexFailed={(info) => {
             feedListRef.current?.scrollToOffset?.({
               offset: Math.max(0, info.averageItemLength * info.index),
               animated: false,
             });
           }}
-          ListFooterComponent={
-            loadingMore ? <ActivityIndicator size="small" color={colors.primary} style={styles.loadingMoreFooter} /> : null
-          }
+          ListFooterComponent={loadingMore ? <View style={styles.loadingMoreFooter} /> : null}
         />
 
         {menuOpen ? (
@@ -2851,7 +3226,7 @@ const styles = StyleSheet.create({
   emptyState: { paddingHorizontal: 24, paddingTop: 72, alignItems: "center" },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111" },
   emptyText: { marginTop: 8, color: "#666", textAlign: "center", lineHeight: 20 },
-  loadingMoreFooter: { paddingVertical: 28 },
+  loadingMoreFooter: { height: 10 },
   topBar: {
     paddingHorizontal: 12,
     paddingTop: 4,
@@ -3354,6 +3729,18 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 2,
+  },
+  postAutoProgressTrack: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: "rgba(255,255,255,0.42)",
+    overflow: "hidden",
+  },
+  postAutoProgressFill: {
+    height: "100%",
   },
   postHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
   postHeaderIdentity: { flexDirection: "row", alignItems: "center", flex: 1 },

@@ -72,7 +72,6 @@ import {
 import { getStoredUser } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { callingDisabledMessage, productFlags } from "../config/productFlags";
-import { useAppTheme } from "../theme/AppThemeContext";
 import { alpha, appFonts, appShadows } from "../theme/designSystem";
 import { getChatLayoutMetrics } from "../theme/chatUi";
 import VoiceRecorderButton from "../components/chat/VoiceRecorderButton";
@@ -102,6 +101,19 @@ import {
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const PRIMARY = "#7b3fe4";
+const CHAT_DARK_COLORS = {
+  primary: PRIMARY,
+  background: "#0B1220",
+  surface: "#111A2B",
+  card: "#151F32",
+  input: "#1B263A",
+  border: "#2A3851",
+  text: "#F6F8FC",
+  mutedText: "#97A3B6",
+  placeholder: "#6F7D93",
+  tabInactive: "#8A96AA",
+  danger: "#FF6961",
+};
 const DEFAULT_CHAT_WALLPAPER = require("../assets/chat/default-whatsapp-doodle.jpeg");
 const LOCATION_MESSAGE_LABEL = "Shared location:";
 
@@ -547,11 +559,11 @@ const dedupeMessages = (items: any[]): any[] => {
       seen.add(identity);
     }
 
-    if (signature && seenSignatures.has(signature)) {
+    if (!identity && signature && seenSignatures.has(signature)) {
       return false;
     }
 
-    if (signature) {
+    if (!identity && signature) {
       seenSignatures.add(signature);
     }
 
@@ -583,6 +595,10 @@ const getMessageTimestamp = (message: any): number => {
 };
 
 const isNearDuplicateMessage = (leftMessage: any, rightMessage: any): boolean => {
+  if (!leftMessage?._optimistic && !rightMessage?._optimistic) {
+    return false;
+  }
+
   const leftSignature = buildMessageSignature(leftMessage);
   const rightSignature = buildMessageSignature(rightMessage);
 
@@ -845,7 +861,7 @@ const buildScheduledCallPreview = (message: ChatMessage): ScheduledCallPreview |
 // ─── Component ──────────────────────────────────────────────────────────────
 
 const ChatScreen = ({ navigation, route }: any) => {
-  const { colors } = useAppTheme();
+  const colors = CHAT_DARK_COLORS;
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
@@ -957,9 +973,15 @@ const ChatScreen = ({ navigation, route }: any) => {
   const pendingFocusMessageIdRef = useRef("");
   const latestAutoScrollMessageIdRef = useRef("");
   const scrollToLatestMessage = useCallback((animated = true) => {
-    requestAnimationFrame(() => {
+    const scroll = () => {
       messageListRef.current?.scrollToEnd?.({ animated });
-    });
+    };
+
+    requestAnimationFrame(scroll);
+    if (!animated) {
+      setTimeout(scroll, 80);
+      setTimeout(scroll, 220);
+    }
   }, []);
 
   useEffect(() => {

@@ -2040,6 +2040,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   chatCard: {
+    position: "relative",
     flexDirection: "row",
     alignItems: "center",
     minHeight: 72,
@@ -2197,6 +2198,10 @@ const styles = StyleSheet.create({
     fontFamily: appFonts.regular,
   },
   unreadBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 3,
     minWidth: 20,
     height: 20,
     borderRadius: 10,
