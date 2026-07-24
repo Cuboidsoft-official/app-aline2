@@ -19,6 +19,7 @@ import { shareContentLink } from "../utils/shareLinks";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { appConfig } from "../config/env";
 import { useAppTheme } from "../theme/AppThemeContext";
+import ProfilePictureViewer from "../components/ProfilePictureViewer";
 
 const PRIMARY = "#7B4DFF";
 const PROFILE_BG = "#0A0F1C";
@@ -65,6 +66,7 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
   const [media, setMedia] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [avatarViewerVisible, setAvatarViewerVisible] = useState(false);
 
   const fetchSeller = useCallback(async () => {
     try {
@@ -244,14 +246,18 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>
-            <View style={styles.avatarRing}>
+            <TouchableOpacity
+              style={styles.avatarRing}
+              activeOpacity={0.85}
+              onPress={() => setAvatarViewerVisible(true)}
+            >
               <Image
                 source={{
                   uri: seller?.profilePic || DEFAULT_AVATAR_URL,
                 }}
                 style={styles.avatar}
               />
-            </View>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.heroMiniAction}
@@ -407,6 +413,12 @@ const SellerDetailsScreen = ({ route, navigation }: any) => {
           </Text>
         </TouchableOpacity>
       </ScrollView>
+      <ProfilePictureViewer
+        visible={avatarViewerVisible}
+        imageUri={seller?.profilePic || DEFAULT_AVATAR_URL}
+        name={seller?.sellerName || "Seller"}
+        onClose={() => setAvatarViewerVisible(false)}
+      />
     </SafeAreaView>
   );
 };

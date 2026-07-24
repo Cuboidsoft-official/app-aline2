@@ -37,6 +37,15 @@ import { getStoredRefreshToken, getStoredSessionMeta, getStoredToken, getStoredU
 const DEFAULT_COVER = DEFAULT_COVER_URL;
 const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
 const TOTAL_STEPS = 6;
+const SELLER_TERMS_VERSION = "seller_terms_v2";
+const SELLER_TERMS_PARAGRAPHS = [
+  "By registering as a seller on Aline2, I confirm that I am joining this platform by my own consent, with a clear understanding of the responsibilities that come with offering paid services, chats, calls, promotions, consultations, or any other seller activity through my account. I understand that my seller profile represents me, and I agree to use Aline2 in a respectful, lawful, professional, and honest manner.",
+  "I agree that I will not misbehave with any buyer, user, customer, company, creator, or Aline2 team member. Misbehavior includes rude, abusive, threatening, insulting, manipulative, discriminatory, or unsafe conduct in chat, call, video, booking, promotion, or any other interaction. I also agree that I will not sexually harass anyone, make sexual comments or requests, pressure anyone for personal contact, send inappropriate content, or behave in any way that makes another person uncomfortable, unsafe, or disrespected.",
+  "I understand that if a buyer reports misbehavior, harassment, unsafe conduct, fake identity, misleading service delivery, or any violation from my side, Aline2 may review the case and the buyer may receive a refund, depending on the situation and available evidence. I also understand that my seller account may be limited, suspended, removed, or sent for further review if my conduct harms buyers, users, or the trust of the platform.",
+  "I agree that I will personally provide the service, conversation, chat, call, consultation, promotion, or seller interaction that the buyer has paid for. If I make someone else talk, chat, call, appear, or provide the service on my behalf without clear permission from Aline2 and the buyer, the buyer may receive a refund and my seller account may be restricted. I understand that buyers are paying for the seller profile they selected, and replacing myself with another person can be treated as a violation of trust.",
+  "I confirm that I have read these terms carefully, I accept them freely, and I am here with my own consent. By tapping accept, I sign and agree that these seller terms apply to my seller account, my services, my chats, my calls, my promotions, and my behavior on Aline2.",
+];
+const SELLER_TERMS_CONTENT = SELLER_TERMS_PARAGRAPHS.join("\n\n");
 
 const SPECIALIZATION_OPTIONS = [
   "Creator",
@@ -55,42 +64,42 @@ const PLAN_OPTIONS = [
     title: "INR 100",
     amount: 100,
     maxHourlyRate: 1000,
-    description: "Plan limit INR 1000.",
+    description: "1 hour / INR 1000 you can charge.",
   },
   {
     key: "PLAN_200",
     title: "INR 200",
     amount: 200,
     maxHourlyRate: 2000,
-    description: "Plan limit INR 2000.",
+    description: "1 hour / INR 2000 you can charge.",
   },
   {
     key: "PLAN_300",
     title: "INR 300",
     amount: 300,
     maxHourlyRate: 3000,
-    description: "Plan limit INR 3000.",
+    description: "1 hour / INR 3000 you can charge.",
   },
   {
     key: "PLAN_400",
     title: "INR 400",
     amount: 400,
     maxHourlyRate: 4000,
-    description: "Plan limit INR 4000.",
+    description: "1 hour / INR 4000 you can charge.",
   },
   {
     key: "PLAN_600",
     title: "INR 600",
     amount: 600,
     maxHourlyRate: 6000,
-    description: "Plan limit INR 6000.",
+    description: "1 hour / INR 6000 you can charge.",
   },
   {
     key: "PLAN_6000",
     title: "INR 6000",
     amount: 6000,
     maxHourlyRate: 999999,
-    description: "Unlimited pricing plan.",
+    description: "Unlimited hourly charge plan.",
   },
 ] as const;
 
@@ -159,6 +168,10 @@ type SellerProfileResponse = {
     story?: number | string;
     reel?: number | string;
   };
+  termsAccepted?: boolean;
+  termsVersion?: string;
+  termsAcceptedAt?: string;
+  termsContentSnapshot?: string;
   degreeDoc?: string;
   licenseDoc?: string;
   aadhaarDoc?: string;
@@ -208,6 +221,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [initializing, setInitializing] = useState(mode === "edit");
   const [errorMessage, setErrorMessage] = useState("");
   const [activeDropdown, setActiveDropdown] = useState<DropdownField | null>(null);
+  const [termsVisible, setTermsVisible] = useState(false);
   const [paymentVerified, setPaymentVerified] = useState(mode === "edit");
   const [subscriptionId, setSubscriptionId] = useState("");
   const [subscriptionProcessing, setSubscriptionProcessing] = useState(false);
@@ -256,6 +270,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [promotionPostPrice, setPromotionPostPrice] = useState("");
   const [promotionStoryPrice, setPromotionStoryPrice] = useState("");
   const [promotionReelPrice, setPromotionReelPrice] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(mode === "edit");
 
   const selectedPlan = useMemo(
     () => PLAN_OPTIONS.find((plan) => plan.key === premiumPlan) || PLAN_OPTIONS[0],
@@ -313,7 +328,8 @@ const SellerRegistration = ({ navigation, route }: any) => {
     setPromotionPostPrice(String(seller?.promotionPricing?.post || ""));
     setPromotionStoryPrice(String(seller?.promotionPricing?.story || ""));
     setPromotionReelPrice(String(seller?.promotionPricing?.reel || ""));
-  }, []);
+    setTermsAccepted(Boolean(seller?.termsAccepted || mode === "edit"));
+  }, [mode]);
 
   useEffect(() => {
     setStep(requestedInitialStep);
@@ -690,6 +706,10 @@ const SellerRegistration = ({ navigation, route }: any) => {
         Alert.alert("Rate limit", `For ${durationMinutes} min, max allowed rate is INR ${rateLimit}.`);
         return false;
       }
+      if (!termsAccepted) {
+        Alert.alert("Terms required", "Please read and accept the seller terms and conditions before finishing.");
+        return false;
+      }
     }
 
     return true;
@@ -858,6 +878,10 @@ const SellerRegistration = ({ navigation, route }: any) => {
           story: Number(promotionStoryPrice) || 0,
           reel: Number(promotionReelPrice) || 0,
         },
+        termsAccepted,
+        termsVersion: SELLER_TERMS_VERSION,
+        termsAcceptedAt: termsAccepted ? new Date().toISOString() : undefined,
+        termsContentSnapshot: SELLER_TERMS_CONTENT,
       };
 
       const endpoint = mode === "edit" ? "/seller/update" : "/seller/register";
@@ -1390,6 +1414,38 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
         <Text style={[styles.label, { color: colors.text }]}>Reel promotion price</Text>
         <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={promotionReelPrice} onChangeText={setPromotionReelPrice} placeholder="INR for one reel" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
+
+        <View style={[styles.termsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.termsHeader}>
+            <View style={[styles.termsIcon, { backgroundColor: `${colors.primary}18` }]}>
+              <Icon name="document-text-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={styles.termsCopy}>
+              <Text style={[styles.termsTitle, { color: colors.text }]}>Seller terms and conditions</Text>
+              <Text style={[styles.termsBody, { color: colors.mutedText }]}>
+                Read the conduct terms and sign by accepting before submitting your seller account.
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity style={styles.termsLink} onPress={() => setTermsVisible(true)}>
+            <Text style={[styles.termsLinkText, { color: colors.primary }]}>View full terms</Text>
+            <Icon name="open-outline" size={16} color={colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.termsAcceptRow, { borderColor: colors.border, backgroundColor: colors.background }]}
+            onPress={() => setTermsAccepted((value) => !value)}
+            activeOpacity={0.85}
+          >
+            <View style={[styles.checkbox, { borderColor: colors.border, backgroundColor: "transparent" }]}>
+              {termsAccepted ? <Icon name="checkmark" size={16} color={colors.text} /> : null}
+            </View>
+            <Text style={[styles.termsAcceptText, { color: colors.text }]}>
+              I accept and sign these seller terms as {name.trim() || "the seller"}.
+            </Text>
+          </TouchableOpacity>
+        </View>
       </>
     );
   };
@@ -1463,6 +1519,24 @@ const SellerRegistration = ({ navigation, route }: any) => {
               </ScrollView>
               <TouchableOpacity style={styles.modalCloseButton} onPress={() => setActiveDropdown(null)}>
                 <Text style={styles.modalCloseText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={termsVisible} transparent animationType="fade" onRequestClose={() => setTermsVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Seller Terms and Conditions</Text>
+              <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
+                {SELLER_TERMS_PARAGRAPHS.map((paragraph) => (
+                  <Text key={paragraph} style={[styles.termParagraph, { color: colors.text }]}>
+                    {paragraph}
+                  </Text>
+                ))}
+              </ScrollView>
+              <TouchableOpacity style={styles.modalCloseButton} onPress={() => setTermsVisible(false)}>
+                <Text style={styles.modalCloseText}>Done</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1724,6 +1798,53 @@ const styles = StyleSheet.create({
   rateLabel: { fontSize: 12, fontWeight: "800" },
   rateValue: { marginTop: 4, fontSize: 30, fontWeight: "900" },
   rateBody: { marginTop: 4, fontSize: 13, lineHeight: 19 },
+  termsCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 16,
+  },
+  termsHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  termsIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  termsCopy: { flex: 1 },
+  termsTitle: { fontSize: 15, fontWeight: "400" },
+  termsBody: { marginTop: 4, fontSize: 12, lineHeight: 18 },
+  termsLink: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  termsLinkText: { fontSize: 13, fontWeight: "400", marginRight: 6 },
+  termsAcceptRow: {
+    marginTop: 12,
+    minHeight: 50,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  termsAcceptText: { flex: 1, fontSize: 13, lineHeight: 18, fontWeight: "400" },
   footerRow: { marginTop: 24, flexDirection: "row", alignItems: "center" },
   secondaryButton: {
     minHeight: 48,
@@ -1755,10 +1876,17 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalCard: { width: "100%", maxWidth: 420, borderRadius: 18, paddingTop: 16, overflow: "hidden" },
-  modalTitle: { fontSize: 17, fontWeight: "900", paddingHorizontal: 16, marginBottom: 8 },
+  modalTitle: { fontSize: 17, fontWeight: "400", paddingHorizontal: 16, marginBottom: 8 },
   modalList: { maxHeight: 320 },
   modalOption: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
   modalOptionText: { fontSize: 15, fontWeight: "700" },
+  termParagraph: {
+    paddingHorizontal: 16,
+    marginBottom: 13,
+    fontSize: 14,
+    lineHeight: 22,
+    fontWeight: "400",
+  },
   modalCloseButton: {
     margin: 16,
     minHeight: 46,

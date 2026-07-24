@@ -32,7 +32,7 @@ import SocialVideo from "../../features/social/components/SocialVideo";
 import MentionSuggestionList from "../../components/MentionSuggestionList";
 import { socialApi } from "../../features/social/socialApi";
 import { ReportReason, SocialUser, Swipe, SwipeComment } from "../../features/social/types";
-import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
@@ -82,12 +82,31 @@ const formatSwipeMusicLabel = (music?: Swipe["music"]): string => {
 };
 
 const getMusicPlaybackUrl = (music?: Swipe["music"]): string =>
-  String(music?.previewUrl || music?.streamUrl || music?.audioUrl || "").trim();
+  String(music?.previewUrl || music?.audioUrl || music?.streamUrl || "").trim();
 
-const getTrimmedMusicDurationMs = (
-  _music?: { duration?: number; startTime?: number; endTime?: number },
+const SWIPE_MUSIC_PREVIEW_MS = 30000;
+
+const getMusicSegmentDurationMs = (
+  music?: { duration?: number; startTime?: number; endTime?: number },
 ): number => {
-  return 30000;
+  const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
+  const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
+
+  if (endMs > startMs) {
+    return Math.min(SWIPE_MUSIC_PREVIEW_MS, endMs - startMs);
+  }
+
+  const durationMs = Math.max(0, Number(music?.duration || 0) * 1000);
+  return durationMs > 0 ? Math.min(SWIPE_MUSIC_PREVIEW_MS, durationMs) : SWIPE_MUSIC_PREVIEW_MS;
+};
+
+const getSwipeMusicLoopDurationMs = (swipe?: Swipe | null): number => {
+  const videoDurationMs = Math.max(0, Number(swipe?.media?.durationMs || 0));
+  if (videoDurationMs > 0) {
+    return videoDurationMs;
+  }
+
+  return getMusicSegmentDurationMs(swipe?.music);
 };
 
 type SwipeRelationshipKind = "self" | "follow" | "follow_back" | "following";
@@ -122,6 +141,7 @@ function SwipesScreen({ navigation, route }: any) {
   const [expandedCaptionIds, setExpandedCaptionIds] = useState<Record<string, boolean>>({});
   const [isSwipeSoundEnabled, setIsSwipeSoundEnabled] = useState(true);
   const [activeSwipeIndex, setActiveSwipeIndex] = useState(0);
+  const [activeSwipePlaybackCycle, setActiveSwipePlaybackCycle] = useState(0);
   const [likeBurstSwipeId, setLikeBurstSwipeId] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentUser, setCurrentUser] = useState<CurrentSwipeUser | null>(null);
@@ -142,16 +162,19 @@ function SwipesScreen({ navigation, route }: any) {
   const isFocusedSwipeFeed = Boolean(focusUserId);
 
   const activeSwipe = swipes[activeSwipeIndex] || null;
-  const nextMusicSwipe = swipes.slice(activeSwipeIndex + 1).find((item) => !!getMusicPlaybackUrl(item.music)) || null;
   const activeSwipeRawMusicUrl = getMusicPlaybackUrl(activeSwipe?.music);
   const activeSwipeMusicUrl = normalizeMediaUrl(activeSwipeRawMusicUrl);
   const activeSwipeMusicStartMs = Math.max(0, Number(activeSwipe?.music?.startTime || 0) * 1000);
-  const activeSwipeMusicDurationMs = getTrimmedMusicDurationMs(activeSwipe?.music);
+  const activeSwipeMusicDurationMs = getSwipeMusicLoopDurationMs(activeSwipe);
   const activeSwipeMusicTrackKey = activeSwipe
     ? `${activeSwipe.id}:${activeSwipeMusicUrl}:${activeSwipeMusicStartMs}:${activeSwipeMusicDurationMs}`
     : "";
   const isSwipePlaybackEnabled = isSwipeSoundEnabled && !activeSheet && isScreenFocused;
   const shouldPlaySwipeMusic = isSwipePlaybackEnabled && !!activeSwipeMusicUrl;
+
+  useEffect(() => {
+    setActiveSwipePlaybackCycle((cycle) => cycle + 1);
+  }, [activeSwipe?.id]);
 
   useEffect(() => {
     if (sheetMentionQuery === null) {
@@ -217,20 +240,8 @@ function SwipesScreen({ navigation, route }: any) {
     startMs: activeSwipeMusicStartMs,
     durationMs: activeSwipeMusicDurationMs,
     shouldPlay: shouldPlaySwipeMusic,
+    syncKey: activeSwipePlaybackCycle,
     pauseWhenInactive: true,
-  });
-  const nextSwipeRawMusicUrl = getMusicPlaybackUrl(nextMusicSwipe?.music);
-  const nextSwipeMusicUrl = normalizeMediaUrl(nextSwipeRawMusicUrl);
-  const nextSwipeMusicStartMs = Math.max(0, Number(nextMusicSwipe?.music?.startTime || 0) * 1000);
-  const nextSwipeMusicDurationMs = getTrimmedMusicDurationMs(nextMusicSwipe?.music);
-  const nextSwipeMusicTrackKey = nextMusicSwipe
-    ? `${nextMusicSwipe.id}:${nextSwipeMusicUrl}:${nextSwipeMusicStartMs}:${nextSwipeMusicDurationMs}`
-    : "";
-  useSegmentedMusicWarmup({
-    rawUrl: nextSwipeRawMusicUrl,
-    normalizedUrl: nextSwipeMusicUrl,
-    trackKey: nextSwipeMusicTrackKey,
-    enabled: shouldPlaySwipeMusic && isScreenFocused && !activeSheet,
   });
   const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
     + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
@@ -980,6 +991,11 @@ function SwipesScreen({ navigation, route }: any) {
             paused={!isActive || !!activeSheet || !isScreenFocused}
             muted={!isActive || !isSwipePlaybackEnabled || (hasAttachedMusic && !!activeSwipeMusicUrl)}
             repeat
+            onEnd={() => {
+              if (isActive && hasAttachedMusic) {
+                setActiveSwipePlaybackCycle((cycle) => cycle + 1);
+              }
+            }}
             preload={false}
             resizeMode="contain"
             contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}

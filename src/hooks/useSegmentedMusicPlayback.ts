@@ -18,6 +18,7 @@ type UseSegmentedMusicPlaybackParams = {
   startMs: number;
   durationMs: number;
   shouldPlay: boolean;
+  syncKey?: string | number;
   pauseWhenInactive?: boolean;
 };
 
@@ -151,6 +152,7 @@ export function useSegmentedMusicPlayback({
   startMs,
   durationMs,
   shouldPlay,
+  syncKey,
   pauseWhenInactive = false,
 }: UseSegmentedMusicPlaybackParams) {
   const [isAppActive, setIsAppActive] = useState(AppState.currentState === "active");
@@ -210,6 +212,17 @@ export function useSegmentedMusicPlayback({
     audioPlayerRef.current.pausePlayer().catch(() => undefined);
   }, []);
 
+  const restartAudioClipFromStart = useCallback(() => {
+    if (!shouldLoopRef.current || !audioTrackKeyRef.current) {
+      return;
+    }
+
+    audioPlayerRef.current
+      .seekToPlayer(audioStartMsRef.current)
+      .then(() => audioPlayerRef.current.resumePlayer())
+      .catch(() => undefined);
+  }, []);
+
   const resetAudioPlayback = useCallback(async () => {
     playbackRequestIdRef.current += 1;
     if (activePlaybackOwnerId === ownerIdRef.current) {
@@ -246,6 +259,14 @@ export function useSegmentedMusicPlayback({
       subscription.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (!syncKey || !shouldPlayNow) {
+      return;
+    }
+
+    restartAudioClipFromStart();
+  }, [restartAudioClipFromStart, shouldPlayNow, syncKey]);
 
   useEffect(() => {
     const player = audioPlayerRef.current;

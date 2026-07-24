@@ -24,6 +24,7 @@ import { useAppTheme } from "../theme/AppThemeContext";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import { openPostInFeed, openSwipeInSwipes } from "../utils/socialNavigation";
+import ProfilePictureViewer from "../components/ProfilePictureViewer";
 
 type ProfilePreviewPost = {
  _id: string;
@@ -62,6 +63,7 @@ const ProfilePreviewScreen = ({ route, navigation }: { route: any; navigation: a
 const [showSuggestions, setShowSuggestions] = useState(true);
 const [myFollowing, setMyFollowing] = useState<string[]>([]);
  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+ const [avatarViewerVisible, setAvatarViewerVisible] = useState(false);
  const suggestionListContentStyle = styles.suggestionListContent;
  const isCompact = width < 360;
  const sectionWidth = Math.min(width - 24, 540);
@@ -451,7 +453,11 @@ const renderProfileHeader = () => (
      style={[styles.heroSection, heroSectionStyle]}
     >
      <View style={styles.profileCenter}>
-      <View style={[styles.profileRing, profileRingStyle]}>
+      <TouchableOpacity
+       style={[styles.profileRing, profileRingStyle]}
+       activeOpacity={0.85}
+       onPress={() => setAvatarViewerVisible(true)}
+      >
        {showProfileImage ? (
         <Image
          source={{
@@ -465,7 +471,7 @@ const renderProfileHeader = () => (
          <Text style={[styles.profilePlaceholderText, { color: colors.primary }]}>{profileInitial}</Text>
         </View>
        )}
-    </View>
+    </TouchableOpacity>
 
     <Text style={[styles.profileName, { color: colors.text }]}>{profileName}</Text>
     <Text style={[styles.profileHandleText, { color: colors.mutedText }]}>{profileHandle}</Text>
@@ -769,9 +775,15 @@ const renderProfileHeader = () => (
        </View>
       )
      }
-    />
+   />
    </SafeAreaView>
    <AppBottomDock navigation={navigation} activeRouteName="ProfileView" />
+   <ProfilePictureViewer
+    visible={avatarViewerVisible}
+    imageUri={showProfileImage ? user?.profilePic : null}
+    name={profileName}
+    onClose={() => setAvatarViewerVisible(false)}
+   />
   </View>
  );
 };

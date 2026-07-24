@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Clipboard from "@react-native-clipboard/clipboard";
 import {
   ActivityIndicator,
@@ -28,6 +28,11 @@ type EarnSection = "listedProfile" | "dropAd" | "searchProfile" | "listedAds" | 
 
 const FEATURE_AMOUNT = 100;
 const FEATURE_DAYS = 30;
+const DEFAULT_SECTION: EarnSection = "listedProfile";
+const EARN_SECTIONS: EarnSection[] = ["listedProfile", "dropAd", "searchProfile", "listedAds", "becomeSeller", "howToEarn"];
+
+const resolveInitialSection = (value?: string): EarnSection =>
+  EARN_SECTIONS.includes(value as EarnSection) ? (value as EarnSection) : DEFAULT_SECTION;
 
 const initialProfileForm = {
   followerCount: "",
@@ -73,10 +78,12 @@ const toNumber = (value: string) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-function HowToEarnScreen({ navigation }: any) {
+function HowToEarnScreen({ navigation, route }: any) {
   const { colors, isDarkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const [activeSection, setActiveSection] = useState<EarnSection>("listedProfile");
+  const [activeSection, setActiveSection] = useState<EarnSection>(
+    resolveInitialSection(route?.params?.section),
+  );
   const [profileSearchQuery, setProfileSearchQuery] = useState("");
   const [referralCode, setReferralCode] = useState("");
   const [hasSellerAccount, setHasSellerAccount] = useState(false);
@@ -88,6 +95,10 @@ function HowToEarnScreen({ navigation }: any) {
   const [submittingCompany, setSubmittingCompany] = useState(false);
   const [profileForm, setProfileForm] = useState(initialProfileForm);
   const [companyForm, setCompanyForm] = useState(initialCompanyForm);
+
+  useEffect(() => {
+    setActiveSection(resolveInitialSection(route?.params?.section));
+  }, [route?.params?.section]);
 
   const loadScreenData = useCallback(async () => {
     try {
@@ -320,7 +331,7 @@ function HowToEarnScreen({ navigation }: any) {
     <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={styles.panelHeader}>
         <View>
-          <Text style={[styles.detailTitle, { color: colors.text }]}>Search your profile</Text>
+          <Text style={[styles.detailTitle, { color: colors.text }]}>Feature your profile</Text>
           <Text style={[styles.detailBody, { color: colors.mutedText }]}>
             Add your creator rate-card, pay INR {FEATURE_AMOUNT} one time, and get listed for brands.
           </Text>
@@ -525,10 +536,7 @@ function HowToEarnScreen({ navigation }: any) {
             {[
               { key: "listedProfile", icon: "list-outline", title: "Listed Profile", sub: "View creators with promotion pricing" },
               { key: "dropAd", icon: "megaphone-outline", title: "Drop an Ad", sub: "Create a campaign for creators" },
-              { key: "searchProfile", icon: "search-outline", title: "Search Your Profile", sub: `Rate-card listing for INR ${FEATURE_AMOUNT}` },
-              { key: "listedAds", icon: "newspaper-outline", title: "Listed Ads", sub: "View active advertiser campaigns" },
               { key: "becomeSeller", icon: "storefront-outline", title: "Become a Seller", sub: "Set post, story, and reel prices" },
-              { key: "howToEarn", icon: "gift-outline", title: "How to Earn", sub: "Referral and promotion earning options" },
             ].map((item) => (
               <TouchableOpacity
                 key={item.key}

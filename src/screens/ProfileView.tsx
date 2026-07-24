@@ -27,6 +27,7 @@ import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import { openPostInFeed, openSwipeInSwipes } from "../utils/socialNavigation";
 import ProgressiveImage from "../features/social/components/ProgressiveImage";
+import ProfilePictureViewer from "../components/ProfilePictureViewer";
 
 interface ProfilePost {
  _id: string;
@@ -116,6 +117,7 @@ const ProfileScreen = ({navigation}: any) => {
  const [activeTab, setActiveTab] = useState<ProfileTab>("posts");
  const [isPrivate, setIsPrivate] = useState(false);
  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+ const [avatarViewerVisible, setAvatarViewerVisible] = useState(false);
 
  const fetchProfile = useCallback(async (showRefreshing = false) => {
 
@@ -386,7 +388,11 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
     style={[styles.heroSection, { borderColor: colors.border, backgroundColor: colors.card }]}
    >
     <View style={styles.profileCenter}>
-     <View style={[styles.profileRing, { borderColor: colors.border, backgroundColor: isDarkMode ? colors.surface : colors.card }]}>
+     <TouchableOpacity
+      style={[styles.profileRing, { borderColor: colors.border, backgroundColor: isDarkMode ? colors.surface : colors.card }]}
+      activeOpacity={0.85}
+      onPress={() => setAvatarViewerVisible(true)}
+     >
       {showProfileImage ? (
        <Image
         source={{
@@ -397,10 +403,10 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
        />
       ) : (
        <View style={[styles.profilePlaceholder, { backgroundColor: `${colors.primary}18` }]}>
-        <Text style={[styles.profilePlaceholderText, { color: colors.primary }]}>{profileInitial}</Text>
-       </View>
-      )}
-     </View>
+       <Text style={[styles.profilePlaceholderText, { color: colors.primary }]}>{profileInitial}</Text>
+      </View>
+     )}
+     </TouchableOpacity>
 
      <Text style={[styles.profileName, { color: colors.text }]}>
       {profileName}
@@ -670,6 +676,12 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
     />
     {!isInsideTabNavigator ? <AppBottomDock navigation={navigation} activeRouteName="ProfileView" /> : null}
+    <ProfilePictureViewer
+     visible={avatarViewerVisible}
+     imageUri={showProfileImage ? user?.profilePic : null}
+     name={profileName}
+     onClose={() => setAvatarViewerVisible(false)}
+    />
    </View>
   );
  };

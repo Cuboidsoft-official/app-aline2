@@ -17,6 +17,7 @@ import { API } from "../api/api";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { DEFAULT_AVATAR_URL, DEFAULT_COVER_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
+import ProfilePictureViewer from "../components/ProfilePictureViewer";
 
 const SellerPreviewScreen = ({ route, navigation }: any) => {
  const { colors, isDarkMode } = useAppTheme();
@@ -26,6 +27,7 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
  const [services, setServices] = useState<any[]>([]);
  const [loading, setLoading] = useState(true);
  const [errorMessage, setErrorMessage] = useState("");
+ const [avatarViewerVisible, setAvatarViewerVisible] = useState(false);
 
  const fetchData = useCallback(async () => {
   try {
@@ -166,7 +168,9 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
     </View>
 
     <View style={[styles.profileCard, { backgroundColor: colors.card, shadowColor: isDarkMode ? "#000" : "#111827" }]}>
-     <Image source={{ uri: seller?.profilePic || DEFAULT_AVATAR_URL }} style={[styles.avatar, { borderColor: colors.card, backgroundColor: colors.surface }]} />
+     <TouchableOpacity activeOpacity={0.85} onPress={() => setAvatarViewerVisible(true)}>
+      <Image source={{ uri: seller?.profilePic || DEFAULT_AVATAR_URL }} style={[styles.avatar, { borderColor: colors.card, backgroundColor: colors.surface }]} />
+     </TouchableOpacity>
 
      <Text style={[styles.name, { color: colors.text }]}>{seller?.sellerName || "Seller"}</Text>
 
@@ -299,6 +303,12 @@ const SellerPreviewScreen = ({ route, navigation }: any) => {
      )}
     </View>
    </ScrollView>
+   <ProfilePictureViewer
+    visible={avatarViewerVisible}
+    imageUri={seller?.profilePic || DEFAULT_AVATAR_URL}
+    name={seller?.sellerName || "Seller"}
+    onClose={() => setAvatarViewerVisible(false)}
+   />
   </SafeAreaView>
  );
 };

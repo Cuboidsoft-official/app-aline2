@@ -37,7 +37,7 @@ import { API } from "../api/api";
 import { getStoredUser, getStoredUserId } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../hooks/useSegmentedMusicPlayback";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
@@ -90,7 +90,7 @@ const emptyFeedInterestProfile = (): FeedInterestProfile => ({
 });
 
 const getMusicPlaybackUrl = (music?: Post["music"]): string =>
-  String(music?.previewUrl || music?.streamUrl || music?.audioUrl || "").trim();
+  String(music?.previewUrl || music?.audioUrl || music?.streamUrl || "").trim();
 
 const formatCount = (value: number): string => {
   if (value >= 1000000) {
@@ -165,11 +165,42 @@ const formatPostMusicLabel = (music?: Post["music"]): string => {
   return artistName ? `${trackName} • ${artistName}` : trackName;
 };
 
-const getTrimmedMusicDurationMs = (
+const getMusicSegmentDurationMs = (
   music?: { duration?: number; startTime?: number; endTime?: number },
 ): number => {
-  void music;
-  return POST_MUSIC_PREVIEW_MS;
+  const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
+  const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
+
+  if (endMs > startMs) {
+    return Math.min(POST_MUSIC_PREVIEW_MS, endMs - startMs);
+  }
+
+  const durationMs = Math.max(0, Number(music?.duration || 0) * 1000);
+  return durationMs > 0 ? Math.min(POST_MUSIC_PREVIEW_MS, durationMs) : POST_MUSIC_PREVIEW_MS;
+};
+
+const getPostVideoLoopDurationMs = (post?: Post | null, carouselIndex = 0): number => {
+  if (!post?.media?.length) {
+    return 0;
+  }
+
+  const activeAsset = post.media[Math.max(0, carouselIndex)];
+  const activeDurationMs = activeAsset?.mediaType === "video" ? Number(activeAsset.durationMs || 0) : 0;
+  if (activeDurationMs > 0) {
+    return activeDurationMs;
+  }
+
+  const firstVideo = post.media.find((asset) => asset.mediaType === "video" && Number(asset.durationMs || 0) > 0);
+  return Math.max(0, Number(firstVideo?.durationMs || 0));
+};
+
+const getPostMusicLoopDurationMs = (post?: Post | null, carouselIndex = 0): number => {
+  const videoDurationMs = getPostVideoLoopDurationMs(post, carouselIndex);
+  if (videoDurationMs > 0) {
+    return videoDurationMs;
+  }
+
+  return getMusicSegmentDurationMs(post?.music);
 };
 
 const getPostAspectRatio = (post: Post): number => {
@@ -445,21 +476,13 @@ function FeedScreen({ navigation, route }: any) {
     () => feed.posts.find((item) => item.id === activePostId) || null,
     [activePostId, feed.posts],
   );
-  const nextMusicPost = useMemo(() => {
-    const currentIndex = feed.posts.findIndex((item) => item.id === activePostId);
-
-    if (currentIndex < 0) {
-      return null;
-    }
-
-    return feed.posts.slice(currentIndex + 1).find((item) => !!getMusicPlaybackUrl(item.music)) || null;
-  }, [activePostId, feed.posts]);
   const activePublishTask = publishTasks[0] || null;
   const completedPublishTaskIdsRef = useRef<Set<string>>(new Set());
   const activePostRawMusicUrl = getMusicPlaybackUrl(activePost?.music);
   const activePostMusicUrl = normalizeMediaUrl(activePostRawMusicUrl);
   const activePostMusicStartMs = Math.max(0, Number(activePost?.music?.startTime || 0) * 1000);
-  const activePostMusicDurationMs = getTrimmedMusicDurationMs(activePost?.music);
+  const activePostCarouselIndex = activePost ? carouselIndexByPostId[activePost.id] || 0 : 0;
+  const activePostMusicDurationMs = getPostMusicLoopDurationMs(activePost, activePostCarouselIndex);
   const activePostMusicTrackKey = activePost
     ? `${activePost.id}:${activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
     : "";
@@ -475,20 +498,8 @@ function FeedScreen({ navigation, route }: any) {
     startMs: activePostMusicStartMs,
     durationMs: activePostMusicDurationMs,
     shouldPlay: activePostShouldPlayMusic,
+    syncKey: activePostPlaybackCycle,
     pauseWhenInactive: true,
-  });
-  const nextPostRawMusicUrl = getMusicPlaybackUrl(nextMusicPost?.music);
-  const nextPostMusicUrl = normalizeMediaUrl(nextPostRawMusicUrl);
-  const nextPostMusicStartMs = Math.max(0, Number(nextMusicPost?.music?.startTime || 0) * 1000);
-  const nextPostMusicDurationMs = getTrimmedMusicDurationMs(nextMusicPost?.music);
-  const nextPostMusicTrackKey = nextMusicPost
-    ? `${nextMusicPost.id}:${nextPostMusicUrl}:${nextPostMusicStartMs}:${nextPostMusicDurationMs}`
-    : "";
-  useSegmentedMusicWarmup({
-    rawUrl: nextPostRawMusicUrl,
-    normalizedUrl: nextPostMusicUrl,
-    trackKey: nextPostMusicTrackKey,
-    enabled: activePostShouldPlayMusic && isScreenFocused && !activeSheet,
   });
   const readSellerAccount = useCallback(async (): Promise<SellerAccountSummary | null> => {
     try {
@@ -536,8 +547,11 @@ function FeedScreen({ navigation, route }: any) {
       {
         title: "Growth",
         data: [
+          { icon: "star-outline", label: "Feature Your Profile", screen: "HowToEarnScreen", params: { section: "searchProfile" } },
+          { icon: "newspaper-outline", label: "Listed Ads", screen: "HowToEarnScreen", params: { section: "listedAds" } },
+          { icon: "gift-outline", label: "Refer and Earn", screen: "HowToEarnScreen", params: { section: "howToEarn" } },
+          { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen", params: { section: "howToEarn" } },
           { icon: "megaphone-outline", label: "Promotions", screen: "HowToEarnScreen" },
-          { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen" },
           hasSellerAccount
             ? { icon: "briefcase-outline", label: "Seller Workspace", screen: "SellerDashboardScreen" }
             : { icon: "storefront-outline", label: "Become a Seller", screen: "SellerRegistration" },
@@ -1594,13 +1608,20 @@ function FeedScreen({ navigation, route }: any) {
     navigation.navigate("WalletScreen");
   }, [navigation]);
 
-  const navigateFromMenu = useCallback((screen: string) => {
+  const navigateFromMenu = useCallback((target: any) => {
+    const screen = typeof target === "string" ? target : target?.screen;
+    const params = typeof target === "string" ? undefined : target?.params;
+
+    if (!screen) {
+      return;
+    }
+
     closeMenu();
     if (screen === "NotificationScreen") {
       setUnreadNotificationCount(0);
       API.put("/notifications/read-all").catch(() => {});
     }
-    navigation.navigate(screen);
+    navigation.navigate(screen, params);
   }, [closeMenu, navigation]);
 
   const toggleSellerAvailability = useCallback(async (nextStatus: boolean) => {
@@ -1767,6 +1788,11 @@ function FeedScreen({ navigation, route }: any) {
                 })}
                 repeat
                 restartKey={isPostActive ? `${post.id}:${activePostPlaybackCycle}` : post.id}
+                onEnd={() => {
+                  if (isPostActive && hasAttachedMusic) {
+                    setActivePostPlaybackCycle((cycle) => cycle + 1);
+                  }
+                }}
                 resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
                 contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
               />
@@ -1838,6 +1864,11 @@ function FeedScreen({ navigation, route }: any) {
                     })}
                     repeat
                     restartKey={isPostActive && currentCarouselIndex === index ? `${post.id}:${asset.id}:${activePostPlaybackCycle}` : asset.id}
+                    onEnd={() => {
+                      if (isPostActive && currentCarouselIndex === index && hasAttachedMusic) {
+                        setActivePostPlaybackCycle((cycle) => cycle + 1);
+                      }
+                    }}
                     resizeMode={getImageResizeMode(asset, frameAspectRatio)}
                     contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
                   />
@@ -3145,7 +3176,7 @@ function FeedScreen({ navigation, route }: any) {
                   <TouchableOpacity
                     key={item.label}
                     style={[styles.sidebarMenuItem, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                    onPress={() => navigateFromMenu(item.screen)}
+                    onPress={() => navigateFromMenu(item)}
                   >
                     <View style={[styles.sidebarMenuIconCircle, { backgroundColor: feedAccentSoft }]}>
                       <Icon name={item.icon} size={18} color={FEED_ACCENT} />
