@@ -981,7 +981,7 @@ function SwipesScreen({ navigation, route }: any) {
             muted={!isActive || !isSwipePlaybackEnabled || (hasAttachedMusic && !!activeSwipeMusicUrl)}
             repeat
             preload={false}
-            resizeMode="cover"
+            resizeMode="contain"
             contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
             showBufferingLoader={false}
           />

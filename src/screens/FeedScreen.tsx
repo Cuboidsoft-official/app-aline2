@@ -329,6 +329,7 @@ function FeedScreen({ navigation, route }: any) {
   const [hasMore, setHasMore] = useState(true);
   const [activePostId, setActivePostId] = useState<string>("");
   const [activePostProgress, setActivePostProgress] = useState(0);
+  const [activePostPlaybackCycle, setActivePostPlaybackCycle] = useState(0);
   const [mutedPostIds, setMutedPostIds] = useState<Record<string, boolean>>({});
   const [expandedCaptionIds, setExpandedCaptionIds] = useState<Record<string, boolean>>({});
   const [carouselIndexByPostId, setCarouselIndexByPostId] = useState<Record<string, number>>({});
@@ -913,6 +914,7 @@ function FeedScreen({ navigation, route }: any) {
   useEffect(() => {
     const canProgress = !!activePostId && isScreenFocused && !activeSheet && !isFeedScrollSettling;
     activePostAdvanceLockRef.current = "";
+    setActivePostPlaybackCycle((cycle) => cycle + 1);
 
     if (!canProgress) {
       activePostProgressStartRef.current = 0;
@@ -930,6 +932,7 @@ function FeedScreen({ navigation, route }: any) {
 
       if (nextProgress >= 1 && activePostAdvanceLockRef.current !== activePostId) {
         activePostAdvanceLockRef.current = activePostId;
+        setActivePostPlaybackCycle((cycle) => cycle + 1);
         advanceToNextFeedPost(activePostId);
       }
     }, 250);
@@ -1763,6 +1766,7 @@ function FeedScreen({ navigation, route }: any) {
                   hasAttachedMusic,
                 })}
                 repeat
+                restartKey={isPostActive ? `${post.id}:${activePostPlaybackCycle}` : post.id}
                 resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
                 contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
               />
@@ -1833,6 +1837,7 @@ function FeedScreen({ navigation, route }: any) {
                       hasAttachedMusic,
                     })}
                     repeat
+                    restartKey={isPostActive && currentCarouselIndex === index ? `${post.id}:${asset.id}:${activePostPlaybackCycle}` : asset.id}
                     resizeMode={getImageResizeMode(asset, frameAspectRatio)}
                     contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
                   />

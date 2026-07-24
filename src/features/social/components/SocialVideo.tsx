@@ -13,6 +13,7 @@ type SocialVideoProps = {
   controls?: boolean;
   preload?: boolean;
   resizeMode?: "cover" | "contain" | "stretch" | "none";
+  restartKey?: string | number;
   onEnd?: () => void;
   contentBlurRadius?: number;
   fallbackColor?: string;
@@ -35,12 +36,14 @@ function SocialVideo({
   controls = false,
   preload = false,
   resizeMode = "cover",
+  restartKey,
   onEnd,
   contentBlurRadius = 0,
   fallbackColor = "#0f172a",
   showBufferingLoader = true,
 }: SocialVideoProps) {
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
+  const videoRef = useRef<any>(null);
   const [posterFailed, setPosterFailed] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
@@ -58,6 +61,14 @@ function SocialVideo({
     setVideoFailed(false);
     setIsBuffering(false);
   }, [placeholderOpacity, usablePosterUri, resolvedUri]);
+
+  useEffect(() => {
+    if (!restartKey || !videoRef.current || paused || preload) {
+      return;
+    }
+
+    videoRef.current.seek?.(0);
+  }, [paused, preload, restartKey]);
 
   useEffect(() => {
     [usablePosterUri]
@@ -92,6 +103,7 @@ function SocialVideo({
       {shouldMountVideo ? (
         <>
           <Video
+            ref={videoRef}
             source={{ uri: resolvedUri }}
             style={StyleSheet.absoluteFill}
             resizeMode={resizeMode}
