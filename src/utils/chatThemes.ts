@@ -26,15 +26,15 @@ export interface ChatThemeColors {
 export const CHAT_THEMES: Record<string, ChatThemeColors> = {
     default: {
         id: "default",
-        name: "Default",
-        sentBubble: ["#0084FF", "#0066CC"],
-        receivedBubble: "#E4E6EB",
+        name: "Black",
+        sentBubble: ["#111827", "#020617"],
+        receivedBubble: "#151F32",
         sentBubbleText: "#FFFFFF",
-        receivedBubbleText: "#1C1E21",
-        background: "#FFFFFF",
-        accent: "#0084FF",
-        headerBg: "#FFFFFF",
-        inputBg: "#F0F2F5",
+        receivedBubbleText: "#F6F8FC",
+        background: "#05070D",
+        accent: "#9b4dff",
+        headerBg: "#05070D",
+        inputBg: "#111A2B",
     },
 
     love: {

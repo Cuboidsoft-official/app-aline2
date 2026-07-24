@@ -3446,8 +3446,8 @@ const ChatScreen = ({ navigation, route }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        enabled={Platform.OS === "ios"}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        enabled
         keyboardVerticalOffset={0}
       >
         <View style={[styles.chatBackground, { backgroundColor: colors.surface }]}>
