@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   FlatList,
   Image,
   Platform,
@@ -68,7 +69,6 @@ const initialFeed: FeedResponse = {
 const FEED_ACCENT = "#9b4dff";
 
 const POST_MUSIC_PREVIEW_MS = 30000;
-const POST_AUTO_ADVANCE_MS = 30000;
 const FEED_PAGE_SIZE = 10;
 const FEED_LOAD_MORE_DELAY_MS = 180;
 const FEED_LOAD_MORE_THROTTLE_MS = 1200;
@@ -179,23 +179,55 @@ const getMusicSegmentDurationMs = (
   return durationMs > 0 ? Math.min(POST_MUSIC_PREVIEW_MS, durationMs) : POST_MUSIC_PREVIEW_MS;
 };
 
-const getPostVideoLoopDurationMs = (post?: Post | null, carouselIndex = 0): number => {
+const normalizeMediaDurationMs = (value?: number): number => {
+  const duration = Math.max(0, Number(value || 0));
+
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return 0;
+  }
+
+  return duration <= 180 ? duration * 1000 : duration;
+};
+
+const getVideoDurationKey = (postId?: string, assetId?: string) =>
+  `${String(postId || "")}:${String(assetId || "")}`;
+
+const getMeasuredVideoDurationMs = (
+  measuredDurations: Record<string, number>,
+  postId?: string,
+  assetId?: string,
+): number => normalizeMediaDurationMs(measuredDurations[getVideoDurationKey(postId, assetId)]);
+
+const getPostVideoLoopDurationMs = (
+  post?: Post | null,
+  carouselIndex = 0,
+  measuredDurations: Record<string, number> = {},
+): number => {
   if (!post?.media?.length) {
     return 0;
   }
 
   const activeAsset = post.media[Math.max(0, carouselIndex)];
-  const activeDurationMs = activeAsset?.mediaType === "video" ? Number(activeAsset.durationMs || 0) : 0;
+  const activeDurationMs = activeAsset?.mediaType === "video"
+    ? getMeasuredVideoDurationMs(measuredDurations, post.id, activeAsset.id) || normalizeMediaDurationMs(activeAsset.durationMs)
+    : 0;
   if (activeDurationMs > 0) {
     return activeDurationMs;
   }
 
-  const firstVideo = post.media.find((asset) => asset.mediaType === "video" && Number(asset.durationMs || 0) > 0);
-  return Math.max(0, Number(firstVideo?.durationMs || 0));
+  const firstVideo = post.media.find((asset) =>
+    asset.mediaType === "video"
+    && (getMeasuredVideoDurationMs(measuredDurations, post.id, asset.id) > 0 || normalizeMediaDurationMs(asset.durationMs) > 0)
+  );
+  return getMeasuredVideoDurationMs(measuredDurations, post.id, firstVideo?.id) || normalizeMediaDurationMs(firstVideo?.durationMs);
 };
 
-const getPostMusicLoopDurationMs = (post?: Post | null, carouselIndex = 0): number => {
-  const videoDurationMs = getPostVideoLoopDurationMs(post, carouselIndex);
+const getPostMusicLoopDurationMs = (
+  post?: Post | null,
+  carouselIndex = 0,
+  measuredDurations: Record<string, number> = {},
+): number => {
+  const videoDurationMs = getPostVideoLoopDurationMs(post, carouselIndex, measuredDurations);
   if (videoDurationMs > 0) {
     return videoDurationMs;
   }
@@ -359,8 +391,8 @@ function FeedScreen({ navigation, route }: any) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [activePostId, setActivePostId] = useState<string>("");
-  const [activePostProgress, setActivePostProgress] = useState(0);
-  const [activePostPlaybackCycle, setActivePostPlaybackCycle] = useState(0);
+  const [activePostMusicSyncCycle, setActivePostMusicSyncCycle] = useState(0);
+  const [measuredVideoDurations, setMeasuredVideoDurations] = useState<Record<string, number>>({});
   const [mutedPostIds, setMutedPostIds] = useState<Record<string, boolean>>({});
   const [expandedCaptionIds, setExpandedCaptionIds] = useState<Record<string, boolean>>({});
   const [carouselIndexByPostId, setCarouselIndexByPostId] = useState<Record<string, number>>({});
@@ -382,17 +414,13 @@ function FeedScreen({ navigation, route }: any) {
     unreadNotificationCount: 0,
     walletCoinBalance: 0,
   });
-  const feedScrollTransitionRef = useRef(false);
-  const feedScrollResumeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedLoadMoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedLoadMoreRequestRef = useRef(false);
   const feedLastLoadMoreAtRef = useRef(0);
-  const activePostProgressStartRef = useRef(0);
-  const activePostAdvanceLockRef = useRef("");
   const feedInterestRef = useRef<FeedInterestProfile>(emptyFeedInterestProfile());
   const activePostDwellRef = useRef<{ postId: string; startedAt: number }>({ postId: "", startedAt: 0 });
   const [_feedInterestVersion, setFeedInterestVersion] = useState(0);
-  const pendingAutoAdvancePostIdRef = useRef("");
+  const loadedFeedScopeRef = useRef("");
   const lastViewablePostIdRef = useRef("");
   const postTapRef = useRef<{ id: string; time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     id: "",
@@ -400,11 +428,11 @@ function FeedScreen({ navigation, route }: any) {
     timeout: null,
   });
   const homeReloadHandledRef = useRef("");
-  const [isFeedScrollSettling, setIsFeedScrollSettling] = useState(false);
   const isTabletLayout = width >= 768;
   const focusedPostId = String(route?.params?.postId || "").trim();
   const focusUserId = String(route?.params?.userId || "").trim();
   const isFocusedPostFeed = Boolean(focusUserId);
+  const feedScopeKey = isFocusedPostFeed ? `user:${focusUserId}` : "home";
   const feedListItems = useMemo(() => {
     if (isFocusedPostFeed || !feed.posts.length) {
       return feed.posts;
@@ -416,26 +444,6 @@ function FeedScreen({ navigation, route }: any) {
     return nextItems;
   }, [feed.posts, featuredCarouselIndex, isFocusedPostFeed]);
 
-  useEffect(() => {
-    const pendingPostId = pendingAutoAdvancePostIdRef.current;
-    if (!pendingPostId || !feedListItems.length) {
-      return;
-    }
-
-    const targetIndex = feedListItems.findIndex((item: any) => item?.id === pendingPostId);
-    if (targetIndex < 0) {
-      return;
-    }
-
-    pendingAutoAdvancePostIdRef.current = "";
-    requestAnimationFrame(() => {
-      feedListRef.current?.scrollToIndex?.({
-        index: targetIndex,
-        animated: true,
-        viewPosition: 0,
-      });
-    });
-  }, [feedListItems]);
   const isCompactPhone = width < 360;
   const isMediumPhone = width < 430;
   const feedHorizontalInset = isTabletLayout ? 18 : isCompactPhone ? 8 : 10;
@@ -482,7 +490,7 @@ function FeedScreen({ navigation, route }: any) {
   const activePostMusicUrl = normalizeMediaUrl(activePostRawMusicUrl);
   const activePostMusicStartMs = Math.max(0, Number(activePost?.music?.startTime || 0) * 1000);
   const activePostCarouselIndex = activePost ? carouselIndexByPostId[activePost.id] || 0 : 0;
-  const activePostMusicDurationMs = getPostMusicLoopDurationMs(activePost, activePostCarouselIndex);
+  const activePostMusicDurationMs = getPostMusicLoopDurationMs(activePost, activePostCarouselIndex, measuredVideoDurations);
   const activePostMusicTrackKey = activePost
     ? `${activePost.id}:${activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
     : "";
@@ -498,7 +506,7 @@ function FeedScreen({ navigation, route }: any) {
     startMs: activePostMusicStartMs,
     durationMs: activePostMusicDurationMs,
     shouldPlay: activePostShouldPlayMusic,
-    syncKey: activePostPlaybackCycle,
+    syncKey: activePostMusicSyncCycle,
     pauseWhenInactive: true,
   });
   const readSellerAccount = useCallback(async (): Promise<SellerAccountSummary | null> => {
@@ -757,7 +765,8 @@ function FeedScreen({ navigation, route }: any) {
     }
     const snapshot = await loadFeedSnapshot({ lightweight: options.lightweight });
     applyFeedSnapshot(snapshot, options);
-  }, [applyFeedSnapshot, loadFeedSnapshot]);
+    loadedFeedScopeRef.current = feedScopeKey;
+  }, [applyFeedSnapshot, feedScopeKey, loadFeedSnapshot]);
 
   const loadMoreFeed = useCallback(() => {
     if (isFocusedPostFeed || loadingMore || !hasMore || feedLoadMoreRequestRef.current) {
@@ -786,7 +795,6 @@ function FeedScreen({ navigation, route }: any) {
             return;
           }
 
-          pendingAutoAdvancePostIdRef.current = activePostProgress >= 1 ? nextPosts[0]?.id || "" : "";
           setFeed((prev) => {
             const existingIds = new Set(prev.posts.map((post) => post.id));
             const uniqueNextPosts = nextPosts.filter((post) => post?.id && !existingIds.has(post.id));
@@ -812,7 +820,7 @@ function FeedScreen({ navigation, route }: any) {
           setLoadingMore(false);
         });
     }, FEED_LOAD_MORE_DELAY_MS);
-  }, [activePostProgress, hasMore, isFocusedPostFeed, loadingMore, page]);
+  }, [hasMore, isFocusedPostFeed, loadingMore, page]);
 
   useEffect(() => {
     let active = true;
@@ -863,7 +871,14 @@ function FeedScreen({ navigation, route }: any) {
       let active = true;
 
       const run = async () => {
-        const shouldShowInitialLoader = !hasFeedContentRef.current;
+        const shouldReloadForScope = loadedFeedScopeRef.current !== feedScopeKey;
+        const shouldShowInitialLoader = !hasFeedContentRef.current || shouldReloadForScope;
+
+        if (!shouldReloadForScope && hasFeedContentRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+          return;
+        }
 
         try {
           if (shouldShowInitialLoader) {
@@ -873,6 +888,7 @@ function FeedScreen({ navigation, route }: any) {
           const snapshot = await loadFeedSnapshot();
           if (active) {
             applyFeedSnapshot(snapshot);
+            loadedFeedScopeRef.current = feedScopeKey;
           }
         } catch (error) {
           if (active) {
@@ -897,62 +913,11 @@ function FeedScreen({ navigation, route }: any) {
         setActivePostId("");
         stopAllSegmentedMusicPlayback();
       };
-    }, [applyFeedSnapshot, loadFeedSnapshot]),
+    }, [applyFeedSnapshot, feedScopeKey, loadFeedSnapshot]),
   );
-  const activePostIndex = useMemo(
-    () => feed.posts.findIndex((item) => item.id === activePostId),
-    [activePostId, feed.posts],
-  );
-
-  const advanceToNextFeedPost = useCallback((completedPostId: string) => {
-    const currentListIndex = feedListItems.findIndex((item: any) => item?.id === completedPostId);
-    const nextListIndex = feedListItems.findIndex((item: any, index) =>
-      index > currentListIndex
-      && item?.id
-      && !(item as any).__featuredProfiles
-      && Array.isArray(item.media)
-    );
-
-    if (nextListIndex >= 0) {
-      feedListRef.current?.scrollToIndex?.({
-        index: nextListIndex,
-        animated: true,
-        viewPosition: 0,
-      });
-      return;
-    }
-
-    loadMoreFeed();
-  }, [feedListItems, loadMoreFeed]);
-
   useEffect(() => {
-    const canProgress = !!activePostId && isScreenFocused && !activeSheet && !isFeedScrollSettling;
-    activePostAdvanceLockRef.current = "";
-    setActivePostPlaybackCycle((cycle) => cycle + 1);
-
-    if (!canProgress) {
-      activePostProgressStartRef.current = 0;
-      setActivePostProgress(0);
-      return undefined;
-    }
-
-    activePostProgressStartRef.current = Date.now();
-    setActivePostProgress(0);
-
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - activePostProgressStartRef.current;
-      const nextProgress = Math.min(1, elapsed / POST_AUTO_ADVANCE_MS);
-      setActivePostProgress(nextProgress);
-
-      if (nextProgress >= 1 && activePostAdvanceLockRef.current !== activePostId) {
-        activePostAdvanceLockRef.current = activePostId;
-        setActivePostPlaybackCycle((cycle) => cycle + 1);
-        advanceToNextFeedPost(activePostId);
-      }
-    }, 250);
-
-    return () => clearInterval(interval);
-  }, [activePostId, activeSheet, advanceToNextFeedPost, isFeedScrollSettling, isScreenFocused]);
+    setActivePostMusicSyncCycle((cycle) => cycle + 1);
+  }, [activePostId, activePostCarouselIndex]);
 
   useEffect(() => {
     const previous = activePostDwellRef.current;
@@ -1071,9 +1036,6 @@ function FeedScreen({ navigation, route }: any) {
       if (postTapRef.current.timeout) {
         clearTimeout(postTapRef.current.timeout);
       }
-      if (feedScrollResumeTimeoutRef.current) {
-        clearTimeout(feedScrollResumeTimeoutRef.current);
-      }
       if (feedLoadMoreTimeoutRef.current) {
         clearTimeout(feedLoadMoreTimeoutRef.current);
         feedLoadMoreTimeoutRef.current = null;
@@ -1094,12 +1056,6 @@ function FeedScreen({ navigation, route }: any) {
         setActivePostId(postIdBeforeRefresh);
       }
     } finally {
-      if (feedScrollResumeTimeoutRef.current) {
-        clearTimeout(feedScrollResumeTimeoutRef.current);
-        feedScrollResumeTimeoutRef.current = null;
-      }
-      feedScrollTransitionRef.current = false;
-      setIsFeedScrollSettling(false);
       setRefreshing(false);
       if (postIdBeforeRefresh) {
         requestAnimationFrame(() => setActivePostId(postIdBeforeRefresh));
@@ -1217,44 +1173,6 @@ function FeedScreen({ navigation, route }: any) {
     }, 720);
   }, []);
 
-  const restoreActiveVisiblePost = useCallback(() => {
-    if (feedScrollResumeTimeoutRef.current) {
-      clearTimeout(feedScrollResumeTimeoutRef.current);
-      feedScrollResumeTimeoutRef.current = null;
-    }
-
-    feedScrollTransitionRef.current = false;
-    setIsFeedScrollSettling(false);
-
-    if (!isScreenFocused || activeSheet) {
-      setActivePostId("");
-      return;
-    }
-
-    const nextActivePostId = lastViewablePostIdRef.current || feed.posts[0]?.id || "";
-    setActivePostId(nextActivePostId);
-  }, [activeSheet, feed.posts, isScreenFocused]);
-
-  const pauseActiveVisiblePost = useCallback(() => {
-    if (feedScrollResumeTimeoutRef.current) {
-      clearTimeout(feedScrollResumeTimeoutRef.current);
-      feedScrollResumeTimeoutRef.current = null;
-    }
-
-    feedScrollTransitionRef.current = true;
-    setIsFeedScrollSettling(true);
-  }, []);
-
-  const scheduleRestoreActiveVisiblePost = useCallback((delay = 80) => {
-    if (feedScrollResumeTimeoutRef.current) {
-      clearTimeout(feedScrollResumeTimeoutRef.current);
-    }
-
-    feedScrollResumeTimeoutRef.current = setTimeout(() => {
-      restoreActiveVisiblePost();
-    }, delay);
-  }, [restoreActiveVisiblePost]);
-
   const handlePostMediaPress = (post: Post) => {
     const now = Date.now();
     const lastTap = postTapRef.current;
@@ -1290,6 +1208,30 @@ function FeedScreen({ navigation, route }: any) {
   const getPostMediaHeight = useCallback((post: Post) => {
     return Math.round(postMediaWidth / getPostAspectRatio(post));
   }, [postMediaWidth]);
+
+  const handleFeedVideoLoaded = useCallback((postId: string, assetId: string | undefined, event: any) => {
+    const durationSeconds = Number(event?.duration || event?.nativeEvent?.duration || 0);
+    const durationMs = Number.isFinite(durationSeconds) && durationSeconds > 0
+      ? Math.round(durationSeconds * 1000)
+      : 0;
+
+    if (durationMs <= 0) {
+      return;
+    }
+
+    setMeasuredVideoDurations((prev) => {
+      const key = getVideoDurationKey(postId, assetId);
+      if (Math.abs(Number(prev[key] || 0) - durationMs) < 250) {
+        return prev;
+      }
+
+      return { ...prev, [key]: durationMs };
+    });
+
+    if (postId === activePostId) {
+      setActivePostMusicSyncCycle((cycle) => cycle + 1);
+    }
+  }, [activePostId]);
 
   const submitComment = async (postId: string, audioFile?: CommentAudioFile) => {
     const draft = (commentDrafts[postId] || "").trim();
@@ -1582,12 +1524,22 @@ function FeedScreen({ navigation, route }: any) {
   };
 
   const animateMenu = useCallback((nextOpen: boolean) => {
-    setMenuOpen(nextOpen);
+    slideAnim.stopAnimation();
+
+    if (nextOpen) {
+      setMenuOpen(true);
+    }
+
     Animated.timing(slideAnim, {
       toValue: nextOpen ? 1 : 0,
-      duration: 260,
+      duration: nextOpen ? 140 : 120,
+      easing: nextOpen ? Easing.out(Easing.quad) : Easing.in(Easing.quad),
       useNativeDriver: true,
-    }).start();
+    }).start(({ finished }) => {
+      if (finished && !nextOpen) {
+        setMenuOpen(false);
+      }
+    });
   }, [slideAnim]);
 
   const toggleMenu = useCallback(() => {
@@ -1750,13 +1702,12 @@ function FeedScreen({ navigation, route }: any) {
     const hasAttachedMusic = !!getMusicPlaybackUrl(post.music);
     const isMuted = !!mutedPostIds[post.id];
     const isPostActive = activePostId === post.id && isScreenFocused && !activeSheet;
-    const postIndex = feed.posts.findIndex((candidate) => candidate.id === post.id);
-    const shouldPreloadVideo = activePostIndex >= 0 && postIndex > activePostIndex && postIndex <= activePostIndex + 2;
+    const shouldPreloadVideo = false;
     const shouldMountVideo = (isCarouselItemActive = true) => shouldMountFeedVideo({
       isPostActive,
       isCarouselItemActive,
       isScreenFocused,
-      isScrolling: isFeedScrollSettling,
+      isScrolling: false,
     });
     const renderSensitiveBadge = (label?: string) => (
       <View pointerEvents="none" style={styles.sensitiveBadge}>
@@ -1787,10 +1738,11 @@ function FeedScreen({ navigation, route }: any) {
                   hasAttachedMusic,
                 })}
                 repeat
-                restartKey={isPostActive ? `${post.id}:${activePostPlaybackCycle}` : post.id}
+                restartKey={post.id}
+                onLoad={(event) => handleFeedVideoLoaded(post.id, primaryMedia.id, event)}
                 onEnd={() => {
                   if (isPostActive && hasAttachedMusic) {
-                    setActivePostPlaybackCycle((cycle) => cycle + 1);
+                    setActivePostMusicSyncCycle((cycle) => cycle + 1);
                   }
                 }}
                 resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
@@ -1863,10 +1815,11 @@ function FeedScreen({ navigation, route }: any) {
                       hasAttachedMusic,
                     })}
                     repeat
-                    restartKey={isPostActive && currentCarouselIndex === index ? `${post.id}:${asset.id}:${activePostPlaybackCycle}` : asset.id}
+                    restartKey={`${post.id}:${asset.id}`}
+                    onLoad={(event) => handleFeedVideoLoaded(post.id, asset.id, event)}
                     onEnd={() => {
                       if (isPostActive && currentCarouselIndex === index && hasAttachedMusic) {
-                        setActivePostPlaybackCycle((cycle) => cycle + 1);
+                        setActivePostMusicSyncCycle((cycle) => cycle + 1);
                       }
                     }}
                     resizeMode={getImageResizeMode(asset, frameAspectRatio)}
@@ -2026,22 +1979,6 @@ function FeedScreen({ navigation, route }: any) {
     );
   };
 
-  const renderPostAutoProgress = (postId: string) => (
-    activePostId === postId ? (
-      <View pointerEvents="none" style={styles.postAutoProgressTrack}>
-        <View
-          style={[
-            styles.postAutoProgressFill,
-            {
-              width: `${Math.max(0, Math.min(100, activePostProgress * 100))}%`,
-              backgroundColor: colors.primary,
-            },
-          ]}
-        />
-      </View>
-    ) : null
-  );
-
   const renderPost = ({ item }: { item: Post }) => {
     const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
     const musicLabel = formatPostMusicLabel(item.music);
@@ -2133,7 +2070,6 @@ function FeedScreen({ navigation, route }: any) {
           onPress={() => openPostDetail(item)}
         >
           {renderPostMedia(item)}
-          {renderPostAutoProgress(item.id)}
           {renderPostStickerOverlay(item)}
         </TouchableOpacity>
 
@@ -2463,7 +2399,6 @@ function FeedScreen({ navigation, route }: any) {
         >
           <Pressable onPress={() => handlePostMediaPress(item)} style={styles.mediaPressSurface}>
             {renderPostMedia(item)}
-            {renderPostAutoProgress(item.id)}
             {renderPostStickerOverlay(item)}
             {likeBurstPostId === item.id ? (
               <View pointerEvents="none" style={styles.likeBurstOverlay}>
@@ -3004,15 +2939,11 @@ function FeedScreen({ navigation, route }: any) {
           maxToRenderPerBatch={4}
           updateCellsBatchingPeriod={16}
           windowSize={5}
-          decelerationRate="fast"
+          decelerationRate="normal"
           scrollEventThrottle={16}
           keyboardDismissMode="on-drag"
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
-          onScrollBeginDrag={pauseActiveVisiblePost}
-          onMomentumScrollBegin={pauseActiveVisiblePost}
-          onScrollEndDrag={() => scheduleRestoreActiveVisiblePost(40)}
-          onMomentumScrollEnd={() => scheduleRestoreActiveVisiblePost(0)}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -3765,18 +3696,6 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 2,
-  },
-  postAutoProgressTrack: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 3,
-    backgroundColor: "rgba(255,255,255,0.42)",
-    overflow: "hidden",
-  },
-  postAutoProgressFill: {
-    height: "100%",
   },
   postHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
   postHeaderIdentity: { flexDirection: "row", alignItems: "center", flex: 1 },

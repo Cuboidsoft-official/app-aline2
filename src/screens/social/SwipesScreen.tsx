@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  Easing,
   LayoutChangeEvent,
   FlatList,
   Image,
@@ -26,12 +27,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../../components/AppBottomDock";
 import DraggableBottomSheet from "../../components/DraggableBottomSheet";
 import CommentThreadSheet from "../../features/social/components/CommentThreadSheet";
+import CommentAudioBubble from "../../features/social/components/CommentAudioBubble";
 import InteractiveText from "../../features/social/components/InteractiveText";
 import ShareTargetsList, { ShareTarget } from "../../features/social/components/ShareTargetsList";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import MentionSuggestionList from "../../components/MentionSuggestionList";
+import VoiceRecorderButton from "../../components/chat/VoiceRecorderButton";
 import { socialApi } from "../../features/social/socialApi";
-import { ReportReason, SocialUser, Swipe, SwipeComment } from "../../features/social/types";
+import { CommentAudioFile, ReportReason, SocialUser, Swipe, SwipeComment } from "../../features/social/types";
 import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
@@ -100,8 +103,18 @@ const getMusicSegmentDurationMs = (
   return durationMs > 0 ? Math.min(SWIPE_MUSIC_PREVIEW_MS, durationMs) : SWIPE_MUSIC_PREVIEW_MS;
 };
 
+const normalizeMediaDurationMs = (value?: number): number => {
+  const duration = Math.max(0, Number(value || 0));
+
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return 0;
+  }
+
+  return duration <= 180 ? duration * 1000 : duration;
+};
+
 const getSwipeMusicLoopDurationMs = (swipe?: Swipe | null): number => {
-  const videoDurationMs = Math.max(0, Number(swipe?.media?.durationMs || 0));
+  const videoDurationMs = normalizeMediaDurationMs(swipe?.media?.durationMs);
   if (videoDurationMs > 0) {
     return videoDurationMs;
   }
@@ -131,6 +144,7 @@ function SwipesScreen({ navigation, route }: any) {
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetSubmitting, setSheetSubmitting] = useState(false);
   const [sheetBusyIds, setSheetBusyIds] = useState<Record<string, boolean>>({});
+  const [sheetPendingVoice, setSheetPendingVoice] = useState<CommentAudioFile | null>(null);
   const [selectedShareTargets, setSelectedShareTargets] = useState<ShareTarget[]>([]);
   const [selectedReason, setSelectedReason] = useState<ReportReason>("spam");
   const [reportNote, setReportNote] = useState("");
@@ -590,6 +604,7 @@ function SwipesScreen({ navigation, route }: any) {
     setSelectedReason("spam");
     setReportNote("");
     setSheetDraft("");
+    setSheetPendingVoice(null);
     setThreadComment(null);
   };
 
@@ -629,14 +644,18 @@ function SwipesScreen({ navigation, route }: any) {
     setThreadComment(comment);
   };
 
-  const onSubmitSheetComment = async () => {
-    if (!selectedSwipe || !sheetDraft.trim() || sheetSubmitting) {
+  const onSubmitSheetComment = async (audioFile?: CommentAudioFile) => {
+    if (!selectedSwipe || sheetSubmitting) {
+      return;
+    }
+
+    if (!sheetDraft.trim() && !audioFile?.uri) {
       return;
     }
 
     try {
       setSheetSubmitting(true);
-      const added = await socialApi.addSwipeComment(selectedSwipe.id, sheetDraft);
+      const added = await socialApi.addSwipeComment(selectedSwipe.id, sheetDraft, undefined, audioFile);
       setSheetComments((prev) => [added, ...prev]);
       setSwipes((prev) =>
         prev.map((item) =>
@@ -645,8 +664,9 @@ function SwipesScreen({ navigation, route }: any) {
       );
       setSelectedSwipe((prev) => (prev ? { ...prev, commentsCount: prev.commentsCount + 1 } : prev));
       setSheetDraft("");
+      setSheetPendingVoice(null);
     } catch (error) {
-      Alert.alert("Could not comment", toUserSafeMessage(error));
+      Alert.alert(audioFile?.uri ? "Could not send voice comment" : "Could not comment", toUserSafeMessage(error));
     } finally {
       setSheetSubmitting(false);
     }
@@ -1179,7 +1199,7 @@ function SwipesScreen({ navigation, route }: any) {
         disableIntervalMomentum
         decelerationRate="fast"
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews={Platform.OS === "android"}
+        removeClippedSubviews={false}
         initialNumToRender={4}
         maxToRenderPerBatch={4}
         windowSize={5}
@@ -1255,6 +1275,9 @@ function SwipesScreen({ navigation, route }: any) {
                             text={item.text}
                           />
                         ) : null}
+                        {item.audioUrl ? (
+                          <CommentAudioBubble audioUrl={item.audioUrl} audioDuration={item.audioDuration} />
+                        ) : null}
                         <View style={styles.sheetCommentActions}>
                           <TouchableOpacity onPress={() => onToggleSheetCommentLike(item.id)}>
                             <Text style={styles.sheetCommentAction}>{item.liked ? "Unlike" : "Like"}</Text>
@@ -1290,16 +1313,46 @@ function SwipesScreen({ navigation, route }: any) {
                   }}
                 />
                 <View style={styles.sheetComposer}>
-                <TextInput
-                  value={sheetDraft}
-                  onChangeText={setSheetDraft}
-                  placeholder="Add a comment..."
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.sheetInput}
-                />
-                <TouchableOpacity disabled={!sheetDraft.trim() || sheetSubmitting} onPress={onSubmitSheetComment}>
-                  <Text style={[styles.sheetSend, (!sheetDraft.trim() || sheetSubmitting) && styles.sheetSendDisabled]}>Post</Text>
-                </TouchableOpacity>
+                {!sheetPendingVoice ? (
+                  <TextInput
+                    value={sheetDraft}
+                    onChangeText={setSheetDraft}
+                    placeholder="Add a comment..."
+                    placeholderTextColor="#8a8a8a"
+                    style={styles.sheetInput}
+                  />
+                ) : null}
+                {sheetPendingVoice ? (
+                  <View style={styles.sheetVoicePreview}>
+                    <CommentAudioBubble audioUrl={sheetPendingVoice.uri} audioDuration={sheetPendingVoice.duration} />
+                    <TouchableOpacity
+                      style={styles.sheetVoiceRemove}
+                      onPress={() => setSheetPendingVoice(null)}
+                      disabled={sheetSubmitting}
+                    >
+                      <Icon name="close-circle" size={22} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+                {sheetDraft.trim() || sheetPendingVoice ? (
+                  <TouchableOpacity
+                    style={styles.sheetSendIconButton}
+                    disabled={sheetSubmitting}
+                    onPress={() => {
+                      onSubmitSheetComment(sheetPendingVoice || undefined).catch((error) => {
+                        Alert.alert("Could not send comment", toUserSafeMessage(error));
+                      });
+                    }}
+                  >
+                    <Icon name="send" size={17} color="#fff" />
+                  </TouchableOpacity>
+                ) : (
+                  <VoiceRecorderButton
+                    color="#2563eb"
+                    disabled={sheetSubmitting}
+                    onSend={(voiceFile) => setSheetPendingVoice(voiceFile)}
+                  />
+                )}
               </View>
             </View>
           ) : null}
@@ -1544,8 +1597,8 @@ function SwipesScreen({ navigation, route }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#000" },
-  swipeItem: { justifyContent: "flex-end", backgroundColor: "#121212" },
-  swipeMedia: { ...StyleSheet.absoluteFillObject },
+  swipeItem: { justifyContent: "flex-end", backgroundColor: "#000", overflow: "hidden" },
+  swipeMedia: { ...StyleSheet.absoluteFillObject, backgroundColor: "#000" },
   swipeStickerLayer: {
     ...StyleSheet.absoluteFillObject,
   },
@@ -1799,6 +1852,24 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     paddingHorizontal: 14,
     color: "#111827",
+  },
+  sheetVoicePreview: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  sheetVoiceRemove: {
+    marginLeft: 8,
+    padding: 4,
+  },
+  sheetSendIconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#2563eb",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 10,
   },
   sheetSend: { color: "#2563eb", fontWeight: "700", paddingHorizontal: 12 },
   sheetSendDisabled: { color: "#9ca3af" },

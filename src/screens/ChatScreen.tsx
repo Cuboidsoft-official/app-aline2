@@ -863,7 +863,7 @@ const buildScheduledCallPreview = (message: ChatMessage): ScheduledCallPreview |
 const ChatScreen = ({ navigation, route }: any) => {
   const colors = CHAT_DARK_COLORS;
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
   const { userId, conversationId, conversationType: conversationTypeParam, serviceId, groupName, groupAvatar, memberCount, groupConversation, openScheduleCallComposer, openScheduleCallType } = route.params || {};
   const initialConversationType = (String(conversationTypeParam || "").trim().toLowerCase() || "direct") as "direct" | "seller" | "group";
@@ -901,6 +901,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [scheduleCallAgenda, setScheduleCallAgenda] = useState("");
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
+  const maxWindowHeightRef = useRef(height);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -920,6 +921,12 @@ const ChatScreen = ({ navigation, route }: any) => {
       hideSubscription.remove();
     };
   }, [insets.bottom]);
+
+  useEffect(() => {
+    if (!isKeyboardVisible) {
+      maxWindowHeightRef.current = Math.max(maxWindowHeightRef.current, height);
+    }
+  }, [height, isKeyboardVisible]);
 
   useEffect(() => {
     const normalized = String(conversationTypeParam || "").trim().toLowerCase();
@@ -3249,6 +3256,12 @@ const ChatScreen = ({ navigation, route }: any) => {
   const composerBottomPadding = isKeyboardVisible
     ? Math.max(6, Math.min(8, keyboardInset || 8))
     : Math.max(7, insets.bottom - 2);
+  const keyboardResizeDelta = Math.max(0, maxWindowHeightRef.current - height);
+  const shouldUseManualAndroidKeyboardOffset = Platform.OS === "android"
+    && isKeyboardVisible
+    && keyboardInset > 0
+    && keyboardResizeDelta < Math.max(80, keyboardInset * 0.35);
+  const composerKeyboardMargin = shouldUseManualAndroidKeyboardOffset ? keyboardInset : 0;
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top"]}>
@@ -3446,8 +3459,8 @@ const ChatScreen = ({ navigation, route }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        enabled
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        enabled={Platform.OS === "ios"}
         keyboardVerticalOffset={0}
       >
         <View style={[styles.chatBackground, { backgroundColor: colors.surface }]}>
@@ -3855,6 +3868,7 @@ const ChatScreen = ({ navigation, route }: any) => {
               paddingTop: 6,
               paddingBottom: composerBottomPadding,
               paddingHorizontal: Math.max(8, chatMetrics.listPadding - 2),
+              marginBottom: composerKeyboardMargin,
             },
           ]}
         >

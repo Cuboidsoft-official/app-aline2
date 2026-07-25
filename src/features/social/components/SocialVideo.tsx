@@ -15,6 +15,7 @@ type SocialVideoProps = {
   resizeMode?: "cover" | "contain" | "stretch" | "none";
   restartKey?: string | number;
   onEnd?: () => void;
+  onLoad?: (event: any) => void;
   contentBlurRadius?: number;
   fallbackColor?: string;
   showBufferingLoader?: boolean;
@@ -38,6 +39,7 @@ function SocialVideo({
   resizeMode = "cover",
   restartKey,
   onEnd,
+  onLoad,
   contentBlurRadius = 0,
   fallbackColor = "#0f172a",
   showBufferingLoader = true,
@@ -126,13 +128,14 @@ function SocialVideo({
             onLoadStart={() => {
               setIsBuffering(true);
             }}
-            onLoad={() => {
+            onLoad={(event) => {
               setIsBuffering(false);
               Animated.timing(placeholderOpacity, {
                 toValue: 0,
                 duration: 180,
                 useNativeDriver: true,
               }).start();
+              onLoad?.(event);
             }}
             onReadyForDisplay={() => {
               setIsBuffering(false);

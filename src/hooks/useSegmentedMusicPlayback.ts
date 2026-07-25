@@ -261,7 +261,7 @@ export function useSegmentedMusicPlayback({
   }, []);
 
   useEffect(() => {
-    if (!syncKey || !shouldPlayNow) {
+    if (syncKey === undefined || syncKey === null || !shouldPlayNow) {
       return;
     }
 
