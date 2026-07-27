@@ -500,8 +500,8 @@ function HowToEarnScreen({ navigation, route }: any) {
     if (activeSection === "howToEarn") return renderReferralSection();
     return renderProfileSection();
   };
-  const showProfileList = activeSection === "listedProfile" || activeSection === "searchProfile";
-  const showAdsList = activeSection === "listedAds" || activeSection === "dropAd";
+  const showProfileList = activeSection === "listedProfile";
+  const showAdsList = activeSection === "listedAds";
 
   return (
     <View style={styles.screen}>
@@ -560,14 +560,12 @@ function HowToEarnScreen({ navigation, route }: any) {
           {showProfileList ? (
           <View style={styles.listSection}>
             <Text style={[styles.listTitle, { color: colors.text }]}>Featured profile list</Text>
-            {activeSection === "searchProfile" ? (
-              <Field
-                label="Search profile"
-                value={profileSearchQuery}
-                onChangeText={setProfileSearchQuery}
-                placeholder="Username, location, creator name"
-              />
-            ) : null}
+            <Field
+              label="Search profile"
+              value={profileSearchQuery}
+              onChangeText={setProfileSearchQuery}
+              placeholder="Username, location, creator name"
+            />
             {filteredFeaturedProfiles.length ? filteredFeaturedProfiles.map((item) => (
               <TouchableOpacity
                 key={item._id}
@@ -628,15 +626,17 @@ function HowToEarnScreen({ navigation, route }: any) {
           </View>
           ) : null}
 
-          <TouchableOpacity
-            style={[styles.sellerLink, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
-          >
-            <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={20} color={colors.primary} />
-            <Text style={[styles.sellerLinkText, { color: colors.text }]}>
-              {hasSellerAccount ? "Open seller dashboard" : "Become a seller"}
-            </Text>
-          </TouchableOpacity>
+          {activeSection !== "becomeSeller" ? (
+            <TouchableOpacity
+              style={[styles.sellerLink, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
+            >
+              <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={20} color={colors.primary} />
+              <Text style={[styles.sellerLinkText, { color: colors.text }]}>
+                {hasSellerAccount ? "Open seller dashboard" : "Become a seller"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </ScrollView>
       </SafeAreaView>
       <AppBottomDock navigation={navigation} />

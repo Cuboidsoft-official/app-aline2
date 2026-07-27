@@ -117,6 +117,7 @@ type StoryToolPanel = "text" | "color" | "font" | "size" | "filters" | "sticker"
 type ComposerEditToolPanel = "layout" | "filters" | "tag" | "music" | "trim" | "text" | "color" | "font" | "size" | null;
 type StoryTextFontVariant = "bold" | "italic" | "clean" | "soft";
 type MusicPreviewMode = "audio";
+type ComposerMediaTransform = { scale: number; translateX: number; translateY: number };
 
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
 const POST_ASPECTS: AspectOption[] = [
@@ -184,6 +185,7 @@ const MUSIC_CLIP_MAX_SECONDS = 30;
 const MUSIC_DISCOVERY_FALLBACK_QUERIES = ["love", "party", "happy", "summer"];
 const PHOTO_PICKER_MAX_DIMENSION = 2160;
 const PHOTO_PICKER_QUALITY = 0.8;
+const DEFAULT_COMPOSER_MEDIA_TRANSFORM: ComposerMediaTransform = { scale: 1, translateX: 0, translateY: 0 };
 const STORY_TEXT_THEMES: Array<{
   id: StoryTextStickerTheme;
   label: string;
@@ -951,6 +953,11 @@ function CreatePostScreen({ navigation, route }: any) {
   const [selectedAsset, setSelectedAsset] = useState<ComposerAsset | null>(
     initialMedia ? createRemoteComposerAsset(initialMedia, initialMediaType) : null,
   );
+  const [selectedAssets, setSelectedAssets] = useState<ComposerAsset[]>(
+    initialMedia ? [createRemoteComposerAsset(initialMedia, initialMediaType)] : [],
+  );
+  const [activeCarouselIndex, setActiveCarouselIndex] = useState(0);
+  const [videoOriginalAudioVolume, setVideoOriginalAudioVolume] = useState(initialMediaType === "video" ? 1 : 0);
   const [aspectId, setAspectId] = useState<Record<ComposerMode, string>>({
     post: DEFAULT_ASPECT_BY_MODE.post,
     story: DEFAULT_ASPECT_BY_MODE.story,
@@ -1010,7 +1017,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const [storyToolPanel, setStoryToolPanel] = useState<StoryToolPanel>("filters");
   const [storyCanvasSize, setStoryCanvasSize] = useState({ width: 0, height: 0 });
   const [composerCanvasSize, setComposerCanvasSize] = useState({ width: 0, height: 0 });
-  const [composerMediaTransform, setComposerMediaTransform] = useState({ scale: 1, translateX: 0, translateY: 0 });
+  const [composerMediaTransform, setComposerMediaTransform] = useState<ComposerMediaTransform>(DEFAULT_COMPOSER_MEDIA_TRANSFORM);
+  const [composerMediaTransformsByAssetId, setComposerMediaTransformsByAssetId] = useState<Record<string, ComposerMediaTransform>>({});
   const [storyBackgroundColor, setStoryBackgroundColor] = useState(STORY_BACKGROUND_COLORS[0]);
   const [storyText, setStoryText] = useState("");
   const [storyTextColor, setStoryTextColor] = useState(STORY_TEXT_COLOR_OPTIONS[0]);
@@ -1091,6 +1099,8 @@ function CreatePostScreen({ navigation, route }: any) {
 
     return Math.max(1, videoDurationLimit);
   }, [selectedAsset?.durationMs, selectedAsset?.mediaType, videoDurationLimit]);
+  const hasVideoSelected = selectedAsset?.mediaType === "video";
+  const hasCarouselSelection = mode === "post" && selectedAssets.length > 1;
   const canContinueFromEdit = useMemo(() => {
     if (mode !== "story") {
       return !!selectedAsset;
@@ -1253,9 +1263,40 @@ function CreatePostScreen({ navigation, route }: any) {
   }, [selectedAsset, stage]);
 
   useEffect(() => {
-    setComposerMediaTransform({ scale: 1, translateX: 0, translateY: 0 });
-    composerMediaPan.setValue({ x: 0, y: 0 });
-  }, [activeAspect.id, composerMediaPan, mode, selectedAsset?.uri]);
+    const nextTransform = selectedAsset?.id
+      ? composerMediaTransformsByAssetId[selectedAsset.id] || DEFAULT_COMPOSER_MEDIA_TRANSFORM
+      : DEFAULT_COMPOSER_MEDIA_TRANSFORM;
+    setComposerMediaTransform(nextTransform);
+    composerMediaPan.setValue({
+      x: composerCanvasSize.width ? nextTransform.translateX * composerCanvasSize.width : 0,
+      y: composerCanvasSize.height ? nextTransform.translateY * composerCanvasSize.height : 0,
+    });
+  }, [
+    activeAspect.id,
+    composerCanvasSize.height,
+    composerCanvasSize.width,
+    composerMediaPan,
+    composerMediaTransformsByAssetId,
+    mode,
+    selectedAsset?.id,
+  ]);
+
+  useEffect(() => {
+    if (!selectedAssets.length) {
+      return;
+    }
+
+    const safeIndex = Math.max(0, Math.min(activeCarouselIndex, selectedAssets.length - 1));
+    if (safeIndex !== activeCarouselIndex) {
+      setActiveCarouselIndex(safeIndex);
+      return;
+    }
+
+    const nextAsset = selectedAssets[safeIndex];
+    if (nextAsset && nextAsset.id !== selectedAsset?.id) {
+      setSelectedAsset(nextAsset);
+    }
+  }, [activeCarouselIndex, selectedAsset?.id, selectedAssets]);
 
   useEffect(() => {
     const assetUri = String(selectedAsset?.uri || "");
@@ -1378,7 +1419,12 @@ function CreatePostScreen({ navigation, route }: any) {
     }
 
     if (nextMedia) {
-      setSelectedAsset(createRemoteComposerAsset(nextMedia, nextMediaType));
+      const remoteAsset = createRemoteComposerAsset(nextMedia, nextMediaType);
+      setSelectedAsset(remoteAsset);
+      setSelectedAssets([remoteAsset]);
+      setActiveCarouselIndex(0);
+      setComposerMediaTransformsByAssetId({});
+      setVideoOriginalAudioVolume(nextMediaType === "video" ? 1 : 0);
       setStage("edit");
     }
 
@@ -1413,6 +1459,9 @@ function CreatePostScreen({ navigation, route }: any) {
       startTransition(() => {
         setStage("launcher");
         setSelectedAsset(null);
+        setSelectedAssets([]);
+        setActiveCarouselIndex(0);
+        setComposerMediaTransformsByAssetId({});
       });
       return true;
     }
@@ -1652,14 +1701,15 @@ function CreatePostScreen({ navigation, route }: any) {
     try {
       setPickingMedia(true);
       const pickerMediaType = mode === "swipe" ? "video" : "mixed";
-      const [asset] = await pickComposerAssets({
+      const pickedAssets = await pickComposerAssets({
         mediaType: pickerMediaType,
-        selectionLimit: 1,
+        selectionLimit: mode === "post" ? 10 : 1,
         quality: PHOTO_PICKER_QUALITY,
         maxWidth: PHOTO_PICKER_MAX_DIMENSION,
         maxHeight: PHOTO_PICKER_MAX_DIMENSION,
         presentationStyle: "fullScreen",
       });
+      const asset = pickedAssets[0];
 
       if (!asset) {
         return;
@@ -1669,11 +1719,19 @@ function CreatePostScreen({ navigation, route }: any) {
         throw new Error("Swipes require a video.");
       }
 
+      if (mode === "post" && pickedAssets.length > 1 && pickedAssets.some((item) => item.mediaType !== "image")) {
+        throw new Error("Carousel posts support multiple images only.");
+      }
+
       if (mode === "story") {
         setStoryCreationMode("media");
         setStoryToolPanel("filters");
       }
       setSelectedAsset(asset);
+      setSelectedAssets(mode === "post" ? pickedAssets : [asset]);
+      setActiveCarouselIndex(0);
+      setComposerMediaTransformsByAssetId({});
+      setVideoOriginalAudioVolume(asset.mediaType === "video" ? 1 : 0);
       startTransition(() => setStage("edit"));
     } catch (error) {
       Alert.alert("Could not pick media", toUserSafeMessage(error));
@@ -1759,6 +1817,10 @@ function CreatePostScreen({ navigation, route }: any) {
         setStoryToolPanel("filters");
       }
       setSelectedAsset(asset);
+      setSelectedAssets([asset]);
+      setActiveCarouselIndex(0);
+      setComposerMediaTransformsByAssetId({});
+      setVideoOriginalAudioVolume(asset.mediaType === "video" ? 1 : 0);
       startTransition(() => setStage("edit"));
     } catch (error) {
       Alert.alert("Could not open camera", toUserSafeMessage(error));
@@ -1777,6 +1839,9 @@ function CreatePostScreen({ navigation, route }: any) {
   const startTextStoryDraft = useCallback(() => {
     lastStoryAssetUriRef.current = "";
     setSelectedAsset(null);
+    setSelectedAssets([]);
+    setActiveCarouselIndex(0);
+    setComposerMediaTransformsByAssetId({});
     resetStoryEditor("text");
     setStoryToolPanel("text");
     startTransition(() => setStage("edit"));
@@ -2039,6 +2104,9 @@ function CreatePostScreen({ navigation, route }: any) {
   const resetComposerState = useCallback(() => {
     setStage("launcher");
     setSelectedAsset(null);
+    setSelectedAssets([]);
+    setActiveCarouselIndex(0);
+    setComposerMediaTransformsByAssetId({});
     setAspectId({
       post: DEFAULT_ASPECT_BY_MODE.post,
       story: DEFAULT_ASPECT_BY_MODE.story,
@@ -2055,6 +2123,7 @@ function CreatePostScreen({ navigation, route }: any) {
     setHideLikeCount(false);
     setPublishError("");
     setSelectedMusic(null);
+    setVideoOriginalAudioVolume(0);
     setPendingMusicSelection(null);
     setMusicQuery("");
     setMusicResults([]);
@@ -2172,13 +2241,13 @@ function CreatePostScreen({ navigation, route }: any) {
         throw new Error("Trimmed video file was not returned.");
       }
 
-      setSelectedAsset((current) =>
-        current
+      setSelectedAsset((current) => {
+        const nextAsset = current
           ? {
               ...current,
               id: `${current.id}_trim_${Date.now()}`,
               uri: trimmedUri,
-              source: "local",
+              source: "local" as const,
               fileName: `trimmed_${Date.now()}.mp4`,
               mimeType: "video/mp4",
               durationMs: Math.max(
@@ -2189,8 +2258,16 @@ function CreatePostScreen({ navigation, route }: any) {
               ),
               thumbnailUrl: current.thumbnailUrl,
             }
-          : current,
-      );
+          : current;
+
+        if (nextAsset) {
+          setSelectedAssets([nextAsset]);
+          setActiveCarouselIndex(0);
+          setComposerMediaTransformsByAssetId({});
+        }
+
+        return nextAsset;
+      });
       closeVideoTrimSheet();
     } catch (error) {
       console.log("video trim apply error:", error);
@@ -2530,13 +2607,16 @@ function CreatePostScreen({ navigation, route }: any) {
         clipEndTime: savedEndTime,
         clipDuration: savedClipDuration,
       });
+      if (hasVideoSelected) {
+        setVideoOriginalAudioVolume(0);
+      }
       closeMusicTrimSheet();
     } catch (error) {
       setMusicError(toUserSafeMessage(error));
     } finally {
       setMusicImportingId("");
     }
-  }, [closeMusicTrimSheet, musicTrimDuration, musicTrimStartTime, pendingMusicSelection]);
+  }, [closeMusicTrimSheet, hasVideoSelected, musicTrimDuration, musicTrimStartTime, pendingMusicSelection]);
 
   const toggleMention = useCallback((candidate: AudienceCandidate) => {
     const normalized = String(candidate?.username || "").replace(/^@/, "").trim();
@@ -2568,20 +2648,38 @@ function CreatePostScreen({ navigation, route }: any) {
   const preparePostPayload = useCallback(async (
     uploadOptions?: UploadComposerAssetsOptions,
   ): Promise<CreatePostInput> => {
-    if (!selectedAsset) {
+    const postAssets = selectedAssets.length ? selectedAssets : selectedAsset ? [selectedAsset] : [];
+    if (!postAssets.length) {
       throw new Error("Choose media before publishing this post.");
+    }
+
+    if (postAssets.length > 1 && postAssets.some((asset) => asset.mediaType !== "image")) {
+      throw new Error("Carousel posts support multiple images only.");
     }
 
     const captionEntities = parseCaptionEntities(caption);
     const hashtags = Array.from(new Set(captionEntities.hashtags));
     const mentions = Array.from(new Set([...selectedMentions, ...captionEntities.mentions]));
-    const [uploadedMedia] = await uploadComposerAssets([selectedAsset], uploadOptions);
-    const framedMedia = buildAspectMetadata(uploadedMedia, selectedAsset, activeAspect.ratio, composerMediaTransform);
+    const uploadedMedia = await uploadComposerAssets(postAssets, uploadOptions);
+    const framedMedia = uploadedMedia.map((media, index) => {
+      const sourceAsset = postAssets[index] || postAssets[0];
+      return buildAspectMetadata(
+        media,
+        sourceAsset,
+        activeAspect.ratio,
+        sourceAsset?.id
+          ? composerMediaTransformsByAssetId[sourceAsset.id]
+            || (sourceAsset.id === selectedAsset?.id ? composerMediaTransform : DEFAULT_COMPOSER_MEDIA_TRANSFORM)
+          : DEFAULT_COMPOSER_MEDIA_TRANSFORM,
+      );
+    });
+    const firstMedia = framedMedia[0];
+    const hasVideoMedia = framedMedia.some((media) => media.mediaType === "video");
 
     return {
-      type: framedMedia.mediaType === "video" ? "video" : "photo",
+      type: framedMedia.length > 1 ? "carousel" : firstMedia?.mediaType === "video" ? "video" : "photo",
       caption: caption.trim(),
-      media: [framedMedia],
+      media: framedMedia,
       location: location.trim() || undefined,
       music: selectedMusic || undefined,
       hashtags,
@@ -2593,10 +2691,12 @@ function CreatePostScreen({ navigation, route }: any) {
         hideLikeCount,
         allowRemix: false,
       },
-      filterPreset: framedMedia.mediaType === "image" && selectedFilterId !== "none" ? selectedFilterId : undefined,
+      filterPreset: framedMedia.every((media) => media.mediaType === "image") && selectedFilterId !== "none" ? selectedFilterId : undefined,
       stickers: buildComposerTextStickers(),
+      hasOriginalAudio: hasVideoMedia,
+      originalAudioVolume: hasVideoMedia ? videoOriginalAudioVolume : undefined,
     };
-  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, disableComments, hideLikeCount, location, selectedAsset, selectedFilterId, selectedMentions, selectedMusic, selectedTagPeople]);
+  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, disableComments, hideLikeCount, location, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedMusic, selectedTagPeople, videoOriginalAudioVolume]);
 
   const prepareStoryPayload = useCallback(async (
     uploadOptions?: UploadComposerAssetsOptions,
@@ -2720,6 +2820,7 @@ function CreatePostScreen({ navigation, route }: any) {
       media: framedMedia,
       thumbnailUrl: framedMedia.thumbnailUrl,
       hasOriginalAudio: !selectedMusic,
+      originalAudioVolume: videoOriginalAudioVolume,
       music: selectedMusic || undefined,
       location: location.trim() || undefined,
       hashtags,
@@ -2727,7 +2828,7 @@ function CreatePostScreen({ navigation, route }: any) {
       taggedUsers: buildTaggedUserPayload(selectedTagPeople),
       stickers: buildComposerTextStickers(),
     };
-  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, location, selectedAsset, selectedMentions, selectedMusic, selectedTagPeople]);
+  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, location, selectedAsset, selectedMentions, selectedMusic, selectedTagPeople, videoOriginalAudioVolume]);
 
   const publish = useCallback(async () => {
     if (publishing) {
@@ -2818,12 +2919,23 @@ function CreatePostScreen({ navigation, route }: any) {
     const rawX = Number((composerMediaPan.x as any)._value || 0);
     const rawY = Number((composerMediaPan.y as any)._value || 0);
 
-    setComposerMediaTransform((current) => ({
-      scale: clamp(current.scale, 1, 4),
+    setComposerMediaTransform((current) => {
+      const nextTransform = {
+        scale: clamp(current.scale, 1, 4),
       translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -1, 1) : current.translateX,
       translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -1, 1) : current.translateY,
-    }));
-  }, [composerCanvasSize.height, composerCanvasSize.width, composerMediaPan]);
+      };
+
+      if (selectedAsset?.id) {
+        setComposerMediaTransformsByAssetId((prev) => ({
+          ...prev,
+          [selectedAsset.id]: nextTransform,
+        }));
+      }
+
+      return nextTransform;
+    });
+  }, [composerCanvasSize.height, composerCanvasSize.width, composerMediaPan, selectedAsset?.id]);
 
   const composerMediaResponder = useMemo(
     () =>
@@ -3007,6 +3119,128 @@ function CreatePostScreen({ navigation, route }: any) {
       <ValueSlider value={value} min={min} max={max} onChange={onChange} accentColor={accentColor} mutedColor={hairlineColor} />
     </View>
   );
+
+  const renderOriginalAudioControl = () => {
+    if (!hasVideoSelected) {
+      return null;
+    }
+
+    const isOriginalAudioOn = videoOriginalAudioVolume > 0;
+
+    return (
+      <View style={[styles.originalAudioPanel, { backgroundColor: inputBackground, borderColor }]}>
+        <View style={styles.switchRow}>
+          <View style={styles.switchCopy}>
+            <Text style={[styles.switchTitle, { color: textColor }]}>Original video sound</Text>
+            <Text style={[styles.switchMeta, { color: mutedColor }]}>
+              {selectedMusic ? "Keep it muted or lower it so music stays clean." : "Mute it or set the volume before publishing."}
+            </Text>
+          </View>
+          <Switch
+            value={isOriginalAudioOn}
+            onValueChange={(enabled) => setVideoOriginalAudioVolume(enabled ? 0.35 : 0)}
+            trackColor={{ false: hairlineColor, true: accentSoft }}
+            thumbColor={isOriginalAudioOn ? accentColor : "#fff"}
+          />
+        </View>
+        {isOriginalAudioOn ? (
+          renderStoryAdjustment(
+            "Volume",
+            `${Math.round(videoOriginalAudioVolume * 100)}%`,
+            videoOriginalAudioVolume,
+            0,
+            1,
+            setVideoOriginalAudioVolume,
+          )
+        ) : null}
+      </View>
+    );
+  };
+
+  const selectCarouselAsset = useCallback((asset: ComposerAsset, index: number) => {
+    persistComposerMediaTransform();
+    setActiveCarouselIndex(index);
+    setSelectedAsset(asset);
+  }, [persistComposerMediaTransform]);
+
+  const removeCarouselAsset = useCallback((assetId: string) => {
+    if (selectedAssets.length <= 1) {
+      return;
+    }
+
+    const removeIndex = selectedAssets.findIndex((asset) => asset.id === assetId);
+    const nextAssets = selectedAssets.filter((asset) => asset.id !== assetId);
+    const nextIndex = Math.max(0, Math.min(
+      removeIndex >= 0 && removeIndex < activeCarouselIndex ? activeCarouselIndex - 1 : activeCarouselIndex,
+      nextAssets.length - 1,
+    ));
+
+    setSelectedAssets(nextAssets);
+    setActiveCarouselIndex(nextIndex);
+    setSelectedAsset(nextAssets[nextIndex] || null);
+    setComposerMediaTransformsByAssetId((current) => {
+      const nextTransforms = { ...current };
+      delete nextTransforms[assetId];
+      return nextTransforms;
+    });
+  }, [activeCarouselIndex, selectedAssets]);
+
+  const renderCarouselAssetRail = () => {
+    if (!hasCarouselSelection) {
+      return null;
+    }
+
+    return (
+      <View style={[styles.carouselEditorPanel, { backgroundColor: surfaceColor, borderColor }]}>
+        <View style={styles.carouselEditorHeader}>
+          <View>
+            <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Carousel</Text>
+            <Text style={[styles.carouselEditorTitle, { color: textColor }]}>
+              Slide {activeCarouselIndex + 1} of {selectedAssets.length}
+            </Text>
+          </View>
+          <Text style={[styles.carouselEditorMeta, { color: mutedColor }]}>Tap image to edit</Text>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselEditorList}>
+          {selectedAssets.map((asset, index) => {
+            const active = index === activeCarouselIndex;
+            return (
+              <TouchableOpacity
+                key={asset.id}
+                activeOpacity={0.88}
+                style={[
+                  styles.carouselEditorThumb,
+                  {
+                    borderColor: active ? accentColor : borderColor,
+                    backgroundColor: inputBackground,
+                  },
+                ]}
+                onPress={() => selectCarouselAsset(asset, index)}
+              >
+                <Image
+                  source={{ uri: asset.thumbnailUrl || asset.uri }}
+                  style={styles.carouselEditorImage}
+                  resizeMode="cover"
+                />
+                <View style={[styles.carouselEditorCountBadge, { backgroundColor: active ? accentColor : "rgba(15,23,42,0.72)" }]}>
+                  <Text style={styles.carouselEditorCountText}>{index + 1}</Text>
+                </View>
+                {selectedAssets.length > 1 ? (
+                  <TouchableOpacity
+                    style={styles.carouselEditorRemove}
+                    onPress={() => removeCarouselAsset(asset.id)}
+                    hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                  >
+                    <Icon name="close" size={12} color="#fff" />
+                  </TouchableOpacity>
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  };
 
   const renderStoryCanvas = (options?: { interactive?: boolean; compact?: boolean; fullscreen?: boolean }) => {
     if (!selectedAsset && storyCreationMode !== "text") {
@@ -3862,7 +4096,8 @@ function CreatePostScreen({ navigation, route }: any) {
               uri={selectedAsset.uri}
               posterUri={selectedAsset.thumbnailUrl}
               style={StyleSheet.absoluteFill}
-              muted={false}
+              muted={!!selectedMusic && videoOriginalAudioVolume <= 0}
+              volume={selectedMusic ? videoOriginalAudioVolume : 1}
               repeat
               paused={stage === "details"}
             />
@@ -4223,6 +4458,7 @@ function CreatePostScreen({ navigation, route }: any) {
         icon: "resize-outline",
         active: composerEditToolPanel === "size",
         onPress: () => setComposerEditToolPanel("size"),
+        hidden: true,
       },
       {
         id: "filters",
@@ -4252,7 +4488,7 @@ function CreatePostScreen({ navigation, route }: any) {
         icon: "cut-outline",
         active: videoTrimSheetVisible,
         onPress: openVideoTrimmer,
-        hidden: selectedAsset?.mediaType !== "video",
+        hidden: true,
       },
     ];
 
@@ -4508,6 +4744,7 @@ function CreatePostScreen({ navigation, route }: any) {
               <Text style={[styles.toolActionMeta, { color: mutedColor }]}>{selectedMusic ? buildMusicLabel(selectedMusic) : "Choose a track"}</Text>
             </View>
           </TouchableOpacity>
+          {renderOriginalAudioControl()}
         </View>
       );
     }
@@ -4586,12 +4823,13 @@ function CreatePostScreen({ navigation, route }: any) {
           },
         ]}
       >
-        <View style={styles.storyEditContent}>
-          <View style={styles.storyCanvasShell}>
-            <View style={styles.composerEditPreviewWrap}>
-              {renderPreviewMedia({ interactive: true })}
+          <View style={styles.storyEditContent}>
+            <View style={styles.storyCanvasShell}>
+              <View style={styles.composerEditPreviewWrap}>
+                {renderPreviewMedia({ interactive: true })}
+                {renderCarouselAssetRail()}
+              </View>
             </View>
-          </View>
           <View style={[styles.storyStageTopBar, { paddingTop: Math.max(insets.top + 4, 10) }]}>
             {renderStageHeader(`Edit ${MODE_COPY[mode].label}`, "", () => {
               if (!canContinueFromEdit) {
@@ -4752,7 +4990,11 @@ function CreatePostScreen({ navigation, route }: any) {
             <View style={styles.summaryCopy}>
               <Text style={[styles.summaryTitle, { color: textColor }]}>{MODE_COPY[mode].label}</Text>
               <Text style={[styles.summaryMeta, { color: mutedColor }]}>
-                {selectedAsset?.mediaType === "video" ? "Video ready" : "Image ready"} • {activeAspect.label}
+                {hasCarouselSelection
+                  ? `${selectedAssets.length} images carousel`
+                  : selectedAsset?.mediaType === "video"
+                    ? "Video ready"
+                    : "Image ready"} • {activeAspect.label}
               </Text>
             </View>
           </View>
@@ -4868,6 +5110,7 @@ function CreatePostScreen({ navigation, route }: any) {
               </TouchableOpacity>
             </View>
             {renderMentionChips()}
+            {renderOriginalAudioControl()}
           </View>
 
           {mode === "post" ? (
@@ -6211,6 +6454,73 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
+  carouselEditorPanel: {
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 12,
+  },
+  carouselEditorHeader: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 10,
+  },
+  carouselEditorTitle: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: appFonts.semibold,
+  },
+  carouselEditorMeta: {
+    fontSize: 10.5,
+    lineHeight: 14,
+    fontFamily: appFonts.medium,
+  },
+  carouselEditorList: {
+    gap: 9,
+    paddingRight: 4,
+  },
+  carouselEditorThumb: {
+    width: 62,
+    height: 78,
+    borderRadius: 14,
+    borderWidth: 2,
+    overflow: "hidden",
+  },
+  carouselEditorImage: {
+    width: "100%",
+    height: "100%",
+  },
+  carouselEditorCountBadge: {
+    position: "absolute",
+    left: 5,
+    top: 5,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 5,
+  },
+  carouselEditorCountText: {
+    color: "#fff",
+    fontSize: 10,
+    fontFamily: appFonts.bold,
+  },
+  carouselEditorRemove: {
+    position: "absolute",
+    right: 5,
+    top: 5,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "rgba(15,23,42,0.75)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   cropFrameGuide: {
     ...StyleSheet.absoluteFillObject,
     borderWidth: 1.5,
@@ -6563,6 +6873,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     fontFamily: appFonts.regular,
+  },
+  originalAudioPanel: {
+    marginTop: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
   },
   visibilityRow: {
     flexDirection: "row",

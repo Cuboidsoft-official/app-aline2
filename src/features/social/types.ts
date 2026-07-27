@@ -103,6 +103,8 @@ export interface Post {
   sharesCount: number;
   liked: boolean;
   saved: boolean;
+  hasOriginalAudio?: boolean;
+  originalAudioVolume?: number;
 }
 
 export type StoryType = "media" | "text" | "poll" | "question";
@@ -302,6 +304,8 @@ export interface CreatePostInput {
   settings?: Partial<PostSettings>;
   filterPreset?: string;
   stickers?: StorySticker[];
+  hasOriginalAudio?: boolean;
+  originalAudioVolume?: number;
 }
 
 export interface CreateStoryInput {
@@ -352,6 +356,7 @@ export interface CreateReelInput {
   media: MediaAsset;
   thumbnailUrl?: string;
   hasOriginalAudio?: boolean;
+  originalAudioVolume?: number;
   music?: SelectedMusicClip;
   hashtags?: string[];
   mentions?: string[];

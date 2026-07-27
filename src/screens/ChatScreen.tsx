@@ -863,7 +863,7 @@ const buildScheduledCallPreview = (message: ChatMessage): ScheduledCallPreview |
 const ChatScreen = ({ navigation, route }: any) => {
   const colors = CHAT_DARK_COLORS;
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
+  const { width } = useWindowDimensions();
   const chatMetrics = useMemo(() => getChatLayoutMetrics(width), [width]);
   const { userId, conversationId, conversationType: conversationTypeParam, serviceId, groupName, groupAvatar, memberCount, groupConversation, openScheduleCallComposer, openScheduleCallType } = route.params || {};
   const initialConversationType = (String(conversationTypeParam || "").trim().toLowerCase() || "direct") as "direct" | "seller" | "group";
@@ -900,33 +900,22 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [scheduleCallDurationMinutes, setScheduleCallDurationMinutes] = useState("30");
   const [scheduleCallAgenda, setScheduleCallAgenda] = useState("");
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const [keyboardInset, setKeyboardInset] = useState(0);
-  const maxWindowHeightRef = useRef(height);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(showEvent, (event) => {
-      const keyboardHeight = Math.max(0, Number(event?.endCoordinates?.height || 0));
+    const showSubscription = Keyboard.addListener(showEvent, () => {
       setIsKeyboardVisible(true);
-      setKeyboardInset(Math.max(0, keyboardHeight - insets.bottom));
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       setIsKeyboardVisible(false);
-      setKeyboardInset(0);
     });
 
     return () => {
       showSubscription.remove();
       hideSubscription.remove();
     };
-  }, [insets.bottom]);
-
-  useEffect(() => {
-    if (!isKeyboardVisible) {
-      maxWindowHeightRef.current = Math.max(maxWindowHeightRef.current, height);
-    }
-  }, [height, isKeyboardVisible]);
+  }, []);
 
   useEffect(() => {
     const normalized = String(conversationTypeParam || "").trim().toLowerCase();
@@ -3254,14 +3243,9 @@ const ChatScreen = ({ navigation, route }: any) => {
   // ─── Main render ──────────────────────────────────────────────────────────
 
   const composerBottomPadding = isKeyboardVisible
-    ? Math.max(6, Math.min(8, keyboardInset || 8))
+    ? 6
     : Math.max(7, insets.bottom - 2);
-  const keyboardResizeDelta = Math.max(0, maxWindowHeightRef.current - height);
-  const shouldUseManualAndroidKeyboardOffset = Platform.OS === "android"
-    && isKeyboardVisible
-    && keyboardInset > 0
-    && keyboardResizeDelta < Math.max(80, keyboardInset * 0.35);
-  const composerKeyboardMargin = shouldUseManualAndroidKeyboardOffset ? keyboardInset : 0;
+  const listBottomPadding = Math.max(20, 12 + insets.bottom) + (isKeyboardVisible ? 8 : 0);
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top"]}>
@@ -3459,8 +3443,8 @@ const ChatScreen = ({ navigation, route }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        enabled={Platform.OS === "ios"}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        enabled
         keyboardVerticalOffset={0}
       >
         <View style={[styles.chatBackground, { backgroundColor: colors.surface }]}>
@@ -3475,7 +3459,7 @@ const ChatScreen = ({ navigation, route }: any) => {
             keyExtractor={(item) => getMessageRenderKey(item)}
             renderItem={renderMessage}
             onScrollToIndexFailed={handleScrollToIndexFailed}
-            contentContainerStyle={[styles.listContent, { paddingHorizontal: Math.max(8, chatMetrics.listPadding - 3), paddingTop: chatMetrics.listPadding, paddingBottom: Math.max(20, 12 + insets.bottom) }]}
+            contentContainerStyle={[styles.listContent, { paddingHorizontal: Math.max(8, chatMetrics.listPadding - 3), paddingTop: chatMetrics.listPadding, paddingBottom: listBottomPadding }]}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={Platform.OS === "android"}
             initialNumToRender={18}
@@ -3868,7 +3852,6 @@ const ChatScreen = ({ navigation, route }: any) => {
               paddingTop: 6,
               paddingBottom: composerBottomPadding,
               paddingHorizontal: Math.max(8, chatMetrics.listPadding - 2),
-              marginBottom: composerKeyboardMargin,
             },
           ]}
         >

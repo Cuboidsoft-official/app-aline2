@@ -365,6 +365,82 @@ type SellerAccountSummary = {
   availabilityStatus: boolean;
 };
 
+type MusicMarqueeChipProps = {
+  label: string;
+  active: boolean;
+  compact: boolean;
+  fontSize: number;
+};
+
+function MusicMarqueeChip({ label, active, compact, fontSize }: MusicMarqueeChipProps) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const [maskWidth, setMaskWidth] = useState(0);
+  const estimatedTextWidth = Math.ceil(label.length * fontSize * 0.58);
+  const shouldAnimate = active && maskWidth > 0 && estimatedTextWidth > maskWidth + 8;
+  const scrollDistance = shouldAnimate
+    ? Math.min(180, Math.max(22, estimatedTextWidth - maskWidth + 18))
+    : 0;
+
+  useEffect(() => {
+    translateX.stopAnimation();
+    translateX.setValue(0);
+
+    if (!shouldAnimate || scrollDistance <= 0) {
+      return;
+    }
+
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.delay(450),
+        Animated.timing(translateX, {
+          toValue: -scrollDistance,
+          duration: Math.max(1800, scrollDistance * 38),
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.delay(650),
+        Animated.timing(translateX, {
+          toValue: 0,
+          duration: 520,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    loop.start();
+    return () => {
+      loop.stop();
+      translateX.stopAnimation();
+      translateX.setValue(0);
+    };
+  }, [scrollDistance, shouldAnimate, translateX]);
+
+  return (
+    <View style={[styles.mediaMusicChip, compact && styles.mediaMusicChipCompact]}>
+      <Icon name="musical-notes" size={11} color="#fff" />
+      <View
+        style={styles.mediaMusicTextMask}
+        onLayout={(event) => setMaskWidth(event.nativeEvent.layout.width)}
+      >
+        <Animated.Text
+          numberOfLines={1}
+          style={[
+            styles.mediaMusicChipText,
+            {
+              fontSize,
+              width: shouldAnimate ? estimatedTextWidth : undefined,
+              transform: [{ translateX }],
+            },
+          ]}
+        >
+          {label}
+        </Animated.Text>
+      </View>
+    </View>
+  );
+}
+
 function FeedScreen({ navigation, route }: any) {
   const { width, height } = useWindowDimensions();
   const { colors, isDarkMode } = useAppTheme();
@@ -475,6 +551,7 @@ function FeedScreen({ navigation, route }: any) {
   const supportingFontSize = isTabletLayout ? 11.8 : isCompactPhone ? 10.2 : 10.7;
   const composerFontSize = isTabletLayout ? 13.1 : isCompactPhone ? 11.8 : 12.4;
   const mediaChipFontSize = isTabletLayout ? 10.8 : isCompactPhone ? 9.8 : 10.2;
+  const musicChipFontSize = isTabletLayout ? 9.8 : isCompactPhone ? 8.6 : 9.1;
 
   const sidebarTranslateX = slideAnim.interpolate({
     inputRange: [0, 1],
@@ -1069,16 +1146,18 @@ function FeedScreen({ navigation, route }: any) {
     }
 
     homeReloadHandledRef.current = homeReloadNonce;
-    const targetPostId = focusedPostId || activePostId || lastViewablePostIdRef.current || feed.posts[0]?.id || "";
-    if (targetPostId) {
-      setActivePostId(targetPostId);
-    }
+    setActivePostId("");
     feedListRef.current?.scrollToOffset?.({ offset: 0, animated: true });
-    onRefresh().catch((error) => {
-      setRefreshing(false);
-      setErrorMessage(getReadableApiErrorMessage(error, "Failed to reload your feed."));
-    });
-  }, [activePostId, feed.posts, focusedPostId, homeReloadNonce, isScreenFocused, onRefresh]);
+    setRefreshing(true);
+    loadFeed({ lightweight: true, shufflePosts: true })
+      .catch((error) => {
+        setErrorMessage(getReadableApiErrorMessage(error, "Failed to reload your feed."));
+      })
+      .finally(() => {
+        setRefreshing(false);
+        requestAnimationFrame(() => feedListRef.current?.scrollToOffset?.({ offset: 0, animated: true }));
+      });
+  }, [homeReloadNonce, isScreenFocused, loadFeed]);
 
   const updatePost = (nextPost: Post) => {
     setFeed((prev) => ({
@@ -1736,7 +1815,9 @@ function FeedScreen({ navigation, route }: any) {
                   isVideoSoundEnabled,
                   isPostMuted: isMuted,
                   hasAttachedMusic,
+                  originalAudioVolume: post.originalAudioVolume,
                 })}
+                volume={Math.max(0, Math.min(1, Number(post.originalAudioVolume ?? (hasAttachedMusic ? 0 : 1))))}
                 repeat
                 restartKey={post.id}
                 onLoad={(event) => handleFeedVideoLoaded(post.id, primaryMedia.id, event)}
@@ -1797,8 +1878,18 @@ function FeedScreen({ navigation, route }: any) {
             setCarouselIndexByPostId((prev) => ({ ...prev, [post.id]: nextIndex }));
           }}
         >
-          {post.media.map((asset, index) => (
-            asset.mediaType === "video" ? (
+          {post.media.map((asset, index) => {
+            const shouldRenderCarouselAsset = Math.abs(index - currentCarouselIndex) <= 1;
+            if (!shouldRenderCarouselAsset) {
+              return (
+                <View
+                  key={asset.id || `${post.id}_${index}`}
+                  style={[styles.postImage, styles.mediaFallback, { width: postMediaWidth, height: mediaHeight }]}
+                />
+              );
+            }
+
+            return asset.mediaType === "video" ? (
               <View key={asset.id} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
                 <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
                   <SocialVideo
@@ -1813,7 +1904,9 @@ function FeedScreen({ navigation, route }: any) {
                       isVideoSoundEnabled,
                       isPostMuted: isMuted,
                       hasAttachedMusic,
+                      originalAudioVolume: post.originalAudioVolume,
                     })}
+                    volume={Math.max(0, Math.min(1, Number(post.originalAudioVolume ?? (hasAttachedMusic ? 0 : 1))))}
                     repeat
                     restartKey={`${post.id}:${asset.id}`}
                     onLoad={(event) => handleFeedVideoLoaded(post.id, asset.id, event)}
@@ -1861,8 +1954,8 @@ function FeedScreen({ navigation, route }: any) {
 
                 return rawImage;
               })()
-            )
-          ))}
+            );
+          })}
         </ScrollView>
         <View style={styles.carouselIndicatorRow}>
           {post.media.map((asset, index) => (
@@ -2142,6 +2235,7 @@ function FeedScreen({ navigation, route }: any) {
                   hasAttachedMusic,
                   isVideoSoundEnabled,
                   isPostMuted: isMuted,
+                  originalAudioVolume: item.originalAudioVolume,
                 }) ? "volume-high-outline" : "volume-mute-outline"}
                 size={22}
                 color={FEED_ACCENT}
@@ -2301,6 +2395,7 @@ function FeedScreen({ navigation, route }: any) {
       hasAttachedMusic,
       isVideoSoundEnabled,
       isPostMuted: isMuted,
+      originalAudioVolume: item.originalAudioVolume,
     });
     const likePreviewUsers =
       Array.isArray(item.likePreviewUsers) && item.likePreviewUsers.length
@@ -2414,12 +2509,12 @@ function FeedScreen({ navigation, route }: any) {
               </View>
             ) : null}
             {musicLabel ? (
-              <View style={[styles.mediaMusicChip, isCompactPhone && styles.mediaMusicChipCompact]}>
-                <Icon name="musical-notes" size={13} color="#fff" />
-                <Text numberOfLines={1} style={[styles.mediaMusicChipText, { fontSize: mediaChipFontSize }]}>
-                  {musicLabel}
-                </Text>
-              </View>
+              <MusicMarqueeChip
+                label={musicLabel}
+                active={activePostId === item.id && isScreenFocused && !activeSheet}
+                compact={isCompactPhone}
+                fontSize={musicChipFontSize}
+              />
             ) : null}
           </Pressable>
         </View>
@@ -2934,10 +3029,10 @@ function FeedScreen({ navigation, route }: any) {
           ListHeaderComponent={isFocusedPostFeed ? null : renderHeader}
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={Platform.OS === "android"}
-          initialNumToRender={4}
-          maxToRenderPerBatch={4}
-          updateCellsBatchingPeriod={16}
+          removeClippedSubviews={false}
+          initialNumToRender={3}
+          maxToRenderPerBatch={3}
+          updateCellsBatchingPeriod={40}
           windowSize={5}
           decelerationRate="normal"
           scrollEventThrottle={16}
@@ -3820,27 +3915,31 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 12,
     bottom: 12,
-    right: 12,
+    maxWidth: "62%",
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
+    gap: 3,
     borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     backgroundColor: "rgba(0,0,0,0.56)",
   },
   mediaMusicChipCompact: {
     left: 10,
-    right: 10,
     bottom: 10,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
+    maxWidth: "66%",
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  mediaMusicTextMask: {
+    flexShrink: 1,
+    minWidth: 0,
+    overflow: "hidden",
   },
   mediaMusicChipText: {
-    flex: 1,
     color: "#fff",
-    fontSize: 12,
-    fontWeight: "800",
+    fontSize: 9,
+    fontWeight: "700",
   },
   actionsRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8 },
   actionButton: {

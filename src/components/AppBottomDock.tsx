@@ -90,7 +90,7 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
 
     const isTabScreen = screen === "Feed" || screen === "Create" || screen === "Chats" || screen === "ProfileView";
     const now = Date.now();
-    const shouldReloadFeed = screen === "Feed" && resolvedActiveKey === "Feed" && now - lastFeedTapRef.current <= 520;
+    const shouldReloadFeed = screen === "Feed" && resolvedActiveKey === "Feed";
     if (screen === "Feed") {
       lastFeedTapRef.current = now;
     }

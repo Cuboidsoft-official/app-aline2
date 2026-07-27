@@ -245,6 +245,14 @@ export const parseCaptionEntities = (caption: string): { hashtags: string[]; men
   };
 };
 
+const normalizeVolume = (value: number | undefined): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.min(1, value));
+};
+
 export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
   const caption = cleanText(input.caption);
   const location = cleanText(input.location);
@@ -287,6 +295,7 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
     taggedUsers,
     collaboratorIds,
     filterPreset,
+    originalAudioVolume: normalizeVolume(input.originalAudioVolume),
   };
 };
 
@@ -589,6 +598,7 @@ export const normalizeReelInput = (input: CreateReelInput): CreateReelInput => {
     hashtags: normalizeTagList(input.hashtags, MAX_HASHTAGS, "hashtags"),
     mentions: normalizeTagList(input.mentions, MAX_MENTIONS, "mentions"),
     taggedUsers: normalizeTaggedUsers(input.taggedUsers),
+    originalAudioVolume: normalizeVolume(input.originalAudioVolume),
   };
 };
 

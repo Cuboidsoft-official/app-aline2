@@ -9,6 +9,7 @@ type SocialVideoProps = {
   style?: StyleProp<ViewStyle>;
   paused?: boolean;
   muted?: boolean;
+  volume?: number;
   repeat?: boolean;
   controls?: boolean;
   preload?: boolean;
@@ -33,6 +34,7 @@ function SocialVideo({
   style,
   paused = false,
   muted = false,
+  volume = 1,
   repeat = false,
   controls = false,
   preload = false,
@@ -55,6 +57,7 @@ function SocialVideo({
   const containerStyle = useMemo(() => stripBackgroundColorFromStyle(style), [style]);
   const shouldMountVideo = !!resolvedUri && !videoFailed && (!paused || controls || preload);
   const shouldShowPoster = !!usablePosterUri && !posterFailed;
+  const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0));
 
   useEffect(() => {
     placeholderOpacity.stopAnimation();
@@ -111,6 +114,7 @@ function SocialVideo({
             resizeMode={resizeMode}
             paused={paused}
             muted={muted || preload}
+            volume={safeVolume}
             repeat={repeat}
             controls={controls}
             onEnd={onEnd}

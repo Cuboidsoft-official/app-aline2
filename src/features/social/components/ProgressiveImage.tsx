@@ -10,6 +10,25 @@ import {
 } from "react-native";
 import { stripBackgroundColorFromStyle } from "./mediaSurfaceStyle";
 
+const LOADED_IMAGE_URI_CACHE_LIMIT = 250;
+const loadedImageUriCache = new Set<string>();
+
+const rememberLoadedImageUri = (uri: string) => {
+  if (!uri) {
+    return;
+  }
+
+  loadedImageUriCache.add(uri);
+  if (loadedImageUriCache.size <= LOADED_IMAGE_URI_CACHE_LIMIT) {
+    return;
+  }
+
+  const firstCachedUri = loadedImageUriCache.values().next().value;
+  if (firstCachedUri) {
+    loadedImageUriCache.delete(firstCachedUri);
+  }
+};
+
 type ProgressiveImageProps = {
   uri?: string;
   previewUri?: string;
@@ -29,17 +48,18 @@ function ProgressiveImage({
   contentBlurRadius = 0,
   fallbackColor = "#0f172a",
 }: ProgressiveImageProps) {
-  const imageOpacity = useRef(new Animated.Value(0)).current;
+  const resolvedUri = String(uri || "").trim();
+  const resolvedPreviewUri = String(previewUri || resolvedUri).trim();
+  const hasLoadedImageBefore = loadedImageUriCache.has(resolvedUri);
+  const imageOpacity = useRef(new Animated.Value(hasLoadedImageBefore ? 1 : 0)).current;
   const imageFailedRef = useRef(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
-  const resolvedUri = String(uri || "").trim();
-  const resolvedPreviewUri = String(previewUri || resolvedUri).trim();
   const containerStyle = useMemo(() => stripBackgroundColorFromStyle(style), [style]);
 
   useEffect(() => {
     imageOpacity.stopAnimation();
-    imageOpacity.setValue(0);
+    imageOpacity.setValue(loadedImageUriCache.has(resolvedUri) ? 1 : 0);
     imageFailedRef.current = false;
     setPreviewFailed(false);
     setImageFailed(false);
@@ -61,6 +81,7 @@ function ProgressiveImage({
       return;
     }
 
+    rememberLoadedImageUri(resolvedUri);
     Animated.timing(imageOpacity, {
       toValue: 1,
       duration: 180,

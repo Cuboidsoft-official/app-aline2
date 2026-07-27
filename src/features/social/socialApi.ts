@@ -712,6 +712,11 @@ class RemoteSocialApi implements SocialApi {
       sharesCount: typeof post?.shares === "number" ? post.shares : 0,
       liked: typeof post?.liked === "boolean" ? post.liked : false,
       saved: typeof post?.saved === "boolean" ? post.saved : false,
+      hasOriginalAudio: !!post?.hasOriginalAudio,
+      originalAudioVolume:
+        typeof post?.originalAudioVolume === "number"
+          ? Math.max(0, Math.min(1, Number(post.originalAudioVolume) || 0))
+          : undefined,
       likePreviewUsers: Array.isArray(post?.recentLikes)
         ? post.recentLikes.map((user: any) => this.mapUser(user)).filter((user: SocialUser) => !!user.id)
         : [],
@@ -2028,6 +2033,8 @@ class RemoteSocialApi implements SocialApi {
       location: payload.location ? { name: payload.location } : undefined,
       commentsDisabled: payload.settings?.disableComments || false,
       likesHidden: payload.settings?.hideLikeCount || false,
+      hasOriginalAudio: payload.hasOriginalAudio || false,
+      originalAudioVolume: payload.originalAudioVolume,
       filterPreset: payload.filterPreset || undefined,
       stickers: (payload.stickers || []).map((sticker) => ({
         type: sticker.type,
@@ -2276,6 +2283,7 @@ class RemoteSocialApi implements SocialApi {
       ],
       postType: "reel",
       hasOriginalAudio: payload.hasOriginalAudio !== false && !payload.music,
+      originalAudioVolume: payload.originalAudioVolume,
       location: payload.location ? { name: payload.location } : undefined,
       hashtags: payload.hashtags,
       mentions: payload.mentions,
