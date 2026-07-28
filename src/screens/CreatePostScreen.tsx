@@ -114,7 +114,7 @@ type MusicResultItem = SelectedMusicClip & {
 };
 
 type StoryToolPanel = "text" | "color" | "font" | "size" | "filters" | "sticker" | null;
-type ComposerEditToolPanel = "layout" | "filters" | "tag" | "music" | "trim" | "text" | "color" | "font" | "size" | null;
+type ComposerEditToolPanel = "layout" | "filters" | "tag" | "trim" | "text" | "color" | "font" | "size" | null;
 type StoryTextFontVariant = "bold" | "italic" | "clean" | "soft";
 type MusicPreviewMode = "audio";
 type ComposerMediaTransform = { scale: number; translateX: number; translateY: number };
@@ -953,11 +953,11 @@ function CreatePostScreen({ navigation, route }: any) {
   const [selectedAsset, setSelectedAsset] = useState<ComposerAsset | null>(
     initialMedia ? createRemoteComposerAsset(initialMedia, initialMediaType) : null,
   );
+  const [isComposerVideoMuted, setIsComposerVideoMuted] = useState(false);
   const [selectedAssets, setSelectedAssets] = useState<ComposerAsset[]>(
     initialMedia ? [createRemoteComposerAsset(initialMedia, initialMediaType)] : [],
   );
   const [activeCarouselIndex, setActiveCarouselIndex] = useState(0);
-  const [videoOriginalAudioVolume, setVideoOriginalAudioVolume] = useState(initialMediaType === "video" ? 1 : 0);
   const [aspectId, setAspectId] = useState<Record<ComposerMode, string>>({
     post: DEFAULT_ASPECT_BY_MODE.post,
     story: DEFAULT_ASPECT_BY_MODE.story,
@@ -1424,7 +1424,6 @@ function CreatePostScreen({ navigation, route }: any) {
       setSelectedAssets([remoteAsset]);
       setActiveCarouselIndex(0);
       setComposerMediaTransformsByAssetId({});
-      setVideoOriginalAudioVolume(nextMediaType === "video" ? 1 : 0);
       setStage("edit");
     }
 
@@ -1731,7 +1730,6 @@ function CreatePostScreen({ navigation, route }: any) {
       setSelectedAssets(mode === "post" ? pickedAssets : [asset]);
       setActiveCarouselIndex(0);
       setComposerMediaTransformsByAssetId({});
-      setVideoOriginalAudioVolume(asset.mediaType === "video" ? 1 : 0);
       startTransition(() => setStage("edit"));
     } catch (error) {
       Alert.alert("Could not pick media", toUserSafeMessage(error));
@@ -1820,7 +1818,6 @@ function CreatePostScreen({ navigation, route }: any) {
       setSelectedAssets([asset]);
       setActiveCarouselIndex(0);
       setComposerMediaTransformsByAssetId({});
-      setVideoOriginalAudioVolume(asset.mediaType === "video" ? 1 : 0);
       startTransition(() => setStage("edit"));
     } catch (error) {
       Alert.alert("Could not open camera", toUserSafeMessage(error));
@@ -2123,7 +2120,6 @@ function CreatePostScreen({ navigation, route }: any) {
     setHideLikeCount(false);
     setPublishError("");
     setSelectedMusic(null);
-    setVideoOriginalAudioVolume(0);
     setPendingMusicSelection(null);
     setMusicQuery("");
     setMusicResults([]);
@@ -2607,9 +2603,6 @@ function CreatePostScreen({ navigation, route }: any) {
         clipEndTime: savedEndTime,
         clipDuration: savedClipDuration,
       });
-      if (hasVideoSelected) {
-        setVideoOriginalAudioVolume(0);
-      }
       closeMusicTrimSheet();
     } catch (error) {
       setMusicError(toUserSafeMessage(error));
@@ -2681,7 +2674,6 @@ function CreatePostScreen({ navigation, route }: any) {
       caption: caption.trim(),
       media: framedMedia,
       location: location.trim() || undefined,
-      music: selectedMusic || undefined,
       hashtags,
       mentions,
       taggedUsers: buildTaggedUserPayload(selectedTagPeople),
@@ -2694,9 +2686,8 @@ function CreatePostScreen({ navigation, route }: any) {
       filterPreset: framedMedia.every((media) => media.mediaType === "image") && selectedFilterId !== "none" ? selectedFilterId : undefined,
       stickers: buildComposerTextStickers(),
       hasOriginalAudio: hasVideoMedia,
-      originalAudioVolume: hasVideoMedia ? videoOriginalAudioVolume : undefined,
     };
-  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, disableComments, hideLikeCount, location, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedMusic, selectedTagPeople, videoOriginalAudioVolume]);
+  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, disableComments, hideLikeCount, location, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedTagPeople]);
 
   const prepareStoryPayload = useCallback(async (
     uploadOptions?: UploadComposerAssetsOptions,
@@ -2733,7 +2724,6 @@ function CreatePostScreen({ navigation, route }: any) {
         visibility: storyVisibility,
         allowReplies: storyAllowReplies,
         allowSharing: storyAllowSharing,
-        music: selectedMusic || undefined,
       };
     }
 
@@ -2766,14 +2756,12 @@ function CreatePostScreen({ navigation, route }: any) {
       visibility: storyVisibility,
       allowReplies: storyAllowReplies,
       allowSharing: storyAllowSharing,
-      music: selectedMusic || undefined,
     };
   }, [
     caption,
     location,
     selectedAsset,
     selectedMentions,
-    selectedMusic,
     storyBackgroundColor,
     storyAllowReplies,
     storyAllowSharing,
@@ -2819,16 +2807,14 @@ function CreatePostScreen({ navigation, route }: any) {
       caption: caption.trim(),
       media: framedMedia,
       thumbnailUrl: framedMedia.thumbnailUrl,
-      hasOriginalAudio: !selectedMusic,
-      originalAudioVolume: videoOriginalAudioVolume,
-      music: selectedMusic || undefined,
+      hasOriginalAudio: true,
       location: location.trim() || undefined,
       hashtags,
       mentions,
       taggedUsers: buildTaggedUserPayload(selectedTagPeople),
       stickers: buildComposerTextStickers(),
     };
-  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, location, selectedAsset, selectedMentions, selectedMusic, selectedTagPeople, videoOriginalAudioVolume]);
+  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, location, selectedAsset, selectedMentions, selectedTagPeople]);
 
   const publish = useCallback(async () => {
     if (publishing) {
@@ -2838,15 +2824,6 @@ function CreatePostScreen({ navigation, route }: any) {
     try {
       setPublishing(true);
       setPublishError("");
-      if (selectedMusic && !hasTrimmedMusicSelection(selectedMusic)) {
-        throw new Error("Please trim the selected music before publishing.");
-      }
-      if (selectedMusic && !isPersistedMusicId(selectedMusic.id)) {
-        throw new Error("Selected track is still syncing. Please select it again.");
-      }
-      if (selectedMusic && !getMusicClipPlaybackUrl(selectedMusic)) {
-        throw new Error("Selected track is missing playback data. Choose another track.");
-      }
       const queueLabel = MODE_COPY[mode].label;
 
       startPublishTask({
@@ -2892,7 +2869,7 @@ function CreatePostScreen({ navigation, route }: any) {
     } finally {
       setPublishing(false);
     }
-  }, [exitComposer, mode, preparePostPayload, prepareStoryPayload, prepareSwipePayload, publishing, resetComposerState, selectedMusic]);
+  }, [exitComposer, mode, preparePostPayload, prepareStoryPayload, prepareSwipePayload, publishing, resetComposerState]);
 
   const updateStoryTextPosition = useCallback((nextPosition: { x: number; y: number }) => {
     setStoryTextPosition({
@@ -3121,40 +3098,7 @@ function CreatePostScreen({ navigation, route }: any) {
   );
 
   const renderOriginalAudioControl = () => {
-    if (!hasVideoSelected) {
-      return null;
-    }
-
-    const isOriginalAudioOn = videoOriginalAudioVolume > 0;
-
-    return (
-      <View style={[styles.originalAudioPanel, { backgroundColor: inputBackground, borderColor }]}>
-        <View style={styles.switchRow}>
-          <View style={styles.switchCopy}>
-            <Text style={[styles.switchTitle, { color: textColor }]}>Original video sound</Text>
-            <Text style={[styles.switchMeta, { color: mutedColor }]}>
-              {selectedMusic ? "Keep it muted or lower it so music stays clean." : "Mute it or set the volume before publishing."}
-            </Text>
-          </View>
-          <Switch
-            value={isOriginalAudioOn}
-            onValueChange={(enabled) => setVideoOriginalAudioVolume(enabled ? 0.35 : 0)}
-            trackColor={{ false: hairlineColor, true: accentSoft }}
-            thumbColor={isOriginalAudioOn ? accentColor : "#fff"}
-          />
-        </View>
-        {isOriginalAudioOn ? (
-          renderStoryAdjustment(
-            "Volume",
-            `${Math.round(videoOriginalAudioVolume * 100)}%`,
-            videoOriginalAudioVolume,
-            0,
-            1,
-            setVideoOriginalAudioVolume,
-          )
-        ) : null}
-      </View>
-    );
+    return null;
   };
 
   const selectCarouselAsset = useCallback((asset: ComposerAsset, index: number) => {
@@ -3242,6 +3186,20 @@ function CreatePostScreen({ navigation, route }: any) {
     );
   };
 
+  const renderVideoSoundToggle = (style?: any) => (
+    <TouchableOpacity
+      activeOpacity={0.86}
+      accessibilityRole="button"
+      accessibilityLabel={isComposerVideoMuted ? "Unmute video preview" : "Mute video preview"}
+      hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+      style={[styles.videoSoundToggle, style]}
+      onPress={() => setIsComposerVideoMuted((muted) => !muted)}
+    >
+      <Icon name={isComposerVideoMuted ? "volume-mute-outline" : "volume-high-outline"} size={17} color="#fff" />
+      <Text style={styles.videoSoundToggleText}>{isComposerVideoMuted ? "Muted" : "Sound on"}</Text>
+    </TouchableOpacity>
+  );
+
   const renderStoryCanvas = (options?: { interactive?: boolean; compact?: boolean; fullscreen?: boolean }) => {
     if (!selectedAsset && storyCreationMode !== "text") {
       return (
@@ -3287,7 +3245,7 @@ function CreatePostScreen({ navigation, route }: any) {
             uri={selectedAsset.uri}
             posterUri={selectedAsset.thumbnailUrl}
             style={StyleSheet.absoluteFill}
-            muted
+            muted={isComposerVideoMuted}
             repeat
             paused={stage === "details"}
           />
@@ -3301,6 +3259,7 @@ function CreatePostScreen({ navigation, route }: any) {
         {storyBrightnessOverlay ? (
           <View pointerEvents="none" style={[styles.storyFilterOverlay, storyBrightnessOverlay]} />
         ) : null}
+        {selectedAsset?.mediaType === "video" ? renderVideoSoundToggle(styles.storyVideoSoundToggle) : null}
         <View pointerEvents="none" style={styles.storyCanvasShade} />
 
         {storyText.trim() ? (
@@ -3379,15 +3338,6 @@ function CreatePostScreen({ navigation, route }: any) {
           </Animated.View>
         ) : null}
 
-        {selectedMusic ? (
-          <View style={styles.storyMusicBadge}>
-            <Icon name="musical-notes" size={12} color="#fff" />
-            <Text style={styles.storyMusicBadgeText} numberOfLines={1}>
-              {selectedMusic.title}
-            </Text>
-          </View>
-        ) : null}
-
         {selectedAsset?.mediaType === "video" ? (
           <View style={styles.storyVideoPill}>
             <Icon name="videocam" size={14} color="#fff" />
@@ -3446,13 +3396,6 @@ function CreatePostScreen({ navigation, route }: any) {
           setStoryActiveLayer(storyImageSticker ? "image" : "emoji");
           setStoryToolPanel("sticker");
         },
-      },
-      {
-        id: "music",
-        label: "Music",
-        icon: "musical-notes-outline",
-        active: musicSheetVisible || !!selectedMusic,
-        onPress: () => setMusicSheetVisible(true),
       },
       ...(selectedAsset?.mediaType === "video"
         ? [
@@ -4096,8 +4039,7 @@ function CreatePostScreen({ navigation, route }: any) {
               uri={selectedAsset.uri}
               posterUri={selectedAsset.thumbnailUrl}
               style={StyleSheet.absoluteFill}
-              muted={!!selectedMusic && videoOriginalAudioVolume <= 0}
-              volume={selectedMusic ? videoOriginalAudioVolume : 1}
+              muted={isComposerVideoMuted}
               repeat
               paused={stage === "details"}
             />
@@ -4106,6 +4048,7 @@ function CreatePostScreen({ navigation, route }: any) {
             <Icon name="videocam" size={16} color="#fff" />
             <Text style={styles.videoBadgeText}>{MODE_COPY[mode].label}</Text>
           </View>
+          {renderVideoSoundToggle()}
           {interactive ? (
             <View pointerEvents="none" style={styles.cropFrameGuide} />
           ) : null}
@@ -4476,13 +4419,6 @@ function CreatePostScreen({ navigation, route }: any) {
         onPress: () => setComposerEditToolPanel("tag"),
       },
       {
-        id: "music",
-        label: "Music",
-        icon: "musical-notes-outline",
-        active: composerEditToolPanel === "music" || !!selectedMusic,
-        onPress: () => setComposerEditToolPanel("music"),
-      },
-      {
         id: "trim",
         label: "Trim",
         icon: "cut-outline",
@@ -4731,24 +4667,6 @@ function CreatePostScreen({ navigation, route }: any) {
       );
     }
 
-    if (composerEditToolPanel === "music") {
-      return (
-        <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
-          <TouchableOpacity
-            style={[styles.toolAction, styles.toolActionFullWidth, { backgroundColor: inputBackground, borderColor }]}
-            onPress={() => setMusicSheetVisible(true)}
-          >
-            <Icon name="musical-notes-outline" size={18} color={accentColor} />
-            <View style={styles.toolActionBody}>
-              <Text style={[styles.toolActionTitle, { color: textColor }]}>Add music</Text>
-              <Text style={[styles.toolActionMeta, { color: mutedColor }]}>{selectedMusic ? buildMusicLabel(selectedMusic) : "Choose a track"}</Text>
-            </View>
-          </TouchableOpacity>
-          {renderOriginalAudioControl()}
-        </View>
-      );
-    }
-
     return null;
   };
 
@@ -4772,7 +4690,7 @@ function CreatePostScreen({ navigation, route }: any) {
                   ? "Font"
                   : composerEditToolPanel === "size"
                     ? "Size"
-                    : "Music";
+                    : "Edit";
     const snapPoints = composerEditToolPanel === "filters" || composerEditToolPanel === "color" ? [0.42, 0.62] : [0.34, 0.52];
 
     return (
@@ -4918,7 +4836,6 @@ function CreatePostScreen({ navigation, route }: any) {
                     : selectedAsset?.mediaType === "video"
                       ? "Video story"
                       : "Image story"}
-                  {selectedMusic ? ` • ${selectedMusic.title}` : ""}
                 </Text>
               </View>
             </View>
@@ -5098,19 +5015,8 @@ function CreatePostScreen({ navigation, route }: any) {
                   </Text>
                 </View>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.toolAction, { backgroundColor: inputBackground, borderColor }]}
-                onPress={() => setMusicSheetVisible(true)}
-              >
-                <Icon name="musical-notes-outline" size={18} color={accentColor} />
-                <View style={styles.toolActionBody}>
-                  <Text style={[styles.toolActionTitle, { color: textColor }]}>Music</Text>
-                  <Text style={[styles.toolActionMeta, { color: mutedColor }]}>{selectedMusic ? buildMusicLabel(selectedMusic) : "Add music"}</Text>
-                </View>
-              </TouchableOpacity>
             </View>
             {renderMentionChips()}
-            {renderOriginalAudioControl()}
           </View>
 
           {mode === "post" ? (
@@ -5643,6 +5549,8 @@ function CreatePostScreen({ navigation, route }: any) {
                 source={{ uri: selectedAsset.uri }}
                 style={styles.videoTrimPreview}
                 paused={!videoTrimPreviewPlaying}
+                muted={isComposerVideoMuted}
+                ignoreSilentSwitch="ignore"
                 repeat={false}
                 resizeMode="cover"
                 onLoad={() => {
@@ -5675,6 +5583,7 @@ function CreatePostScreen({ navigation, route }: any) {
                 <Icon name="cut-outline" size={14} color="#fff" />
                 <Text style={styles.videoTrimBadgeText}>Preview clip</Text>
               </View>
+              {renderVideoSoundToggle(styles.videoTrimSoundToggle)}
             </View>
 
             <View style={styles.videoTrimMetaRow}>
@@ -5753,8 +5662,6 @@ function CreatePostScreen({ navigation, route }: any) {
       {stage === "details" ? renderDetailsStage() : null}
 
       {renderTagSheet()}
-      {renderMusicSheet()}
-      {renderMusicTrimSheet()}
       {renderVideoTrimSheet()}
       {!isInsideTabNavigator ? <AppBottomDock navigation={navigation} activeRouteName="Create" /> : null}
     </SafeAreaView>
@@ -6550,6 +6457,30 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     textAlign: "center",
     fontFamily: appFonts.regular,
+  },
+  videoSoundToggle: {
+    position: "absolute",
+    top: 14,
+    right: 14,
+    zIndex: 8,
+    minHeight: 34,
+    borderRadius: 999,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(15, 23, 42, 0.68)",
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  videoSoundToggleText: {
+    color: "#fff",
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: appFonts.semibold,
+  },
+  storyVideoSoundToggle: {
+    top: 12,
+    right: 12,
   },
   videoBadge: {
     position: "absolute",
@@ -7437,6 +7368,10 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     fontFamily: appFonts.semibold,
   },
+  videoTrimSoundToggle: {
+    top: 12,
+    right: 12,
+  },
   videoTrimMetaRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -7526,3 +7461,4 @@ const styles = StyleSheet.create({
 });
 
 export default CreatePostScreen;
+

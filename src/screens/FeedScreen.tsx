@@ -38,7 +38,6 @@ import { API } from "../api/api";
 import { getStoredUser, getStoredUserId } from "../utils/authSession";
 import { DEFAULT_AVATAR_URL } from "../constants/defaultAssets";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
-import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../hooks/useSegmentedMusicPlayback";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { useAppTheme } from "../theme/AppThemeContext";
 import { PHOTO_FILTER_LIST } from "../utils/photoFilters";
@@ -52,7 +51,7 @@ import { downloadImageAsset } from "../utils/mediaDownload";
 import { connectSocket, socket } from "../socket";
 import { listLiveStreams } from "../utils/liveStreamApi";
 import { APP_RELEASE_DATE, APP_VERSION } from "../config/appMeta";
-import { FEED_VIDEO_SOUND_DEFAULT, isFeedPostAudioOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../utils/feedMediaSound";
+import { FEED_VIDEO_SOUND_DEFAULT, isFeedVideoSoundOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../utils/feedMediaSound";
 
 let ColorMatrix: any;
 try {
@@ -68,7 +67,6 @@ const initialFeed: FeedResponse = {
 
 const FEED_ACCENT = "#9b4dff";
 
-const POST_MUSIC_PREVIEW_MS = 30000;
 const FEED_PAGE_SIZE = 10;
 const FEED_LOAD_MORE_DELAY_MS = 180;
 const FEED_LOAD_MORE_THROTTLE_MS = 1200;
@@ -88,9 +86,6 @@ const emptyFeedInterestProfile = (): FeedInterestProfile => ({
   hashtags: {},
   types: {},
 });
-
-const getMusicPlaybackUrl = (music?: Post["music"]): string =>
-  String(music?.previewUrl || music?.audioUrl || music?.streamUrl || "").trim();
 
 const formatCount = (value: number): string => {
   if (value >= 1000000) {
@@ -154,31 +149,6 @@ const showAvailabilityStatusModal = (nextStatus: boolean) => {
   );
 };
 
-const formatPostMusicLabel = (music?: Post["music"]): string => {
-  const trackName = String(music?.trackName || "").trim();
-  const artistName = String(music?.artistName || "").trim();
-
-  if (!trackName) {
-    return "";
-  }
-
-  return artistName ? `${trackName} • ${artistName}` : trackName;
-};
-
-const getMusicSegmentDurationMs = (
-  music?: { duration?: number; startTime?: number; endTime?: number },
-): number => {
-  const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
-  const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
-
-  if (endMs > startMs) {
-    return Math.min(POST_MUSIC_PREVIEW_MS, endMs - startMs);
-  }
-
-  const durationMs = Math.max(0, Number(music?.duration || 0) * 1000);
-  return durationMs > 0 ? Math.min(POST_MUSIC_PREVIEW_MS, durationMs) : POST_MUSIC_PREVIEW_MS;
-};
-
 const normalizeMediaDurationMs = (value?: number): number => {
   const duration = Math.max(0, Number(value || 0));
 
@@ -220,19 +190,6 @@ const getPostVideoLoopDurationMs = (
     && (getMeasuredVideoDurationMs(measuredDurations, post.id, asset.id) > 0 || normalizeMediaDurationMs(asset.durationMs) > 0)
   );
   return getMeasuredVideoDurationMs(measuredDurations, post.id, firstVideo?.id) || normalizeMediaDurationMs(firstVideo?.durationMs);
-};
-
-const getPostMusicLoopDurationMs = (
-  post?: Post | null,
-  carouselIndex = 0,
-  measuredDurations: Record<string, number> = {},
-): number => {
-  const videoDurationMs = getPostVideoLoopDurationMs(post, carouselIndex, measuredDurations);
-  if (videoDurationMs > 0) {
-    return videoDurationMs;
-  }
-
-  return getMusicSegmentDurationMs(post?.music);
 };
 
 const getPostAspectRatio = (post: Post): number => {
@@ -354,6 +311,7 @@ type CurrentUserSummary = {
   avatarUrl: string;
   username: string;
   name: string;
+  email?: string;
   followingIds: string[];
 };
 
@@ -364,82 +322,6 @@ type SellerAccountSummary = {
   sellerName: string;
   availabilityStatus: boolean;
 };
-
-type MusicMarqueeChipProps = {
-  label: string;
-  active: boolean;
-  compact: boolean;
-  fontSize: number;
-};
-
-function MusicMarqueeChip({ label, active, compact, fontSize }: MusicMarqueeChipProps) {
-  const translateX = useRef(new Animated.Value(0)).current;
-  const [maskWidth, setMaskWidth] = useState(0);
-  const estimatedTextWidth = Math.ceil(label.length * fontSize * 0.58);
-  const shouldAnimate = active && maskWidth > 0 && estimatedTextWidth > maskWidth + 8;
-  const scrollDistance = shouldAnimate
-    ? Math.min(180, Math.max(22, estimatedTextWidth - maskWidth + 18))
-    : 0;
-
-  useEffect(() => {
-    translateX.stopAnimation();
-    translateX.setValue(0);
-
-    if (!shouldAnimate || scrollDistance <= 0) {
-      return;
-    }
-
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.delay(450),
-        Animated.timing(translateX, {
-          toValue: -scrollDistance,
-          duration: Math.max(1800, scrollDistance * 38),
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-        Animated.delay(650),
-        Animated.timing(translateX, {
-          toValue: 0,
-          duration: 520,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-
-    loop.start();
-    return () => {
-      loop.stop();
-      translateX.stopAnimation();
-      translateX.setValue(0);
-    };
-  }, [scrollDistance, shouldAnimate, translateX]);
-
-  return (
-    <View style={[styles.mediaMusicChip, compact && styles.mediaMusicChipCompact]}>
-      <Icon name="musical-notes" size={11} color="#fff" />
-      <View
-        style={styles.mediaMusicTextMask}
-        onLayout={(event) => setMaskWidth(event.nativeEvent.layout.width)}
-      >
-        <Animated.Text
-          numberOfLines={1}
-          style={[
-            styles.mediaMusicChipText,
-            {
-              fontSize,
-              width: shouldAnimate ? estimatedTextWidth : undefined,
-              transform: [{ translateX }],
-            },
-          ]}
-        >
-          {label}
-        </Animated.Text>
-      </View>
-    </View>
-  );
-}
 
 function FeedScreen({ navigation, route }: any) {
   const { width, height } = useWindowDimensions();
@@ -467,7 +349,6 @@ function FeedScreen({ navigation, route }: any) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [activePostId, setActivePostId] = useState<string>("");
-  const [activePostMusicSyncCycle, setActivePostMusicSyncCycle] = useState(0);
   const [measuredVideoDurations, setMeasuredVideoDurations] = useState<Record<string, number>>({});
   const [mutedPostIds, setMutedPostIds] = useState<Record<string, boolean>>({});
   const [expandedCaptionIds, setExpandedCaptionIds] = useState<Record<string, boolean>>({});
@@ -503,6 +384,7 @@ function FeedScreen({ navigation, route }: any) {
     time: 0,
     timeout: null,
   });
+  const carouselScrollRefs = useRef<Record<string, ScrollView | null>>({});
   const homeReloadHandledRef = useRef("");
   const isTabletLayout = width >= 768;
   const focusedPostId = String(route?.params?.postId || "").trim();
@@ -551,41 +433,13 @@ function FeedScreen({ navigation, route }: any) {
   const supportingFontSize = isTabletLayout ? 11.8 : isCompactPhone ? 10.2 : 10.7;
   const composerFontSize = isTabletLayout ? 13.1 : isCompactPhone ? 11.8 : 12.4;
   const mediaChipFontSize = isTabletLayout ? 10.8 : isCompactPhone ? 9.8 : 10.2;
-  const musicChipFontSize = isTabletLayout ? 9.8 : isCompactPhone ? 8.6 : 9.1;
 
   const sidebarTranslateX = slideAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [-sidebarWidth - 24, 0],
   });
-  const activePost = useMemo(
-    () => feed.posts.find((item) => item.id === activePostId) || null,
-    [activePostId, feed.posts],
-  );
   const activePublishTask = publishTasks[0] || null;
   const completedPublishTaskIdsRef = useRef<Set<string>>(new Set());
-  const activePostRawMusicUrl = getMusicPlaybackUrl(activePost?.music);
-  const activePostMusicUrl = normalizeMediaUrl(activePostRawMusicUrl);
-  const activePostMusicStartMs = Math.max(0, Number(activePost?.music?.startTime || 0) * 1000);
-  const activePostCarouselIndex = activePost ? carouselIndexByPostId[activePost.id] || 0 : 0;
-  const activePostMusicDurationMs = getPostMusicLoopDurationMs(activePost, activePostCarouselIndex, measuredVideoDurations);
-  const activePostMusicTrackKey = activePost
-    ? `${activePost.id}:${activePostMusicUrl}:${activePostMusicStartMs}:${activePostMusicDurationMs}`
-    : "";
-  const activePostShouldPlayMusic = !!activePostId
-    && !mutedPostIds[activePostId]
-    && !activeSheet
-    && isScreenFocused
-    && !!activePostMusicUrl;
-  useSegmentedMusicPlayback({
-    rawUrl: activePostRawMusicUrl,
-    normalizedUrl: activePostMusicUrl,
-    trackKey: activePostMusicTrackKey,
-    startMs: activePostMusicStartMs,
-    durationMs: activePostMusicDurationMs,
-    shouldPlay: activePostShouldPlayMusic,
-    syncKey: activePostMusicSyncCycle,
-    pauseWhenInactive: true,
-  });
   const readSellerAccount = useCallback(async (): Promise<SellerAccountSummary | null> => {
     try {
       const res = await API.get("/seller/me");
@@ -646,6 +500,7 @@ function FeedScreen({ navigation, route }: any) {
         title: "Support",
         data: [
           { icon: "settings-outline", label: "Settings", screen: "SettingsScreen" },
+          { icon: "chatbox-ellipses-outline", label: "Suggestion / Feedback", screen: "FeedbackScreen" },
           { icon: "help-circle-outline", label: "Help & Support", screen: "HelpSupportScreen" },
         ],
       },
@@ -810,6 +665,7 @@ function FeedScreen({ navigation, route }: any) {
           avatarUrl: storedUser.profilePic || storedUser.avatarUrl || "",
           username: String(storedUser.username || ""),
           name: String(storedUser.name || ""),
+          email: String(storedUser.email || ""),
           followingIds: Array.isArray(storedUser.following)
             ? storedUser.following.map((entry: any) => String(entry?._id || entry?.id || entry || "")).filter(Boolean)
             : [],
@@ -988,13 +844,9 @@ function FeedScreen({ navigation, route }: any) {
       return () => {
         active = false;
         setActivePostId("");
-        stopAllSegmentedMusicPlayback();
       };
     }, [applyFeedSnapshot, feedScopeKey, loadFeedSnapshot]),
   );
-  useEffect(() => {
-    setActivePostMusicSyncCycle((cycle) => cycle + 1);
-  }, [activePostId, activePostCarouselIndex]);
 
   useEffect(() => {
     const previous = activePostDwellRef.current;
@@ -1228,13 +1080,12 @@ function FeedScreen({ navigation, route }: any) {
   }, []);
 
   const handlePostAudioToggle = useCallback((post: Post) => {
-    const hasAttachedMusic = !!getMusicPlaybackUrl(post.music);
     const hasVideoMedia = post.media.some((asset) => asset.mediaType === "video");
     const isMuted = !!mutedPostIds[post.id];
 
-    if (hasAttachedMusic || isMuted) {
+    if (isMuted) {
       togglePostMute(post.id);
-      if (hasVideoMedia && isMuted) {
+      if (hasVideoMedia) {
         setIsVideoSoundEnabled(true);
       }
       return;
@@ -1255,9 +1106,7 @@ function FeedScreen({ navigation, route }: any) {
   const handlePostMediaPress = (post: Post) => {
     const now = Date.now();
     const lastTap = postTapRef.current;
-    const hasAudioLayer =
-      post.media.some((asset) => asset.mediaType === "video")
-      || !!getMusicPlaybackUrl(post.music);
+    const hasAudioLayer = post.media.some((asset) => asset.mediaType === "video");
 
     if (lastTap.id === post.id && now - lastTap.time < 260) {
       if (lastTap.timeout) {
@@ -1307,10 +1156,7 @@ function FeedScreen({ navigation, route }: any) {
       return { ...prev, [key]: durationMs };
     });
 
-    if (postId === activePostId) {
-      setActivePostMusicSyncCycle((cycle) => cycle + 1);
-    }
-  }, [activePostId]);
+  }, []);
 
   const submitComment = async (postId: string, audioFile?: CommentAudioFile) => {
     const draft = (commentDrafts[postId] || "").trim();
@@ -1427,7 +1273,6 @@ function FeedScreen({ navigation, route }: any) {
   }, [navigation]);
 
   const renderPostMetaChips = useCallback((item: Post, paddingHorizontal: number) => {
-    const musicLabel = formatPostMusicLabel(item.music);
     const chips = [
       item.location
         ? (
@@ -1435,16 +1280,6 @@ function FeedScreen({ navigation, route }: any) {
             <Icon name="location-outline" size={12} color={colors.mutedText} />
             <Text style={[styles.metaChipText, { color: colors.text }]} numberOfLines={1}>
               {item.location}
-            </Text>
-          </TouchableOpacity>
-        )
-        : null,
-      musicLabel
-        ? (
-          <TouchableOpacity key={`music_${item.id}`} style={styles.metaChip} onPress={() => setActivePostId(item.id)}>
-            <Icon name="musical-notes-outline" size={12} color={colors.mutedText} />
-            <Text style={[styles.metaChipText, { color: colors.text }]} numberOfLines={1}>
-              {musicLabel}
             </Text>
           </TouchableOpacity>
         )
@@ -1778,7 +1613,6 @@ function FeedScreen({ navigation, route }: any) {
     const mediaHeight = getPostMediaHeight(post);
     const frameAspectRatio = postMediaWidth / Math.max(1, mediaHeight);
     const currentCarouselIndex = carouselIndexByPostId[post.id] || 0;
-    const hasAttachedMusic = !!getMusicPlaybackUrl(post.music);
     const isMuted = !!mutedPostIds[post.id];
     const isPostActive = activePostId === post.id && isScreenFocused && !activeSheet;
     const shouldPreloadVideo = false;
@@ -1814,18 +1648,10 @@ function FeedScreen({ navigation, route }: any) {
                   isPostActive,
                   isVideoSoundEnabled,
                   isPostMuted: isMuted,
-                  hasAttachedMusic,
-                  originalAudioVolume: post.originalAudioVolume,
                 })}
-                volume={Math.max(0, Math.min(1, Number(post.originalAudioVolume ?? (hasAttachedMusic ? 0 : 1))))}
                 repeat
                 restartKey={post.id}
                 onLoad={(event) => handleFeedVideoLoaded(post.id, primaryMedia.id, event)}
-                onEnd={() => {
-                  if (isPostActive && hasAttachedMusic) {
-                    setActivePostMusicSyncCycle((cycle) => cycle + 1);
-                  }
-                }}
                 resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
                 contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
               />
@@ -1865,56 +1691,90 @@ function FeedScreen({ navigation, route }: any) {
       return rawImage;
     }
 
+    const carouselSlides =
+      post.media.length > 1
+        ? [
+          { asset: post.media[post.media.length - 1], sourceIndex: post.media.length - 1, key: "loop-start" },
+          ...post.media.map((asset, index) => ({ asset, sourceIndex: index, key: `media-${asset.id || index}` })),
+          { asset: post.media[0], sourceIndex: 0, key: "loop-end" },
+        ]
+        : post.media.map((asset, index) => ({ asset, sourceIndex: index, key: `media-${asset.id || index}` }));
+
     return (
       <View style={styles.carouselWrap}>
         <ScrollView
+          ref={(node) => {
+            carouselScrollRefs.current[post.id] = node;
+          }}
           horizontal
           pagingEnabled
+          snapToInterval={postMediaWidth}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          disableIntervalMomentum
+          scrollEventThrottle={16}
+          contentOffset={{ x: postMediaWidth, y: 0 }}
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={(event) => {
-            const nextIndex = Math.round(
+            const virtualIndex = Math.round(
               Number(event?.nativeEvent?.contentOffset?.x || 0) / Math.max(1, postMediaWidth),
             );
+            let nextIndex = Math.max(0, Math.min(post.media.length - 1, virtualIndex - 1));
+
+            if (virtualIndex <= 0) {
+              nextIndex = post.media.length - 1;
+              requestAnimationFrame(() => {
+                carouselScrollRefs.current[post.id]?.scrollTo({
+                  x: postMediaWidth * post.media.length,
+                  y: 0,
+                  animated: false,
+                });
+              });
+            } else if (virtualIndex >= post.media.length + 1) {
+              nextIndex = 0;
+              requestAnimationFrame(() => {
+                carouselScrollRefs.current[post.id]?.scrollTo({
+                  x: postMediaWidth,
+                  y: 0,
+                  animated: false,
+                });
+              });
+            }
+
             setCarouselIndexByPostId((prev) => ({ ...prev, [post.id]: nextIndex }));
           }}
         >
-          {post.media.map((asset, index) => {
-            const shouldRenderCarouselAsset = Math.abs(index - currentCarouselIndex) <= 1;
+          {carouselSlides.map(({ asset, sourceIndex, key }) => {
+            const directDistance = Math.abs(sourceIndex - currentCarouselIndex);
+            const circularDistance = Math.min(directDistance, post.media.length - directDistance);
+            const shouldRenderCarouselAsset = circularDistance <= 1;
             if (!shouldRenderCarouselAsset) {
               return (
                 <View
-                  key={asset.id || `${post.id}_${index}`}
+                  key={`${post.id}-${key}`}
                   style={[styles.postImage, styles.mediaFallback, { width: postMediaWidth, height: mediaHeight }]}
                 />
               );
             }
 
             return asset.mediaType === "video" ? (
-              <View key={asset.id} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
+              <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
                 <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
                   <SocialVideo
                     uri={normalizeMediaUrl(asset.url)}
                     posterUri={normalizeMediaUrl(asset.thumbnailUrl || "")}
                     style={StyleSheet.absoluteFill}
-                    paused={!shouldMountVideo(currentCarouselIndex === index)}
-                    preload={shouldPreloadVideo && currentCarouselIndex === index}
+                    paused={!shouldMountVideo(currentCarouselIndex === sourceIndex)}
+                    preload={shouldPreloadVideo && currentCarouselIndex === sourceIndex}
                     muted={shouldMuteFeedVideo({
                       isPostActive,
-                      isCarouselItemActive: currentCarouselIndex === index,
+                      isCarouselItemActive: currentCarouselIndex === sourceIndex,
                       isVideoSoundEnabled,
                       isPostMuted: isMuted,
-                      hasAttachedMusic,
-                      originalAudioVolume: post.originalAudioVolume,
                     })}
-                    volume={Math.max(0, Math.min(1, Number(post.originalAudioVolume ?? (hasAttachedMusic ? 0 : 1))))}
                     repeat
                     restartKey={`${post.id}:${asset.id}`}
                     onLoad={(event) => handleFeedVideoLoaded(post.id, asset.id, event)}
-                    onEnd={() => {
-                      if (isPostActive && currentCarouselIndex === index && hasAttachedMusic) {
-                        setActivePostMusicSyncCycle((cycle) => cycle + 1);
-                      }
-                    }}
                     resizeMode={getImageResizeMode(asset, frameAspectRatio)}
                     contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
                   />
@@ -1925,7 +1785,7 @@ function FeedScreen({ navigation, route }: any) {
               (() => {
                 const imageResizeMode = getImageResizeMode(asset, frameAspectRatio);
                 const rawImage = (
-                  <View key={asset.id} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
+                  <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
                     <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
                       <ProgressiveImage
                         uri={normalizeMediaUrl(asset.url)}
@@ -1943,7 +1803,7 @@ function FeedScreen({ navigation, route }: any) {
                   const activeFilter = PHOTO_FILTER_LIST.find((f) => f.id === post.filterPreset);
                   if (activeFilter && activeFilter.matrix) {
                     return (
-                      <View key={asset.id}>
+                      <View key={`${post.id}-${key}`}>
                         <ColorMatrix matrix={activeFilter.matrix}>
                           {rawImage}
                         </ColorMatrix>
@@ -2074,23 +1934,14 @@ function FeedScreen({ navigation, route }: any) {
 
   const renderPost = ({ item }: { item: Post }) => {
     const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
-    const musicLabel = formatPostMusicLabel(item.music);
-    const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isMuted = !!mutedPostIds[item.id];
-    void musicLabel;
-    void hasAttachedMusic;
     void isMuted;
     const tokens: string[] = [getPostTypeTag(item)];
 
     if (item.location) {
       tokens.push(`📍 ${item.location}`);
     }
-
-    if (item.music) {
-      tokens.push(`🎵 ${item.music}`);
-    }
-
-    const metaLine = tokens.join(" • ");
+const metaLine = tokens.join(" • ");
 
     return (
       <View
@@ -2215,7 +2066,7 @@ function FeedScreen({ navigation, route }: any) {
             <Icon name="paper-plane-outline" size={22} color={FEED_ACCENT} />
           </TouchableOpacity>
 
-          {(hasVideoMedia || hasAttachedMusic) ? (
+          {hasVideoMedia ? (
             <TouchableOpacity
               style={[
                 styles.actionButton,
@@ -2230,12 +2081,9 @@ function FeedScreen({ navigation, route }: any) {
               onPress={() => handlePostAudioToggle(item)}
             >
               <Icon
-                name={isFeedPostAudioOn({
-                  hasVideoMedia,
-                  hasAttachedMusic,
+                name={isFeedVideoSoundOn({
                   isVideoSoundEnabled,
                   isPostMuted: isMuted,
-                  originalAudioVolume: item.originalAudioVolume,
                 }) ? "volume-high-outline" : "volume-mute-outline"}
                 size={22}
                 color={FEED_ACCENT}
@@ -2385,17 +2233,12 @@ function FeedScreen({ navigation, route }: any) {
     }
 
     const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
-    const musicLabel = formatPostMusicLabel(item.music);
-    const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isMuted = !!mutedPostIds[item.id];
     const isCaptionExpanded = !!expandedCaptionIds[item.id];
     const shouldTruncateCaption = item.caption.length > 110 || item.caption.includes("\n");
-    const isPostAudioOn = isFeedPostAudioOn({
-      hasVideoMedia,
-      hasAttachedMusic,
+    const isPostAudioOn = isFeedVideoSoundOn({
       isVideoSoundEnabled,
       isPostMuted: isMuted,
-      originalAudioVolume: item.originalAudioVolume,
     });
     const likePreviewUsers =
       Array.isArray(item.likePreviewUsers) && item.likePreviewUsers.length
@@ -2500,21 +2343,13 @@ function FeedScreen({ navigation, route }: any) {
                 <Icon name="heart" size={88} color="rgba(255,255,255,0.92)" />
               </View>
             ) : null}
-            {(hasVideoMedia || hasAttachedMusic) ? (
+            {hasVideoMedia ? (
               <View style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
                 <Icon name={isPostAudioOn ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
                 <Text style={[styles.mediaSoundHintText, { fontSize: mediaChipFontSize }]}>
                   {isPostAudioOn ? "Sound on" : "Muted"}
                 </Text>
               </View>
-            ) : null}
-            {musicLabel ? (
-              <MusicMarqueeChip
-                label={musicLabel}
-                active={activePostId === item.id && isScreenFocused && !activeSheet}
-                compact={isCompactPhone}
-                fontSize={musicChipFontSize}
-              />
             ) : null}
           </Pressable>
         </View>
@@ -3138,7 +2973,11 @@ function FeedScreen({ navigation, route }: any) {
             ) : null}
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sidebarContent}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.sidebarContent}
+            keyboardShouldPersistTaps="handled"
+          >
             <TouchableOpacity
               activeOpacity={0.86}
               style={[styles.sidebarWalletPreview, { borderColor: colors.border, backgroundColor: colors.surface }]}
@@ -3213,6 +3052,7 @@ function FeedScreen({ navigation, route }: any) {
                 ))}
               </View>
             ))}
+
           </ScrollView>
         </Animated.View>
       </View>
@@ -3651,6 +3491,83 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
   },
+  feedbackCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 18,
+  },
+  feedbackCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  feedbackCardIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  feedbackCardTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  feedbackCardTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  feedbackCardHint: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  feedbackLabel: {
+    marginTop: 10,
+    marginBottom: 7,
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  feedbackInput: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  feedbackInputReadonly: {
+    backgroundColor: "rgba(148, 163, 184, 0.12)",
+  },
+  feedbackTextarea: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    minHeight: 118,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  feedbackSubmitButton: {
+    marginTop: 14,
+    minHeight: 46,
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  feedbackSubmitButtonDisabled: {
+    opacity: 0.7,
+  },
+  feedbackSubmitText: {
+    marginLeft: 8,
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+  },
   storyRail: {
     marginHorizontal: 14,
     marginBottom: 12,
@@ -3911,36 +3828,6 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontWeight: "800",
   },
-  mediaMusicChip: {
-    position: "absolute",
-    left: 12,
-    bottom: 12,
-    maxWidth: "62%",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: "rgba(0,0,0,0.56)",
-  },
-  mediaMusicChipCompact: {
-    left: 10,
-    bottom: 10,
-    maxWidth: "66%",
-    paddingHorizontal: 7,
-    paddingVertical: 4,
-  },
-  mediaMusicTextMask: {
-    flexShrink: 1,
-    minWidth: 0,
-    overflow: "hidden",
-  },
-  mediaMusicChipText: {
-    color: "#fff",
-    fontSize: 9,
-    fontWeight: "700",
-  },
   actionsRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8 },
   actionButton: {
     width: 42,
@@ -4066,3 +3953,5 @@ const styles = StyleSheet.create({
 });
 
 export default FeedScreen;
+
+

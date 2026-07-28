@@ -245,18 +245,9 @@ export const parseCaptionEntities = (caption: string): { hashtags: string[]; men
   };
 };
 
-const normalizeVolume = (value: number | undefined): number | undefined => {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return undefined;
-  }
-
-  return Math.max(0, Math.min(1, value));
-};
-
 export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
   const caption = cleanText(input.caption);
   const location = cleanText(input.location);
-  const music = normalizeSelectedMusic(input.music);
   const filterPreset = input.filterPreset ? cleanText(input.filterPreset).toLowerCase() : undefined;
 
   assertLength(caption, MAX_CAPTION_LENGTH, "Caption");
@@ -288,14 +279,12 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
     ...input,
     caption,
     location,
-    music,
     media,
     hashtags,
     mentions,
     taggedUsers,
     collaboratorIds,
     filterPreset,
-    originalAudioVolume: normalizeVolume(input.originalAudioVolume),
   };
 };
 
@@ -351,7 +340,6 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
       : [];
   const hashtags = normalizeTagList(input.hashtags, MAX_HASHTAGS, "hashtags");
   const mentions = normalizeTagList(input.mentions, MAX_MENTIONS, "mentions");
-  const music = normalizeSelectedMusic(input.music);
 
   if (linkUrl && !URL_PROTOCOL_PATTERN.test(linkUrl)) {
     throw new SocialValidationError("validation_error", "Story link must be http/https.");
@@ -576,13 +564,11 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
     mentions,
     allowReplies: input.allowReplies !== false,
     allowSharing: input.allowSharing !== false,
-    music,
   };
 };
 
 export const normalizeReelInput = (input: CreateReelInput): CreateReelInput => {
   const caption = cleanText(input.caption);
-  const music = normalizeSelectedMusic(input.music);
   const location = cleanText(input.location);
 
   assertLength(caption, MAX_CAPTION_LENGTH, "Caption");
@@ -591,14 +577,12 @@ export const normalizeReelInput = (input: CreateReelInput): CreateReelInput => {
   return {
     ...input,
     caption,
-    music,
     location,
     media: normalizeMedia(input.media),
     thumbnailUrl: input.thumbnailUrl ? cleanText(input.thumbnailUrl) : undefined,
     hashtags: normalizeTagList(input.hashtags, MAX_HASHTAGS, "hashtags"),
     mentions: normalizeTagList(input.mentions, MAX_MENTIONS, "mentions"),
     taggedUsers: normalizeTaggedUsers(input.taggedUsers),
-    originalAudioVolume: normalizeVolume(input.originalAudioVolume),
   };
 };
 

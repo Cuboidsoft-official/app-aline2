@@ -89,7 +89,6 @@ export interface Post {
   caption: string;
   media: MediaAsset[];
   location?: string;
-  music?: StoryMusic;
   hashtags: string[];
   mentions: string[];
   collaboratorIds: string[];
@@ -104,7 +103,6 @@ export interface Post {
   liked: boolean;
   saved: boolean;
   hasOriginalAudio?: boolean;
-  originalAudioVolume?: number;
 }
 
 export type StoryType = "media" | "text" | "poll" | "question";
@@ -296,7 +294,6 @@ export interface CreatePostInput {
   caption: string;
   media: MediaAsset[];
   location?: string;
-  music?: SelectedMusicClip;
   hashtags?: string[];
   mentions?: string[];
   taggedUsers?: TaggedUserInput[];
@@ -305,7 +302,6 @@ export interface CreatePostInput {
   filterPreset?: string;
   stickers?: StorySticker[];
   hasOriginalAudio?: boolean;
-  originalAudioVolume?: number;
 }
 
 export interface CreateStoryInput {
@@ -348,7 +344,6 @@ export interface CreateStoryInput {
   visibleToUserIds?: string[];
   allowReplies?: boolean;
   allowSharing?: boolean;
-  music?: SelectedMusicClip;
 }
 
 export interface CreateReelInput {
@@ -356,8 +351,6 @@ export interface CreateReelInput {
   media: MediaAsset;
   thumbnailUrl?: string;
   hasOriginalAudio?: boolean;
-  originalAudioVolume?: number;
-  music?: SelectedMusicClip;
   hashtags?: string[];
   mentions?: string[];
   taggedUsers?: TaggedUserInput[];

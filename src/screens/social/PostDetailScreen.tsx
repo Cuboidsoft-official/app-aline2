@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -13,7 +13,7 @@ import {
   View
 } from "react-native";
 import { Alert } from "../../utils/appAlert";
-import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
 
@@ -25,7 +25,6 @@ import PostShareSheet from "../../features/social/components/PostShareSheet";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import { socialApi } from "../../features/social/socialApi";
 import { Post } from "../../features/social/types";
-import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { DEFAULT_AVATAR_URL } from "../../constants/defaultAssets";
 import { PHOTO_FILTER_LIST } from "../../utils/photoFilters";
@@ -60,23 +59,6 @@ const formatPostTime = (timestamp?: number) => {
   return `${Math.floor(hours / 24)}d`;
 };
 
-const getMusicPlaybackUrl = (music?: Post["music"]) =>
-  String(music?.audioUrl || music?.streamUrl || music?.previewUrl || "").trim();
-
-const getTrimmedMusicDurationMs = (
-  music?: { duration?: number; startTime?: number; endTime?: number },
-): number => {
-  const maxClipMs = 30000;
-  const explicitDurationMs = Math.max(0, Number(music?.duration || 0) * 1000);
-  if (explicitDurationMs > 0) {
-    return Math.min(maxClipMs, explicitDurationMs);
-  }
-
-  const startMs = Math.max(0, Number(music?.startTime || 0) * 1000);
-  const endMs = Math.max(0, Number(music?.endTime || 0) * 1000);
-  return endMs > startMs ? Math.min(maxClipMs, endMs - startMs) : 0;
-};
-
 const getMediaFrameTransformStyle = (
   asset: Post["media"][number] | undefined,
   width: number,
@@ -100,7 +82,6 @@ function PostDetailScreen({ route, navigation }: any) {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const isScreenFocused = useIsFocused();
   const postId = typeof route?.params?.postId === "string" ? route.params.postId : "";
 
   const [post, setPost] = useState<Post | null>(null);
@@ -159,35 +140,15 @@ function PostDetailScreen({ route, navigation }: any) {
 
       return () => {
         active = false;
-        stopAllSegmentedMusicPlayback();
       };
     }, [navigation, postId]),
   );
-
-  const attachedMusicRawUrl = getMusicPlaybackUrl(post?.music);
-  const attachedMusicUrl = useMemo(() => normalizeMediaUrl(attachedMusicRawUrl), [attachedMusicRawUrl]);
-  const attachedMusicStartMs = Math.max(0, Number(post?.music?.startTime || 0) * 1000);
-  const attachedMusicDurationMs = getTrimmedMusicDurationMs(post?.music);
-  const attachedMusicTrackKey = post
-    ? `${post.id}:${attachedMusicUrl}:${attachedMusicStartMs}:${attachedMusicDurationMs}`
-    : "";
-  const hasAttachedMusic = !!attachedMusicUrl;
-  const shouldPlayAttachedMusic = hasAttachedMusic && isMediaSoundEnabled && !activeSheet && isScreenFocused;
-  useSegmentedMusicPlayback({
-    rawUrl: attachedMusicRawUrl,
-    normalizedUrl: attachedMusicUrl,
-    trackKey: attachedMusicTrackKey,
-    startMs: attachedMusicStartMs,
-    durationMs: attachedMusicDurationMs,
-    shouldPlay: shouldPlayAttachedMusic,
-  });
 
   useEffect(() => {
     return () => {
       if (postTapRef.current.timeout) {
         clearTimeout(postTapRef.current.timeout);
       }
-      stopAllSegmentedMusicPlayback();
     };
   }, []);
 
@@ -325,7 +286,7 @@ function PostDetailScreen({ route, navigation }: any) {
 
     const now = Date.now();
     const lastTap = postTapRef.current;
-    const hasAudioLayer = post.media.some((asset) => asset.mediaType === "video") || hasAttachedMusic;
+    const hasAudioLayer = post.media.some((asset) => asset.mediaType === "video");
 
     if (now - lastTap.time < 260) {
       if (lastTap.timeout) {
@@ -373,7 +334,7 @@ function PostDetailScreen({ route, navigation }: any) {
               uri={assetUrl}
               posterUri={posterUrl}
               style={StyleSheet.absoluteFill}
-              muted={!isMediaSoundEnabled || hasAttachedMusic}
+              muted={!isMediaSoundEnabled}
               repeat
               contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
             />
@@ -522,7 +483,7 @@ function PostDetailScreen({ route, navigation }: any) {
             )}
             {renderStickerOverlay()}
 
-            {(hasAttachedMusic || post.media.some((asset) => asset.mediaType === "video")) ? (
+            {post.media.some((asset) => asset.mediaType === "video") ? (
               <View style={styles.mediaSoundBadge}>
                 <Icon
                   name={isMediaSoundEnabled ? "volume-high-outline" : "volume-mute-outline"}
@@ -602,15 +563,6 @@ function PostDetailScreen({ route, navigation }: any) {
             <Text style={[styles.label, { color: colors.text }]}>Location</Text>
             <View style={[styles.readOnlyField, { borderColor: colors.border, backgroundColor: colors.card }]}>
               <Text style={[styles.readOnlyText, { color: colors.text }]}>{post.location || "Not set"}</Text>
-            </View>
-
-            <Text style={[styles.label, { color: colors.text }]}>Music</Text>
-            <View style={[styles.readOnlyField, { borderColor: colors.border, backgroundColor: colors.card }]}>
-              <Text style={[styles.readOnlyText, { color: colors.text }]}>
-                {post.music?.trackName
-                  ? `${post.music.trackName}${post.music.artistName ? ` • ${post.music.artistName}` : ""}`
-                  : "Not set"}
-              </Text>
             </View>
 
             {post.hashtags.length ? (
@@ -905,3 +857,4 @@ const styles = StyleSheet.create({
 });
 
 export default PostDetailScreen;
+

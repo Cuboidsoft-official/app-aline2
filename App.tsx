@@ -28,6 +28,7 @@ import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen
 import CommentControlsScreen from './src/screens/CommentControlsScreen';
 import TagsMentionsScreen from './src/screens/TagsMentionsScreen';
 import DeleteAccountScreen from './src/screens/DeleteAccountScreen';
+import FeedbackScreen from './src/screens/FeedbackScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
 import ChildSafetyScreen from './src/screens/ChildSafetyScreen';
@@ -430,6 +431,7 @@ function AppNavigator() {
         <Stack.Screen name="TagsMentionsScreen" component={TagsMentionsScreen} />
         <Stack.Screen name="CloseFriendsScreen" component={CloseFriendsScreen} />
         <Stack.Screen name="DeleteAccountScreen" component={DeleteAccountScreen} />
+        <Stack.Screen name="FeedbackScreen" component={FeedbackScreen} />
         <Stack.Screen name="HelpSupportScreen" component={HelpSupportScreen} />
         <Stack.Screen name="PrivacyPolicyScreen" component={PrivacyPolicyScreen} />
         <Stack.Screen name="ChildSafetyScreen" component={ChildSafetyScreen} />

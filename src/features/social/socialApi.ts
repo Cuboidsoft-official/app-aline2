@@ -294,30 +294,6 @@ const mapStoryMusicDetails = (music: any, musicConfig?: any) => {
   };
 };
 
-const buildMusicRequestPayload = (music: any) =>
-  music?.id
-    ? (() => {
-      const startTime = Math.max(0, Number(music.clipStartTime ?? 0) || 0);
-      const rawDuration = Number(music.clipDuration ?? music.duration ?? MUSIC_CLIP_MAX_SECONDS) || MUSIC_CLIP_MAX_SECONDS;
-      const duration = Math.max(1, Math.min(MUSIC_CLIP_MAX_SECONDS, rawDuration));
-      const explicitEndTime = Number(music.clipEndTime);
-      const endTime = Math.min(
-        startTime + duration,
-        Number.isFinite(explicitEndTime) && explicitEndTime > startTime ? explicitEndTime : startTime + duration,
-      );
-
-      return {
-        musicId: music.id,
-        musicConfig: {
-          startTime,
-          endTime,
-          duration: Math.max(1, endTime - startTime),
-          volume: 1,
-        },
-      };
-    })()
-    : {};
-
 const mapTaggedUsersForRequest = (taggedUsers: any[] | undefined) =>
   (taggedUsers || []).map((entry) => ({
     user: entry.user,
@@ -672,7 +648,6 @@ class RemoteSocialApi implements SocialApi {
       caption: post?.caption || "",
       media,
       location: typeof post?.location === "string" ? post.location : post?.location?.name,
-      music: mapStoryMusicDetails(post?.music, post?.musicConfig),
       hashtags: Array.isArray(post?.hashtags) ? post.hashtags : [],
       mentions: this.mapMentionNames(post?.mentions),
       collaboratorIds: Array.isArray(post?.collaborators) ? post.collaborators.map((item: any) => this.getId(item)) : [],
@@ -713,10 +688,6 @@ class RemoteSocialApi implements SocialApi {
       liked: typeof post?.liked === "boolean" ? post.liked : false,
       saved: typeof post?.saved === "boolean" ? post.saved : false,
       hasOriginalAudio: !!post?.hasOriginalAudio,
-      originalAudioVolume:
-        typeof post?.originalAudioVolume === "number"
-          ? Math.max(0, Math.min(1, Number(post.originalAudioVolume) || 0))
-          : undefined,
       likePreviewUsers: Array.isArray(post?.recentLikes)
         ? post.recentLikes.map((user: any) => this.mapUser(user)).filter((user: SocialUser) => !!user.id)
         : [],
@@ -2034,7 +2005,6 @@ class RemoteSocialApi implements SocialApi {
       commentsDisabled: payload.settings?.disableComments || false,
       likesHidden: payload.settings?.hideLikeCount || false,
       hasOriginalAudio: payload.hasOriginalAudio || false,
-      originalAudioVolume: payload.originalAudioVolume,
       filterPreset: payload.filterPreset || undefined,
       stickers: (payload.stickers || []).map((sticker) => ({
         type: sticker.type,
@@ -2053,7 +2023,6 @@ class RemoteSocialApi implements SocialApi {
       hashtags: payload.hashtags,
       mentions: payload.mentions,
       taggedUsers: mapTaggedUsersForRequest(payload.taggedUsers),
-      ...buildMusicRequestPayload(payload.music),
     }, {
       timeout: 120000,
     });
@@ -2101,11 +2070,6 @@ class RemoteSocialApi implements SocialApi {
             },
           ]
           : [];
-    const musicSticker = buildStoryMusicSticker(payload.music);
-    if (musicSticker) {
-      stickers.push(musicSticker);
-    }
-
     if (payload.location) {
       stickers.push({
         type: "location",
@@ -2250,7 +2214,6 @@ class RemoteSocialApi implements SocialApi {
       isCloseFriends: payload.visibility === "close_friends",
       allowReplies: payload.allowReplies,
       allowSharing: payload.allowSharing,
-      ...buildMusicRequestPayload(payload.music),
     }, {
       timeout: 120000,
     });
@@ -2282,8 +2245,7 @@ class RemoteSocialApi implements SocialApi {
         },
       ],
       postType: "reel",
-      hasOriginalAudio: payload.hasOriginalAudio !== false && !payload.music,
-      originalAudioVolume: payload.originalAudioVolume,
+      hasOriginalAudio: payload.hasOriginalAudio !== false,
       location: payload.location ? { name: payload.location } : undefined,
       hashtags: payload.hashtags,
       mentions: payload.mentions,
@@ -2301,7 +2263,6 @@ class RemoteSocialApi implements SocialApi {
         },
         style: sticker.style,
       })),
-      ...buildMusicRequestPayload(payload.music),
     }, {
       timeout: 120000,
     });
