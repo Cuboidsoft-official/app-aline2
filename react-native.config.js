@@ -22,5 +22,13 @@ module.exports = {
       packageName: 'com.aline2',
     },
   },
+  dependencies: {
+    expo: {
+      platforms: {
+        android: null,
+        ios: null,
+      },
+    },
+  },
   assets: ['./node_modules/react-native-vector-icons/Fonts'],
 };

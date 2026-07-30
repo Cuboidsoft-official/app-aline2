@@ -43,11 +43,17 @@ const resolveNavigation = (navigationRef?: any) => {
 
 if (Notifications) {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
+    handleNotification: async (notification: any) => {
+      const data = notification?.request?.content?.data || {};
+      const type = String(data?.type || "").trim();
+      const isChatMessage = type === "chat_message" || type.startsWith("group_");
+
+      return {
+        shouldShowAlert: !isChatMessage,
+        shouldPlaySound: !isChatMessage,
+        shouldSetBadge: true,
+      };
+    },
   });
 }
 
@@ -290,15 +296,18 @@ async function showForegroundNotification(remoteMessage: any) {
   }
 
   const data = remoteMessage?.data || remoteMessage?.notification?.data || {};
-  const title = safeDecodeURIComponent(remoteMessage?.notification?.title || data.title || "New notification");
   const type = String(data.type || "").trim();
-  const conversationId = String(data.conversationId || "").trim();
-  const body =
-    type === "chat_message"
-      ? "Kisi ne message kiya hai"
-      : String(remoteMessage?.notification?.body || data.body || "").trim();
 
-  if (conversationId && (type === "chat_message" || type.startsWith("group_"))) {
+  // Do not pop up system notification for chat messages; only unread badge in chat list updates
+  if (type === "chat_message" || type.startsWith("group_")) {
+    return;
+  }
+
+  const title = safeDecodeURIComponent(remoteMessage?.notification?.title || data.title || "New notification");
+  const body = String(remoteMessage?.notification?.body || data.body || "").trim();
+  const conversationId = String(data.conversationId || "").trim();
+
+  if (conversationId) {
     try {
       const userId = await getStoredUserId();
       if (userId) {
@@ -314,9 +323,7 @@ async function showForegroundNotification(remoteMessage: any) {
   const channelId =
     type === "incoming_call"
       ? CALL_NOTIFICATION_CHANNEL_ID
-      : type === "chat_message"
-        ? "chat"
-        : "social";
+      : "social";
 
   await Notifications.scheduleNotificationAsync({
     content: {

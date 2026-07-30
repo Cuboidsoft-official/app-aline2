@@ -51,6 +51,7 @@ function SocialVideo({
   const [posterFailed, setPosterFailed] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
+  const [isPreloadReady, setIsPreloadReady] = useState(false);
   const resolvedUri = String(uri || "").trim();
   const resolvedPosterUri = String(posterUri || "").trim();
   const usablePosterUri = isUsablePosterUri(resolvedPosterUri, resolvedUri) ? resolvedPosterUri : "";
@@ -58,6 +59,7 @@ function SocialVideo({
   const shouldMountVideo = !!resolvedUri && !videoFailed && (!paused || controls || preload);
   const shouldShowPoster = !!usablePosterUri && !posterFailed;
   const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0));
+  const effectivePaused = preload ? (isPreloadReady ? true : false) : paused;
 
   useEffect(() => {
     placeholderOpacity.stopAnimation();
@@ -66,6 +68,19 @@ function SocialVideo({
     setVideoFailed(false);
     setIsBuffering(false);
   }, [placeholderOpacity, usablePosterUri, resolvedUri]);
+
+  useEffect(() => {
+    if (!preload && !paused && isPreloadReady) {
+      Animated.timing(placeholderOpacity, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }).start();
+    } else if (preload) {
+      placeholderOpacity.stopAnimation();
+      placeholderOpacity.setValue(1);
+    }
+  }, [preload, paused, isPreloadReady, placeholderOpacity]);
 
   useEffect(() => {
     if (!restartKey || !videoRef.current || paused || preload) {
@@ -112,7 +127,7 @@ function SocialVideo({
             source={{ uri: resolvedUri }}
             style={StyleSheet.absoluteFill}
             resizeMode={resizeMode}
-            paused={paused}
+            paused={effectivePaused}
             muted={muted || preload}
             volume={safeVolume}
             repeat={repeat}
@@ -121,28 +136,38 @@ function SocialVideo({
             poster={usablePosterUri || undefined}
             posterResizeMode={resizeMode}
             progressUpdateInterval={500}
-            preferredForwardBufferDuration={preload ? 1 : 2}
+            preferredForwardBufferDuration={preload ? 2 : 4}
             automaticallyWaitsToMinimizeStalling={false}
             bufferConfig={{
-              minBufferMs: preload ? 500 : 1200,
-              maxBufferMs: preload ? 2500 : 5000,
-              bufferForPlaybackMs: preload ? 250 : 500,
-              bufferForPlaybackAfterRebufferMs: preload ? 500 : 1000,
+              minBufferMs: 2000,
+              maxBufferMs: 8000,
+              bufferForPlaybackMs: 400,
+              bufferForPlaybackAfterRebufferMs: 800,
             }}
             onLoadStart={() => {
               setIsBuffering(true);
             }}
             onLoad={(event) => {
               setIsBuffering(false);
-              Animated.timing(placeholderOpacity, {
-                toValue: 0,
-                duration: 180,
-                useNativeDriver: true,
-              }).start();
+              if (preload && !isPreloadReady) {
+                videoRef.current?.seek?.(0);
+                setIsPreloadReady(true);
+              }
+              if (!preload && !paused) {
+                Animated.timing(placeholderOpacity, {
+                  toValue: 0,
+                  duration: 180,
+                  useNativeDriver: true,
+                }).start();
+              }
               onLoad?.(event);
             }}
             onReadyForDisplay={() => {
               setIsBuffering(false);
+              if (preload && !isPreloadReady) {
+                videoRef.current?.seek?.(0);
+                setIsPreloadReady(true);
+              }
             }}
             onBuffer={({ isBuffering: nextIsBuffering }) => {
               setIsBuffering(Boolean(nextIsBuffering));

@@ -59,7 +59,15 @@ function FeaturedProfilesCarousel({
     try {
       setLoading(true);
       const res = await API.get("/featured-profiles", { params: { limit } });
-      const nextProfiles = Array.isArray(res.data?.profiles) ? res.data.profiles : [];
+      const rawProfiles = Array.isArray(res.data?.profiles) ? res.data.profiles : [];
+      const nextProfiles = rawProfiles.filter((item: any) => {
+        if (!item) return false;
+        const pStatus = String(item.paymentStatus || "").toLowerCase();
+        const status = String(item.status || "").toLowerCase();
+        if (pStatus === "pending" || pStatus === "unpaid" || status === "pending" || status === "rejected" || status === "draft") return false;
+        if (item.onboardingCompleted === false) return false;
+        return true;
+      });
       setProfiles(nextProfiles);
       nextProfiles.forEach((profile: FeaturedProfileItem) => trackFeaturedProfile(profile._id, "impression"));
     } catch (error) {

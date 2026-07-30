@@ -678,16 +678,8 @@ function FeedScreen({ navigation, route }: any) {
     setErrorMessage("");
   }, [focusedPostId, isFocusedPostFeed, personalizeFeedPosts]);
 
-  useEffect(() => {
-    if (isFocusedPostFeed || !feed.posts.length) {
-      return;
-    }
-
-    setFeed((prev) => ({
-      ...prev,
-      posts: personalizeFeedPosts(prev.posts),
-    }));
-  }, [_feedInterestVersion, isFocusedPostFeed, personalizeFeedPosts]);
+  // Live re-sorting on interest updates is disabled to prevent posts from jumping/changing order while scrolling.
+  // Feed order remains stable until the user explicitly refreshes or reloads.
 
   const loadFeed = useCallback(async (options: { shufflePosts?: boolean; lightweight?: boolean; preserveActivePostId?: string } = {}) => {
     feedLoadMoreRequestRef.current = false;
@@ -2829,8 +2821,8 @@ const metaLine = tokens.join(" • ");
     ? styles.sidebarStatusAvailable
     : styles.sidebarStatusUnavailable;
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 55,
-    minimumViewTime: 40,
+    itemVisiblePercentThreshold: 30,
+    minimumViewTime: 10,
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
     const firstVisiblePost = viewableItems.find((entry) =>

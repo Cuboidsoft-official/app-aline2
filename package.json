@@ -1,6 +1,6 @@
 {
   "name": "Aline2",
-  "version": "2.1.5",
+  "version": "2.1.6",
   "private": true,
   "scripts": {
     "postinstall": "node ./scripts/patch-nitro-sound-android.js && node ./scripts/patch-react-native-keep-awake-android.js && node ./scripts/patch-webrtc-event-target-shim.js && node ./scripts/patch-color-matrix-codegen-name.js",
@@ -41,7 +41,9 @@
     "axios": "^1.6.7",
     "engine.io-client": "^6.5.3",
     "engine.io-parser": "^5.2.2",
+    "expo": "~55.0.18",
     "expo-device": "~55.0.12",
+    "expo-modules-core": "~55.0.23",
     "expo-notifications": "~55.0.16",
     "firebase-tools": "^15.14.0",
     "react": "19.2.3",

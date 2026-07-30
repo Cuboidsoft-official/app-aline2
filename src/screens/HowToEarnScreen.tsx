@@ -24,15 +24,19 @@ import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import { useAppTheme } from "../theme/AppThemeContext";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 
-type EarnSection = "listedProfile" | "dropAd" | "searchProfile" | "listedAds" | "becomeSeller" | "howToEarn";
+type EarnSection = "menu" | "listedProfile" | "dropAd" | "featureProfile" | "listedAds" | "referral";
 
 const FEATURE_AMOUNT = 100;
 const FEATURE_DAYS = 30;
-const DEFAULT_SECTION: EarnSection = "listedProfile";
-const EARN_SECTIONS: EarnSection[] = ["listedProfile", "dropAd", "searchProfile", "listedAds", "becomeSeller", "howToEarn"];
+const DEFAULT_SECTION: EarnSection = "menu";
+const EARN_SECTIONS: EarnSection[] = ["menu", "listedProfile", "dropAd", "featureProfile", "listedAds", "referral"];
 
-const resolveInitialSection = (value?: string): EarnSection =>
-  EARN_SECTIONS.includes(value as EarnSection) ? (value as EarnSection) : DEFAULT_SECTION;
+const resolveInitialSection = (value?: string): EarnSection => {
+  if (value === "searchProfile") return "featureProfile";
+  if (value === "howToEarn") return "referral";
+  if (EARN_SECTIONS.includes(value as EarnSection)) return value as EarnSection;
+  return DEFAULT_SECTION;
+};
 
 const initialProfileForm = {
   followerCount: "",
@@ -121,8 +125,25 @@ function HowToEarnScreen({ navigation, route }: any) {
       setReferralCode(nextCode);
       setHasSellerAccount(Boolean(seller?.onboardingCompleted || String(user?.category || "").toLowerCase() === "seller"));
       setFeaturedProfile(myFeature);
-      setFeaturedProfiles(Array.isArray(profilesRes.data?.profiles) ? profilesRes.data.profiles : []);
-      setCompanyAds(Array.isArray(adsRes.data?.ads) ? adsRes.data.ads : []);
+      const rawProfiles = Array.isArray(profilesRes.data?.profiles) ? profilesRes.data.profiles : [];
+      const activeProfiles = rawProfiles.filter((item: any) => {
+        if (!item) return false;
+        const pStatus = String(item.paymentStatus || "").toLowerCase();
+        const status = String(item.status || "").toLowerCase();
+        if (pStatus === "pending" || pStatus === "unpaid" || status === "pending" || status === "rejected" || status === "draft") return false;
+        if (item.onboardingCompleted === false) return false;
+        return true;
+      });
+      setFeaturedProfiles(activeProfiles);
+
+      const rawAds = Array.isArray(adsRes.data?.ads) ? adsRes.data.ads : [];
+      const activeAds = rawAds.filter((item: any) => {
+        if (!item) return false;
+        const status = String(item.status || item.approvalStatus || "").toLowerCase();
+        if (status === "pending" || status === "draft" || status === "rejected" || status === "unverified") return false;
+        return true;
+      });
+      setCompanyAds(activeAds);
       setProfileForm((current) => ({
         ...current,
         aline2Username: current.aline2Username || user?.username || myFeature?.aline2Username || "",
@@ -149,9 +170,9 @@ function HowToEarnScreen({ navigation, route }: any) {
   }, [loadScreenData]));
 
   const referralMessage = useMemo(() => {
-    const shareBase = (appConfig.publicShareBaseUrl || "https://aline2.com").replace(/\/+$/, "");
-    const codeLine = referralCode ? `Use my referral code: ${referralCode}` : "Join me on Aline2.";
-    return `${codeLine}\n${shareBase}`;
+    const playStoreUrl = "https://play.google.com/store/apps/details?id=com.aline2";
+    const codePart = referralCode ? `\n\nReferral Code: ${referralCode}` : "";
+    return `🚀 Join Aline2 – The Next Generation Social Platform!\n\nConnect, chat, share posts, reels, and stories, and discover a fresh social experience.\n\nSign up using my referral link and become part of the Aline2 community today!${codePart}\n\n${playStoreUrl}`;
   }, [referralCode]);
 
   const isFeatureActive = String(featuredProfile?.status || "").toLowerCase() === "active"
@@ -480,93 +501,43 @@ function HowToEarnScreen({ navigation, route }: any) {
     </View>
   );
 
-  const renderActiveSection = () => {
-    if (activeSection === "listedProfile" || activeSection === "listedAds") return null;
-    if (activeSection === "dropAd") return renderCompanySection();
-    if (activeSection === "searchProfile") return renderProfileSection();
-    if (activeSection === "becomeSeller") {
-      return (
-        <TouchableOpacity
-          style={[styles.sellerLink, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 18 }]}
-          onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
-        >
-          <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={20} color={colors.primary} />
-          <Text style={[styles.sellerLinkText, { color: colors.text }]}>
-            {hasSellerAccount ? "Open seller dashboard" : "Become a seller"}
-          </Text>
-        </TouchableOpacity>
-      );
+  const getHeaderTitle = () => {
+    switch (activeSection) {
+      case "listedProfile":
+        return "Listed Profiles";
+      case "dropAd":
+        return "Drop an Ad";
+      case "featureProfile":
+        return "Feature Profile";
+      case "listedAds":
+        return "Featured Ads";
+      case "referral":
+        return "Referral Rewards";
+      default:
+        return "Promotions";
     }
-    if (activeSection === "howToEarn") return renderReferralSection();
-    return renderProfileSection();
   };
-  const showProfileList = activeSection === "listedProfile";
-  const showAdsList = activeSection === "listedAds";
 
-  return (
-    <View style={styles.screen}>
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={colors.background} />
-        <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
-            <Icon name="arrow-back" size={23} color={colors.text} />
-          </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Promotions</Text>
-          <View style={styles.headerButton} />
-        </View>
+  const handleHeaderBack = () => {
+    if (activeSection !== "menu" && !route?.params?.section) {
+      setActiveSection("menu");
+    } else {
+      navigation.goBack();
+    }
+  };
 
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={[styles.content, { paddingBottom: APP_BOTTOM_DOCK_BASE_HEIGHT + Math.max(insets.bottom, 10) + 32 }]}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={[styles.hero, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[styles.heroIcon, { backgroundColor: `${colors.primary}18` }]}>
-              <Icon name="cash-outline" size={25} color={colors.primary} />
-            </View>
-            <View style={styles.heroCopy}>
-              <Text style={[styles.heroTitle, { color: colors.text }]}>Earn from brand promotions</Text>
-              <Text style={[styles.heroText, { color: colors.mutedText }]}>
-                Creators list their rates. Companies post ad budgets. Both lists stay discoverable here.
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.actionList}>
-            {[
-              { key: "listedProfile", icon: "list-outline", title: "Listed Profile", sub: "View creators with promotion pricing" },
-              { key: "dropAd", icon: "megaphone-outline", title: "Drop an Ad", sub: "Create a campaign for creators" },
-              { key: "becomeSeller", icon: "storefront-outline", title: "Become a Seller", sub: "Set post, story, and reel prices" },
-            ].map((item) => (
-              <TouchableOpacity
-                key={item.key}
-                style={[styles.actionRow, { backgroundColor: colors.card, borderColor: activeSection === item.key ? colors.primary : colors.border }]}
-                onPress={() => setActiveSection(item.key as EarnSection)}
-              >
-                <View style={[styles.actionIcon, { backgroundColor: `${colors.primary}14` }]}>
-                  <Icon name={item.icon} size={20} color={colors.primary} />
-                </View>
-                <View style={styles.actionCopy}>
-                  <Text style={[styles.actionTitle, { color: colors.text }]}>{item.title}</Text>
-                  <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>{item.sub}</Text>
-                </View>
-                <Icon name="chevron-forward" size={18} color={colors.mutedText} />
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {renderActiveSection()}
-
-          {showProfileList ? (
-          <View style={styles.listSection}>
-            <Text style={[styles.listTitle, { color: colors.text }]}>Featured profile list</Text>
-            <Field
-              label="Search profile"
-              value={profileSearchQuery}
-              onChangeText={setProfileSearchQuery}
-              placeholder="Username, location, creator name"
-            />
-            {filteredFeaturedProfiles.length ? filteredFeaturedProfiles.map((item) => (
+  const renderPageContent = () => {
+    if (activeSection === "listedProfile") {
+      return (
+        <View style={styles.listSection}>
+          <Field
+            label="Search profile"
+            value={profileSearchQuery}
+            onChangeText={setProfileSearchQuery}
+            placeholder="Username, location, creator name"
+          />
+          {filteredFeaturedProfiles.length ? (
+            filteredFeaturedProfiles.map((item) => (
               <TouchableOpacity
                 key={item._id}
                 style={[styles.marketCard, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -591,16 +562,27 @@ function HowToEarnScreen({ navigation, route }: any) {
                   Reel INR {item.reelPromotion?.price || item.videoPromotion?.pricePerMinute || 0}
                 </Text>
               </TouchableOpacity>
-            )) : (
-              <Text style={[styles.emptyText, { color: colors.mutedText }]}>No featured creators yet.</Text>
-            )}
-          </View>
-          ) : null}
+            ))
+          ) : (
+            <Text style={[styles.emptyText, { color: colors.mutedText, marginTop: 14 }]}>No featured creators found.</Text>
+          )}
+        </View>
+      );
+    }
 
-          {showAdsList ? (
-          <View style={styles.listSection}>
-            <Text style={[styles.listTitle, { color: colors.text }]}>Featured ads list</Text>
-            {companyAds.length ? companyAds.map((item) => (
+    if (activeSection === "dropAd") {
+      return renderCompanySection();
+    }
+
+    if (activeSection === "featureProfile") {
+      return renderProfileSection();
+    }
+
+    if (activeSection === "listedAds") {
+      return (
+        <View style={styles.listSection}>
+          {companyAds.length ? (
+            companyAds.map((item) => (
               <TouchableOpacity
                 key={item._id}
                 style={[styles.marketCard, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -620,23 +602,88 @@ function HowToEarnScreen({ navigation, route }: any) {
                   {item.preferredPlacement || "story"} - Offered INR {item.offeredPrice || item.storyBudget || item.photoBudget || item.videoBudgetPerMinute || 0}
                 </Text>
               </TouchableOpacity>
-            )) : (
-              <Text style={[styles.emptyText, { color: colors.mutedText }]}>No company ad requirements yet.</Text>
-            )}
-          </View>
-          ) : null}
+            ))
+          ) : (
+            <Text style={[styles.emptyText, { color: colors.mutedText, marginTop: 14 }]}>No company ad requirements yet.</Text>
+          )}
+        </View>
+      );
+    }
 
-          {activeSection !== "becomeSeller" ? (
+    if (activeSection === "referral") {
+      return renderReferralSection();
+    }
+
+    return (
+      <>
+        <View style={[styles.hero, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[styles.heroIcon, { backgroundColor: `${colors.primary}18` }]}>
+            <Icon name="cash-outline" size={25} color={colors.primary} />
+          </View>
+          <View style={styles.heroCopy}>
+            <Text style={[styles.heroTitle, { color: colors.text }]}>Earn from brand promotions</Text>
+            <Text style={[styles.heroText, { color: colors.mutedText }]}>
+              Creators list their rates. Companies post ad budgets. Select an option below.
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.actionList}>
+          {[
+            { key: "listedProfile", icon: "list-outline", title: "Listed Profiles", sub: "View creators with promotion pricing" },
+            { key: "dropAd", icon: "megaphone-outline", title: "Drop an Ad", sub: "Create a campaign requirement for creators" },
+            { key: "featureProfile", icon: "sparkles-outline", title: "Feature Profile", sub: "List your rate card & get featured" },
+            { key: "listedAds", icon: "document-text-outline", title: "Featured Ads", sub: "Browse active company campaign ads" },
+            { key: "referral", icon: "gift-outline", title: "Referral Rewards", sub: "Invite friends using your link & earn" },
+          ].map((item) => (
             <TouchableOpacity
-              style={[styles.sellerLink, { backgroundColor: colors.card, borderColor: colors.border }]}
-              onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
+              key={item.key}
+              style={[styles.actionRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => setActiveSection(item.key as EarnSection)}
             >
-              <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={20} color={colors.primary} />
-              <Text style={[styles.sellerLinkText, { color: colors.text }]}>
-                {hasSellerAccount ? "Open seller dashboard" : "Become a seller"}
-              </Text>
+              <View style={[styles.actionIcon, { backgroundColor: `${colors.primary}14` }]}>
+                <Icon name={item.icon} size={20} color={colors.primary} />
+              </View>
+              <View style={styles.actionCopy}>
+                <Text style={[styles.actionTitle, { color: colors.text }]}>{item.title}</Text>
+                <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>{item.sub}</Text>
+              </View>
+              <Icon name="chevron-forward" size={18} color={colors.mutedText} />
             </TouchableOpacity>
-          ) : null}
+          ))}
+
+          <TouchableOpacity
+            style={[styles.sellerLink, { backgroundColor: colors.card, borderColor: colors.border, marginTop: 4 }]}
+            onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
+          >
+            <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={20} color={colors.primary} />
+            <Text style={[styles.sellerLinkText, { color: colors.text }]}>
+              {hasSellerAccount ? "Open seller dashboard" : "Become a seller"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </>
+    );
+  };
+
+  return (
+    <View style={styles.screen}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={colors.background} />
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity style={styles.headerButton} onPress={handleHeaderBack}>
+            <Icon name="arrow-back" size={23} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{getHeaderTitle()}</Text>
+          <View style={styles.headerButton} />
+        </View>
+
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.content, { paddingBottom: APP_BOTTOM_DOCK_BASE_HEIGHT + Math.max(insets.bottom, 10) + 32 }]}
+          showsVerticalScrollIndicator={false}
+        >
+          {renderPageContent()}
         </ScrollView>
       </SafeAreaView>
       <AppBottomDock navigation={navigation} />

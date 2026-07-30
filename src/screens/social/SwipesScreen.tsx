@@ -253,7 +253,7 @@ function SwipesScreen({ navigation, route }: any) {
     trackKey: activeSwipeMusicTrackKey,
     startMs: activeSwipeMusicStartMs,
     durationMs: activeSwipeMusicDurationMs,
-    shouldPlay: shouldPlaySwipeMusic,
+    shouldPlay: false,
     syncKey: activeSwipePlaybackCycle,
     pauseWhenInactive: true,
   });
@@ -994,10 +994,11 @@ function SwipesScreen({ navigation, route }: any) {
 
   const renderSwipe = ({ item, index }: { item: Swipe; index: number }) => {
     const isActive = index === activeSwipeIndex;
+    const isPreloadTarget = index === activeSwipeIndex + 1 || index === activeSwipeIndex + 2;
     const musicLabel = formatSwipeMusicLabel(item.music);
     const hasAttachedMusic = !!getMusicPlaybackUrl(item.music);
     const isCaptionExpanded = !!expandedCaptionIds[item.id];
-    const shouldTruncateCaption = item.caption.length > 96 || item.caption.includes("\n");
+    const shouldTruncateCaption = item.caption.length > 38 || item.caption.includes("\n");
     const relationship = getSwipeRelationship(item.user);
     const followBusy = !!busyActions[`follow_${item.user.id}`];
 
@@ -1009,14 +1010,14 @@ function SwipesScreen({ navigation, route }: any) {
             posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
             style={styles.swipeMedia}
             paused={!isActive || !!activeSheet || !isScreenFocused}
-            muted={!isActive || !isSwipePlaybackEnabled || (hasAttachedMusic && !!activeSwipeMusicUrl)}
+            muted={!isActive || !isSwipePlaybackEnabled}
             repeat
             onEnd={() => {
               if (isActive && hasAttachedMusic) {
                 setActiveSwipePlaybackCycle((cycle) => cycle + 1);
               }
             }}
-            preload={false}
+            preload={isPreloadTarget}
             resizeMode="contain"
             contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
             showBufferingLoader={false}
@@ -1058,7 +1059,7 @@ function SwipesScreen({ navigation, route }: any) {
                     <TouchableOpacity style={styles.userNameButton} onPress={() => openUserProfile(item.user.id)}>
                       <Text style={styles.userName} numberOfLines={1}>@{item.user.username}</Text>
                     </TouchableOpacity>
-                    {shouldShowVerifiedBadge(item.user) ? <Icon name="checkmark-circle" color="#6cbcff" size={16} /> : null}
+                    {shouldShowVerifiedBadge(item.user) ? <Icon name="checkmark-circle" color="#6cbcff" size={15} /> : null}
                     {relationship.kind !== "self" ? (
                       <TouchableOpacity
                         style={[
@@ -1094,19 +1095,19 @@ function SwipesScreen({ navigation, route }: any) {
                 onPressHashtag={openHashtagResults}
                 onPress={() => {
                   if (shouldTruncateCaption) {
-                    setExpandedCaptionIds((current) => ({ ...current, [item.id]: !current[item.id] }));
+                    openCommentsSheet(item);
                   }
                 }}
-                numberOfLines={shouldTruncateCaption && !isCaptionExpanded ? 2 : undefined}
+                numberOfLines={1}
                 ellipsizeMode="tail"
                 text={item.caption}
               />
               {shouldTruncateCaption ? (
                 <TouchableOpacity
                   activeOpacity={0.75}
-                  onPress={() => setExpandedCaptionIds((current) => ({ ...current, [item.id]: !current[item.id] }))}
+                  onPress={() => openCommentsSheet(item)}
                 >
-                  <Text style={styles.captionMoreButton}>{isCaptionExpanded ? "less" : "more"}</Text>
+                  <Text style={styles.captionMoreButton}>more</Text>
                 </TouchableOpacity>
               ) : null}
 
@@ -1708,15 +1709,16 @@ const styles = StyleSheet.create({
   },
   userRow: { flexDirection: "row", alignItems: "center", minWidth: 0 },
   userNameButton: { maxWidth: "58%" },
-  userName: { color: "#fff", fontWeight: "900", fontSize: 15, marginRight: 5 },
+  userName: { color: "#fff", fontWeight: "800", fontSize: 13.5, marginRight: 4 },
   followChip: {
-    marginLeft: 8,
+    marginLeft: 6,
+    marginTop: 2,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.54)",
+    borderColor: "rgba(255,255,255,0.48)",
     backgroundColor: "rgba(255,255,255,0.12)",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
   },
   followChipMuted: {
     backgroundColor: "rgba(0,0,0,0.22)",
@@ -1724,18 +1726,18 @@ const styles = StyleSheet.create({
   },
   followChipText: {
     color: "#fff",
-    fontSize: 11,
-    fontWeight: "900",
+    fontSize: 10,
+    fontWeight: "800",
   },
   musicInlineRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 4,
+    marginTop: 3,
     maxWidth: "86%",
   },
-  musicInlineText: { color: "#fff", marginLeft: 5, fontSize: 12.5, fontWeight: "700" },
-  caption: { color: "#fff", marginTop: 8, fontSize: 14.5, lineHeight: 20, fontWeight: "600" },
-  captionMoreButton: { color: "rgba(255,255,255,0.72)", marginTop: 3, fontSize: 12.5, lineHeight: 16, fontWeight: "800" },
+  musicInlineText: { color: "#fff", marginLeft: 4, fontSize: 12, fontWeight: "700" },
+  caption: { color: "#fff", marginTop: 6, fontSize: 13.5, lineHeight: 18, fontWeight: "600" },
+  captionMoreButton: { color: "rgba(255,255,255,0.72)", marginTop: 2, fontSize: 12, lineHeight: 15, fontWeight: "800" },
   captionEntity: { color: "#a9c4ff", fontWeight: "800" },
   mentionLine: { color: "#d7e4ff", marginTop: 5, fontSize: 12.5, fontWeight: "700" },
   hashTags: { color: "#a9c4ff", marginTop: 5, fontSize: 12.5, fontWeight: "800" },

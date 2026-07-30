@@ -438,15 +438,18 @@ export const isAudioMessage = (message) =>
 export const getAttachmentDisplayName = (message) => {
   const attachment = getMessageAttachment(message);
 
+  let rawName = "Attachment";
   if (attachment?.fileName) {
-    return attachment.fileName;
+    rawName = attachment.fileName;
+  } else if (attachment?.url) {
+    rawName = String(attachment.url).split("?")[0].split("#")[0].split("/").pop() || "Attachment";
   }
 
-  if (attachment?.url) {
-    return attachment.url.split("/").pop() || "Attachment";
+  try {
+    return decodeURIComponent(rawName);
+  } catch {
+    return rawName;
   }
-
-  return "Attachment";
 };
 
 export const getConversationPreview = (conversation) => {

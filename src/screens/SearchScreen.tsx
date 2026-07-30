@@ -93,6 +93,7 @@ const SearchScreen = ({ navigation, route }: any) => {
   const [trendingHashtags, setTrendingHashtags] = useState<TrendingHashtag[]>([]);
   const [featuredProfiles, setFeaturedProfiles] = useState<FeaturedProfileItem[]>([]);
   const [search, setSearch] = useState(String(route?.params?.initialQuery || "").trim());
+  const [locationSearch, setLocationSearch] = useState(String(route?.params?.initialLocation || "").trim());
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -101,6 +102,47 @@ const SearchScreen = ({ navigation, route }: any) => {
   const [activeTab, setActiveTab] = useState<keyof typeof TAB_LABELS>("users");
   const [showFilterSheet, setShowFilterSheet] = useState(false);
 
+const isVerifiedSellerOnly = (seller: any): boolean => {
+  if (!seller) return false;
+  if (seller.onboardingCompleted === false || seller.isOnboarded === false) {
+    return false;
+  }
+  const verificationStatus = String(
+    seller.verificationStatus
+    || seller.sellerVerificationStatus
+    || seller.sellerProfile?.verificationStatus
+    || seller.status
+    || seller.approvalStatus
+    || ""
+  ).toLowerCase().trim();
+
+  if (
+    verificationStatus === "pending"
+    || verificationStatus === "rejected"
+    || verificationStatus === "draft"
+    || verificationStatus === "incomplete"
+    || verificationStatus === "unverified"
+    || verificationStatus === "disabled"
+  ) {
+    return false;
+  }
+
+  const isApproved =
+    verificationStatus === "approved" ||
+    seller.isVerifiedSeller === true ||
+    seller.isVerified === true;
+
+  if (!isApproved) {
+    return false;
+  }
+
+  const name = String(seller.sellerName || seller.name || "").trim();
+  if (!name) {
+    return false;
+  }
+  return true;
+};
+
   const applyUserResults = useCallback((items: UserItem[], userId: string | null) => {
     const filtered = items.filter((item) => item?._id && item._id !== userId);
     setAllUsers(filtered);
@@ -108,13 +150,18 @@ const SearchScreen = ({ navigation, route }: any) => {
   }, []);
 
   const applySellerResults = useCallback((items: SellerItem[]) => {
-    setAllSellers(items);
-    setSellers(items);
+    const registeredSellers = items.filter((seller) => isVerifiedSellerOnly(seller));
+    setAllSellers(registeredSellers);
+    setSellers(registeredSellers);
   }, []);
 
   const applyServiceResults = useCallback((items: ServiceItem[]) => {
-    setDiscoverServices(items);
-    setServices(items);
+    const validServices = items.filter((service) => {
+      if (!service?.seller) return true;
+      return isVerifiedSellerOnly(service.seller);
+    });
+    setDiscoverServices(validServices);
+    setServices(validServices);
   }, []);
 
   const init = useCallback(async (showRefreshing = false) => {
@@ -177,8 +224,33 @@ const SearchScreen = ({ navigation, route }: any) => {
     navigation.setParams?.({ initialQuery: undefined });
   }, [navigation, route?.params?.initialQuery]);
 
+  const matchesLocationFilter = useCallback((item: any, locQuery: string): boolean => {
+    const normLoc = locQuery.trim().toLowerCase();
+    if (!normLoc) return true;
+
+    const locFields = [
+      item?.location,
+      item?.city,
+      item?.state,
+      item?.country,
+      item?.address,
+      item?.seller?.location,
+      item?.seller?.city,
+      item?.seller?.state,
+      item?.seller?.country,
+      item?.seller?.address,
+      item?.bio,
+      item?.specialization,
+    ];
+
+    return locFields.some((field) => String(field || "").toLowerCase().includes(normLoc));
+  }, []);
+
   useEffect(() => {
-    if (!search.trim()) {
+    const trimmedQuery = search.trim();
+    const trimmedLoc = locationSearch.trim();
+
+    if (!trimmedQuery && !trimmedLoc) {
       setUsers(allUsers);
       setSellers(allSellers);
       setServices(discoverServices);
@@ -192,27 +264,34 @@ const SearchScreen = ({ navigation, route }: any) => {
       try {
         if (activeTab === "users") {
           const res = await API.get("/auth/search", {
-            params: { query: search.trim() }
+            params: { query: trimmedQuery, location: trimmedLoc }
           });
 
-          setUsers((res.data?.users || []).filter((item: UserItem) => item?._id !== currentUserId));
+          let rawUsers = (res.data?.users || []).filter((item: UserItem) => item?._id !== currentUserId);
+          if (trimmedLoc) {
+            rawUsers = rawUsers.filter((item: UserItem) => matchesLocationFilter(item, trimmedLoc));
+          }
+          setUsers(rawUsers);
           setErrorMessage("");
           return;
         }
 
         if (activeTab === "sellers") {
-          const normalizedQuery = search.trim().toLowerCase();
+          const normQuery = trimmedQuery.toLowerCase();
+          const normLoc = trimmedLoc.toLowerCase();
+
           setSellers(
             allSellers.filter((seller) => {
-              const sellerName = String(seller?.sellerName || "").toLowerCase();
-              const specialization = String(seller?.specialization || "").toLowerCase();
-              const bio = String(seller?.bio || "").toLowerCase();
+              if (!isVerifiedSellerOnly(seller)) return false;
+              const matchesQuery = !normQuery || [
+                seller?.sellerName,
+                seller?.specialization,
+                seller?.bio
+              ].some((val) => String(val || "").toLowerCase().includes(normQuery));
 
-              return (
-                sellerName.includes(normalizedQuery)
-                || specialization.includes(normalizedQuery)
-                || bio.includes(normalizedQuery)
-              );
+              const matchesLoc = !normLoc || matchesLocationFilter(seller, normLoc);
+
+              return matchesQuery && matchesLoc;
             })
           );
           setErrorMessage("");
@@ -220,10 +299,14 @@ const SearchScreen = ({ navigation, route }: any) => {
         }
 
         const res = await API.get("/service/discover", {
-          params: { query: search.trim(), limit: 20 }
+          params: { query: trimmedQuery, location: trimmedLoc, limit: 20 }
         });
 
-        setServices(res.data?.services || []);
+        let rawServices = res.data?.services || [];
+        if (trimmedLoc) {
+          rawServices = rawServices.filter((service: ServiceItem) => matchesLocationFilter(service, trimmedLoc));
+        }
+        setServices(rawServices);
         setErrorMessage("");
       } catch (error) {
         console.log("searchData error:", error);
@@ -234,7 +317,7 @@ const SearchScreen = ({ navigation, route }: any) => {
     };
 
     handleSearch();
-  }, [activeTab, allSellers, allUsers, currentUserId, discoverServices, search]);
+  }, [activeTab, allSellers, allUsers, currentUserId, discoverServices, locationSearch, matchesLocationFilter, search]);
 
   const searchData = (text: string) => {
     setSearch(text);
@@ -523,6 +606,22 @@ const SearchScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             </View>
 
+            {locationSearch.trim() ? (
+              <View style={styles.activeLocationBadgeRow}>
+                <TouchableOpacity
+                  style={[styles.activeLocationChip, { backgroundColor: accentSoft, borderColor: accentBorder }]}
+                  onPress={() => setLocationSearch("")}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="location" size={14} color={accentColor} />
+                  <Text style={[styles.activeLocationText, { color: accentColor }]}>
+                    Location: {locationSearch.trim()}
+                  </Text>
+                  <Icon name="close" size={14} color={accentColor} />
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
             {searching ? (
               <View style={[styles.searchingBox, { backgroundColor: colors.surface }]}>
                 <ActivityIndicator size="small" color={accentColor} />
@@ -603,6 +702,49 @@ const SearchScreen = ({ navigation, route }: any) => {
             ))}
           </View>
 
+          <Text style={[styles.filterSectionLabel, styles.filterSectionSpacing, { color: colors.mutedText }]}>Location filter</Text>
+          <View style={[styles.searchBar, styles.locationFilterInputBar, { backgroundColor: colors.input, borderColor: colors.border }]}>
+            <Icon name="location-outline" size={18} color={accentColor} />
+            <TextInput
+              placeholder="Search by city, state, or country..."
+              placeholderTextColor={colors.placeholder}
+              style={[styles.searchInput, { color: colors.text }]}
+              value={locationSearch}
+              onChangeText={(text) => setLocationSearch(text)}
+            />
+            {locationSearch ? (
+              <TouchableOpacity onPress={() => setLocationSearch("")}>
+                <Icon name="close-circle" size={18} color={colors.mutedText} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <View style={styles.tagWrap}>
+            {["Mumbai", "Delhi", "Bangalore", "London", "New York"].map((loc) => (
+              <TouchableOpacity
+                key={loc}
+                style={[
+                  styles.tagChip,
+                  locationSearch.toLowerCase() === loc.toLowerCase()
+                    ? { backgroundColor: accentColor, borderColor: accentColor }
+                    : { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+                onPress={() => {
+                  setLocationSearch(locationSearch.toLowerCase() === loc.toLowerCase() ? "" : loc);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.tagText,
+                    { color: locationSearch.toLowerCase() === loc.toLowerCase() ? "#fff" : colors.text },
+                  ]}
+                >
+                  📍 {loc}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           {activeTab === "services" ? (
             <>
               <Text style={[styles.filterSectionLabel, styles.filterSectionSpacing, { color: colors.mutedText }]}>Trending hashtags</Text>
@@ -674,6 +816,28 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+  },
+  locationFilterInputBar: {
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  activeLocationBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  activeLocationChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 6,
+  },
+  activeLocationText: {
+    fontSize: 12,
+    fontWeight: "600",
   },
   heroCopy: {
     flex: 1,

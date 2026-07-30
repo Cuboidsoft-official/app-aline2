@@ -86,8 +86,10 @@ import AppAvatar from "../components/AppAvatar";
 import DraggableBottomSheet from "../components/DraggableBottomSheet";
 import MentionSuggestionList from "../components/MentionSuggestionList";
 import InteractiveText from "../features/social/components/InteractiveText";
+import SocialVideo from "../features/social/components/SocialVideo";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { showModerationBlockedSheet } from "../utils/moderationNotice";
+import DocumentViewerModal from "../components/chat/DocumentViewerModal";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../utils/mentionComposer";
@@ -220,7 +222,8 @@ interface PendingVoiceNote {
 }
 
 interface MessagePreviewState {
-  imageUrl: string;
+  imageUrl?: string;
+  videoUrl?: string;
   title?: string;
 }
 
@@ -958,6 +961,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const pendingAttachment = pendingAttachments[0] || null;
   const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
+  const [documentPreview, setDocumentPreview] = useState<{ url: string; fileName?: string } | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
   const [showAssistant, setShowAssistant] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState("");
@@ -2702,7 +2706,16 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
 
     if (isVideoMessage(message)) {
-      openAttachmentUrl(attachment.url, "This video could not be opened right now.");
+      const videoUrl = normalizeMediaUrl(attachment?.url || (message as any)?.mediaUrl);
+      if (videoUrl) {
+        setMessagePreview({
+          imageUrl: attachment?.thumbnailUrl ? normalizeMediaUrl(attachment.thumbnailUrl) : undefined,
+          videoUrl,
+          title: getAttachmentDisplayName(message),
+        });
+      } else {
+        openAttachmentUrl(attachment?.url, "This video could not be opened right now.");
+      }
       return;
     }
 
@@ -2711,7 +2724,13 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
 
     if (isDocumentMessage(message)) {
-      openAttachmentUrl(attachment.url, "This document could not be opened right now.");
+      const docUrl = attachment?.url || message?.mediaUrl;
+      const docName = getAttachmentDisplayName(message) || attachment?.fileName || "Document";
+      if (docUrl) {
+        setDocumentPreview({ url: docUrl, fileName: docName });
+      } else {
+        openAttachmentUrl(attachment?.url, "This document could not be opened right now.");
+      }
     }
   }, [openAttachmentUrl]);
 
@@ -2787,9 +2806,7 @@ const ChatScreen = ({ navigation, route }: any) => {
           ? "voice"
           : hasVideoBubble
             ? "video"
-            : hasDocumentBubble
-              ? "document"
-              : null
+            : null
       : null;
     const isMediaBubble = Boolean(mediaBubbleKind);
     const attachmentLabel = getAttachmentDisplayName(item);
@@ -2892,8 +2909,8 @@ const ChatScreen = ({ navigation, route }: any) => {
                   minWidth: replyPreview ? 0 : width < 360 ? 64 : width < 430 ? 76 : 84,
                 } : null,
                 showGroupSender ? styles.groupMessageBubble : null,
-                sharedContent
-                  ? [styles.messageBubbleWide, { maxWidth: wideContentBubbleMaxWidth, minWidth: minimumWideBubbleWidth }]
+                sharedContent || hasDocumentBubble
+                  ? [styles.messageBubbleWide, { maxWidth: wideContentBubbleMaxWidth, minWidth: Math.min(width * 0.65, 230) }]
                   : null,
                 (callEvent || scheduledCall)
                   ? [
@@ -3102,16 +3119,32 @@ const ChatScreen = ({ navigation, route }: any) => {
 
             {mediaBubbleKind === "video" ? (
               <View style={styles.mediaCard}>
-                <Image
-                  source={{ uri: normalizeMediaUrl(attachment?.thumbnailUrl || attachment?.url || "") }}
-                  style={[
-                    styles.messageImage,
-                    {
-                      width: mediaBubbleWidth,
-                      height: Math.min(width * 0.48, 176),
-                    },
-                  ]}
-                />
+                {attachment?.thumbnailUrl ? (
+                  <Image
+                    source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl) }}
+                    style={[
+                      styles.messageImage,
+                      {
+                        width: mediaBubbleWidth,
+                        height: Math.min(width * 0.48, 176),
+                      },
+                    ]}
+                  />
+                ) : (
+                  <SocialVideo
+                    uri={normalizeMediaUrl(attachment?.url || (item as any)?.mediaUrl || "")}
+                    paused={true}
+                    controls={false}
+                    resizeMode="cover"
+                    style={[
+                      styles.messageImage,
+                      {
+                        width: mediaBubbleWidth,
+                        height: Math.min(width * 0.48, 176),
+                      },
+                    ]}
+                  />
+                )}
                 <View style={[styles.mediaOverlayBadge, isMine ? styles.mediaOverlayBadgeMine : null]}>
                   <Icon name="play" size={13} color="#fff" />
                 </View>
@@ -3131,12 +3164,22 @@ const ChatScreen = ({ navigation, route }: any) => {
               />
             ) : null}
 
-            {mediaBubbleKind === "document" ? (
-              <View style={styles.documentCard}>
-                <Icon name="document-text-outline" size={20} color={isMine ? "#fff" : PRIMARY} />
-                <Text style={[styles.documentName, isMine && styles.myDocumentName]} numberOfLines={1}>
-                  {getAttachmentDisplayName(item)}
-                </Text>
+            {hasDocumentBubble ? (
+              <View style={[styles.documentCard, isMine ? styles.documentCardMine : styles.documentCardOther]}>
+                <View style={[styles.documentIconBox, isMine ? styles.documentIconBoxMine : styles.documentIconBoxOther]}>
+                  <Icon name="document-text" size={24} color={isMine ? "#FFFFFF" : PRIMARY} />
+                </View>
+                <View style={styles.documentTextContainer}>
+                  <Text
+                    style={[styles.documentName, isMine ? styles.myDocumentName : styles.otherDocumentName]}
+                    numberOfLines={2}
+                  >
+                    {getAttachmentDisplayName(item)}
+                  </Text>
+                  <Text style={[styles.documentSubtext, isMine ? styles.myDocumentSubtext : styles.otherDocumentSubtext]}>
+                    Document • Tap to open
+                  </Text>
+                </View>
               </View>
             ) : null}
 
@@ -3820,11 +3863,24 @@ const ChatScreen = ({ navigation, route }: any) => {
             >
               <Icon name="close" size={26} color="#fff" />
             </TouchableOpacity>
-            <Image
-              source={{ uri: messagePreview?.imageUrl || "" }}
-              style={styles.previewImage}
-              resizeMode="contain"
-            />
+            {messagePreview?.videoUrl ? (
+              <View style={styles.previewVideoContainer}>
+                <SocialVideo
+                  uri={messagePreview.videoUrl}
+                  posterUri={messagePreview.imageUrl}
+                  controls={true}
+                  paused={false}
+                  resizeMode="contain"
+                  style={styles.previewVideo}
+                />
+              </View>
+            ) : (
+              <Image
+                source={{ uri: messagePreview?.imageUrl || "" }}
+                style={styles.previewImage}
+                resizeMode="contain"
+              />
+            )}
             {messagePreview?.title ? (
               <Text style={styles.previewCaption} numberOfLines={1}>
                 {messagePreview.title}
@@ -3832,6 +3888,13 @@ const ChatScreen = ({ navigation, route }: any) => {
             ) : null}
           </View>
         </Modal>
+
+        <DocumentViewerModal
+          visible={!!documentPreview}
+          url={documentPreview?.url}
+          fileName={documentPreview?.fileName}
+          onClose={() => setDocumentPreview(null)}
+        />
 
         <AISupportSheet
           visible={showAssistant}
@@ -4807,15 +4870,57 @@ const styles = StyleSheet.create({
   documentCard: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 2,
-    marginBottom: 2
+    padding: 8,
+    borderRadius: 12,
+    width: "100%",
+    marginVertical: 2,
+  },
+  documentCardMine: {
+    backgroundColor: "rgba(255, 255, 255, 0.14)",
+  },
+  documentCardOther: {
+    backgroundColor: "rgba(0, 0, 0, 0.05)",
+  },
+  documentIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+  documentIconBoxMine: {
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+  },
+  documentIconBoxOther: {
+    backgroundColor: "rgba(139, 92, 246, 0.14)",
+  },
+  documentTextContainer: {
+    flex: 1,
+    justifyContent: "center",
   },
   documentName: {
-    marginLeft: 8,
-    color: PRIMARY,
+    fontSize: 14,
     fontFamily: appFonts.semibold,
-    maxWidth: 180,
-    flexShrink: 1,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  myDocumentName: {
+    color: "#FFFFFF",
+  },
+  otherDocumentName: {
+    color: "#1E293B",
+  },
+  documentSubtext: {
+    fontSize: 11,
+    marginTop: 2,
+    fontFamily: appFonts.regular,
+  },
+  myDocumentSubtext: {
+    color: "rgba(255, 255, 255, 0.75)",
+  },
+  otherDocumentSubtext: {
+    color: "#64748B",
   },
   locationCard: {
     flexDirection: "row",
@@ -4901,9 +5006,6 @@ const styles = StyleSheet.create({
   },
   messageStatusPillSeen: {
     backgroundColor: "rgba(15,23,42,0.22)",
-  },
-  myDocumentName: {
-    color: "#fff"
   },
   inputContainer: {
     flexDirection: "row",
@@ -5070,6 +5172,16 @@ const styles = StyleSheet.create({
   previewImage: {
     width: "100%",
     height: "78%",
+  },
+  previewVideoContainer: {
+    width: "100%",
+    height: "78%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  previewVideo: {
+    width: "100%",
+    height: "100%",
   },
   previewCaption: {
     marginTop: 16,

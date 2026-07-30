@@ -83,6 +83,8 @@ import StickerPickerSheet from "../components/chat/StickerPickerSheet";
 import AISupportSheet from "../components/chat/AISupportSheet";
 import MessageLinkPreview from "../components/chat/MessageLinkPreview";
 import ChatLockModal from "../components/chat/ChatLockModal";
+import DocumentViewerModal from "../components/chat/DocumentViewerModal";
+import SocialVideo from "../features/social/components/SocialVideo";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 import {
@@ -199,7 +201,8 @@ type AttachmentShape = {
 };
 
 type MessagePreviewState = {
-  imageUrl: string;
+  imageUrl?: string;
+  videoUrl?: string;
   title?: string;
 };
 
@@ -561,6 +564,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
+  const [documentPreview, setDocumentPreview] = useState<{ url: string; fileName?: string } | null>(null);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
   const [isConversationLockedState, setIsConversationLockedState] = useState(false);
@@ -1893,7 +1897,16 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     }
 
     if (isVideoMessage(message)) {
-      openAttachmentUrl(attachment.url, "This video could not be opened right now.");
+      const videoUrl = normalizeMediaUrl(attachment?.url || (message as any)?.mediaUrl);
+      if (videoUrl) {
+        setMessagePreview({
+          imageUrl: attachment?.thumbnailUrl ? normalizeMediaUrl(attachment.thumbnailUrl) : undefined,
+          videoUrl,
+          title: getAttachmentDisplayName(message),
+        });
+      } else {
+        openAttachmentUrl(attachment?.url, "This video could not be opened right now.");
+      }
       return;
     }
 
@@ -1902,7 +1915,13 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     }
 
     if (isDocumentMessage(message)) {
-      openAttachmentUrl(attachment.url, "This document could not be opened right now.");
+      const docUrl = attachment?.url || (message as any)?.mediaUrl;
+      const docName = getAttachmentDisplayName(message) || attachment?.fileName || "Document";
+      if (docUrl) {
+        setDocumentPreview({ url: docUrl, fileName: docName });
+      } else {
+        openAttachmentUrl(attachment?.url, "This document could not be opened right now.");
+      }
     }
   }, [openAttachmentUrl]);
 
@@ -1976,7 +1995,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
                 maxWidth: chatMetrics.bubbleMaxWidth,
                 minWidth: minimumReadableBubbleWidth,
               },
-              sharedContent || callEvent
+              sharedContent || callEvent || isDocumentMessage(item)
                 ? [styles.messageBubbleWide, { maxWidth: chatMetrics.wideBubbleMaxWidth, minWidth: minimumWideBubbleWidth }]
                 : null,
               isMine ? styles.myMsg : styles.otherMsg,
@@ -2096,10 +2115,20 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
             {!isAudioMessage(item) && String(item?.messageType || "") !== "voice" && isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url) ? (
               <View style={styles.attachmentRow}>
-                <Image
-                  source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl || attachment.url) }}
-                  style={styles.messageImage}
-                />
+                {attachment?.thumbnailUrl ? (
+                  <Image
+                    source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl) }}
+                    style={styles.messageImage}
+                  />
+                ) : (
+                  <SocialVideo
+                    uri={normalizeMediaUrl(attachment?.url || (item as any)?.mediaUrl || "")}
+                    paused={true}
+                    controls={false}
+                    resizeMode="cover"
+                    style={styles.messageImage}
+                  />
+                )}
                 <Text
                   style={[styles.attachmentName, isMine ? styles.myText : [styles.otherText, { color: incomingBubbleText }]]}
                   numberOfLines={1}
@@ -2120,18 +2149,21 @@ const SellerChatScreen = ({ route, navigation }: any) => {
             ) : null}
 
             {isDocumentMessage(item) && attachment?.url ? (
-              <View style={styles.attachmentRow}>
-                <Icon
-                  name="document-text-outline"
-                  size={20}
-                  color={isMine ? "#fff" : PRIMARY}
-                />
-                <Text
-                  style={[styles.attachmentName, isMine ? styles.myText : [styles.otherText, { color: incomingBubbleText }]]}
-                  numberOfLines={1}
-                >
-                  {getAttachmentDisplayName(item)}
-                </Text>
+              <View style={[styles.documentCard, isMine ? styles.documentCardMine : styles.documentCardOther]}>
+                <View style={[styles.documentIconBox, isMine ? styles.documentIconBoxMine : styles.documentIconBoxOther]}>
+                  <Icon name="document-text" size={24} color={isMine ? "#FFFFFF" : PRIMARY} />
+                </View>
+                <View style={styles.documentTextContainer}>
+                  <Text
+                    style={[styles.documentName, isMine ? styles.myDocumentName : [styles.otherDocumentName, { color: incomingBubbleText }]]}
+                    numberOfLines={2}
+                  >
+                    {getAttachmentDisplayName(item)}
+                  </Text>
+                  <Text style={[styles.documentSubtext, isMine ? styles.myDocumentSubtext : styles.otherDocumentSubtext]}>
+                    Document • Tap to open
+                  </Text>
+                </View>
               </View>
             ) : null}
 
@@ -2657,11 +2689,24 @@ const SellerChatScreen = ({ route, navigation }: any) => {
           >
             <Icon name="close" size={26} color="#fff" />
           </TouchableOpacity>
-          <Image
-            source={{ uri: messagePreview?.imageUrl || "" }}
-            style={styles.previewImage}
-            resizeMode="contain"
-          />
+          {messagePreview?.videoUrl ? (
+            <View style={styles.previewVideoContainer}>
+              <SocialVideo
+                uri={messagePreview.videoUrl}
+                posterUri={messagePreview.imageUrl}
+                controls={true}
+                paused={false}
+                resizeMode="contain"
+                style={styles.previewVideo}
+              />
+            </View>
+          ) : (
+            <Image
+              source={{ uri: messagePreview?.imageUrl || "" }}
+              style={styles.previewImage}
+              resizeMode="contain"
+            />
+          )}
           {messagePreview?.title ? (
             <Text style={styles.previewCaption} numberOfLines={1}>
               {messagePreview.title}
@@ -2944,6 +2989,13 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         busy={lockingBusy}
         onClose={() => setChatLockModalVisible(false)}
         onSubmit={submitChatLockPasscode}
+      />
+
+      <DocumentViewerModal
+        visible={!!documentPreview}
+        url={documentPreview?.url}
+        fileName={documentPreview?.fileName}
+        onClose={() => setDocumentPreview(null)}
       />
     </SafeAreaView>
   );
@@ -3498,6 +3550,61 @@ const styles = StyleSheet.create({
     maxWidth: 180,
     color: "#F5F7FF",
   },
+  documentCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 8,
+    borderRadius: 12,
+    width: "100%",
+    marginVertical: 2,
+  },
+  documentCardMine: {
+    backgroundColor: "rgba(255, 255, 255, 0.14)",
+  },
+  documentCardOther: {
+    backgroundColor: "rgba(0, 0, 0, 0.05)",
+  },
+  documentIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+  documentIconBoxMine: {
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+  },
+  documentIconBoxOther: {
+    backgroundColor: "rgba(139, 92, 246, 0.14)",
+  },
+  documentTextContainer: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  documentName: {
+    fontSize: 14,
+    fontFamily: appFonts.semibold,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  myDocumentName: {
+    color: "#FFFFFF",
+  },
+  otherDocumentName: {
+    color: "#1E293B",
+  },
+  documentSubtext: {
+    fontSize: 11,
+    marginTop: 2,
+    fontFamily: appFonts.regular,
+  },
+  myDocumentSubtext: {
+    color: "rgba(255, 255, 255, 0.75)",
+  },
+  otherDocumentSubtext: {
+    color: "#64748B",
+  },
   previewOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.96)",
@@ -3516,6 +3623,16 @@ const styles = StyleSheet.create({
   previewImage: {
     width: "100%",
     height: "78%",
+  },
+  previewVideoContainer: {
+    width: "100%",
+    height: "78%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  previewVideo: {
+    width: "100%",
+    height: "100%",
   },
   previewCaption: {
     marginTop: 16,
