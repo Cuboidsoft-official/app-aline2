@@ -153,6 +153,9 @@ const POST_NOTIFICATION_TYPES = new Set([
 ]);
 
 const isNotificationForUser = (item: AppNotification, currentUserId: string): boolean => {
+  if (item.type === "chat_message" || item.type === "chat") {
+    return false;
+  }
   const receiverId = getTargetId(item.receiver || null);
   return !receiverId || !currentUserId || receiverId === currentUserId;
 };

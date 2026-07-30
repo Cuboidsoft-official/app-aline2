@@ -3491,7 +3491,7 @@ const ChatScreen = ({ navigation, route }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
         enabled
         keyboardVerticalOffset={0}
       >

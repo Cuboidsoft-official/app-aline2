@@ -477,7 +477,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={rootStyle}>
       <SafeAreaProvider>
-        <SafeKeyboardProvider>
+        <SafeKeyboardProvider statusBarTranslucent navigationBarTranslucent>
           <AppThemeProvider>
             <AppAlertProvider>
               <AppNavigator />
