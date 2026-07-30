@@ -79,6 +79,10 @@ import { registerPushToken, setupNotificationListeners } from './src/utils/pushR
 import { safeDecodeURIComponent } from './src/utils/safeDecode';
 import { openNotificationContentTarget } from './src/utils/socialNavigation';
 
+import { KeyboardProvider } from 'react-native-keyboard-controller';
+
+const SafeKeyboardProvider = (KeyboardProvider as any) || (({ children }: any) => <>{children}</>);
+
 installReadableUiDefaults();
 
 const Stack = createNativeStackNavigator();
@@ -473,11 +477,13 @@ export default function App() {
   return (
     <GestureHandlerRootView style={rootStyle}>
       <SafeAreaProvider>
-        <AppThemeProvider>
-          <AppAlertProvider>
-            <AppNavigator />
-          </AppAlertProvider>
-        </AppThemeProvider>
+        <SafeKeyboardProvider>
+          <AppThemeProvider>
+            <AppAlertProvider>
+              <AppNavigator />
+            </AppAlertProvider>
+          </AppThemeProvider>
+        </SafeKeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

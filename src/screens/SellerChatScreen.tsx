@@ -13,11 +13,11 @@ import {
   Modal,
   ActivityIndicator,
   Linking,
-  KeyboardAvoidingView,
   Keyboard,
   Platform,
   useWindowDimensions,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../utils/appAlert";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
