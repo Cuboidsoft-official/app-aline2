@@ -909,6 +909,9 @@ const ChatScreen = ({ navigation, route }: any) => {
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
     const showSubscription = Keyboard.addListener(showEvent, () => {
       setIsKeyboardVisible(true);
+      setTimeout(() => {
+        scrollToLatestMessage(false);
+      }, 100);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       setIsKeyboardVisible(false);

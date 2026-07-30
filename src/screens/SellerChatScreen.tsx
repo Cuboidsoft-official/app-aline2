@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Linking,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   useWindowDimensions,
 } from "react-native";
@@ -562,6 +563,25 @@ const SellerChatScreen = ({ route, navigation }: any) => {
   const [sellerLastSeenAt, setSellerLastSeenAt] = useState("");
   const [sellerPresenceStatus, setSellerPresenceStatus] = useState("");
   const [showLocationComposer, setShowLocationComposer] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showSubscription = Keyboard.addListener(showEvent, () => {
+      setIsKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   const [locationDraft, setLocationDraft] = useState("");
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
   const [documentPreview, setDocumentPreview] = useState<{ url: string; fileName?: string } | null>(null);
@@ -2353,6 +2373,11 @@ const SellerChatScreen = ({ route, navigation }: any) => {
     Math.round(width * 0.9),
   );
 
+  const composerBottomPadding = isKeyboardVisible
+    ? 6
+    : Math.max(7, insets.bottom - 2);
+  const listBottomPadding = Math.max(20, 12 + insets.bottom) + (isKeyboardVisible ? 8 : 0);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: sellerChatColors.background }]} edges={["top"]}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={sellerChatColors.background} />
@@ -2552,7 +2577,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       <KeyboardAvoidingView
         style={styles.flexFill}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         enabled
         keyboardVerticalOffset={0}
       >
@@ -2566,7 +2591,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
               data={bookingTimelineMessages}
               renderItem={renderMessage}
               keyExtractor={(item) => getMessageRenderKey(item)}
-              contentContainerStyle={{ paddingHorizontal: chatMetrics.listPadding, paddingTop: chatMetrics.listPadding, paddingBottom: Math.max(20, 12 + insets.bottom) }}
+              contentContainerStyle={{ paddingHorizontal: chatMetrics.listPadding, paddingTop: chatMetrics.listPadding, paddingBottom: listBottomPadding }}
               keyboardShouldPersistTaps="handled"
               refreshControl={
                 <RefreshControl
@@ -2612,7 +2637,7 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
         </View>
 
-        <View style={[styles.inputWrap, { backgroundColor: sellerChatColors.background, paddingBottom: Math.max(8, insets.bottom), borderTopColor: sellerChatColors.border }]}>
+        <View style={[styles.inputWrap, { backgroundColor: sellerChatColors.background, paddingBottom: composerBottomPadding, borderTopColor: sellerChatColors.border }]}>
           <View style={[styles.composerLockedCard, { borderColor: sellerChatColors.border, backgroundColor: sellerChatColors.panelAlt, borderRadius: chatMetrics.bubbleRadius }]}>
             <View style={[styles.composerLockedIconWrap, { backgroundColor: alpha(colors.primary, "1A") }]}>
               <Icon name="calendar-clear-outline" size={18} color={colors.primary} />
