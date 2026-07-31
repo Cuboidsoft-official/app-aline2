@@ -192,8 +192,17 @@ const getPostVideoLoopDurationMs = (
   return getMeasuredVideoDurationMs(measuredDurations, post.id, firstVideo?.id) || normalizeMediaDurationMs(firstVideo?.durationMs);
 };
 
-const getPostAspectRatio = (post: Post): number => {
+const getPostAspectRatio = (
+  post: Post,
+  measuredRatios: Record<string, number> = {},
+): number => {
   const primaryMedia = Array.isArray(post.media) ? post.media[0] : null;
+  const key = getVideoDurationKey(post.id, primaryMedia?.id);
+  const measured = measuredRatios[key];
+  if (measured && Number.isFinite(measured) && measured > 0) {
+    return Math.max(4 / 5, Math.min(16 / 9, measured));
+  }
+
   const width = Number(primaryMedia?.width || 0);
   const height = Number(primaryMedia?.height || 0);
   const mediaRatio = width > 0 && height > 0 ? width / height : 0;
@@ -260,8 +269,14 @@ const getImageResizeMode = (
   asset: Post["media"][number] | undefined,
   frameAspectRatio: number,
 ): "contain" | "cover" => {
-  void asset;
-  void frameAspectRatio;
+  const width = Number(asset?.width || 0);
+  const height = Number(asset?.height || 0);
+  const mediaRatio = width > 0 && height > 0 ? width / height : frameAspectRatio;
+
+  if (mediaRatio > 0 && mediaRatio < 0.76) {
+    return "contain";
+  }
+
   return "cover";
 };
 
@@ -271,9 +286,16 @@ const getMediaFrameTransformStyle = (
   height: number,
 ) => {
   const transform = asset?.frameTransform;
+  if (!transform || (!transform.scale && !transform.translateX && !transform.translateY)) {
+    return undefined;
+  }
   const scale = Math.max(1, Math.min(4, Number(transform?.scale || 1)));
   const translateX = Math.max(-1, Math.min(1, Number(transform?.translateX || 0))) * width;
   const translateY = Math.max(-1, Math.min(1, Number(transform?.translateY || 0))) * height;
+
+  if (scale === 1 && translateX === 0 && translateY === 0) {
+    return undefined;
+  }
 
   return {
     transform: [
@@ -350,6 +372,7 @@ function FeedScreen({ navigation, route }: any) {
   const [hasMore, setHasMore] = useState(true);
   const [activePostId, setActivePostId] = useState<string>("");
   const [measuredVideoDurations, setMeasuredVideoDurations] = useState<Record<string, number>>({});
+  const [measuredVideoAspectRatios, setMeasuredVideoAspectRatios] = useState<Record<string, number>>({});
   const [mutedPostIds, setMutedPostIds] = useState<Record<string, boolean>>({});
   const [expandedCaptionIds, setExpandedCaptionIds] = useState<Record<string, boolean>>({});
   const [carouselIndexByPostId, setCarouselIndexByPostId] = useState<Record<string, number>>({});
@@ -1126,14 +1149,29 @@ function FeedScreen({ navigation, route }: any) {
   };
 
   const getPostMediaHeight = useCallback((post: Post) => {
-    return Math.round(postMediaWidth / getPostAspectRatio(post));
-  }, [postMediaWidth]);
+    return Math.round(postMediaWidth / getPostAspectRatio(post, measuredVideoAspectRatios));
+  }, [measuredVideoAspectRatios, postMediaWidth]);
 
   const handleFeedVideoLoaded = useCallback((postId: string, assetId: string | undefined, event: any) => {
     const durationSeconds = Number(event?.duration || event?.nativeEvent?.duration || 0);
     const durationMs = Number.isFinite(durationSeconds) && durationSeconds > 0
       ? Math.round(durationSeconds * 1000)
       : 0;
+
+    const naturalSize = event?.naturalSize || event?.nativeEvent?.naturalSize;
+    const videoWidth = Number(naturalSize?.width || 0);
+    const videoHeight = Number(naturalSize?.height || 0);
+
+    if (videoWidth > 0 && videoHeight > 0) {
+      const ratio = videoWidth / videoHeight;
+      setMeasuredVideoAspectRatios((prev) => {
+        const key = getVideoDurationKey(postId, assetId);
+        if (prev[key] && Math.abs(prev[key] - ratio) < 0.05) {
+          return prev;
+        }
+        return { ...prev, [key]: ratio };
+      });
+    }
 
     if (durationMs <= 0) {
       return;
@@ -1147,7 +1185,6 @@ function FeedScreen({ navigation, route }: any) {
 
       return { ...prev, [key]: durationMs };
     });
-
   }, []);
 
   const submitComment = async (postId: string, audioFile?: CommentAudioFile) => {
@@ -1688,14 +1725,11 @@ function FeedScreen({ navigation, route }: any) {
       return rawImage;
     }
 
-    const carouselSlides =
-      post.media.length > 1
-        ? [
-          { asset: post.media[post.media.length - 1], sourceIndex: post.media.length - 1, key: "loop-start" },
-          ...post.media.map((asset, index) => ({ asset, sourceIndex: index, key: `media-${asset.id || index}` })),
-          { asset: post.media[0], sourceIndex: 0, key: "loop-end" },
-        ]
-        : post.media.map((asset, index) => ({ asset, sourceIndex: index, key: `media-${asset.id || index}` }));
+    const carouselSlides = post.media.map((asset, index) => ({
+      asset,
+      sourceIndex: index,
+      key: `media-${asset.id || index}`,
+    }));
 
     return (
       <View style={styles.carouselWrap}>
@@ -1704,40 +1738,20 @@ function FeedScreen({ navigation, route }: any) {
             carouselScrollRefs.current[post.id] = node;
           }}
           horizontal
-          pagingEnabled
           snapToInterval={postMediaWidth}
-          snapToAlignment="start"
+          snapToAlignment="center"
           decelerationRate="fast"
           disableIntervalMomentum
           scrollEventThrottle={16}
-          contentOffset={{ x: postMediaWidth, y: 0 }}
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={(event) => {
-            const virtualIndex = Math.round(
-              Number(event?.nativeEvent?.contentOffset?.x || 0) / Math.max(1, postMediaWidth),
+            const nextIndex = Math.max(
+              0,
+              Math.min(
+                post.media.length - 1,
+                Math.round(Number(event?.nativeEvent?.contentOffset?.x || 0) / Math.max(1, postMediaWidth)),
+              ),
             );
-            let nextIndex = Math.max(0, Math.min(post.media.length - 1, virtualIndex - 1));
-
-            if (virtualIndex <= 0) {
-              nextIndex = post.media.length - 1;
-              requestAnimationFrame(() => {
-                carouselScrollRefs.current[post.id]?.scrollTo({
-                  x: postMediaWidth * post.media.length,
-                  y: 0,
-                  animated: false,
-                });
-              });
-            } else if (virtualIndex >= post.media.length + 1) {
-              nextIndex = 0;
-              requestAnimationFrame(() => {
-                carouselScrollRefs.current[post.id]?.scrollTo({
-                  x: postMediaWidth,
-                  y: 0,
-                  animated: false,
-                });
-              });
-            }
-
             setCarouselIndexByPostId((prev) => ({ ...prev, [post.id]: nextIndex }));
           }}
         >
@@ -2827,7 +2841,8 @@ const metaLine = tokens.join(" • ");
     ? styles.sidebarStatusAvailable
     : styles.sidebarStatusUnavailable;
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 70,
+    itemVisiblePercentThreshold: 85,
+    minimumViewTime: 120,
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
     const firstVisiblePost = viewableItems.find((entry) =>
@@ -2861,11 +2876,11 @@ const metaLine = tokens.join(" • ");
           ListHeaderComponent={isFocusedPostFeed ? null : renderHeader}
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={false}
-          initialNumToRender={3}
-          maxToRenderPerBatch={3}
-          updateCellsBatchingPeriod={40}
-          windowSize={5}
+          removeClippedSubviews={Platform.OS === "android"}
+          initialNumToRender={2}
+          maxToRenderPerBatch={2}
+          updateCellsBatchingPeriod={30}
+          windowSize={3}
           decelerationRate="normal"
           scrollEventThrottle={16}
           keyboardDismissMode="on-drag"
@@ -3726,7 +3741,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  carouselWrap: { width: "100%" },
+  carouselWrap: { width: "100%", overflow: "hidden" },
   carouselIndicatorRow: {
     position: "absolute",
     left: 0,

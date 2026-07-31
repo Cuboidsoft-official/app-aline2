@@ -3,14 +3,19 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Keyboard,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View
 } from "react-native";
+import { useKeyboardHandler } from "react-native-keyboard-controller";
+import { runOnJS } from "react-native-reanimated";
 import { Alert } from "../../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
@@ -62,7 +67,42 @@ function SwipeCommentsSheet({
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
   const [threadComment, setThreadComment] = useState<SwipeComment | null>(null);
   const [pendingVoice, setPendingVoice] = useState<CommentAudioFile | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const mentionQuery = getActiveMentionQuery(draft);
+
+  useKeyboardHandler({
+    onStart: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+    onMove: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+    onEnd: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+  }, []);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      },
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardHeight(0);
+      },
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (mentionQuery === null) {
@@ -213,10 +253,21 @@ function SwipeCommentsSheet({
     ]);
   };
 
+  const { height: windowHeight } = useWindowDimensions();
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={styles.sheetWrap}>
+      <View
+        style={[
+          styles.sheetWrap,
+          {
+            marginBottom: keyboardHeight,
+            minHeight: keyboardHeight > 0 ? 220 : 360,
+            maxHeight: keyboardHeight > 0 ? Math.max(240, windowHeight - keyboardHeight - 16) : "82%",
+          },
+        ]}
+      >
         <View style={styles.handle} />
         <View style={styles.sheetContent}>
           <View style={styles.header}>
@@ -369,6 +420,10 @@ const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  keyboardAvoider: {
+    flex: 1,
+    justifyContent: "flex-end",
   },
   sheetWrap: {
     marginTop: "auto",

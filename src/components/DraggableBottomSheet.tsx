@@ -1,15 +1,18 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  Keyboard,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   StyleSheet,
   useWindowDimensions,
   View,
 } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { useKeyboardHandler } from "react-native-keyboard-controller";
+import { runOnJS } from "react-native-reanimated";
 
 import { useAppTheme } from "../theme/AppThemeContext";
 
@@ -36,6 +39,42 @@ function DraggableBottomSheet({
 }: DraggableBottomSheetProps) {
   const { colors, isDarkMode } = useAppTheme();
   const { height: windowHeight } = useWindowDimensions();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useKeyboardHandler({
+    onStart: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+    onMove: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+    onEnd: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+  }, []);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      },
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardHeight(0);
+      },
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   const maxHeight = Math.max(minHeight + 40, Math.floor(windowHeight * maxHeightRatio));
 
   const sheetHeights = useMemo(() => {
@@ -111,6 +150,7 @@ function DraggableBottomSheet({
             styles.sheetWrap,
             {
               height: animatedHeight,
+              marginBottom: keyboardHeight > 0 ? keyboardHeight + 8 : 8,
               backgroundColor: colors.card,
               borderColor: colors.border,
               shadowColor: isDarkMode ? "#000" : "#0f172a",
@@ -139,9 +179,9 @@ function DraggableBottomSheet({
             <View style={[styles.handle, { backgroundColor: isDarkMode ? "#475569" : "#cbd5e1" }]} />
           </View>
 
-          <KeyboardAvoidingView style={styles.keyboardContainer} behavior="padding">
+          <View style={styles.keyboardContainer}>
             <View style={styles.content}>{children}</View>
-          </KeyboardAvoidingView>
+          </View>
         </Animated.View>
       </View>
     </Modal>

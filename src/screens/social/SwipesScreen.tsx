@@ -7,6 +7,7 @@ import {
   FlatList,
   Image,
   ImageBackground,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -18,6 +19,8 @@ import {
   TouchableOpacity,
   View
 } from "react-native";
+import { useKeyboardHandler } from "react-native-keyboard-controller";
+import { runOnJS } from "react-native-reanimated";
 import { Alert } from "../../utils/appAlert";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import LinearGradient from "react-native-linear-gradient";
@@ -35,7 +38,7 @@ import MentionSuggestionList from "../../components/MentionSuggestionList";
 import VoiceRecorderButton from "../../components/chat/VoiceRecorderButton";
 import { socialApi } from "../../features/social/socialApi";
 import { CommentAudioFile, ReportReason, SocialUser, Swipe, SwipeComment } from "../../features/social/types";
-import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback } from "../../hooks/useSegmentedMusicPlayback";
+import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
@@ -159,8 +162,43 @@ function SwipesScreen({ navigation, route }: any) {
   const [likeBurstSwipeId, setLikeBurstSwipeId] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentUser, setCurrentUser] = useState<CurrentSwipeUser | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sheetMentionQuery = getActiveMentionQuery(sheetDraft);
   const isScreenFocused = useIsFocused();
+
+  useKeyboardHandler({
+    onStart: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+    onMove: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+    onEnd: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+  }, []);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      },
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardHeight(0);
+      },
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const swipeTapRef = useRef<{ id: string; time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     id: "",
@@ -247,20 +285,36 @@ function SwipesScreen({ navigation, route }: any) {
       active = false;
     };
   }, []);
+
+  const nextSwipe = swipes[activeSwipeIndex + 1] || null;
+  const nextSwipeRawMusicUrl = getMusicPlaybackUrl(nextSwipe?.music);
+  const nextSwipeMusicUrl = normalizeMediaUrl(nextSwipeRawMusicUrl);
+  const nextSwipeMusicTrackKey = nextSwipe
+    ? `${nextSwipe.id}:${nextSwipeMusicUrl}`
+    : "";
+
+  useSegmentedMusicWarmup({
+    rawUrl: nextSwipeRawMusicUrl,
+    normalizedUrl: nextSwipeMusicUrl,
+    trackKey: nextSwipeMusicTrackKey,
+    enabled: isSwipePlaybackEnabled && !!nextSwipeMusicUrl,
+  });
+
   useSegmentedMusicPlayback({
     rawUrl: activeSwipeRawMusicUrl,
     normalizedUrl: activeSwipeMusicUrl,
     trackKey: activeSwipeMusicTrackKey,
     startMs: activeSwipeMusicStartMs,
     durationMs: activeSwipeMusicDurationMs,
-    shouldPlay: false,
+    shouldPlay: shouldPlaySwipeMusic,
     syncKey: activeSwipePlaybackCycle,
     pauseWhenInactive: true,
   });
   const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
     + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 60,
+    itemVisiblePercentThreshold: 85,
+    minimumViewTime: 100,
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null; isViewable?: boolean }> }) => {
     const firstVisibleItem = viewableItems.find((entry) => entry.isViewable && typeof entry.index === "number");
@@ -884,7 +938,7 @@ function SwipesScreen({ navigation, route }: any) {
     const now = Date.now();
     const lastTap = swipeTapRef.current;
 
-    if (lastTap.id === swipe.id && now - lastTap.time < 260) {
+    if (lastTap.id === swipe.id && now - lastTap.time < 220) {
       if (lastTap.timeout) {
         clearTimeout(lastTap.timeout);
       }
@@ -897,7 +951,7 @@ function SwipesScreen({ navigation, route }: any) {
     const timeout = setTimeout(() => {
       setIsSwipeSoundEnabled((current) => !current);
       swipeTapRef.current = { id: "", time: 0, timeout: null };
-    }, 260);
+    }, 130);
 
     swipeTapRef.current = {
       id: swipe.id,
@@ -1011,6 +1065,7 @@ function SwipesScreen({ navigation, route }: any) {
             paused={!isActive || !!activeSheet || !isScreenFocused}
             muted={!isActive || !isSwipePlaybackEnabled}
             repeat
+            restartKey={item.id}
             onEnd={() => {
               if (isActive && hasAttachedMusic) {
                 setActiveSwipePlaybackCycle((cycle) => cycle + 1);
@@ -1197,16 +1252,15 @@ function SwipesScreen({ navigation, route }: any) {
         keyExtractor={(item) => item.id}
         renderItem={renderSwipe}
         onLayout={onListLayout}
-        pagingEnabled
         snapToInterval={viewportHeight}
         snapToAlignment="start"
         disableIntervalMomentum
         decelerationRate="fast"
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews={false}
-        initialNumToRender={4}
-        maxToRenderPerBatch={4}
-        windowSize={5}
+        removeClippedSubviews={Platform.OS === "android"}
+        initialNumToRender={2}
+        maxToRenderPerBatch={2}
+        windowSize={3}
         updateCellsBatchingPeriod={16}
         scrollEventThrottle={16}
         getItemLayout={(_, index) => ({
@@ -1234,7 +1288,17 @@ function SwipesScreen({ navigation, route }: any) {
 
       <Modal visible={!!activeSheet && activeSheet !== "share"} transparent animationType="slide" onRequestClose={closeSheet}>
         <Pressable style={styles.sheetBackdrop} onPress={closeSheet} />
-        <View style={[styles.sheetWrap, activeSheet === "share" && styles.shareSheetWrap]}>
+        <View
+          style={[
+            styles.sheetWrap,
+            activeSheet === "share" && styles.shareSheetWrap,
+            {
+              marginBottom: keyboardHeight,
+              minHeight: keyboardHeight > 0 ? 220 : viewportHeight * 0.42,
+              maxHeight: keyboardHeight > 0 ? Math.max(260, viewportHeight - keyboardHeight - 16) : viewportHeight * 0.8,
+            },
+          ]}
+        >
           <View style={[styles.sheetHandle, activeSheet === "share" && styles.shareSheetHandle]} />
           {activeSheet === "comments" ? (
             <View style={styles.sheetContent}>

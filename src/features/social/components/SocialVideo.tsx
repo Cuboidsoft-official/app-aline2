@@ -59,7 +59,7 @@ function SocialVideo({
   const shouldMountVideo = !!resolvedUri && !videoFailed && (!paused || controls || preload);
   const shouldShowPoster = !!usablePosterUri && !posterFailed;
   const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0));
-  const effectivePaused = preload ? (isVideoReady ? true : false) : paused;
+  const effectivePaused = paused || preload;
 
   const fadeOutPoster = useCallback(() => {
     Animated.timing(placeholderOpacity, {
@@ -140,12 +140,12 @@ function SocialVideo({
             onEnd={onEnd}
             progressUpdateInterval={250}
             preferredForwardBufferDuration={preload ? 2 : 4}
-            automaticallyWaitsToMinimizeStalling={false}
+            automaticallyWaitsToMinimizeStalling
             bufferConfig={{
-              minBufferMs: 500,
-              maxBufferMs: 5000,
-              bufferForPlaybackMs: 50,
-              bufferForPlaybackAfterRebufferMs: 100,
+              minBufferMs: 2500,
+              maxBufferMs: 15000,
+              bufferForPlaybackMs: 500,
+              bufferForPlaybackAfterRebufferMs: 1000,
             }}
             onLoadStart={() => {
               setIsBuffering(false);

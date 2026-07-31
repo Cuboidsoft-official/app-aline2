@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -11,9 +12,11 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View
 } from "react-native";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { useKeyboardHandler } from "react-native-keyboard-controller";
+import { runOnJS } from "react-native-reanimated";
 import { Alert } from "../../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
 
@@ -61,7 +64,42 @@ function StoryActivitySheet({
   const [submitting, setSubmitting] = useState(false);
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
   const [savingSettings, setSavingSettings] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const onStoryUpdateRef = useRef(onStoryUpdate);
+
+  useKeyboardHandler({
+    onStart: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+    onMove: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+    onEnd: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+  }, []);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      },
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardHeight(0);
+      },
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     onStoryUpdateRef.current = onStoryUpdate;
@@ -366,17 +404,23 @@ function StoryActivitySheet({
     </View>
   );
 
+  const { height: windowHeight } = useWindowDimensions();
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <KeyboardAvoidingView
-        style={styles.keyboardAvoider}
-        behavior="padding"
-        keyboardVerticalOffset={0}
+      <View
+        style={[
+          styles.sheetWrap,
+          {
+            marginBottom: keyboardHeight,
+            minHeight: keyboardHeight > 0 ? 220 : 480,
+            maxHeight: keyboardHeight > 0 ? Math.max(240, windowHeight - keyboardHeight - 16) : "90%",
+          },
+        ]}
       >
-        <View style={styles.sheetWrap}>
-          <View style={styles.handle} />
-          <View style={styles.sheetContent}>
+        <View style={styles.handle} />
+        <View style={styles.sheetContent}>
           <View style={styles.header}>
             <TouchableOpacity onPress={onClose}>
               <Icon name="chevron-down" size={22} color="#111" />
@@ -533,7 +577,6 @@ function StoryActivitySheet({
           )}
           </View>
         </View>
-      </KeyboardAvoidingView>
     </Modal>
   );
 }
