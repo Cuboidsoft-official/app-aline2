@@ -1,6 +1,31 @@
 /* eslint-env jest */
 
 require("react-native-gesture-handler/jestSetup");
+if (globalThis.__workletsModuleProxy === undefined) {
+  const dummyFn = jest.fn(() => ({}));
+  globalThis.__workletsModuleProxy = new Proxy(
+    {
+      createSerializableUndefined: () => ({}),
+      createSerializableNull: () => ({}),
+      createSerializableBoolean: () => ({}),
+      createSerializableNumber: () => ({}),
+      createSerializableString: () => ({}),
+      getStaticFeatureFlag: () => false,
+      getDynamicFeatureFlag: () => false,
+      setDynamicFeatureFlag: () => {},
+    },
+    {
+      get(target, prop) {
+        if (prop in target) {
+          return target[prop];
+        }
+        return dummyFn;
+      },
+    }
+  );
+}
+
+jest.mock("react-native-reanimated", () => require("react-native-reanimated/mock"));
 
 jest.mock("react-native-keyboard-controller", () => require("react-native-keyboard-controller/jest"));
 
