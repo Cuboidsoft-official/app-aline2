@@ -3,6 +3,7 @@ import Clipboard from "@react-native-clipboard/clipboard";
 import { TextInput as RNTextInput } from "react-native";
 import {
   ActivityIndicator,
+  Modal,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -86,6 +87,11 @@ function WalletScreen({ navigation }: any) {
   const [bankAccountNumber, setBankAccountNumber] = useState("");
   const [bankIfsc, setBankIfsc] = useState("");
   const [bankName, setBankName] = useState("");
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("500");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawalsEnabled, setWithdrawalsEnabled] = useState(true);
+  const [withdrawalConfig, setWithdrawalConfig] = useState<any>(null);
 
   const accent = colors.primary;
   const bg = isDarkMode ? "#070B14" : "#F4F1FF";
@@ -121,6 +127,9 @@ function WalletScreen({ navigation }: any) {
       setReferredByCode(walletRes.data?.referredByCode || "");
       setRecentTransactions(walletRes.data?.recentTransactions || []);
       setRecentDeposits(walletRes.data?.recentDeposits || []);
+      const canWithdraw = walletRes.data?.withdrawalsEnabled !== false;
+      setWithdrawalsEnabled(canWithdraw);
+      setWithdrawalConfig(walletRes.data?.withdrawalConfig || null);
     } catch (error) {
       console.log("wallet screen error:", error);
       Alert.alert("Error", "Failed to load wallet details.");
@@ -232,6 +241,42 @@ function WalletScreen({ navigation }: any) {
     }
   }, [bankAccountName, bankAccountNumber, bankIfsc, bankName]);
 
+  const requestWithdrawal = useCallback(async () => {
+    try {
+      const amount = Number(withdrawAmount || 0);
+      const minAmount = Number(withdrawalConfig?.minAmount || 100);
+      if (!Number.isFinite(amount) || amount < minAmount) {
+        Alert.alert("Withdrawal amount", `Minimum withdrawal amount is INR ${minAmount}.`);
+        return;
+      }
+
+      if (!bankAccount?.hasBankAccount && (!bankAccountName || !bankIfsc)) {
+        Alert.alert("Bank Account Required", "Please add and save your bank account details below before requesting a withdrawal.");
+        return;
+      }
+
+      setWithdrawing(true);
+      const res = await API.post("/wallet/withdraw", { amount });
+
+      if (res.data?.success) {
+        setWalletData((prev: any) => ({
+          ...(prev || {}),
+          balance: Number(res.data?.walletBalance || 0),
+        }));
+        setShowWithdrawModal(false);
+        Alert.alert("Withdrawal Placed", res.data?.message || `INR ${amount} withdrawal request placed successfully.`);
+        loadData().catch(() => undefined);
+      }
+    } catch (error: any) {
+      Alert.alert(
+        "Withdrawal Failed",
+        getReadableApiErrorMessage(error, "Withdrawal request could not be processed."),
+      );
+    } finally {
+      setWithdrawing(false);
+    }
+  }, [withdrawAmount, withdrawalConfig, bankAccount, bankAccountName, bankIfsc, loadData]);
+
   const cardStyle = useMemo(
     () => [
       styles.card,
@@ -273,13 +318,20 @@ function WalletScreen({ navigation }: any) {
             </View>
           </View>
 
-          <View style={styles.balanceBadgeRow}>
-            <View style={styles.balanceBadge}>
-              <Icon name="flash-outline" size={14} color={white} />
-              <Text style={styles.balanceBadgeText}>
-                Recharge coins securely and keep your balance ready for bookings
-              </Text>
-            </View>
+          <View style={styles.heroActionRow}>
+            <TouchableOpacity
+              style={styles.heroActionButton}
+              onPress={() => {
+                if (!bankAccount?.hasBankAccount && (!bankAccountName || !bankIfsc)) {
+                  Alert.alert("Bank Account Needed", "Please fill in and save your bank account details below to request withdrawals.");
+                } else {
+                  setShowWithdrawModal(true);
+                }
+              }}
+            >
+              <Icon name="arrow-up-circle" size={18} color="#FFFFFF" />
+              <Text style={styles.heroActionButtonText}>Withdrawal</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -370,6 +422,32 @@ function WalletScreen({ navigation }: any) {
                 <Text style={styles.primaryButtonText}>Recharge coins</Text>
               </>
             )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={cardStyle}>
+          <View style={styles.sectionHeaderRow}>
+            <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+              <Icon name="arrow-up-circle-outline" size={18} color={accent} />
+            </View>
+            <View style={styles.sectionHeaderCopy}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Withdrawal Request</Text>
+              <Text style={[styles.cardText, { color: textSecondary }]}>Withdraw your available wallet balance directly to your bank account.</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: accent }]}
+            onPress={() => {
+              if (!bankAccount?.hasBankAccount && (!bankAccountName || !bankIfsc)) {
+                Alert.alert("Bank Account Needed", "Please fill in and save your bank account details below first.");
+              } else {
+                setShowWithdrawModal(true);
+              }
+            }}
+          >
+            <Icon name="arrow-up-circle-outline" size={18} color={white} />
+            <Text style={styles.primaryButtonText}>Request Withdrawal</Text>
           </TouchableOpacity>
         </View>
 
@@ -615,6 +693,110 @@ function WalletScreen({ navigation }: any) {
           )) : <Text style={[styles.emptyText, { color: textSecondary }]}>Appointments and booking payments will appear here.</Text>}
         </View>
       </View>
+
+      <Modal
+        visible={showWithdrawModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowWithdrawModal(false)}
+      >
+        <View style={styles.withdrawModalOverlay}>
+          <View style={[styles.withdrawModalCard, { backgroundColor: panel, borderColor: border }]}>
+            <View style={styles.withdrawModalHeader}>
+              <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
+                <Icon name="arrow-up-circle-outline" size={20} color={accent} />
+              </View>
+              <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Request Withdrawal</Text>
+              <TouchableOpacity
+                style={styles.withdrawModalClose}
+                onPress={() => setShowWithdrawModal(false)}
+              >
+                <Icon name="close" size={20} color={textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.withdrawModalSubtitle, { color: textSecondary }]}>
+              {withdrawalConfig?.notice || "Withdrawal funds will be transferred directly to your saved bank account within 24-48 hours."}
+            </Text>
+
+            <View style={[styles.withdrawBalanceBanner, { backgroundColor: panelAlt, borderColor: border }]}>
+              <Text style={[styles.withdrawBalanceLabel, { color: textSecondary }]}>Available Balance</Text>
+              <Text style={[styles.withdrawBalanceValue, { color: colors.text }]}>
+                {formatCoinAmount(walletData?.balance || 0)}
+              </Text>
+            </View>
+
+            {bankAccount?.hasBankAccount ? (
+              <View style={[styles.withdrawBankChip, { backgroundColor: `${accent}10`, borderColor: `${accent}30` }]}>
+                <Icon name="business-outline" size={16} color={accent} />
+                <Text style={[styles.withdrawBankText, { color: colors.text }]}>
+                  Payout to {bankAccount.bankName || "Saved Bank"} ({bankAccount.accountNumber || "Account"})
+                </Text>
+              </View>
+            ) : null}
+
+            <Text style={[styles.withdrawInputLabel, { color: colors.text }]}>Enter Withdrawal Amount (INR)</Text>
+
+            <View style={styles.presetRow}>
+              {["100", "500", "1000", "2000"].map((preset) => {
+                const active = withdrawAmount === preset;
+                return (
+                  <TouchableOpacity
+                    key={`withdraw-preset-${preset}`}
+                    style={[
+                      styles.presetChip,
+                      {
+                        backgroundColor: active ? accent : panelAlt,
+                        borderColor: active ? accent : border,
+                      },
+                    ]}
+                    onPress={() => setWithdrawAmount(preset)}
+                  >
+                    <Text style={[styles.presetChipText, { color: active ? white : colors.text }]}>INR {preset}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={[styles.amountField, { backgroundColor: panelAlt, borderColor: border }]}>
+              <Icon name="logo-usd" size={18} color={accent} />
+              <RNTextInput
+                style={[styles.amountInput, { color: colors.text }]}
+                placeholder="Enter amount (min INR 100)"
+                placeholderTextColor={textSecondary}
+                value={withdrawAmount}
+                onChangeText={setWithdrawAmount}
+                keyboardType="numeric"
+              />
+            </View>
+
+            <View style={styles.withdrawModalActions}>
+              <TouchableOpacity
+                style={[styles.withdrawSecondaryBtn, { backgroundColor: panelAlt, borderColor: border }]}
+                onPress={() => setShowWithdrawModal(false)}
+                disabled={withdrawing}
+              >
+                <Text style={[styles.withdrawSecondaryText, { color: colors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: accent, flex: 1, marginTop: 0 }, withdrawing && styles.buttonDisabled]}
+                onPress={requestWithdrawal}
+                disabled={withdrawing}
+              >
+                {withdrawing ? (
+                  <ActivityIndicator color={white} />
+                ) : (
+                  <>
+                    <Icon name="arrow-up-circle-outline" size={18} color={white} />
+                    <Text style={styles.primaryButtonText}>Confirm Withdrawal</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -982,6 +1164,127 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 13,
     lineHeight: 20,
+  },
+  heroActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 14,
+  },
+  heroActionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.4)",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  heroActionButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13.5,
+    fontWeight: "800",
+    marginLeft: 6,
+  },
+  heroWithdrawButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.35)",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginTop: 10,
+    alignSelf: "flex-start",
+  },
+  heroWithdrawText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+    marginLeft: 5,
+  },
+  withdrawModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    justifyContent: "flex-end",
+  },
+  withdrawModalCard: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+  },
+  withdrawModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  withdrawModalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    flex: 1,
+    marginLeft: 10,
+  },
+  withdrawModalClose: {
+    padding: 4,
+  },
+  withdrawModalSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  withdrawBalanceBanner: {
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  withdrawBalanceLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  withdrawBalanceValue: {
+    fontSize: 20,
+    fontWeight: "800",
+    marginTop: 4,
+  },
+  withdrawBankChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  withdrawBankText: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginLeft: 8,
+  },
+  withdrawInputLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  withdrawModalActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 18,
+    gap: 10,
+  },
+  withdrawSecondaryBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  withdrawSecondaryText: {
+    fontSize: 14,
+    fontWeight: "700",
   },
   buttonDisabled: {
     opacity: 0.6,

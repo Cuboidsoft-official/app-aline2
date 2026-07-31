@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { useAppTheme } from "../theme/AppThemeContext";
 
@@ -137,7 +138,10 @@ function DraggableBottomSheet({
           >
             <View style={[styles.handle, { backgroundColor: isDarkMode ? "#475569" : "#cbd5e1" }]} />
           </View>
-          <View style={styles.content}>{children}</View>
+
+          <KeyboardAvoidingView style={styles.keyboardContainer} behavior="padding">
+            <View style={styles.content}>{children}</View>
+          </KeyboardAvoidingView>
         </Animated.View>
       </View>
     </Modal>
@@ -145,6 +149,9 @@ function DraggableBottomSheet({
 }
 
 const styles = StyleSheet.create({
+  keyboardContainer: {
+    flex: 1,
+  },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(2,6,23,0.66)",

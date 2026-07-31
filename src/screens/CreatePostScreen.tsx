@@ -6,7 +6,6 @@ import {
   BackHandler,
   FlatList,
   Image,
-  KeyboardAvoidingView,
   PanResponder,
   PermissionsAndroid,
   Platform,
@@ -20,6 +19,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
@@ -4900,7 +4900,7 @@ function CreatePostScreen({ navigation, route }: any) {
     >
           {renderStageHeader("Final details", "", publish, { loading: publishing })}
 
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
+      <KeyboardAvoidingView behavior="padding" style={styles.flex}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + CREATE_DOCK_OFFSET + 16, 104) }}>
           <View style={[styles.summaryCard, { backgroundColor: surfaceColor, borderColor }]}>
             <View style={styles.summaryPreview}>{renderPreviewMedia()}</View>

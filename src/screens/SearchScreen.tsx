@@ -37,10 +37,19 @@ type UserItem = {
 type SellerItem = {
   _id: string;
   sellerName?: string;
+  name?: string;
   specialization?: string;
+  category?: string;
   bio?: string;
   profilePic?: string;
   availabilityStatus?: boolean;
+  user?: {
+    _id?: string;
+    name?: string;
+    username?: string;
+    category?: string;
+    role?: string;
+  };
 };
 
 type ServiceItem = {
@@ -118,28 +127,43 @@ const isVerifiedSellerOnly = (seller: any): boolean => {
 
   if (
     verificationStatus === "pending"
-    || verificationStatus === "rejected"
+    || verificationStatus === "unverified"
     || verificationStatus === "draft"
     || verificationStatus === "incomplete"
-    || verificationStatus === "unverified"
+    || verificationStatus === "rejected"
     || verificationStatus === "disabled"
+    || verificationStatus === "blocked"
   ) {
     return false;
   }
 
   const isApproved =
     verificationStatus === "approved" ||
+    verificationStatus === "verified" ||
     seller.isVerifiedSeller === true ||
-    seller.isVerified === true;
+    seller.isVerified === true ||
+    seller.digilockerVerified === true;
 
-  if (!isApproved) {
+  if (!isApproved && verificationStatus !== "approved" && verificationStatus !== "verified") {
     return false;
   }
 
-  const name = String(seller.sellerName || seller.name || "").trim();
+  const name = String(seller.sellerName || seller.name || seller.user?.name || "").trim();
   if (!name) {
     return false;
   }
+
+  const category = String(
+    seller.specialization
+    || seller.category
+    || seller.user?.category
+    || ""
+  ).trim();
+
+  if (!category) {
+    return false;
+  }
+
   return true;
 };
 
@@ -284,8 +308,12 @@ const isVerifiedSellerOnly = (seller: any): boolean => {
             allSellers.filter((seller) => {
               if (!isVerifiedSellerOnly(seller)) return false;
               const matchesQuery = !normQuery || [
-                seller?.sellerName,
                 seller?.specialization,
+                seller?.category,
+                seller?.user?.category,
+                seller?.sellerName,
+                seller?.name,
+                seller?.user?.name,
                 seller?.bio
               ].some((val) => String(val || "").toLowerCase().includes(normQuery));
 

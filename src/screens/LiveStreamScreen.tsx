@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   AppState,
   Image,
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StatusBar,
@@ -13,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import {
   RTCIceCandidate,
   RTCPeerConnection,
@@ -877,7 +877,7 @@ const LiveStreamScreen = ({ navigation, route }: any) => {
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: "#050816" }]} edges={["top", "bottom"]}>
       <StatusBar barStyle="light-content" backgroundColor="#050816" />
-      <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView style={styles.screen} behavior="padding">
           <View style={styles.stage}>
             {mainStageStreamURL ? (
               <RTCView objectFit="cover" streamURL={mainStageStreamURL} style={styles.video} mirror={shouldMirrorMainStage} />

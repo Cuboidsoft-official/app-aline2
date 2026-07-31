@@ -1601,19 +1601,23 @@ function FeedScreen({ navigation, route }: any) {
     );
   };
 
-  const renderPostMedia = (post: Post) => {
+  const renderPostMedia = (post: Post, postIndex?: number) => {
     const mediaHeight = getPostMediaHeight(post);
     const frameAspectRatio = postMediaWidth / Math.max(1, mediaHeight);
     const currentCarouselIndex = carouselIndexByPostId[post.id] || 0;
     const isMuted = !!mutedPostIds[post.id];
-    const isPostActive = activePostId === post.id && isScreenFocused && !activeSheet;
-    const shouldPreloadVideo = false;
-    const shouldMountVideo = (isCarouselItemActive = true) => shouldMountFeedVideo({
-      isPostActive,
-      isCarouselItemActive,
-      isScreenFocused,
-      isScrolling: false,
-    });
+
+    const postIndexInFeed = feedListItems.findIndex((p) => p.id === post.id);
+    const activePostIndexInFeed = feedListItems.findIndex((p) => p.id === activePostId);
+    const effectiveActiveIndex = activePostIndexInFeed >= 0 ? activePostIndexInFeed : 0;
+    const effectivePostIndex = postIndexInFeed >= 0 ? postIndexInFeed : typeof postIndex === "number" ? postIndex : 0;
+
+    const isPostActive = (activePostId ? activePostId === post.id : effectivePostIndex === 0) && isScreenFocused && !activeSheet;
+    const isPreloadTarget = effectivePostIndex > effectiveActiveIndex && effectivePostIndex <= effectiveActiveIndex + 2;
+
+    const shouldPreloadVideo = isPreloadTarget;
+    const shouldMountVideo = (isCarouselItemActive = true) =>
+      isScreenFocused && !activeSheet && (isPostActive || isPreloadTarget) && isCarouselItemActive;
     const renderSensitiveBadge = (label?: string) => (
       <View pointerEvents="none" style={styles.sensitiveBadge}>
         <Text style={styles.sensitiveBadgeText}>{label ? `${label} sensitive content` : "Sensitive content"}</Text>
@@ -1634,7 +1638,7 @@ function FeedScreen({ navigation, route }: any) {
                 uri={normalizeMediaUrl(primaryMedia.url)}
                 posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || "")}
                 style={StyleSheet.absoluteFill}
-                paused={!shouldMountVideo()}
+                paused={!isPostActive}
                 preload={shouldPreloadVideo}
                 muted={shouldMuteFeedVideo({
                   isPostActive,
@@ -1646,6 +1650,7 @@ function FeedScreen({ navigation, route }: any) {
                 onLoad={(event) => handleFeedVideoLoaded(post.id, primaryMedia.id, event)}
                 resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
                 contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
+                showBufferingLoader={false}
               />
             </View>
             {primaryMedia.sensitiveContent?.isSensitive ? renderSensitiveBadge(primaryMedia.sensitiveContent.label) : null}
@@ -1756,7 +1761,7 @@ function FeedScreen({ navigation, route }: any) {
                     uri={normalizeMediaUrl(asset.url)}
                     posterUri={normalizeMediaUrl(asset.thumbnailUrl || "")}
                     style={StyleSheet.absoluteFill}
-                    paused={!shouldMountVideo(currentCarouselIndex === sourceIndex)}
+                    paused={!isPostActive || currentCarouselIndex !== sourceIndex}
                     preload={shouldPreloadVideo && currentCarouselIndex === sourceIndex}
                     muted={shouldMuteFeedVideo({
                       isPostActive,
@@ -1769,6 +1774,7 @@ function FeedScreen({ navigation, route }: any) {
                     onLoad={(event) => handleFeedVideoLoaded(post.id, asset.id, event)}
                     resizeMode={getImageResizeMode(asset, frameAspectRatio)}
                     contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+                    showBufferingLoader={false}
                   />
                 </View>
                 {asset.sensitiveContent?.isSensitive ? renderSensitiveBadge(asset.sensitiveContent.label) : null}
@@ -2219,7 +2225,7 @@ const metaLine = tokens.join(" • ");
     );
   };
 
-  const renderInstagramPost = ({ item }: { item: Post }) => {
+  const renderInstagramPost = ({ item, index }: { item: Post; index: number }) => {
     if ((item as any)?.__featuredProfiles) {
       return <FeaturedProfilesCarousel navigation={navigation} title="Featured profiles to follow" />;
     }
@@ -2328,7 +2334,7 @@ const metaLine = tokens.join(" • ");
           ]}
         >
           <Pressable onPress={() => handlePostMediaPress(item)} style={styles.mediaPressSurface}>
-            {renderPostMedia(item)}
+            {renderPostMedia(item, index)}
             {renderPostStickerOverlay(item)}
             {likeBurstPostId === item.id ? (
               <View pointerEvents="none" style={styles.likeBurstOverlay}>
@@ -2821,8 +2827,7 @@ const metaLine = tokens.join(" • ");
     ? styles.sidebarStatusAvailable
     : styles.sidebarStatusUnavailable;
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 30,
-    minimumViewTime: 10,
+    itemVisiblePercentThreshold: 70,
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
     const firstVisiblePost = viewableItems.find((entry) =>

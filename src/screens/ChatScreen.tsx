@@ -344,6 +344,19 @@ const ensurePickedFileName = (name: string | undefined | null, fallbackBase: str
   return `${cleanName}${extension}`;
 };
 
+const MAX_CHAT_FILE_SIZE_BYTES = 300 * 1024 * 1024; // 300 MB limit
+
+const validateChatFileSize = (sizeInBytes?: number | null): boolean => {
+  if (typeof sizeInBytes === "number" && sizeInBytes > MAX_CHAT_FILE_SIZE_BYTES) {
+    Alert.alert(
+      "File Limit Exceeded",
+      "Selected file size exceeds the 300 MB limit. Please select a smaller file (up to 300 MB)."
+    );
+    return false;
+  }
+  return true;
+};
+
 const inferPickedMimeType = (asset: any): string => {
   const explicitType = String(asset?.type || "").trim();
   if (explicitType) {
@@ -2085,8 +2098,9 @@ const ChatScreen = ({ navigation, route }: any) => {
 
   const queueAttachmentPreview = useCallback((assetsInput: any[] | any) => {
     const assets = Array.isArray(assetsInput) ? assetsInput : [assetsInput];
+    const validAssets = assets.filter((asset) => validateChatFileSize(asset?.fileSize || asset?.size));
     const seenAssetKeys = new Set<string>();
-    const nextAttachments = assets
+    const nextAttachments = validAssets
       .filter((asset) => {
         const assetKey = String(asset?.uri || asset?.fileName || "").trim();
         if (!assetKey || seenAssetKeys.has(assetKey)) {
@@ -2232,6 +2246,9 @@ const ChatScreen = ({ navigation, route }: any) => {
       if (!file?.uri) {
         return;
       }
+      if (!validateChatFileSize(file.size)) {
+        return;
+      }
 
       let localUri = file.uri;
       if (file.isVirtual || String(file.uri || "").startsWith("content://")) {
@@ -2288,6 +2305,9 @@ const ChatScreen = ({ navigation, route }: any) => {
       });
 
       if (!file?.uri) {
+        return;
+      }
+      if (!validateChatFileSize(file.size)) {
         return;
       }
 
@@ -3857,9 +3877,10 @@ const ChatScreen = ({ navigation, route }: any) => {
 
         <Modal
           visible={!!messagePreview}
-          transparent
+          transparent={false}
           animationType="fade"
           onRequestClose={() => setMessagePreview(null)}
+          statusBarTranslucent
         >
           <View style={styles.previewOverlay}>
             <TouchableOpacity
@@ -5176,11 +5197,13 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     width: "100%",
-    height: "78%",
+    height: "100%",
+    flex: 1,
   },
   previewVideoContainer: {
     width: "100%",
-    height: "78%",
+    height: "100%",
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },

@@ -514,7 +514,7 @@ function HowToEarnScreen({ navigation, route }: any) {
       case "referral":
         return "Referral Rewards";
       default:
-        return "Promotions";
+        return "How to Earn";
     }
   };
 
@@ -527,141 +527,204 @@ function HowToEarnScreen({ navigation, route }: any) {
   };
 
   const renderPageContent = () => {
-    if (activeSection === "listedProfile") {
-      return (
-        <View style={styles.listSection}>
-          <Field
-            label="Search profile"
-            value={profileSearchQuery}
-            onChangeText={setProfileSearchQuery}
-            placeholder="Username, location, creator name"
-          />
-          {filteredFeaturedProfiles.length ? (
-            filteredFeaturedProfiles.map((item) => (
-              <TouchableOpacity
-                key={item._id}
-                style={[styles.marketCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: item.userId })}
-              >
-                <View style={styles.marketHeader}>
-                  <View>
-                    <Text style={[styles.marketTitle, { color: colors.text }]}>{item.name || item.aline2Username || "Aline2 creator"}</Text>
-                    <Text style={[styles.marketMeta, { color: colors.mutedText }]}>
-                      @{item.aline2Username || item.username || "creator"} - {item.location || "Location not set"}
-                    </Text>
-                  </View>
-                  <Icon name="star" size={18} color={colors.primary} />
-                </View>
-                <Text style={[styles.rateLine, { color: colors.text }]}>
-                  {Number(item.followerCount || 0).toLocaleString()} followers
-                </Text>
-                <Text style={[styles.rateLine, { color: colors.mutedText }]}>
-                  Story INR {item.storyPromotion?.price || 0}/{item.storyPromotion?.durationHours || 24}h - Post INR {item.postPromotion?.price || item.photoPromotion?.price || 0}
-                </Text>
-                <Text style={[styles.rateLine, { color: colors.mutedText }]}>
-                  Reel INR {item.reelPromotion?.price || item.videoPromotion?.pricePerMinute || 0}
-                </Text>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <Text style={[styles.emptyText, { color: colors.mutedText, marginTop: 14 }]}>No featured creators found.</Text>
-          )}
-        </View>
-      );
-    }
-
-    if (activeSection === "dropAd") {
-      return renderCompanySection();
-    }
-
-    if (activeSection === "featureProfile") {
-      return renderProfileSection();
-    }
-
-    if (activeSection === "listedAds") {
-      return (
-        <View style={styles.listSection}>
-          {companyAds.length ? (
-            companyAds.map((item) => (
-              <TouchableOpacity
-                key={item._id}
-                style={[styles.marketCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                onPress={() => navigation.navigate("CompanyAdPreviewScreen", { companyAdId: item._id, ad: item })}
-              >
-                <View style={styles.marketHeader}>
-                  <View style={styles.marketCopy}>
-                    <Text style={[styles.marketTitle, { color: colors.text }]}>{item.productOrService}</Text>
-                    <Text style={[styles.marketMeta, { color: colors.mutedText }]}>{item.companyName} - {item.location || "Any location"}</Text>
-                  </View>
-                  <Icon name="open-outline" size={18} color={colors.primary} />
-                </View>
-                <Text style={[styles.rateLine, { color: colors.mutedText }]}>
-                  {item.contentType || "Campaign"} - {item.minimumFollowers || 0}+ followers - {item.contentFormat || "template"}
-                </Text>
-                <Text style={[styles.rateLine, { color: colors.mutedText }]}>
-                  {item.preferredPlacement || "story"} - Offered INR {item.offeredPrice || item.storyBudget || item.photoBudget || item.videoBudgetPerMinute || 0}
-                </Text>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <Text style={[styles.emptyText, { color: colors.mutedText, marginTop: 14 }]}>No company ad requirements yet.</Text>
-          )}
-        </View>
-      );
-    }
-
-    if (activeSection === "referral") {
-      return renderReferralSection();
-    }
-
     return (
       <>
-        <View style={[styles.hero, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={[styles.heroIcon, { backgroundColor: `${colors.primary}18` }]}>
-            <Icon name="cash-outline" size={25} color={colors.primary} />
-          </View>
-          <View style={styles.heroCopy}>
-            <Text style={[styles.heroTitle, { color: colors.text }]}>Earn from brand promotions</Text>
-            <Text style={[styles.heroText, { color: colors.mutedText }]}>
-              Creators list their rates. Companies post ad budgets. Select an option below.
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.actionList}>
+        {/* Top category chip filter */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.categoryScroll}
+          contentContainerStyle={styles.categoryContainer}
+        >
           {[
-            { key: "listedProfile", icon: "list-outline", title: "Listed Profiles", sub: "View creators with promotion pricing" },
-            { key: "dropAd", icon: "megaphone-outline", title: "Drop an Ad", sub: "Create a campaign requirement for creators" },
-            { key: "featureProfile", icon: "sparkles-outline", title: "Feature Profile", sub: "List your rate card & get featured" },
-            { key: "listedAds", icon: "document-text-outline", title: "Featured Ads", sub: "Browse active company campaign ads" },
-            { key: "referral", icon: "gift-outline", title: "Referral Rewards", sub: "Invite friends using your link & earn" },
-          ].map((item) => (
-            <TouchableOpacity
-              key={item.key}
-              style={[styles.actionRow, { backgroundColor: colors.card, borderColor: colors.border }]}
-              onPress={() => setActiveSection(item.key as EarnSection)}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: `${colors.primary}14` }]}>
-                <Icon name={item.icon} size={20} color={colors.primary} />
-              </View>
-              <View style={styles.actionCopy}>
-                <Text style={[styles.actionTitle, { color: colors.text }]}>{item.title}</Text>
-                <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>{item.sub}</Text>
-              </View>
-              <Icon name="chevron-forward" size={18} color={colors.mutedText} />
-            </TouchableOpacity>
-          ))}
+            { key: "menu", label: "All Ways", icon: "sparkles-outline" },
+            { key: "referral", label: "Referral Rewards", icon: "gift-outline" },
+            { key: "featureProfile", label: "Feature Profile", icon: "star-outline" },
+            { key: "dropAd", label: "Drop an Ad", icon: "megaphone-outline" },
+            { key: "listedProfile", label: "Creator Directory", icon: "list-outline" },
+            { key: "listedAds", label: "Brand Campaigns", icon: "document-text-outline" },
+          ].map((chip) => {
+            const isSelected = activeSection === chip.key;
+            return (
+              <TouchableOpacity
+                key={chip.key}
+                style={[
+                  styles.categoryChip,
+                  {
+                    backgroundColor: isSelected ? colors.primary : colors.card,
+                    borderColor: isSelected ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setActiveSection(chip.key as EarnSection)}
+              >
+                <Icon name={chip.icon} size={15} color={isSelected ? "#fff" : colors.text} />
+                <Text style={[styles.categoryChipText, { color: isSelected ? "#fff" : colors.text }]}>
+                  {chip.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
 
-          <TouchableOpacity
-            style={[styles.sellerLink, { backgroundColor: colors.card, borderColor: colors.border, marginTop: 4 }]}
-            onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
-          >
-            <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={20} color={colors.primary} />
-            <Text style={[styles.sellerLinkText, { color: colors.text }]}>
-              {hasSellerAccount ? "Open seller dashboard" : "Become a seller"}
-            </Text>
-          </TouchableOpacity>
-        </View>
+        {activeSection === "listedProfile" ? (
+          <View style={styles.listSection}>
+            <Field
+              label="Search profile"
+              value={profileSearchQuery}
+              onChangeText={setProfileSearchQuery}
+              placeholder="Username, location, creator name"
+            />
+            {filteredFeaturedProfiles.length ? (
+              filteredFeaturedProfiles.map((item) => (
+                <TouchableOpacity
+                  key={item._id}
+                  style={[styles.marketCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => navigation.navigate("ProfilePreviewScreen", { userId: item.userId })}
+                >
+                  <View style={styles.marketHeader}>
+                    <View>
+                      <Text style={[styles.marketTitle, { color: colors.text }]}>{item.name || item.aline2Username || "Aline2 creator"}</Text>
+                      <Text style={[styles.marketMeta, { color: colors.mutedText }]}>
+                        @{item.aline2Username || item.username || "creator"} - {item.location || "Location not set"}
+                      </Text>
+                    </View>
+                    <Icon name="star" size={18} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.rateLine, { color: colors.text }]}>
+                    {Number(item.followerCount || 0).toLocaleString()} followers
+                  </Text>
+                  <Text style={[styles.rateLine, { color: colors.mutedText }]}>
+                    Story INR {item.storyPromotion?.price || 0}/{item.storyPromotion?.durationHours || 24}h - Post INR {item.postPromotion?.price || item.photoPromotion?.price || 0}
+                  </Text>
+                  <Text style={[styles.rateLine, { color: colors.mutedText }]}>
+                    Reel INR {item.reelPromotion?.price || item.videoPromotion?.pricePerMinute || 0}
+                  </Text>
+                </TouchableOpacity>
+              ))
+            ) : (
+              <Text style={[styles.emptyText, { color: colors.mutedText, marginTop: 14 }]}>No featured creators found.</Text>
+            )}
+          </View>
+        ) : activeSection === "dropAd" ? (
+          renderCompanySection()
+        ) : activeSection === "featureProfile" ? (
+          renderProfileSection()
+        ) : activeSection === "listedAds" ? (
+          <View style={styles.listSection}>
+            {companyAds.length ? (
+              companyAds.map((item) => (
+                <TouchableOpacity
+                  key={item._id}
+                  style={[styles.marketCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => navigation.navigate("CompanyAdPreviewScreen", { companyAdId: item._id, ad: item })}
+                >
+                  <View style={styles.marketHeader}>
+                    <View style={styles.marketCopy}>
+                      <Text style={[styles.marketTitle, { color: colors.text }]}>{item.productOrService}</Text>
+                      <Text style={[styles.marketMeta, { color: colors.mutedText }]}>{item.companyName} - {item.location || "Any location"}</Text>
+                    </View>
+                    <Icon name="open-outline" size={18} color={colors.primary} />
+                  </View>
+                  <Text style={[styles.rateLine, { color: colors.mutedText }]}>
+                    {item.contentType || "Campaign"} - {item.minimumFollowers || 0}+ followers - {item.contentFormat || "template"}
+                  </Text>
+                  <Text style={[styles.rateLine, { color: colors.mutedText }]}>
+                    {item.preferredPlacement || "story"} - Offered INR {item.offeredPrice || item.storyBudget || item.photoBudget || item.videoBudgetPerMinute || 0}
+                  </Text>
+                </TouchableOpacity>
+              ))
+            ) : (
+              <Text style={[styles.emptyText, { color: colors.mutedText, marginTop: 14 }]}>No company ad requirements yet.</Text>
+            )}
+          </View>
+        ) : activeSection === "referral" ? (
+          renderReferralSection()
+        ) : (
+          /* "menu" / "all" overview showing clean clickable cards for each earning method */
+          <>
+            <View style={[styles.hero, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={[styles.heroIcon, { backgroundColor: `${colors.primary}18` }]}>
+                <Icon name="cash-outline" size={25} color={colors.primary} />
+              </View>
+              <View style={styles.heroCopy}>
+                <Text style={[styles.heroTitle, { color: colors.text }]}>How to Earn on Aline2</Text>
+                <Text style={[styles.heroText, { color: colors.mutedText }]}>
+                  Select any earning method below to open its dedicated page:
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.actionList}>
+              {[
+                {
+                  key: "featureProfile",
+                  icon: "star-outline",
+                  title: "Feature Your Profile",
+                  sub: "List your creator rate-card & get featured for brand deals",
+                },
+                {
+                  key: "dropAd",
+                  icon: "megaphone-outline",
+                  title: "Drop an Ad",
+                  sub: "Post product or service promotion requirements for creators",
+                },
+                {
+                  key: "referral",
+                  icon: "gift-outline",
+                  title: "Referral Rewards",
+                  sub: "Invite friends using your link & earn wallet rewards",
+                },
+                {
+                  key: "listedProfile",
+                  icon: "list-outline",
+                  title: "Listed Creators Directory",
+                  sub: "Browse featured creators & view promotion rate cards",
+                },
+                {
+                  key: "listedAds",
+                  icon: "document-text-outline",
+                  title: "Brand Campaigns & Ads",
+                  sub: "Explore active company campaign requirements",
+                },
+              ].map((item) => (
+                <TouchableOpacity
+                  key={item.key}
+                  style={[styles.actionRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => setActiveSection(item.key as EarnSection)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.actionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                    <Icon name={item.icon} size={22} color={colors.primary} />
+                  </View>
+                  <View style={styles.actionCopy}>
+                    <Text style={[styles.actionTitle, { color: colors.text }]}>{item.title}</Text>
+                    <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>{item.sub}</Text>
+                  </View>
+                  <Icon name="chevron-forward" size={18} color={colors.mutedText} />
+                </TouchableOpacity>
+              ))}
+
+              <TouchableOpacity
+                style={[styles.sellerLink, { backgroundColor: colors.card, borderColor: colors.border, marginTop: 6, marginBottom: 16 }]}
+                onPress={() => navigation.navigate(hasSellerAccount ? "SellerDashboardScreen" : "SellerRegistration")}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.actionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                  <Icon name={hasSellerAccount ? "briefcase-outline" : "storefront-outline"} size={20} color={colors.primary} />
+                </View>
+                <View style={styles.actionCopy}>
+                  <Text style={[styles.actionTitle, { color: colors.text }]}>
+                    {hasSellerAccount ? "Seller Dashboard" : "Become a Seller"}
+                  </Text>
+                  <Text style={[styles.actionSubtitle, { color: colors.mutedText }]}>
+                    {hasSellerAccount ? "Manage appointments, earnings & services" : "Register seller profile & start offering services"}
+                  </Text>
+                </View>
+                <Icon name="chevron-forward" size={18} color={colors.mutedText} />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </>
     );
   };
@@ -799,4 +862,18 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   sellerLinkText: { fontSize: 14, fontWeight: "900" },
+  categoryScroll: { marginBottom: 14, marginHorizontal: -4 },
+  categoryContainer: { paddingHorizontal: 4, gap: 8, flexDirection: "row", alignItems: "center" },
+  categoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  categoryChipText: { fontSize: 13, fontWeight: "800" },
+  sectionBlock: { marginBottom: 16 },
+  sectionHeaderTitle: { fontSize: 16, fontWeight: "900", marginBottom: 8, marginLeft: 2 },
 });

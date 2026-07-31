@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -14,6 +13,7 @@ import {
   TouchableOpacity,
   View
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../../../utils/appAlert";
 import Icon from "react-native-vector-icons/Ionicons";
 
@@ -371,7 +371,7 @@ function StoryActivitySheet({
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
         style={styles.keyboardAvoider}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior="padding"
         keyboardVerticalOffset={0}
       >
         <View style={styles.sheetWrap}>

@@ -260,8 +260,7 @@ function SwipesScreen({ navigation, route }: any) {
   const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
     + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-    minimumViewTime: 30,
+    itemVisiblePercentThreshold: 60,
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null; isViewable?: boolean }> }) => {
     const firstVisibleItem = viewableItems.find((entry) => entry.isViewable && typeof entry.index === "number");
@@ -1095,19 +1094,23 @@ function SwipesScreen({ navigation, route }: any) {
                 onPressHashtag={openHashtagResults}
                 onPress={() => {
                   if (shouldTruncateCaption) {
-                    openCommentsSheet(item);
+                    setExpandedCaptionIds((prev) => ({ ...prev, [item.id]: !prev[item.id] }));
                   }
                 }}
-                numberOfLines={1}
+                numberOfLines={isCaptionExpanded ? undefined : 1}
                 ellipsizeMode="tail"
                 text={item.caption}
               />
               {shouldTruncateCaption ? (
                 <TouchableOpacity
                   activeOpacity={0.75}
-                  onPress={() => openCommentsSheet(item)}
+                  onPress={() => {
+                    setExpandedCaptionIds((prev) => ({ ...prev, [item.id]: !prev[item.id] }));
+                  }}
                 >
-                  <Text style={styles.captionMoreButton}>more</Text>
+                  <Text style={styles.captionMoreButton}>
+                    {isCaptionExpanded ? "less" : "...more"}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
 

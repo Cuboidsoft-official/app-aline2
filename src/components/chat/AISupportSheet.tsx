@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   SafeAreaView,
@@ -12,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import Icon from "react-native-vector-icons/Ionicons";
 
 import { askSupportAssistant, type AssistantHistoryEntry } from "../../utils/assistantApi";
@@ -144,7 +144,7 @@ const AISupportSheet = ({
       <SafeAreaView style={[styles.fullScreen, { backgroundColor: colors.background }]}>
         <KeyboardAvoidingView
           style={styles.fullScreen}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior="padding"
         >
           <View
             style={[

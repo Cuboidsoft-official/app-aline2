@@ -348,6 +348,19 @@ const formatAppointmentSlotWindow = (slot?: AppointmentSlot | null) => {
   return startLabel;
 };
 
+const MAX_CHAT_FILE_SIZE_BYTES = 300 * 1024 * 1024; // 300 MB limit
+
+const validateChatFileSize = (sizeInBytes?: number | null): boolean => {
+  if (typeof sizeInBytes === "number" && sizeInBytes > MAX_CHAT_FILE_SIZE_BYTES) {
+    Alert.alert(
+      "File Limit Exceeded",
+      "Selected file size exceeds the 300 MB limit. Please select a smaller file (up to 300 MB)."
+    );
+    return false;
+  }
+  return true;
+};
+
 const formatMessageTime = (value?: string) => {
   if (!value) {
     return "";
@@ -1307,6 +1320,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       if (!file?.uri) {
         return;
       }
+      if (!validateChatFileSize(file.size)) {
+        return;
+      }
 
       const normalizedFile = await normalizePickedDocument(file);
       setUploading(true);
@@ -1341,6 +1357,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
       });
 
       if (!file?.uri) {
+        return;
+      }
+      if (!validateChatFileSize(file.size)) {
         return;
       }
 
@@ -2703,9 +2722,10 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
       <Modal
         visible={!!messagePreview}
-        transparent
+        transparent={false}
         animationType="fade"
         onRequestClose={() => setMessagePreview(null)}
+        statusBarTranslucent
       >
         <View style={styles.previewOverlay}>
           <TouchableOpacity
@@ -3647,11 +3667,13 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     width: "100%",
-    height: "78%",
+    height: "100%",
+    flex: 1,
   },
   previewVideoContainer: {
     width: "100%",
-    height: "78%",
+    height: "100%",
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },

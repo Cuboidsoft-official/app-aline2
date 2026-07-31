@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Image, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 import Video from "react-native-video";
 import { stripBackgroundColorFromStyle } from "./mediaSurfaceStyle";
@@ -51,7 +51,7 @@ function SocialVideo({
   const [posterFailed, setPosterFailed] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
-  const [isPreloadReady, setIsPreloadReady] = useState(false);
+  const [isVideoReady, setIsVideoReady] = useState(false);
   const resolvedUri = String(uri || "").trim();
   const resolvedPosterUri = String(posterUri || "").trim();
   const usablePosterUri = isUsablePosterUri(resolvedPosterUri, resolvedUri) ? resolvedPosterUri : "";
@@ -59,7 +59,15 @@ function SocialVideo({
   const shouldMountVideo = !!resolvedUri && !videoFailed && (!paused || controls || preload);
   const shouldShowPoster = !!usablePosterUri && !posterFailed;
   const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0));
-  const effectivePaused = preload ? (isPreloadReady ? true : false) : paused;
+  const effectivePaused = preload ? (isVideoReady ? true : false) : paused;
+
+  const fadeOutPoster = useCallback(() => {
+    Animated.timing(placeholderOpacity, {
+      toValue: 0,
+      duration: 100,
+      useNativeDriver: true,
+    }).start();
+  }, [placeholderOpacity]);
 
   useEffect(() => {
     placeholderOpacity.stopAnimation();
@@ -67,20 +75,17 @@ function SocialVideo({
     setPosterFailed(false);
     setVideoFailed(false);
     setIsBuffering(false);
+    setIsVideoReady(false);
   }, [placeholderOpacity, usablePosterUri, resolvedUri]);
 
   useEffect(() => {
-    if (!preload && !paused && isPreloadReady) {
-      Animated.timing(placeholderOpacity, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: true,
-      }).start();
+    if (!preload && !paused && isVideoReady) {
+      fadeOutPoster();
     } else if (preload) {
       placeholderOpacity.stopAnimation();
       placeholderOpacity.setValue(1);
     }
-  }, [preload, paused, isPreloadReady, placeholderOpacity]);
+  }, [preload, paused, isVideoReady, fadeOutPoster, placeholderOpacity]);
 
   useEffect(() => {
     if (!restartKey || !videoRef.current || paused || preload) {
@@ -133,44 +138,51 @@ function SocialVideo({
             repeat={repeat}
             controls={controls}
             onEnd={onEnd}
-            poster={usablePosterUri || undefined}
-            posterResizeMode={resizeMode}
-            progressUpdateInterval={500}
+            progressUpdateInterval={250}
             preferredForwardBufferDuration={preload ? 2 : 4}
             automaticallyWaitsToMinimizeStalling={false}
             bufferConfig={{
-              minBufferMs: 2000,
-              maxBufferMs: 8000,
-              bufferForPlaybackMs: 400,
-              bufferForPlaybackAfterRebufferMs: 800,
+              minBufferMs: 500,
+              maxBufferMs: 5000,
+              bufferForPlaybackMs: 50,
+              bufferForPlaybackAfterRebufferMs: 100,
             }}
             onLoadStart={() => {
-              setIsBuffering(true);
+              setIsBuffering(false);
             }}
             onLoad={(event) => {
               setIsBuffering(false);
-              if (preload && !isPreloadReady) {
+              setIsVideoReady(true);
+              if (preload) {
                 videoRef.current?.seek?.(0);
-                setIsPreloadReady(true);
-              }
-              if (!preload && !paused) {
-                Animated.timing(placeholderOpacity, {
-                  toValue: 0,
-                  duration: 180,
-                  useNativeDriver: true,
-                }).start();
+              } else if (!paused) {
+                fadeOutPoster();
               }
               onLoad?.(event);
             }}
             onReadyForDisplay={() => {
               setIsBuffering(false);
-              if (preload && !isPreloadReady) {
+              setIsVideoReady(true);
+              if (preload) {
                 videoRef.current?.seek?.(0);
-                setIsPreloadReady(true);
+              } else if (!paused) {
+                fadeOutPoster();
+              }
+            }}
+            onProgress={() => {
+              if (!preload && !paused) {
+                setIsBuffering(false);
+                setIsVideoReady(true);
+                fadeOutPoster();
               }
             }}
             onBuffer={({ isBuffering: nextIsBuffering }) => {
-              setIsBuffering(Boolean(nextIsBuffering));
+              if (!nextIsBuffering) {
+                setIsBuffering(false);
+                if (!preload && !paused) {
+                  fadeOutPoster();
+                }
+              }
             }}
             onError={() => {
               placeholderOpacity.stopAnimation();

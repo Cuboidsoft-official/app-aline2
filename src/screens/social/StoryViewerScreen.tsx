@@ -18,7 +18,8 @@ import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
-
+import { useKeyboardHandler } from "react-native-keyboard-controller";
+import { runOnJS } from "react-native-reanimated";
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
 import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import SocialVideo from "../../features/social/components/SocialVideo";
@@ -221,26 +222,20 @@ function StoryViewerScreen({ route, navigation }: any) {
     }, []),
   );
 
-  useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(showEvent, (event) => {
-      const endCoordinates = event?.endCoordinates;
-      const keyboardTop = Number(endCoordinates?.screenY || 0);
-      const measuredHeight = Math.max(
-        0,
-        Number(endCoordinates?.height || 0),
-        keyboardTop > 0 ? windowHeight - keyboardTop : 0,
-      );
-      setKeyboardHeight(measuredHeight);
-    });
-    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
-
-    return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
-  }, [windowHeight]);
+  useKeyboardHandler({
+    onStart: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+    onMove: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+    onEnd: (e) => {
+      'worklet';
+      runOnJS(setKeyboardHeight)(e.height);
+    },
+  }, []);
 
   useEffect(() => {
     setProgress(0);
