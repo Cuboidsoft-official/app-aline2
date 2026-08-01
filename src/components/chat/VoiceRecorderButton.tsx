@@ -87,9 +87,15 @@ interface VoiceRecorderButtonProps {
     onSend: (file: VoiceFile) => void;
     disabled?: boolean;
     color?: string;
+    iconColor?: string;
 }
 
-const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disabled = false, color = "#7b3fe4" }) => {
+const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({
+    onSend,
+    disabled = false,
+    color = "#7b3fe4",
+    iconColor = "#ffffff",
+}) => {
     const [recording, setRecording] = useState(false);
     const [starting, setStarting] = useState(false);
     const [stopping, setStopping] = useState(false);
@@ -378,9 +384,9 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
                 <TouchableOpacity
                     disabled={cancelled || starting || stopping}
                     onPress={() => stopRecording(true)}
-                    style={[styles.recordingMic, { backgroundColor: cancelled ? "#ccc" : color }]}
+                    style={[styles.recordingMic, { backgroundColor: cancelled ? "#64748b" : color }]}
                 >
-                    <Icon name="mic" size={22} color="#fff" />
+                    <Icon name="mic" size={20} color="#ffffff" />
                 </TouchableOpacity>
             </Animated.View>
         );
@@ -390,25 +396,30 @@ const VoiceRecorderButton: React.FC<VoiceRecorderButtonProps> = ({ onSend, disab
         <TouchableOpacity
             disabled={disabled}
             onPress={startRecording}
+            activeOpacity={0.82}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={styles.micButton}
+            style={[
+                styles.micButton,
+                { backgroundColor: disabled ? "rgba(148, 163, 184, 0.24)" : color },
+            ]}
         >
-            <Icon name="mic" size={24} color={disabled ? "#ccc" : color} />
+            <Icon name="mic" size={20} color={disabled ? "rgba(255, 255, 255, 0.4)" : iconColor} />
         </TouchableOpacity>
     );
 };
 
 const styles = StyleSheet.create({
     micButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         alignItems: "center",
         justifyContent: "center",
-        padding: 4,
-        backgroundColor: "rgba(123,63,228,0.1)",
-        borderWidth: 1,
-        borderColor: "rgba(123,63,228,0.16)",
+        shadowColor: "#0f172a",
+        shadowOpacity: 0.16,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 2,
     },
     recordingContainer: {
         flexDirection: "row",

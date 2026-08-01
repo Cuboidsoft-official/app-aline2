@@ -1,16 +1,18 @@
 import React, { useCallback, useMemo, useState } from "react";
 import Clipboard from "@react-native-clipboard/clipboard";
-import { TextInput as RNTextInput } from "react-native";
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput as RNTextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import Icon from "react-native-vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { Alert } from "../utils/appAlert";
@@ -250,6 +252,12 @@ function WalletScreen({ navigation }: any) {
         return;
       }
 
+      const availableBalance = Number(walletData?.balance || 0);
+      if (availableBalance < amount) {
+        Alert.alert("Insufficient balance", `Your available wallet balance is INR ${availableBalance}.`);
+        return;
+      }
+
       if (!bankAccount?.hasBankAccount && (!bankAccountName || !bankIfsc)) {
         Alert.alert("Bank Account Required", "Please add and save your bank account details below before requesting a withdrawal.");
         return;
@@ -275,7 +283,7 @@ function WalletScreen({ navigation }: any) {
     } finally {
       setWithdrawing(false);
     }
-  }, [withdrawAmount, withdrawalConfig, bankAccount, bankAccountName, bankIfsc, loadData]);
+  }, [withdrawAmount, withdrawalConfig, walletData?.balance, bankAccount, bankAccountName, bankIfsc, loadData]);
 
   const cardStyle = useMemo(
     () => [
@@ -700,7 +708,15 @@ function WalletScreen({ navigation }: any) {
         animationType="slide"
         onRequestClose={() => setShowWithdrawModal(false)}
       >
-        <View style={styles.withdrawModalOverlay}>
+        <KeyboardAvoidingView
+          behavior="padding"
+          style={styles.withdrawModalOverlay}
+        >
+          <TouchableOpacity
+            style={styles.withdrawModalBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowWithdrawModal(false)}
+          />
           <View style={[styles.withdrawModalCard, { backgroundColor: panel, borderColor: border }]}>
             <View style={styles.withdrawModalHeader}>
               <View style={[styles.sectionIconWrap, { backgroundColor: `${accent}16` }]}>
@@ -715,60 +731,67 @@ function WalletScreen({ navigation }: any) {
               </TouchableOpacity>
             </View>
 
-            <Text style={[styles.withdrawModalSubtitle, { color: textSecondary }]}>
-              {withdrawalConfig?.notice || "Withdrawal funds will be transferred directly to your saved bank account within 24-48 hours."}
-            </Text>
-
-            <View style={[styles.withdrawBalanceBanner, { backgroundColor: panelAlt, borderColor: border }]}>
-              <Text style={[styles.withdrawBalanceLabel, { color: textSecondary }]}>Available Balance</Text>
-              <Text style={[styles.withdrawBalanceValue, { color: colors.text }]}>
-                {formatCoinAmount(walletData?.balance || 0)}
+            <ScrollView
+              bounces={false}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              style={styles.withdrawModalScroll}
+            >
+              <Text style={[styles.withdrawModalSubtitle, { color: textSecondary }]}>
+                {withdrawalConfig?.notice || "Withdrawal funds will be transferred automatically to your saved bank account."}
               </Text>
-            </View>
 
-            {bankAccount?.hasBankAccount ? (
-              <View style={[styles.withdrawBankChip, { backgroundColor: `${accent}10`, borderColor: `${accent}30` }]}>
-                <Icon name="business-outline" size={16} color={accent} />
-                <Text style={[styles.withdrawBankText, { color: colors.text }]}>
-                  Payout to {bankAccount.bankName || "Saved Bank"} ({bankAccount.accountNumber || "Account"})
+              <View style={[styles.withdrawBalanceBanner, { backgroundColor: panelAlt, borderColor: border }]}>
+                <Text style={[styles.withdrawBalanceLabel, { color: textSecondary }]}>Available Balance</Text>
+                <Text style={[styles.withdrawBalanceValue, { color: colors.text }]}>
+                  {formatCoinAmount(walletData?.balance || 0)}
                 </Text>
               </View>
-            ) : null}
 
-            <Text style={[styles.withdrawInputLabel, { color: colors.text }]}>Enter Withdrawal Amount (INR)</Text>
+              {bankAccount?.hasBankAccount ? (
+                <View style={[styles.withdrawBankChip, { backgroundColor: `${accent}10`, borderColor: `${accent}30` }]}>
+                  <Icon name="business-outline" size={16} color={accent} />
+                  <Text style={[styles.withdrawBankText, { color: colors.text }]}>
+                    Payout to {bankAccount.bankName || "Saved Bank"} ({bankAccount.accountNumber || "Account"})
+                  </Text>
+                </View>
+              ) : null}
 
-            <View style={styles.presetRow}>
-              {["100", "500", "1000", "2000"].map((preset) => {
-                const active = withdrawAmount === preset;
-                return (
-                  <TouchableOpacity
-                    key={`withdraw-preset-${preset}`}
-                    style={[
-                      styles.presetChip,
-                      {
-                        backgroundColor: active ? accent : panelAlt,
-                        borderColor: active ? accent : border,
-                      },
-                    ]}
-                    onPress={() => setWithdrawAmount(preset)}
-                  >
-                    <Text style={[styles.presetChipText, { color: active ? white : colors.text }]}>INR {preset}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+              <Text style={[styles.withdrawInputLabel, { color: colors.text }]}>Enter Withdrawal Amount (INR)</Text>
 
-            <View style={[styles.amountField, { backgroundColor: panelAlt, borderColor: border }]}>
-              <Icon name="logo-usd" size={18} color={accent} />
-              <RNTextInput
-                style={[styles.amountInput, { color: colors.text }]}
-                placeholder="Enter amount (min INR 100)"
-                placeholderTextColor={textSecondary}
-                value={withdrawAmount}
-                onChangeText={setWithdrawAmount}
-                keyboardType="numeric"
-              />
-            </View>
+              <View style={styles.presetRow}>
+                {["100", "500", "1000", "2000"].map((preset) => {
+                  const active = withdrawAmount === preset;
+                  return (
+                    <TouchableOpacity
+                      key={`withdraw-preset-${preset}`}
+                      style={[
+                        styles.presetChip,
+                        {
+                          backgroundColor: active ? accent : panelAlt,
+                          borderColor: active ? accent : border,
+                        },
+                      ]}
+                      onPress={() => setWithdrawAmount(preset)}
+                    >
+                      <Text style={[styles.presetChipText, { color: active ? white : colors.text }]}>INR {preset}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={[styles.amountField, { backgroundColor: panelAlt, borderColor: border }]}>
+                <Icon name="logo-usd" size={18} color={accent} />
+                <RNTextInput
+                  style={[styles.amountInput, { color: colors.text }]}
+                  placeholder="Enter amount (min INR 100)"
+                  placeholderTextColor={textSecondary}
+                  value={withdrawAmount}
+                  onChangeText={setWithdrawAmount}
+                  keyboardType="numeric"
+                />
+              </View>
+            </ScrollView>
 
             <View style={styles.withdrawModalActions}>
               <TouchableOpacity
@@ -795,7 +818,7 @@ function WalletScreen({ navigation }: any) {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </ScrollView>
   );
@@ -1210,11 +1233,18 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.65)",
     justifyContent: "flex-end",
   },
+  withdrawModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
   withdrawModalCard: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 20,
     borderWidth: 1,
+    maxHeight: "88%",
+  },
+  withdrawModalScroll: {
+    maxHeight: 320,
   },
   withdrawModalHeader: {
     flexDirection: "row",

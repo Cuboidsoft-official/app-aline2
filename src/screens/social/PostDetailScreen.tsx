@@ -94,6 +94,7 @@ function PostDetailScreen({ route, navigation }: any) {
   const [busyDownload, setBusyDownload] = useState(false);
   const [activeSheet, setActiveSheet] = useState<null | "comments" | "share" | "actions">(null);
   const [isMediaSoundEnabled, setIsMediaSoundEnabled] = useState(true);
+  const [activeCarouselIndex, setActiveCarouselIndex] = useState(0);
 
   const [caption, setCaption] = useState("");
   const [hideLikeCount, setHideLikeCount] = useState(false);
@@ -475,12 +476,28 @@ function PostDetailScreen({ route, navigation }: any) {
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
           <Pressable style={[styles.mediaSurface, { backgroundColor: colors.card }]} onPress={handleMediaPress}>
             {post.type === "carousel" ? (
-              <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+              <ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={(e) => {
+                  const x = e.nativeEvent.contentOffset.x;
+                  const idx = Math.max(0, Math.min(post.media.length - 1, Math.round(x / Math.max(1, width))));
+                  setActiveCarouselIndex(idx);
+                }}
+              >
                 {post.media.map((asset) => renderMediaAsset(asset, asset.id))}
               </ScrollView>
             ) : (
               post.media[0] ? renderMediaAsset(post.media[0], post.media[0].id) : <View style={styles.image} />
             )}
+            {post.media.length > 1 ? (
+              <View style={styles.carouselBadge}>
+                <Text style={styles.carouselBadgeText}>
+                  {activeCarouselIndex + 1}/{post.media.length}
+                </Text>
+              </View>
+            ) : null}
             {renderStickerOverlay()}
 
             {post.media.some((asset) => asset.mediaType === "video") ? (
@@ -514,9 +531,15 @@ function PostDetailScreen({ route, navigation }: any) {
                   <Text style={[styles.userName, { color: colors.text }]} numberOfLines={1}>
                     {post.user.username || post.user.name || "User"}
                   </Text>
-                  <Text style={[styles.userMeta, { color: colors.mutedText }]} numberOfLines={1}>
-                    {formatPostTime(post.createdAt)} {post.editedAt ? "• Edited" : ""}
-                  </Text>
+                  {post.location ? (
+                    <Text style={[styles.userLocationText, { color: colors.text }]} numberOfLines={1}>
+                      {post.location}
+                    </Text>
+                  ) : (
+                    <Text style={[styles.userMeta, { color: colors.mutedText }]} numberOfLines={1}>
+                      {formatPostTime(post.createdAt)} {post.editedAt ? "• Edited" : ""}
+                    </Text>
+                  )}
                 </View>
               </TouchableOpacity>
             </View>
@@ -770,15 +793,21 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     flex: 1,
   },
+  userMeta: {
+    fontSize: 11.5,
+    marginTop: 2,
+  },
+  userLocationText: {
+    fontSize: 11,
+    lineHeight: 14,
+    marginTop: 1,
+    fontWeight: "400",
+  },
   userName: {
     fontSize: 13.5,
     fontWeight: "700",
   },
-  userMeta: {
-    marginTop: 2,
-    fontSize: 12,
-    fontWeight: "600",
-  },
+
   meta: { color: "#666", fontSize: 12, marginBottom: 4 },
   actionRow: { flexDirection: "row", alignItems: "center", marginTop: 8, marginBottom: 10 },
   actionIcon: { flexDirection: "row", alignItems: "center", marginRight: 18 },
@@ -854,6 +883,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   deleteText: { fontWeight: "700" },
+  carouselBadge: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    backgroundColor: "rgba(15, 23, 42, 0.72)",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 14,
+    zIndex: 10,
+  },
+  carouselBadgeText: {
+    color: "#ffffff",
+    fontSize: 11.5,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+  },
 });
 
 export default PostDetailScreen;

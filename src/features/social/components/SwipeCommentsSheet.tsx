@@ -262,9 +262,13 @@ function SwipeCommentsSheet({
         style={[
           styles.sheetWrap,
           {
-            marginBottom: keyboardHeight,
+            marginBottom: Platform.OS === "ios" ? keyboardHeight : 0,
             minHeight: keyboardHeight > 0 ? 220 : 360,
-            maxHeight: keyboardHeight > 0 ? Math.max(240, windowHeight - keyboardHeight - 16) : "82%",
+            maxHeight: keyboardHeight > 0
+              ? (Platform.OS === "ios"
+                  ? Math.max(240, windowHeight - keyboardHeight - 16)
+                  : "100%")
+              : "82%",
           },
         ]}
       >

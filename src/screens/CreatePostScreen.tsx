@@ -6,6 +6,7 @@ import {
   BackHandler,
   FlatList,
   Image,
+  NativeModules,
   PanResponder,
   PermissionsAndroid,
   Platform,
@@ -179,7 +180,6 @@ const MODE_COPY: Record<
     icon: "play-circle-outline",
   },
 };
-const LOCATION_SEEDS = ["Nearby", "Studio", "Cafe", "Beach", "Restaurant", "Office"];
 const MUSIC_PICKER_PAGE_SIZE = 24;
 const MUSIC_CLIP_MAX_SECONDS = 30;
 const MUSIC_DISCOVERY_FALLBACK_QUERIES = ["love", "party", "happy", "summer"];
@@ -491,35 +491,66 @@ const appendMentionToken = (draft: string, username: string) => {
   return `${normalizedDraft}${normalizedDraft ? " " : ""}${token}`.slice(0, limits.caption);
 };
 
-const formatCoordinateLocation = (latitude: number, longitude: number): string =>
-  `Current location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+const formatCoordinateLocation = (_latitude: number, _longitude: number): string =>
+  "Current location";
 
 const reverseGeocodeLocation = async (latitude: number, longitude: number): Promise<string> => {
-  const response = await fetch(
-    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=16`,
-    {
-      headers: {
-        Accept: "application/json",
+  // Primary: OpenStreetMap Nominatim with proper User-Agent
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=16`,
+      {
+        headers: {
+          "User-Agent": "Aline2App/2.1",
+          Accept: "application/json",
+        },
       },
-    },
-  );
+    );
+    if (response.ok) {
+      const payload = await response.json();
+      const address = payload?.address || {};
+      const placeName = payload?.name || address?.amenity || address?.shop || address?.tourism || address?.building;
+      const locality = address?.suburb || address?.neighbourhood || address?.quarter || address?.road;
+      const city = address?.city || address?.town || address?.village || address?.city_district || address?.county;
+      const state = address?.state;
 
-  if (!response.ok) {
-    throw new Error("Could not reverse geocode your location.");
+      const parts = [placeName, locality, city, state]
+        .map((p) => String(p || "").trim())
+        .filter((val, index, self) => val && self.indexOf(val) === index);
+
+      if (parts.length > 0) {
+        return parts.slice(0, 2).join(", ");
+      }
+    }
+  } catch {
+    // Continue to fallback
   }
 
-  const payload = await response.json();
-  const address = payload?.address || {};
-  const parts = [
-    address?.suburb,
-    address?.neighbourhood,
-    address?.city || address?.town || address?.village,
-    address?.state,
-  ]
-    .map((part: string | undefined) => String(part || "").trim())
-    .filter(Boolean);
+  // Secondary: BigDataCloud Reverse Geocoder
+  try {
+    const response = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (response.ok) {
+      const payload = await response.json();
+      const locality = payload?.locality || payload?.localityInfo?.informative?.[0]?.name;
+      const city = payload?.city || payload?.localityInfo?.administrative?.[2]?.name;
+      const state = payload?.principalSubdivision;
 
-  return parts.length ? parts.slice(0, 3).join(", ") : formatCoordinateLocation(latitude, longitude);
+      const parts = [locality, city, state]
+        .map((p) => String(p || "").trim())
+        .filter((val, index, self) => val && self.indexOf(val) === index);
+
+      if (parts.length > 0) {
+        return parts.slice(0, 2).join(", ");
+      }
+    }
+  } catch {
+    // Continue to fallback
+  }
+
+  return "Current location";
 };
 
 function RangeSlider({
@@ -1511,17 +1542,19 @@ function CreatePostScreen({ navigation, route }: any) {
       return true;
     }
 
-    const permission = await PermissionsAndroid.request(
+    const permissions = [
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-      {
-        title: "Use your current location",
-        message: "Allow Aline2 to fetch your current location for your post, story, or swipe.",
-        buttonPositive: "Allow",
-        buttonNegative: "Not now",
-      },
+      PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+    ];
+    const currentStatuses = await Promise.all(
+      permissions.map((permission) => PermissionsAndroid.check(permission)),
     );
+    if (currentStatuses.some(Boolean)) {
+      return true;
+    }
 
-    return permission === PermissionsAndroid.RESULTS.GRANTED;
+    const results = await PermissionsAndroid.requestMultiple(permissions);
+    return Object.values(results).some((status) => status === PermissionsAndroid.RESULTS.GRANTED);
   }, []);
 
   const applyCurrentLocation = useCallback(async () => {
@@ -1532,30 +1565,46 @@ function CreatePostScreen({ navigation, route }: any) {
         throw new Error("Location permission was denied.");
       }
 
-      const geolocation = (globalThis as any)?.navigator?.geolocation;
-      if (!geolocation?.getCurrentPosition) {
-        throw new Error("Current location is not available on this device build yet.");
+      let latitude: number | null = null;
+      let longitude: number | null = null;
+
+      const nativeLocation = (NativeModules as any)?.AlineLocationModule;
+      if (Platform.OS === "android" && nativeLocation?.getCurrentPosition) {
+        try {
+          const position = await nativeLocation.getCurrentPosition(15000);
+          latitude = Number(position?.latitude);
+          longitude = Number(position?.longitude);
+        } catch {
+          // Fall back to navigator.geolocation below
+        }
       }
 
-      const position = await new Promise<{ coords: { latitude: number; longitude: number } }>((resolve, reject) => {
-        geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 30000,
-        });
-      });
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        const geolocation = (globalThis as any)?.navigator?.geolocation;
+        if (!geolocation?.getCurrentPosition) {
+          throw new Error("Current location is not available on this device build yet.");
+        }
 
-      const latitude = Number(position?.coords?.latitude);
-      const longitude = Number(position?.coords?.longitude);
+        const position = await new Promise<{ coords: { latitude: number; longitude: number } }>((resolve, reject) => {
+          geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 30000,
+          });
+        });
+
+        latitude = Number(position?.coords?.latitude);
+        longitude = Number(position?.coords?.longitude);
+      }
 
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
         throw new Error("We could not read your current coordinates.");
       }
 
-      let nextLabel = formatCoordinateLocation(latitude, longitude);
+      let nextLabel = formatCoordinateLocation(latitude!, longitude!);
 
       try {
-        nextLabel = await reverseGeocodeLocation(latitude, longitude);
+        nextLabel = await reverseGeocodeLocation(latitude!, longitude!);
       } catch {
         // Keep coordinates fallback.
       }
@@ -4984,20 +5033,6 @@ function CreatePostScreen({ navigation, route }: any) {
                 },
               ]}
             />
-            <View style={styles.seedWrap}>
-              {LOCATION_SEEDS.map((seed) => (
-                <TouchableOpacity
-                  key={seed}
-                  style={[styles.seedChip, { backgroundColor: inputBackground, borderColor }]}
-                  onPress={() => {
-                    setLocation(seed);
-                    runLocationSearch(seed).catch(() => undefined);
-                  }}
-                >
-                  <Text style={[styles.seedChipText, { color: textColor }]}>{seed}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
             {renderLocationSuggestions()}
           </View>
 

@@ -17,9 +17,12 @@ type SocialVideoProps = {
   restartKey?: string | number;
   onEnd?: () => void;
   onLoad?: (event: any) => void;
+  onProgress?: (data: any) => void;
   contentBlurRadius?: number;
   fallbackColor?: string;
   showBufferingLoader?: boolean;
+  showProgressBar?: boolean;
+  progressBarBottomOffset?: number;
 };
 
 const isLikelyVideoUri = (value: string): boolean =>
@@ -42,16 +45,21 @@ function SocialVideo({
   restartKey,
   onEnd,
   onLoad,
+  onProgress,
   contentBlurRadius = 0,
   fallbackColor = "#0f172a",
   showBufferingLoader = true,
+  showProgressBar = false,
+  progressBarBottomOffset,
 }: SocialVideoProps) {
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
   const videoRef = useRef<any>(null);
+  const durationRef = useRef(0);
   const [posterFailed, setPosterFailed] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [isVideoReady, setIsVideoReady] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
   const resolvedUri = String(uri || "").trim();
   const resolvedPosterUri = String(posterUri || "").trim();
   const usablePosterUri = isUsablePosterUri(resolvedPosterUri, resolvedUri) ? resolvedPosterUri : "";
@@ -76,6 +84,8 @@ function SocialVideo({
     setVideoFailed(false);
     setIsBuffering(false);
     setIsVideoReady(false);
+    setVideoProgress(0);
+    durationRef.current = 0;
   }, [placeholderOpacity, usablePosterUri, resolvedUri]);
 
   useEffect(() => {
@@ -84,6 +94,9 @@ function SocialVideo({
     } else if (preload) {
       placeholderOpacity.stopAnimation();
       placeholderOpacity.setValue(1);
+      setVideoProgress(0);
+    } else if (paused) {
+      setVideoProgress(0);
     }
   }, [preload, paused, isVideoReady, fadeOutPoster, placeholderOpacity]);
 
@@ -93,6 +106,7 @@ function SocialVideo({
     }
 
     videoRef.current.seek?.(0);
+    setVideoProgress(0);
   }, [paused, preload, restartKey]);
 
   useEffect(() => {
@@ -137,15 +151,19 @@ function SocialVideo({
             volume={safeVolume}
             repeat={repeat}
             controls={controls}
-            onEnd={onEnd}
-            progressUpdateInterval={250}
+            useTextureView={true}
+            onEnd={() => {
+              setVideoProgress(0);
+              onEnd?.();
+            }}
+            progressUpdateInterval={100}
             preferredForwardBufferDuration={preload ? 2 : 4}
             automaticallyWaitsToMinimizeStalling
             bufferConfig={{
-              minBufferMs: 2500,
+              minBufferMs: 1000,
               maxBufferMs: 15000,
-              bufferForPlaybackMs: 500,
-              bufferForPlaybackAfterRebufferMs: 1000,
+              bufferForPlaybackMs: 250,
+              bufferForPlaybackAfterRebufferMs: 500,
             }}
             onLoadStart={() => {
               setIsBuffering(false);
@@ -153,8 +171,12 @@ function SocialVideo({
             onLoad={(event) => {
               setIsBuffering(false);
               setIsVideoReady(true);
+              if (event?.duration && Number(event.duration) > 0) {
+                durationRef.current = Number(event.duration);
+              }
               if (preload) {
                 videoRef.current?.seek?.(0);
+                setVideoProgress(0);
               } else if (!paused) {
                 fadeOutPoster();
               }
@@ -165,16 +187,26 @@ function SocialVideo({
               setIsVideoReady(true);
               if (preload) {
                 videoRef.current?.seek?.(0);
+                setVideoProgress(0);
               } else if (!paused) {
                 fadeOutPoster();
               }
             }}
-            onProgress={() => {
+            onProgress={(data) => {
               if (!preload && !paused) {
                 setIsBuffering(false);
                 setIsVideoReady(true);
                 fadeOutPoster();
               }
+              const current = Number(data?.currentTime || 0);
+              const total = Number(
+                data?.seekableDuration || data?.playableDuration || durationRef.current || 0
+              );
+              if (total > 0) {
+                const ratio = Math.max(0, Math.min(1, current / total));
+                setVideoProgress(ratio);
+              }
+              onProgress?.(data);
             }}
             onBuffer={({ isBuffering: nextIsBuffering }) => {
               if (!nextIsBuffering) {
@@ -188,6 +220,7 @@ function SocialVideo({
               placeholderOpacity.stopAnimation();
               placeholderOpacity.setValue(1);
               setIsBuffering(false);
+              setVideoProgress(0);
               setVideoFailed(true);
             }}
             playWhenInactive={false}
@@ -205,6 +238,22 @@ function SocialVideo({
                 style={StyleSheet.absoluteFill}
                 resizeMode={resizeMode}
                 blurRadius={contentBlurRadius}
+              />
+            </View>
+          ) : null}
+          {showProgressBar && !preload ? (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.progressBarTrack,
+                progressBarBottomOffset !== undefined ? { bottom: progressBarBottomOffset } : null,
+              ]}
+            >
+              <View
+                style={[
+                  styles.progressBarFill,
+                  { width: `${Math.max(0, Math.min(100, videoProgress * 100))}%` },
+                ]}
               />
             </View>
           ) : null}
@@ -231,6 +280,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(2, 6, 23, 0.12)",
+  },
+  progressBarTrack: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 3.5,
+    backgroundColor: "rgba(255, 255, 255, 0.35)",
+    zIndex: 999,
+    elevation: 10,
+  },
+  progressBarFill: {
+    height: "100%",
+    backgroundColor: "#ffffff",
+    borderRadius: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.5,
+    shadowRadius: 2,
+    elevation: 3,
   },
 });
 

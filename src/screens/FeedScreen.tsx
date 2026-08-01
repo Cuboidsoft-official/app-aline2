@@ -408,6 +408,8 @@ function FeedScreen({ navigation, route }: any) {
     timeout: null,
   });
   const carouselScrollRefs = useRef<Record<string, ScrollView | null>>({});
+  const carouselGestureStartRef = useRef<Record<string, { x: number; y: number }>>({});
+  const carouselGestureIntentRef = useRef<Record<string, "horizontal" | "vertical" | "unknown">>({});
   const homeReloadHandledRef = useRef("");
   const isTabletLayout = width >= 768;
   const focusedPostId = String(route?.params?.postId || "").trim();
@@ -798,8 +800,10 @@ function FeedScreen({ navigation, route }: any) {
     };
   }, [focusedPostId, feed.posts]);
 
+  const focusedPostScrolledRef = useRef("");
+
   useEffect(() => {
-    if (!focusedPostId || !feed.posts.length) {
+    if (!focusedPostId || !feed.posts.length || focusedPostScrolledRef.current === focusedPostId) {
       return;
     }
 
@@ -808,6 +812,7 @@ function FeedScreen({ navigation, route }: any) {
       return;
     }
 
+    focusedPostScrolledRef.current = focusedPostId;
     setActivePostId(focusedPostId);
     requestAnimationFrame(() => {
       feedListRef.current?.scrollToIndex?.({ index: targetIndex, animated: false });
@@ -915,10 +920,16 @@ function FeedScreen({ navigation, route }: any) {
       return;
     }
 
-    const maxInsertionIndex = Math.min(feed.posts.length - 1, 7);
-    const minInsertionIndex = Math.min(2, maxInsertionIndex);
-    const nextIndex = minInsertionIndex + Math.floor(Math.random() * Math.max(1, maxInsertionIndex - minInsertionIndex + 1));
-    setFeaturedCarouselIndex(nextIndex);
+    setFeaturedCarouselIndex((currentIndex) => {
+      const maxInsertionIndex = Math.min(feed.posts.length - 1, 7);
+      const minInsertionIndex = Math.min(2, maxInsertionIndex);
+
+      if (currentIndex >= minInsertionIndex && currentIndex <= maxInsertionIndex) {
+        return currentIndex;
+      }
+
+      return minInsertionIndex + Math.floor(Math.random() * Math.max(1, maxInsertionIndex - minInsertionIndex + 1));
+    });
   }, [feed.posts.length, isFocusedPostFeed]);
 
   useEffect(() => {
@@ -1650,30 +1661,30 @@ function FeedScreen({ navigation, route }: any) {
     const effectivePostIndex = postIndexInFeed >= 0 ? postIndexInFeed : typeof postIndex === "number" ? postIndex : 0;
 
     const isPostActive = (activePostId ? activePostId === post.id : effectivePostIndex === 0) && isScreenFocused && !activeSheet;
-    const isPreloadTarget = effectivePostIndex > effectiveActiveIndex && effectivePostIndex <= effectiveActiveIndex + 2;
+    const isPreloadTarget = false; 
 
     const shouldPreloadVideo = isPreloadTarget;
     const shouldMountVideo = (isCarouselItemActive = true) =>
       isScreenFocused && !activeSheet && (isPostActive || isPreloadTarget) && isCarouselItemActive;
     const renderSensitiveBadge = (label?: string) => (
       <View pointerEvents="none" style={styles.sensitiveBadge}>
-        <Text style={styles.sensitiveBadgeText}>{label ? `${label} sensitive content` : "Sensitive content"}</Text>
+        <Text style={styles.sensitiveBadgeText}>{label ? `${label} sensitive content` : 'Sensitive content'}</Text>
       </View>
     );
 
-    if (post.type !== "carousel") {
+    if (post.type !== 'carousel') {
       const primaryMedia = post.media[0];
       if (!primaryMedia?.url) {
         return <View style={[styles.postImage, styles.mediaFallback, { width: postMediaWidth, height: mediaHeight }]} />;
       }
 
-      if (primaryMedia?.mediaType === "video") {
+      if (primaryMedia?.mediaType === 'video') {
         return (
-          <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
+          <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden' }]}>
             <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
               <SocialVideo
                 uri={normalizeMediaUrl(primaryMedia.url)}
-                posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || "")}
+                posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || '')}
                 style={StyleSheet.absoluteFill}
                 paused={!isPostActive}
                 preload={shouldPreloadVideo}
@@ -1697,7 +1708,7 @@ function FeedScreen({ navigation, route }: any) {
 
       const imageResizeMode = getImageResizeMode(primaryMedia, frameAspectRatio);
       const rawImage = (
-        <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
+        <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden' }]}>
           <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
             <ProgressiveImage
               uri={normalizeMediaUrl(primaryMedia?.url)}
@@ -1744,7 +1755,50 @@ function FeedScreen({ navigation, route }: any) {
           disableIntervalMomentum
           scrollEventThrottle={16}
           showsHorizontalScrollIndicator={false}
+          directionalLockEnabled
+          nestedScrollEnabled
+          onTouchStart={(event: any) => {
+            const { pageX = 0, pageY = 0 } = event?.nativeEvent || {};
+            carouselGestureStartRef.current[post.id] = { x: pageX, y: pageY };
+            carouselGestureIntentRef.current[post.id] = "unknown";
+          }}
+          onTouchMove={(event: any) => {
+            if (carouselGestureIntentRef.current[post.id] !== "unknown") {
+              return;
+            }
+
+            const start = carouselGestureStartRef.current[post.id];
+            if (!start) {
+              return;
+            }
+
+            const { pageX = start.x, pageY = start.y } = event?.nativeEvent || {};
+            const deltaX = Math.abs(pageX - start.x);
+            const deltaY = Math.abs(pageY - start.y);
+
+            if (Math.max(deltaX, deltaY) < 10) {
+              return;
+            }
+
+            carouselGestureIntentRef.current[post.id] = deltaX > deltaY * 1.15 ? "horizontal" : "vertical";
+          }}
+          onTouchEnd={() => {
+            if (carouselGestureIntentRef.current[post.id] === "unknown") {
+              delete carouselGestureStartRef.current[post.id];
+              delete carouselGestureIntentRef.current[post.id];
+            }
+          }}
           onMomentumScrollEnd={(event) => {
+            if (carouselGestureIntentRef.current[post.id] === "vertical") {
+              carouselScrollRefs.current[post.id]?.scrollTo?.({
+                x: currentCarouselIndex * postMediaWidth,
+                animated: false,
+              });
+              delete carouselGestureStartRef.current[post.id];
+              delete carouselGestureIntentRef.current[post.id];
+              return;
+            }
+
             const nextIndex = Math.max(
               0,
               Math.min(
@@ -1753,6 +1807,8 @@ function FeedScreen({ navigation, route }: any) {
               ),
             );
             setCarouselIndexByPostId((prev) => ({ ...prev, [post.id]: nextIndex }));
+            delete carouselGestureStartRef.current[post.id];
+            delete carouselGestureIntentRef.current[post.id];
           }}
         >
           {carouselSlides.map(({ asset, sourceIndex, key }) => {
@@ -1829,6 +1885,13 @@ function FeedScreen({ navigation, route }: any) {
             );
           })}
         </ScrollView>
+        {post.media.length > 1 ? (
+          <View style={styles.carouselBadge}>
+            <Text style={styles.carouselBadgeText}>
+              {currentCarouselIndex + 1}/{post.media.length}
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.carouselIndicatorRow}>
           {post.media.map((asset, index) => (
             <View
@@ -1997,7 +2060,17 @@ const metaLine = tokens.join(" • ");
                   <Icon style={styles.verifiedIcon} name="checkmark-circle" color={FEED_ACCENT} size={16} />
                 ) : null}
               </View>
-              <Text style={[styles.postTime, { color: colors.mutedText }]}>{formatAgo(item.createdAt)}</Text>
+              {item.location ? (
+                <TouchableOpacity onPress={() => openHashtagResults(item.location!)} activeOpacity={0.75}>
+                  <Text
+                    style={[styles.postLocationText, { color: colors.mutedText }]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {item.location}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </TouchableOpacity>
           <View style={styles.postHeaderActions}>
@@ -2197,51 +2270,20 @@ const metaLine = tokens.join(" • ");
           </Text>
         </TouchableOpacity>
 
-        {!item.settings.disableComments ? (
-          <View
-            style={[
-              styles.commentComposer,
-              {
-                marginHorizontal: postBodyInset,
-                borderColor: feedAccentBorder,
-                backgroundColor: feedAccentSoft,
-              },
-            ]}
-          >
-            <TextInput
-              value={commentDrafts[item.id] || ""}
-              onChangeText={(text) => setCommentDrafts((prev) => ({ ...prev, [item.id]: text }))}
-              style={[styles.commentInput, { color: colors.text, fontSize: composerFontSize }]}
-              placeholder="Add a comment..."
-              placeholderTextColor={colors.mutedText}
-            />
-            <TouchableOpacity onPress={() => handleCommentSubmit(item.id)}>
-              <Text style={[styles.postButton, { color: FEED_ACCENT, fontSize: composerFontSize }]}>
-                {isCompactPhone ? "Send" : "Post"}
-              </Text>
-            </TouchableOpacity>
-            <VoiceRecorderButton
-              color={FEED_ACCENT}
-              disabled={isActionBusy[`comment_${item.id}`]}
-              onSend={(voiceFile) => {
-                submitComment(item.id, voiceFile).catch((error) => {
-                  Alert.alert("Could not send voice comment", toUserSafeMessage(error));
-                });
-              }}
-            />
-          </View>
-        ) : (
-          <Text style={[styles.commentsDisabled, { paddingHorizontal: postBodyInset, color: colors.mutedText, fontSize: supportingFontSize }]}>
-            Comments limited for this post
-          </Text>
-        )}
+        <Text style={[styles.postFooterTime, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
+          {formatAgo(item.createdAt)}
+        </Text>
       </View>
     );
   };
 
   const renderInstagramPost = ({ item, index }: { item: Post; index: number }) => {
     if ((item as any)?.__featuredProfiles) {
-      return <FeaturedProfilesCarousel navigation={navigation} title="Featured profiles to follow" />;
+      return (
+        <View style={{ marginHorizontal: feedHorizontalInset, marginBottom: 12 }}>
+          <FeaturedProfilesCarousel navigation={navigation} title="Featured profiles to follow" compact />
+        </View>
+      );
     }
 
     const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
@@ -2311,9 +2353,17 @@ const metaLine = tokens.join(" • ");
                   <Icon style={styles.verifiedIcon} name="checkmark-circle" color={FEED_ACCENT} size={16} />
                 ) : null}
               </View>
-              <Text style={[styles.postTime, { color: colors.mutedText, fontSize: postTimeFontSize }]}>
-                {formatAgo(item.createdAt)}
-              </Text>
+              {item.location ? (
+                <TouchableOpacity onPress={() => openHashtagResults(item.location!)} activeOpacity={0.75}>
+                  <Text
+                    style={[styles.postLocationText, { color: colors.mutedText }]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {item.location}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </TouchableOpacity>
           <View style={styles.postHeaderActions}>
@@ -2521,42 +2571,9 @@ const metaLine = tokens.join(" • ");
           </Text>
         </TouchableOpacity>
 
-        {!item.settings.disableComments ? (
-          <View
-            style={[
-              styles.commentComposer,
-              {
-                marginHorizontal: postBodyInset,
-                borderColor: feedAccentBorder,
-                backgroundColor: feedAccentSoft,
-              },
-            ]}
-          >
-            <TextInput
-              value={commentDrafts[item.id] || ""}
-              onChangeText={(text) => setCommentDrafts((prev) => ({ ...prev, [item.id]: text }))}
-              style={[styles.commentInput, { color: colors.text }]}
-              placeholder="Add a comment..."
-              placeholderTextColor={colors.mutedText}
-            />
-            <TouchableOpacity onPress={() => handleCommentSubmit(item.id)}>
-              <Text style={[styles.postButton, { color: FEED_ACCENT }]}>Post</Text>
-            </TouchableOpacity>
-            <VoiceRecorderButton
-              color={FEED_ACCENT}
-              disabled={isActionBusy[`comment_${item.id}`]}
-              onSend={(voiceFile) => {
-                submitComment(item.id, voiceFile).catch((error) => {
-                  Alert.alert("Could not send voice comment", toUserSafeMessage(error));
-                });
-              }}
-            />
-          </View>
-        ) : (
-          <Text style={[styles.commentsDisabled, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
-            Comments limited for this post
-          </Text>
-        )}
+        <Text style={[styles.postFooterTime, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
+          {formatAgo(item.createdAt)}
+        </Text>
       </View>
     );
   };
@@ -2841,7 +2858,7 @@ const metaLine = tokens.join(" • ");
     ? styles.sidebarStatusAvailable
     : styles.sidebarStatusUnavailable;
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 85,
+    itemVisiblePercentThreshold: 80,
     minimumViewTime: 120,
   }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
@@ -2853,7 +2870,7 @@ const metaLine = tokens.join(" • ");
     )?.item;
     lastViewablePostIdRef.current = firstVisiblePost?.id || "";
     if (firstVisiblePost?.id) {
-      setActivePostId(firstVisiblePost.id);
+      setActivePostId((current) => (current === firstVisiblePost.id ? current : firstVisiblePost.id));
     }
   }).current;
 
@@ -2876,11 +2893,11 @@ const metaLine = tokens.join(" • ");
           ListHeaderComponent={isFocusedPostFeed ? null : renderHeader}
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={Platform.OS === "android"}
-          initialNumToRender={2}
-          maxToRenderPerBatch={2}
-          updateCellsBatchingPeriod={30}
-          windowSize={3}
+          removeClippedSubviews={false}
+          initialNumToRender={4}
+          maxToRenderPerBatch={6}
+          updateCellsBatchingPeriod={50}
+          windowSize={11}
           decelerationRate="normal"
           scrollEventThrottle={16}
           keyboardDismissMode="on-drag"
@@ -3709,7 +3726,7 @@ const styles = StyleSheet.create({
   },
   postCard: {
     marginHorizontal: 14,
-    marginBottom: 12,
+    marginBottom: 20,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 12,
     overflow: "hidden",
@@ -3733,6 +3750,10 @@ const styles = StyleSheet.create({
   usernameText: { flexShrink: 1 },
   verifiedIcon: { marginLeft: 5 },
   postTime: { fontSize: 10.5, color: "#666", marginTop: 1 },
+  postHeaderDot: { fontSize: 11, color: "#666" },
+  postHeaderTime: { fontSize: 11, color: "#666", fontWeight: "400" },
+  postLocationText: { fontSize: 10.5, lineHeight: 13, marginTop: 1, fontWeight: "400" },
+  postFooterTime: { fontSize: 10, lineHeight: 14, marginTop: 6, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.3 },
   moreButton: {
     width: 38,
     height: 38,
@@ -3760,6 +3781,22 @@ const styles = StyleSheet.create({
   carouselIndicatorDotActive: {
     width: 18,
     backgroundColor: "#fff",
+  },
+  carouselBadge: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    backgroundColor: "rgba(15, 23, 42, 0.72)",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 14,
+    zIndex: 10,
+  },
+  carouselBadgeText: {
+    color: "#ffffff",
+    fontSize: 11.5,
+    fontWeight: "600",
+    letterSpacing: 0.4,
   },
   sensitiveBadge: {
     position: "absolute",

@@ -997,8 +997,11 @@ const ChatScreen = ({ navigation, route }: any) => {
 
     requestAnimationFrame(scroll);
     if (!animated) {
-      setTimeout(scroll, 80);
-      setTimeout(scroll, 220);
+      setTimeout(scroll, 50);
+      setTimeout(scroll, 150);
+      setTimeout(scroll, 300);
+      setTimeout(scroll, 500);
+      setTimeout(scroll, 800);
     }
   }, []);
 
@@ -2931,7 +2934,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   paddingVertical: chatMetrics.bubblePaddingY,
                   borderRadius: chatMetrics.bubbleRadius,
                   maxWidth: compactBubbleMaxWidth,
-                  minWidth: replyPreview ? 0 : width < 360 ? 64 : width < 430 ? 76 : 84,
+                  minWidth: replyPreview ? 0 : width < 360 ? 44 : width < 430 ? 52 : 60,
                 } : null,
                 showGroupSender ? styles.groupMessageBubble : null,
                 sharedContent || hasDocumentBubble
@@ -4530,10 +4533,9 @@ const styles = StyleSheet.create({
   messageBubble: {
     padding: 7,
     borderRadius: 16,
-    width: 250,
     maxWidth: "100%",
     minWidth: 0,
-    flexShrink: 0,
+    flexShrink: 1,
     flexGrow: 0,
     overflow: "hidden",
     shadowColor: "#0f172a",

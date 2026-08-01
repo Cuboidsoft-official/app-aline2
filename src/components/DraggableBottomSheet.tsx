@@ -150,7 +150,7 @@ function DraggableBottomSheet({
             styles.sheetWrap,
             {
               height: animatedHeight,
-              marginBottom: keyboardHeight > 0 ? keyboardHeight + 8 : 8,
+              marginBottom: Platform.OS === "ios" ? (keyboardHeight > 0 ? keyboardHeight + 8 : 8) : 8,
               backgroundColor: colors.card,
               borderColor: colors.border,
               shadowColor: isDarkMode ? "#000" : "#0f172a",

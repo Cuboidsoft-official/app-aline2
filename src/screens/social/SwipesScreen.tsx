@@ -1075,6 +1075,8 @@ function SwipesScreen({ navigation, route }: any) {
             resizeMode="contain"
             contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
             showBufferingLoader={false}
+            showProgressBar={isActive}
+            progressBarBottomOffset={bottomDockPadding}
           />
           {item.media.sensitiveContent?.isSensitive ? (
             <View style={styles.sensitiveBadge}>
@@ -1293,9 +1295,13 @@ function SwipesScreen({ navigation, route }: any) {
             styles.sheetWrap,
             activeSheet === "share" && styles.shareSheetWrap,
             {
-              marginBottom: keyboardHeight,
-              minHeight: keyboardHeight > 0 ? 220 : viewportHeight * 0.42,
-              maxHeight: keyboardHeight > 0 ? Math.max(260, viewportHeight - keyboardHeight - 16) : viewportHeight * 0.8,
+              marginBottom: Platform.OS === "ios" ? keyboardHeight : 0,
+              minHeight: keyboardHeight > 0 ? 240 : viewportHeight * 0.4,
+              maxHeight: keyboardHeight > 0
+                ? (Platform.OS === "ios"
+                    ? Math.max(260, viewportHeight - keyboardHeight - 16)
+                    : "100%")
+                : viewportHeight * 0.8,
             },
           ]}
         >

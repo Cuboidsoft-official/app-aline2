@@ -1192,6 +1192,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
         if (!asset?.uri) {
           return;
         }
+        if (!validateChatFileSize(asset.fileSize)) {
+          return;
+        }
 
         try {
           setUploading(true);
@@ -1249,6 +1252,9 @@ const SellerChatScreen = ({ route, navigation }: any) => {
 
         const asset = response.assets?.[0];
         if (!asset?.uri) {
+          return;
+        }
+        if (!validateChatFileSize(asset.fileSize)) {
           return;
         }
 
