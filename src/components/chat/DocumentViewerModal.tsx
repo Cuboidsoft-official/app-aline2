@@ -12,10 +12,12 @@ import {
   SafeAreaView,
   StatusBar,
   Platform,
+  ScrollView,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import Icon from "react-native-vector-icons/Ionicons";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
+import MediaPreviewActionsModal from "./MediaPreviewActionsModal";
 
 interface DocumentViewerModalProps {
   visible: boolean;
@@ -35,6 +37,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [showActionsModal, setShowActionsModal] = useState(false);
 
   const targetUrl = useMemo(() => {
     return normalizeMediaUrl(url || "");
@@ -159,11 +162,11 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 
           <TouchableOpacity
             style={styles.headerButton}
-            onPress={handleOpenExternal}
+            onPress={() => setShowActionsModal(true)}
             activeOpacity={0.7}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Icon name="open-outline" size={22} color="#FFFFFF" />
+            <Icon name="ellipsis-vertical" size={22} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
 
@@ -176,17 +179,28 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             </View>
           ) : isImage ? (
             <View style={styles.imageContainer}>
-              <Image
-                source={{ uri: targetUrl }}
-                style={styles.imagePreview}
-                resizeMode="contain"
-                onLoadStart={() => setLoading(true)}
-                onLoadEnd={() => setLoading(false)}
-                onError={() => {
-                  setLoading(false);
-                  setHasError(true);
-                }}
-              />
+              <ScrollView
+                style={styles.imageScroll}
+                contentContainerStyle={styles.imageScrollContent}
+                minimumZoomScale={1}
+                maximumZoomScale={4}
+                showsHorizontalScrollIndicator={false}
+                showsVerticalScrollIndicator={false}
+                bouncesZoom={true}
+                centerContent={true}
+              >
+                <Image
+                  source={{ uri: targetUrl }}
+                  style={styles.imagePreview}
+                  resizeMode="contain"
+                  onLoadStart={() => setLoading(true)}
+                  onLoadEnd={() => setLoading(false)}
+                  onError={() => {
+                    setLoading(false);
+                    setHasError(true);
+                  }}
+                />
+              </ScrollView>
             </View>
           ) : (
             <WebView
@@ -200,6 +214,10 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
               allowFileAccessFromFileURLs
               allowUniversalAccessFromFileURLs
               originWhitelist={["*"]}
+              scalesPageToFit={true}
+              pinchGestureEnabled={true}
+              setBuiltInZoomControls={true}
+              setDisplayZoomControls={false}
               onLoadStart={() => {
                 setLoading(true);
                 setHasError(false);
@@ -251,6 +269,12 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             </View>
           )}
         </View>
+        <MediaPreviewActionsModal
+          visible={showActionsModal}
+          onClose={() => setShowActionsModal(false)}
+          mediaUrl={targetUrl}
+          fileName={displayName}
+        />
       </SafeAreaView>
     </Modal>
   );
@@ -310,6 +334,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#000000",
+  },
+  imageScroll: {
+    flex: 1,
+    width: "100%",
+  },
+  imageScrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
   imagePreview: {
     width: "100%",

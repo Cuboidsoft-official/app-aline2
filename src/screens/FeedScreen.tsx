@@ -1749,56 +1749,12 @@ function FeedScreen({ navigation, route }: any) {
             carouselScrollRefs.current[post.id] = node;
           }}
           horizontal
-          snapToInterval={postMediaWidth}
-          snapToAlignment="center"
-          decelerationRate="fast"
-          disableIntervalMomentum
-          scrollEventThrottle={16}
+          pagingEnabled
           showsHorizontalScrollIndicator={false}
-          directionalLockEnabled
           nestedScrollEnabled
-          onTouchStart={(event: any) => {
-            const { pageX = 0, pageY = 0 } = event?.nativeEvent || {};
-            carouselGestureStartRef.current[post.id] = { x: pageX, y: pageY };
-            carouselGestureIntentRef.current[post.id] = "unknown";
-          }}
-          onTouchMove={(event: any) => {
-            if (carouselGestureIntentRef.current[post.id] !== "unknown") {
-              return;
-            }
-
-            const start = carouselGestureStartRef.current[post.id];
-            if (!start) {
-              return;
-            }
-
-            const { pageX = start.x, pageY = start.y } = event?.nativeEvent || {};
-            const deltaX = Math.abs(pageX - start.x);
-            const deltaY = Math.abs(pageY - start.y);
-
-            if (Math.max(deltaX, deltaY) < 10) {
-              return;
-            }
-
-            carouselGestureIntentRef.current[post.id] = deltaX > deltaY * 1.15 ? "horizontal" : "vertical";
-          }}
-          onTouchEnd={() => {
-            if (carouselGestureIntentRef.current[post.id] === "unknown") {
-              delete carouselGestureStartRef.current[post.id];
-              delete carouselGestureIntentRef.current[post.id];
-            }
-          }}
+          scrollEventThrottle={16}
+          decelerationRate="fast"
           onMomentumScrollEnd={(event) => {
-            if (carouselGestureIntentRef.current[post.id] === "vertical") {
-              carouselScrollRefs.current[post.id]?.scrollTo?.({
-                x: currentCarouselIndex * postMediaWidth,
-                animated: false,
-              });
-              delete carouselGestureStartRef.current[post.id];
-              delete carouselGestureIntentRef.current[post.id];
-              return;
-            }
-
             const nextIndex = Math.max(
               0,
               Math.min(
@@ -1807,8 +1763,16 @@ function FeedScreen({ navigation, route }: any) {
               ),
             );
             setCarouselIndexByPostId((prev) => ({ ...prev, [post.id]: nextIndex }));
-            delete carouselGestureStartRef.current[post.id];
-            delete carouselGestureIntentRef.current[post.id];
+          }}
+          onScrollEndDrag={(event) => {
+            const nextIndex = Math.max(
+              0,
+              Math.min(
+                post.media.length - 1,
+                Math.round(Number(event?.nativeEvent?.contentOffset?.x || 0) / Math.max(1, postMediaWidth)),
+              ),
+            );
+            setCarouselIndexByPostId((prev) => ({ ...prev, [post.id]: nextIndex }));
           }}
         >
           {carouselSlides.map(({ asset, sourceIndex, key }) => {

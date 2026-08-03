@@ -954,7 +954,7 @@ function StoryViewerScreen({ route, navigation }: any) {
         onPressOut={() => setPaused(false)}
       />
 
-      <View style={[styles.bottomSheet, { paddingBottom: Math.max(insets.bottom + 34, 58), marginBottom: storyKeyboardInset }]}>
+      <View style={[styles.bottomSheet, { paddingBottom: keyboardHeight > 0 ? 8 : Math.max(insets.bottom + 34, 58), marginBottom: storyKeyboardInset }]}>
         {renderStoryOverlay()}
 
         {!currentStory.isOwner && canReplyToCurrentStory ? (

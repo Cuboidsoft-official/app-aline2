@@ -76,6 +76,10 @@ function DraggableBottomSheet({
   }, []);
 
   const maxHeight = Math.max(minHeight + 40, Math.floor(windowHeight * maxHeightRatio));
+  const availableKeyboardHeight = keyboardHeight > 0
+    ? Math.max(200, windowHeight - keyboardHeight - 24)
+    : maxHeight;
+  const activeMaxHeight = Math.min(maxHeight, availableKeyboardHeight);
 
   const sheetHeights = useMemo(() => {
     const values = snapPoints

@@ -92,6 +92,7 @@ import SocialVideo from "../features/social/components/SocialVideo";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { showModerationBlockedSheet } from "../utils/moderationNotice";
 import DocumentViewerModal from "../components/chat/DocumentViewerModal";
+import MediaPreviewActionsModal from "../components/chat/MediaPreviewActionsModal";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../utils/mentionComposer";
@@ -980,6 +981,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
   const [documentPreview, setDocumentPreview] = useState<{ url: string; fileName?: string } | null>(null);
+  const [showPreviewActionsModal, setShowPreviewActionsModal] = useState(false);
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
   const [showAssistant, setShowAssistant] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState("");
@@ -1870,7 +1872,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     Math.max(134, Math.round(width * 0.38)),
     Math.round(width * 0.66),
   );
-  const compactBubbleMaxWidth = width < 360 ? "82%" : width < 430 ? "78%" : "74%";
+  const compactBubbleMaxWidth = width < 360 ? "76%" : width < 430 ? "69%" : "65%";
   const wideContentBubbleMaxWidth = width < 360 ? "86%" : width < 430 ? "82%" : "78%";
   const callEventBubbleWidth = Math.min(Math.max(Math.round(width * 0.52), 164), 216);
   const mediaBubbleWidth = Math.min(width * 0.56, 192);
@@ -5190,12 +5192,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 24,
   },
+  previewActionsButton: {
+    position: "absolute",
+    top: 48,
+    right: 18,
+    zIndex: 2,
+    padding: 6,
+  },
   previewCloseButton: {
     position: "absolute",
     top: 48,
     right: 18,
     zIndex: 2,
     padding: 6,
+  },
+  zoomScrollView: {
+    flex: 1,
+    width: "100%",
+  },
+  zoomScrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
   previewImage: {
     width: "100%",

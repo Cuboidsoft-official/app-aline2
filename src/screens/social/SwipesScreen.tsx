@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Dimensions,
   Easing,
   LayoutChangeEvent,
@@ -157,12 +158,14 @@ function SwipesScreen({ navigation, route }: any) {
   const [hasMoreSwipes, setHasMoreSwipes] = useState(true);
   const [expandedCaptionIds, setExpandedCaptionIds] = useState<Record<string, boolean>>({});
   const [isSwipeSoundEnabled, setIsSwipeSoundEnabled] = useState(true);
+  const [isUserPaused, setIsUserPaused] = useState(false);
   const [activeSwipeIndex, setActiveSwipeIndex] = useState(0);
   const [activeSwipePlaybackCycle, setActiveSwipePlaybackCycle] = useState(0);
   const [likeBurstSwipeId, setLikeBurstSwipeId] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentUser, setCurrentUser] = useState<CurrentSwipeUser | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const likeScaleAnim = useRef(new Animated.Value(1)).current;
   const sheetMentionQuery = getActiveMentionQuery(sheetDraft);
   const isScreenFocused = useIsFocused();
 
@@ -927,8 +930,23 @@ function SwipesScreen({ navigation, route }: any) {
     }
   };
 
+  useEffect(() => {
+    setIsUserPaused(false);
+  }, [activeSwipeIndex]);
+
+    const animateLike = useCallback(() => {
+    likeScaleAnim.setValue(0.7);
+    Animated.spring(likeScaleAnim, {
+      toValue: 1,
+      friction: 3,
+      tension: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [likeScaleAnim]);
+
   const triggerSwipeLikeBurst = useCallback((swipeId: string) => {
     setLikeBurstSwipeId(swipeId);
+    animateLike();
     setTimeout(() => {
       setLikeBurstSwipeId((current) => (current === swipeId ? "" : current));
     }, 720);
@@ -1062,7 +1080,7 @@ function SwipesScreen({ navigation, route }: any) {
             uri={normalizeMediaUrl(item.media.url)}
             posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
             style={styles.swipeMedia}
-            paused={!isActive || !!activeSheet || !isScreenFocused}
+            paused={!isActive || !!activeSheet || !isScreenFocused || (isActive && isUserPaused)}
             muted={!isActive || !isSwipePlaybackEnabled}
             repeat
             restartKey={item.id}
@@ -1696,6 +1714,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "800",
     textAlign: "center",
+  },
+  pauseOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.18)",
+    zIndex: 10,
+  },
+  pauseIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "rgba(0,0,0,0.52)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingLeft: 4,
   },
   likeBurstOverlay: {
     ...StyleSheet.absoluteFillObject,
