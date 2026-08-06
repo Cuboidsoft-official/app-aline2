@@ -76,10 +76,6 @@ function DraggableBottomSheet({
   }, []);
 
   const maxHeight = Math.max(minHeight + 40, Math.floor(windowHeight * maxHeightRatio));
-  const availableKeyboardHeight = keyboardHeight > 0
-    ? Math.max(200, windowHeight - keyboardHeight - 24)
-    : maxHeight;
-  const activeMaxHeight = Math.min(maxHeight, availableKeyboardHeight);
 
   const sheetHeights = useMemo(() => {
     const values = snapPoints
@@ -154,7 +150,7 @@ function DraggableBottomSheet({
             styles.sheetWrap,
             {
               height: animatedHeight,
-              marginBottom: Platform.OS === "ios" ? (keyboardHeight > 0 ? keyboardHeight + 8 : 8) : 8,
+              marginBottom: keyboardHeight > 0 ? keyboardHeight + 8 : 8,
               backgroundColor: colors.card,
               borderColor: colors.border,
               shadowColor: isDarkMode ? "#000" : "#0f172a",

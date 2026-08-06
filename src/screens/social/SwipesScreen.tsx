@@ -1345,12 +1345,10 @@ function SwipesScreen({ navigation, route }: any) {
             styles.sheetWrap,
             activeSheet === "share" && styles.shareSheetWrap,
             {
-              marginBottom: Platform.OS === "ios" ? keyboardHeight : 0,
+              marginBottom: keyboardHeight > 0 ? keyboardHeight : 0,
               minHeight: keyboardHeight > 0 ? 240 : viewportHeight * 0.4,
               maxHeight: keyboardHeight > 0
-                ? (Platform.OS === "ios"
-                    ? Math.max(260, viewportHeight - keyboardHeight - 16)
-                    : "100%")
+                ? Math.max(260, viewportHeight - keyboardHeight - 16)
                 : viewportHeight * 0.8,
             },
           ]}

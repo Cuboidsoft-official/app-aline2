@@ -320,12 +320,10 @@ function CommentThreadSheet({
         style={[
           styles.sheetWrap,
           {
-            marginBottom: Platform.OS === "ios" ? keyboardHeight : 0,
+            marginBottom: keyboardHeight > 0 ? keyboardHeight : 0,
             minHeight: keyboardHeight > 0 ? 220 : 420,
             maxHeight: keyboardHeight > 0
-              ? (Platform.OS === "ios"
-                  ? Math.max(240, windowHeight - keyboardHeight - 16)
-                  : "100%")
+              ? Math.max(240, windowHeight - keyboardHeight - 16)
               : "88%",
           },
         ]}
