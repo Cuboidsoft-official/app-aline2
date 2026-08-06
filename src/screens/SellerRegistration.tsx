@@ -612,22 +612,13 @@ const SellerRegistration = ({ navigation, route }: any) => {
   };
 
   const handleKycCheck = () => {
-    if (
-      !aadhaar.trim()
-      || !pan.trim()
-      || !bankAccountName.trim()
-      || !bankAccountNumber.trim()
-      || !bankIfsc.trim()
-      || !aadhaarDoc
-      || !panDoc
-      || !idProof
-    ) {
-      Alert.alert("KYC", "Complete Aadhaar, PAN, bank details, and uploads first.");
+    if (!aadhaar.trim() || !aadhaarDoc) {
+      Alert.alert("KYC", "Complete Aadhaar details and upload first.");
       return;
     }
 
     setKycChecked(true);
-    Alert.alert("Checked", "KYC and bank details are ready for review.");
+    Alert.alert("Checked", "Identity details are ready for review.");
   };
 
   const validateCurrentStep = () => {
@@ -673,16 +664,16 @@ const SellerRegistration = ({ navigation, route }: any) => {
     }
 
     if (step === 4) {
-      if (!aadhaar.trim() || !pan.trim() || !bankAccountName.trim() || !bankAccountNumber.trim() || !bankIfsc.trim()) {
-        Alert.alert("Validation", "Please complete Aadhaar, PAN, and bank details.");
+      if (!aadhaar.trim()) {
+        Alert.alert("Validation", "Please enter Aadhaar number.");
         return false;
       }
-      if (!aadhaarDoc || !panDoc || !idProof) {
-        Alert.alert("Validation", "Please upload Aadhaar, PAN, and bank proof.");
+      if (!aadhaarDoc) {
+        Alert.alert("Validation", "Please upload Aadhaar document.");
         return false;
       }
       if (!kycChecked) {
-        Alert.alert("Validation", "Tap Check on KYC before continuing.");
+        Alert.alert("Validation", "Tap Check on Identity details before continuing.");
         return false;
       }
     }
@@ -1234,34 +1225,17 @@ const SellerRegistration = ({ navigation, route }: any) => {
     if (step === 4) {
       return (
         <>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Aadhaar, PAN, bank details</Text>
-          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Complete KYC and payout details.</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Aadhaar & Identity details</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Complete identity verification details.</Text>
 
           <Text style={[styles.label, { color: colors.text }]}>Aadhaar number</Text>
           <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={aadhaar} onChangeText={(text) => { setAadhaar(text); setKycChecked(false); }} placeholder="XXXX XXXX XXXX" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
 
-          <Text style={[styles.label, { color: colors.text }]}>PAN number</Text>
-          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={pan} onChangeText={(text) => { setPan(text.toUpperCase()); setKycChecked(false); }} placeholder="ABCDE1234F" placeholderTextColor={colors.placeholder} autoCapitalize="characters" />
-
-          <Text style={[styles.label, { color: colors.text }]}>Account holder</Text>
-          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={bankAccountName} onChangeText={(text) => { setBankAccountName(text); setKycChecked(false); }} placeholder="Account holder name" placeholderTextColor={colors.placeholder} />
-
-          <Text style={[styles.label, { color: colors.text }]}>Account number</Text>
-          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={bankAccountNumber} onChangeText={(text) => { setBankAccountNumber(text); setKycChecked(false); }} placeholder="Bank account number" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
-
-          <Text style={[styles.label, { color: colors.text }]}>IFSC</Text>
-          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={bankIfsc} onChangeText={(text) => { setBankIfsc(text.toUpperCase()); setKycChecked(false); }} placeholder="IFSC code" placeholderTextColor={colors.placeholder} autoCapitalize="characters" />
-
-          <Text style={[styles.label, { color: colors.text }]}>Bank name</Text>
-          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={bankName} onChangeText={setBankName} placeholder="Bank name" placeholderTextColor={colors.placeholder} />
-
           {renderUpload("Aadhaar upload", aadhaarDoc, (file) => { setAadhaarDoc(file); setKycChecked(false); })}
-          {renderUpload("PAN upload", panDoc, (file) => { setPanDoc(file); setKycChecked(false); })}
-          {renderUpload("Bank proof", idProof, (file) => { setIdProof(file); setKycChecked(false); })}
 
           <TouchableOpacity style={[styles.checkButton, kycChecked && styles.checkButtonDone]} onPress={handleKycCheck}>
             <Icon name={kycChecked ? "checkmark-circle" : "card-outline"} size={18} color="#fff" />
-            <Text style={styles.checkButtonText}>{kycChecked ? "Checked" : "Check KYC"}</Text>
+            <Text style={styles.checkButtonText}>{kycChecked ? "Checked" : "Check details"}</Text>
           </TouchableOpacity>
         </>
       );

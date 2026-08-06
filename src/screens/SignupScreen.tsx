@@ -22,6 +22,7 @@ const SignupScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
 
   const [email, setEmail] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [loading, setLoading] = useState(false);
 
   const goToLogin = (params?: Record<string, any>) => {
@@ -36,6 +37,7 @@ const SignupScreen = ({ navigation }: any) => {
   const sendOtp = async () => {
 
     const cleanEmail = email.trim().toLowerCase();
+    const cleanRefCode = referralCode.trim().toUpperCase();
 
     if (!cleanEmail) {
       Alert.alert("Error", "Please enter email");
@@ -61,6 +63,7 @@ const SignupScreen = ({ navigation }: any) => {
         navigation.navigate("OtpVerify", {
           email: cleanEmail,
           purpose: "signup",
+          referralCode: cleanRefCode,
         });
 
       } else {
@@ -126,6 +129,16 @@ const SignupScreen = ({ navigation }: any) => {
           autoCapitalize="none"
           autoCorrect={false}
           textContentType="emailAddress"
+        />
+
+        <TextInput
+          placeholder="Referral Code (Optional)"
+          value={referralCode}
+          onChangeText={setReferralCode}
+          style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface, marginTop: 12 }]}
+          placeholderTextColor={colors.placeholder}
+          autoCapitalize="characters"
+          autoCorrect={false}
         />
 
         <TouchableOpacity

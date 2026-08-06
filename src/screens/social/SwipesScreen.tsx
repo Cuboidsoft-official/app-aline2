@@ -159,6 +159,24 @@ function SwipesScreen({ navigation, route }: any) {
   const [expandedCaptionIds, setExpandedCaptionIds] = useState<Record<string, boolean>>({});
   const [isSwipeSoundEnabled, setIsSwipeSoundEnabled] = useState(true);
   const [isUserPaused, setIsUserPaused] = useState(false);
+  const [isHoldingToPause, setIsHoldingToPause] = useState(false);
+  const holdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSwipePressIn = useCallback(() => {
+    if (holdTimeoutRef.current) {
+      clearTimeout(holdTimeoutRef.current);
+    }
+    holdTimeoutRef.current = setTimeout(() => {
+      setIsHoldingToPause(true);
+    }, 220);
+  }, []);
+
+  const handleSwipePressOut = useCallback(() => {
+    if (holdTimeoutRef.current) {
+      clearTimeout(holdTimeoutRef.current);
+    }
+    setIsHoldingToPause(false);
+  }, []);
   const [activeSwipeIndex, setActiveSwipeIndex] = useState(0);
   const [activeSwipePlaybackCycle, setActiveSwipePlaybackCycle] = useState(0);
   const [likeBurstSwipeId, setLikeBurstSwipeId] = useState("");
@@ -967,7 +985,7 @@ function SwipesScreen({ navigation, route }: any) {
     }
 
     const timeout = setTimeout(() => {
-      setIsSwipeSoundEnabled((current) => !current);
+      setIsUserPaused((current) => !current);
       swipeTapRef.current = { id: "", time: 0, timeout: null };
     }, 130);
 
@@ -1075,27 +1093,34 @@ function SwipesScreen({ navigation, route }: any) {
 
     return (
       <View style={[styles.swipeItem, { height: viewportHeight }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={() => handleSwipeMediaTap(item)}>
-          <SocialVideo
-            uri={normalizeMediaUrl(item.media.url)}
-            posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
-            style={styles.swipeMedia}
-            paused={!isActive || !!activeSheet || !isScreenFocused || (isActive && isUserPaused)}
-            muted={!isActive || !isSwipePlaybackEnabled}
-            repeat
-            restartKey={item.id}
-            onEnd={() => {
-              if (isActive && hasAttachedMusic) {
-                setActiveSwipePlaybackCycle((cycle) => cycle + 1);
-              }
-            }}
-            preload={isPreloadTarget}
-            resizeMode="contain"
-            contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
-            showBufferingLoader={false}
-            showProgressBar={isActive}
-            progressBarBottomOffset={bottomDockPadding}
-          />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => handleSwipeMediaTap(item)}
+          onPressIn={handleSwipePressIn}
+          onPressOut={handleSwipePressOut}
+        >
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            <SocialVideo
+              uri={normalizeMediaUrl(item.media.url)}
+              posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
+              style={styles.swipeMedia}
+              paused={!isActive || !!activeSheet || !isScreenFocused || (isActive && (isUserPaused || isHoldingToPause))}
+              muted={!isActive || !isSwipePlaybackEnabled}
+              repeat
+              restartKey={item.id}
+              onEnd={() => {
+                if (isActive && hasAttachedMusic) {
+                  setActiveSwipePlaybackCycle((cycle) => cycle + 1);
+                }
+              }}
+              preload={isPreloadTarget}
+              resizeMode="contain"
+              contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
+              showBufferingLoader={false}
+              showProgressBar={isActive}
+              progressBarBottomOffset={bottomDockPadding}
+            />
+          </View>
           {item.media.sensitiveContent?.isSensitive ? (
             <View style={styles.sensitiveBadge}>
               <Text style={styles.sensitiveBadgeText}>
@@ -1109,11 +1134,18 @@ function SwipesScreen({ navigation, route }: any) {
               <Icon name="heart" size={92} color="rgba(255,255,255,0.92)" />
             </View>
           ) : null}
+          {isActive && isUserPaused && !isHoldingToPause ? (
+            <View pointerEvents="none" style={styles.pausedPlayOverlay}>
+              <View style={styles.pausedPlayCircle}>
+                <Icon name="play" size={42} color="#FFFFFF" style={{ marginLeft: 4 }} />
+              </View>
+            </View>
+          ) : null}
         </Pressable>
-        <LinearGradient colors={["rgba(0,0,0,0.74)", "rgba(0,0,0,0.12)", "transparent"]} style={styles.topGradient} />
-        <LinearGradient colors={["transparent", "rgba(0,0,0,0.42)", "rgba(0,0,0,0.88)"]} style={styles.bottomGradient} />
-        <View style={[styles.overlay, { paddingBottom: bottomDockPadding + 12 }]}>
-          <View style={styles.topBar}>
+        <LinearGradient pointerEvents="none" colors={["rgba(0,0,0,0.74)", "rgba(0,0,0,0.12)", "transparent"]} style={styles.topGradient} />
+        <LinearGradient pointerEvents="none" colors={["transparent", "rgba(0,0,0,0.42)", "rgba(0,0,0,0.88)"]} style={styles.bottomGradient} />
+        <View pointerEvents="box-none" style={[styles.overlay, { paddingBottom: bottomDockPadding + 12 }, isHoldingToPause && { opacity: 0 }]}>
+          <View pointerEvents="box-none" style={styles.topBar}>
             <Text style={styles.screenTitle}>Swipes</Text>
             <TouchableOpacity style={styles.createButton} onPress={openSwipeComposer}>
               <LinearGradient colors={["rgba(255,255,255,0.14)", "rgba(255,255,255,0.04)"]} style={styles.createButtonGradient}>
@@ -1122,8 +1154,8 @@ function SwipesScreen({ navigation, route }: any) {
               </LinearGradient>
             </TouchableOpacity>
           </View>
-          <View style={styles.bottomRow}>
-            <View style={styles.bottomTextBlock}>
+          <View pointerEvents="box-none" style={styles.bottomRow}>
+            <View pointerEvents="box-none" style={styles.bottomTextBlock}>
               <View style={styles.userMetaBlock}>
                 <TouchableOpacity style={styles.userAvatarButton} onPress={() => openUserProfile(item.user.id)}>
                   <Image source={{ uri: item.user.avatarUrl }} style={styles.userAvatar} />
@@ -1219,7 +1251,7 @@ function SwipesScreen({ navigation, route }: any) {
             </View>
           </View>
 
-          <View style={[styles.actionRail, { top: Math.max(116, Math.round(viewportHeight * 0.36) - 112) }]}>
+          <View style={styles.actionRail}>
             <TouchableOpacity style={styles.actionButton} onPress={() => handleLike(item.id)}>
               <Icon name={item.liked ? "heart" : "heart-outline"} size={28} color={item.liked ? "#ff4f73" : "#fff"} />
               <Text style={styles.actionText}>{formatCount(item.likesCount)}</Text>
@@ -1862,10 +1894,13 @@ const styles = StyleSheet.create({
   },
   actionRail: {
     position: "absolute",
-    right: 9,
+    right: 10,
+    top: "50%",
+    transform: [{ translateY: -70 }],
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 12,
+    zIndex: 20,
   },
   actionButton: {
     alignItems: "center",
@@ -2102,6 +2137,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   reportButtonText: { color: "#fff", fontWeight: "700" },
+  pausedPlayOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 15,
+  },
+  pausedPlayCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.35)",
+  },
 });
 
 export default SwipesScreen;

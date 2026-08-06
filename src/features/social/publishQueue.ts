@@ -10,12 +10,20 @@ export type PublishQueueTask = {
   message: string;
   progress: number;
   status: PublishQueueStatus;
+  result?: PublishTaskResult;
   error?: string;
   createdAt: number;
   updatedAt: number;
 };
 
 type PublishQueueListener = (tasks: PublishQueueTask[]) => void;
+
+export type PublishTaskResult = {
+  postId?: string;
+  post?: unknown;
+  storyId?: string;
+  swipeId?: string;
+};
 
 type PublishTaskRunnerControls = {
   setProgress: (progress: number, message: string, status?: PublishQueueStatus) => void;
@@ -24,7 +32,7 @@ type PublishTaskRunnerControls = {
 type StartPublishTaskInput = {
   mode: PublishQueueMode;
   label: string;
-  run: (controls: PublishTaskRunnerControls) => Promise<void>;
+  run: (controls: PublishTaskRunnerControls) => Promise<PublishTaskResult | void>;
 };
 
 let publishTasks: PublishQueueTask[] = [];
@@ -96,11 +104,12 @@ export const startPublishTask = ({ mode, label, run }: StartPublishTaskInput) =>
 
   void (async () => {
     try {
-      await run({ setProgress });
+      const result = await run({ setProgress });
       updateTask(taskId, (task) => ({
         ...task,
         progress: 1,
         status: "success",
+        result: result || undefined,
         message: `${label} uploaded`,
         error: undefined,
         updatedAt: Date.now(),

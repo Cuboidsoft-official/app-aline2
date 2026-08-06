@@ -2728,9 +2728,10 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
 
     if (isImageMessage(message)) {
-      setMessagePreview({
-        imageUrl: normalizeMediaUrl(attachment.url),
-        title: getAttachmentDisplayName(message),
+      const imgUrl = normalizeMediaUrl(attachment.url);
+      setDocumentPreview({
+        url: imgUrl,
+        fileName: getAttachmentDisplayName(message) || "Photo",
       });
       return;
     }
@@ -2738,10 +2739,9 @@ const ChatScreen = ({ navigation, route }: any) => {
     if (isVideoMessage(message)) {
       const videoUrl = normalizeMediaUrl(attachment?.url || (message as any)?.mediaUrl);
       if (videoUrl) {
-        setMessagePreview({
-          imageUrl: attachment?.thumbnailUrl ? normalizeMediaUrl(attachment.thumbnailUrl) : undefined,
-          videoUrl,
-          title: getAttachmentDisplayName(message),
+        setDocumentPreview({
+          url: videoUrl,
+          fileName: getAttachmentDisplayName(message) || "Video",
         });
       } else {
         openAttachmentUrl(attachment?.url, "This video could not be opened right now.");
@@ -2798,7 +2798,27 @@ const ChatScreen = ({ navigation, route }: any) => {
     const sharedContent = parseSharedContentMessage(item);
     const callEvent = buildCallEventPreview(item, currentUserId);
     const scheduledCall = buildScheduledCallPreview(item);
-    const sharedMedia = Array.isArray(sharedContent?.media) ? sharedContent.media[0] : null;
+    const sharedUser = sharedContent?.user || (sharedContent as any)?.author || (sharedContent as any)?.owner || (sharedContent as any)?.creator || (sharedContent as any)?.post?.user || (sharedContent as any)?.swipe?.user;
+    const sharedMediaUrl = (() => {
+      if (!sharedContent) return "";
+      if (Array.isArray(sharedContent?.media) && sharedContent.media.length > 0) {
+        const m = sharedContent.media[0];
+        return String(m?.thumbnailUrl || m?.url || m?.previewUrl || "").trim();
+      }
+      if (sharedContent?.media && typeof sharedContent.media === "object") {
+        const m = sharedContent.media as any;
+        return String(m?.thumbnailUrl || m?.url || m?.previewUrl || "").trim();
+      }
+      const direct = String(sharedContent?.thumbnailUrl || sharedContent?.url || sharedContent?.mediaUrl || sharedContent?.image || (sharedContent as any)?.coverUrl || "").trim();
+      if (direct) return direct;
+      if (attachment) {
+        const att = String(attachment?.thumbnailUrl || attachment?.url || "").trim();
+        if (att) return att;
+      }
+      return "";
+    })();
+    const sharedContentCaption = String(sharedContent?.caption || (sharedContent as any)?.text || (sharedContent as any)?.post?.caption || "").trim();
+    const sharedAuthorUsername = String(sharedUser?.username || sharedUser?.name || sharedUser?.handle || "").trim().replace(/^@/, "");
     const locationPayload = parseLocationMessage(textValue);
     const linkPreview = item?.linkPreview || null;
     const seenCount = Array.isArray(item?.seenBy) ? item.seenBy.length : 0;
@@ -2828,7 +2848,15 @@ const ChatScreen = ({ navigation, route }: any) => {
     const hasVoiceBubble = (isAudioMessage(item) || item?.messageType === "voice") && attachment?.url;
     const hasVideoBubble = !hasVoiceBubble && isVideoMessage(item) && (attachment?.thumbnailUrl || attachment?.url);
     const hasDocumentBubble = isDocumentMessage(item) && attachment?.url;
+    const isCardBubble = Boolean(sharedContent || hasDocumentBubble || locationPayload);
     const isGifBubble = String(item?.messageType || "").trim().toLowerCase() === "gif";
+    const isStickerBubble =
+      String(item?.messageType || "").trim().toLowerCase() === "sticker"
+      || String((attachment as any)?.mimeType || "").trim().toLowerCase().includes("sticker")
+      || String(attachment?.url || "").toLowerCase().includes("sticker")
+      || String(attachment?.url || "").toLowerCase().includes("emoji")
+      || String((attachment as any)?.name || "").toLowerCase().includes("sticker")
+      || String((attachment as any)?.name || "").toLowerCase().includes("emoji");
     const mediaBubbleKind = !callEvent && !locationPayload && !sharedContent
       ? hasImageBubble
         ? "image"
@@ -2840,10 +2868,11 @@ const ChatScreen = ({ navigation, route }: any) => {
       : null;
     const isMediaBubble = Boolean(mediaBubbleKind);
     const attachmentLabel = getAttachmentDisplayName(item);
+    const isRawSharedContentString = textValue.startsWith("[SHARED_CONTENT]");
     const shouldRenderMessageText =
       !locationPayload
-      && !sharedContent
       && !callEvent
+      && !isRawSharedContentString
       && !!textValue
       && (!isMediaBubble || !isGenericAttachmentText(textValue, attachmentLabel));
     let swipeableRef: Swipeable | null = null;
@@ -2907,7 +2936,11 @@ const ChatScreen = ({ navigation, route }: any) => {
             style={[
               styles.messageContentColumn,
               isMine ? styles.messageContentColumnMine : styles.messageContentColumnOther,
-              showGroupSender ? [styles.groupMessageColumn, { maxWidth: chatMetrics.wideBubbleMaxWidth }] : { maxWidth: chatMetrics.wideBubbleMaxWidth },
+              isCardBubble
+                ? { maxWidth: Math.min(width * 0.82, 310) }
+                : showGroupSender
+                  ? [styles.groupMessageColumn, { maxWidth: chatMetrics.wideBubbleMaxWidth }]
+                  : { maxWidth: chatMetrics.wideBubbleMaxWidth },
             ]}
           >
             {showGroupSender ? (
@@ -2931,16 +2964,19 @@ const ChatScreen = ({ navigation, route }: any) => {
               style={[
                 styles.messageBubble,
                 isMine ? styles.messageBubbleMineAligned : styles.messageBubbleOtherAligned,
-                !callEvent && !scheduledCall && !isEmojiOnly && !isMediaBubble ? {
+                !callEvent && !scheduledCall && !isEmojiOnly && !isMediaBubble && !isCardBubble ? {
                   paddingHorizontal: chatMetrics.bubblePaddingX,
                   paddingVertical: chatMetrics.bubblePaddingY,
                   borderRadius: chatMetrics.bubbleRadius,
                   maxWidth: compactBubbleMaxWidth,
-                  minWidth: replyPreview ? 0 : width < 360 ? 44 : width < 430 ? 52 : 60,
+                  minWidth: replyPreview ? 140 : 80,
+                } : isCardBubble ? {
+                  padding: 4,
+                  borderRadius: 16,
                 } : null,
                 showGroupSender ? styles.groupMessageBubble : null,
-                sharedContent || hasDocumentBubble
-                  ? [styles.messageBubbleWide, { maxWidth: wideContentBubbleMaxWidth, minWidth: Math.min(width * 0.65, 230) }]
+                sharedContent || hasDocumentBubble || locationPayload
+                  ? [styles.messageBubbleWide, { maxWidth: Math.min(width * 0.82, 310), minWidth: Math.min(width * 0.74, 260), width: "100%" }]
                   : null,
                 (callEvent || scheduledCall)
                   ? [
@@ -3007,7 +3043,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   if (sharedContent?.kind === "story" && sharedContent?.storyId) {
                     navigation.navigate("StoryViewer", {
                       storyId: sharedContent.storyId,
-                      storyUserId: sharedContent?.user?.id,
+                      storyUserId: sharedUser?.id,
                     });
                   }
                 }}
@@ -3015,16 +3051,16 @@ const ChatScreen = ({ navigation, route }: any) => {
               >
                 <View style={styles.sharedPostHeader}>
                   <AppAvatar
-                    uri={normalizeMediaUrl(sharedContent?.user?.avatarUrl || DEFAULT_AVATAR_URL)}
-                    name={sharedContent?.user?.name || sharedContent?.user?.username || "Aline2"}
+                    uri={normalizeMediaUrl(sharedUser?.avatarUrl || sharedUser?.avatar || DEFAULT_AVATAR_URL)}
+                    name={sharedUser?.name || sharedUser?.username || "Aline2"}
                     size={30}
                     style={styles.sharedPostAvatar}
                   />
                   <View style={styles.sharedPostMeta}>
                     <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]} numberOfLines={1}>
-                      {sharedContent?.user?.username
-                        ? `@${sharedContent.user.username}`
-                        : sharedContent?.user?.name || (sharedContent?.kind === "story" ? "Aline2 story" : "Aline2 post")}
+                      {sharedAuthorUsername
+                        ? `@${sharedAuthorUsername}`
+                        : sharedUser?.name || (sharedContent?.kind === "story" ? "Aline2 story" : sharedContent?.kind === "swipe" ? "Aline2 swipe" : "Aline2 post")}
                     </Text>
                     <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : null, { fontSize: chatMetrics.metaFontSize }]} numberOfLines={1}>
                       {sharedContent?.kind === "story"
@@ -3046,17 +3082,17 @@ const ChatScreen = ({ navigation, route }: any) => {
                   </Text>
                 ) : null}
 
-                {sharedMedia?.url || sharedMedia?.thumbnailUrl ? (
+                {sharedMediaUrl ? (
                   <Image
-                    source={{ uri: normalizeMediaUrl(sharedMedia?.thumbnailUrl || sharedMedia?.url || "") }}
+                    source={{ uri: normalizeMediaUrl(sharedMediaUrl) }}
                     style={styles.sharedPostImage}
                     resizeMode="cover"
                   />
                 ) : null}
 
-                {sharedContent?.caption ? (
+                {sharedContentCaption ? (
                   <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, { fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]} numberOfLines={3}>
-                    {sharedContent.caption}
+                    {sharedContentCaption}
                   </Text>
                 ) : null}
 
@@ -3127,17 +3163,18 @@ const ChatScreen = ({ navigation, route }: any) => {
             ) : null}
 
             {mediaBubbleKind === "image" ? (
-              <View style={[styles.mediaCard, isGifBubble ? styles.gifMediaCard : null]}>
+              <View style={[styles.mediaCard, isGifBubble ? styles.gifMediaCard : null, isStickerBubble ? styles.stickerMediaCard : null]}>
                 <Image
                   source={{ uri: normalizeMediaUrl(attachment?.url || "") }}
                   style={[
                     styles.messageImage,
                     {
                       width: mediaBubbleWidth,
-                      height: Math.min(width * 0.5, 188),
+                      height: isStickerBubble ? 168 : Math.min(width * 0.5, 188),
                     },
+                    isStickerBubble ? styles.stickerImage : null,
                   ]}
-                  resizeMode="cover"
+                  resizeMode={isStickerBubble ? "contain" : "contain"}
                 />
                 {isGifBubble ? (
                   <View style={[styles.mediaTypeBadge, isMine ? styles.mediaTypeBadgeMine : null]}>
@@ -3221,14 +3258,15 @@ const ChatScreen = ({ navigation, route }: any) => {
                   isEmojiOnly ? styles.emojiOnlyText : null,
                   {
                     color: bubbleTextColor,
-                    fontSize: isEmojiOnly ? Math.max(chatMetrics.bodyFontSize + 8, 22) : chatMetrics.bodyFontSize,
-                    lineHeight: isEmojiOnly ? Math.max(chatMetrics.bodyLineHeight + 8, 26) : chatMetrics.bodyLineHeight,
+                    fontSize: isEmojiOnly ? Math.max(chatMetrics.bodyFontSize + 10, 24) : chatMetrics.bodyFontSize,
+                    lineHeight: isEmojiOnly ? Math.max(chatMetrics.bodyLineHeight + 10, 28) : chatMetrics.bodyLineHeight,
                   },
                 ]}
                 mentionStyle={[styles.messageMentionText, isMine && styles.myMessageMentionText]}
                 onPressMention={isGroupConversation ? openMentionedGroupMember : undefined}
                 text={textValue}
-                textBreakStrategy="simple"
+                textBreakStrategy="highQuality"
+                lineBreakStrategyIOS="standard"
               >
                 {item?.isEdited ? (
                   <Text style={{ fontSize: 11, fontStyle: "italic", opacity: 0.6 }}> edited</Text>
@@ -3249,21 +3287,21 @@ const ChatScreen = ({ navigation, route }: any) => {
             ) : null}
 
             {locationPayload ? (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => handleMessagePress(item, attachment, locationPayload)}
-                style={[styles.locationCard, isMine && styles.myLocationCard]}
-              >
+              <View style={[styles.locationCard, isMine && styles.myLocationCard]}>
                 <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
                 <View style={styles.locationBody}>
-                  <Text style={[styles.locationTitle, isMine && styles.myLocationTitle, { fontSize: chatMetrics.metaFontSize + 1 }]}>
+                  <Text
+                    style={[styles.locationTitle, isMine && styles.myLocationTitle, { fontSize: chatMetrics.metaFontSize + 1 }]}
+                    numberOfLines={2}
+                    ellipsizeMode="tail"
+                  >
                     {locationPayload.label}
                   </Text>
                   <Text style={[styles.locationLink, isMine && styles.myLocationLink, { fontSize: chatMetrics.metaFontSize }]}>
                     Open in Maps
                   </Text>
                 </View>
-              </TouchableOpacity>
+              </View>
             ) : null}
 
             {!!reactions.length && (
@@ -3535,9 +3573,10 @@ const ChatScreen = ({ navigation, route }: any) => {
             contentContainerStyle={[styles.listContent, { paddingHorizontal: Math.max(8, chatMetrics.listPadding - 3), paddingTop: chatMetrics.listPadding, paddingBottom: listBottomPadding }]}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={Platform.OS === "android"}
-            initialNumToRender={18}
-            maxToRenderPerBatch={12}
-            windowSize={7}
+            initialNumToRender={10}
+            maxToRenderPerBatch={8}
+            updateCellsBatchingPeriod={50}
+            windowSize={5}
             keyboardShouldPersistTaps="handled"
             onContentSizeChange={() => {
               if (!initialLatestScrollDoneRef.current && messages.length) {
@@ -4568,10 +4607,11 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   emojiOnlyBubble: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
     borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 0,
+    backgroundColor: "transparent",
     shadowOpacity: 0,
     elevation: 0,
   },
@@ -4615,23 +4655,23 @@ const styles = StyleSheet.create({
   replyPreviewCard: {
     flexDirection: "row",
     alignItems: "center",
-    alignSelf: "flex-start",
-    marginBottom: 5,
+    alignSelf: "stretch",
+    marginBottom: 6,
     paddingHorizontal: 9,
-    paddingVertical: 7,
-    borderRadius: 12,
-    backgroundColor: "rgba(123, 63, 228, 0.1)",
-    maxWidth: "96%",
-    minWidth: '100%',
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: "rgba(123, 63, 228, 0.12)",
+    width: "100%",
+    maxWidth: "100%",
   },
   replyPreviewCardMine: {
-    backgroundColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.18)",
   },
   replyPreviewCardMineAligned: {
-    alignSelf: "flex-end",
+    alignSelf: "stretch",
   },
   replyPreviewCardOtherAligned: {
-    alignSelf: "flex-start",
+    alignSelf: "stretch",
   },
   replyPreviewBar: {
     width: 3,
@@ -4644,9 +4684,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   replyPreviewBody: {
-    flexShrink: 1,
+    flex: 1,
     minWidth: 0,
-    maxWidth: 196,
+    maxWidth: "100%",
   },
   replyPreviewAuthor: {
     color: PRIMARY,
@@ -4666,23 +4706,23 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.82)",
   },
   sharedPostCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.18)",
-    padding: 10,
-    marginBottom: 6,
-    backgroundColor: "rgba(15,23,42,0.22)",
-    maxWidth: "100%",
+    borderRadius: 12,
+    borderWidth: 0,
+    padding: 8,
+    backgroundColor: "rgba(15,23,42,0.06)",
+    width: "100%",
     minWidth: 0,
+    marginBottom: 0,
     overflow: "hidden",
   },
   sharedPostCardMine: {
-    backgroundColor: "rgba(255,255,255,0.14)",
-    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderColor: "transparent",
   },
   sharedPostHeader: {
     flexDirection: "row",
     alignItems: "center",
+    marginBottom: 4,
   },
   sharedPostAvatarFallback: {
     fontSize: 12,
@@ -4698,39 +4738,40 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   sharedPostAuthor: {
-    color: "#111827",
+    color: "#0f172a",
     fontSize: 12.5,
     fontFamily: appFonts.semibold,
   },
   sharedPostAuthorMine: {
-    color: "#fff",
+    color: "#ffffff",
   },
   sharedPostLabel: {
     marginTop: 1,
-    color: "#667085",
-    fontSize: 11,
+    color: "#64748b",
+    fontSize: 10.5,
     fontFamily: appFonts.medium,
   },
   sharedPostLabelMine: {
-    color: "rgba(255,255,255,0.78)",
+    color: "rgba(255,255,255,0.8)",
   },
   sharedPostImage: {
     width: "100%",
-    height: 126,
-    borderRadius: 12,
-    marginTop: 8,
+    height: 154,
+    borderRadius: 10,
+    marginTop: 4,
+    marginBottom: 4,
   },
   sharedPostCaption: {
-    marginTop: 8,
-    color: "#344054",
-    fontSize: 12.5,
-    lineHeight: 17,
+    marginTop: 4,
+    color: "#334155",
+    fontSize: 12,
+    lineHeight: 16.5,
   },
   sharedStoryReplyText: {
     fontFamily: appFonts.semibold,
   },
   sharedPostCaptionMine: {
-    color: "rgba(255,255,255,0.92)",
+    color: "rgba(255,255,255,0.94)",
   },
   callEventCard: {
     width: "auto",
@@ -4824,10 +4865,12 @@ const styles = StyleSheet.create({
     color: "#111",
     fontFamily: appFonts.regular,
     flexShrink: 1,
+    flexWrap: "wrap",
   },
   emojiOnlyText: {
-    textAlign: "center",
+    textAlign: "left",
     letterSpacing: 0,
+    flexWrap: "wrap",
   },
   myMessageText: {
     color: "#fff"
@@ -4864,6 +4907,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(56,189,248,0.32)",
     backgroundColor: "rgba(15,23,42,0.34)",
+  },
+  stickerMediaCard: {
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    padding: 0,
+    borderRadius: 0,
+  },
+  stickerImage: {
+    borderRadius: 0,
   },
   mediaOverlayBadge: {
     position: "absolute",
@@ -4959,6 +5011,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 10,
     backgroundColor: "rgba(123, 63, 228, 0.08)",
+    maxWidth: "100%",
+    overflow: "hidden",
   },
   myLocationCard: {
     backgroundColor: "rgba(255,255,255,0.16)",
@@ -4966,10 +5020,13 @@ const styles = StyleSheet.create({
   locationBody: {
     marginLeft: 8,
     flex: 1,
+    flexShrink: 1,
+    overflow: "hidden",
   },
   locationTitle: {
     color: "#111",
     fontWeight: "700",
+    flexShrink: 1,
   },
   myLocationTitle: {
     color: "#fff",

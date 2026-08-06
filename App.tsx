@@ -16,6 +16,7 @@ import FeedScreen from './src/screens/FeedScreen';
 import ProfileView from './src/screens/ProfileView';
 import ProfilePreviewScreen from './src/screens/ProfilePreviewScreen';
 import NotificationScreen from './src/screens/NotificationScreen';
+import LeaderboardScreen from './src/screens/LeaderboardScreen';
 import FollowersFollowingScreen from './src/screens/FollowersFollowingScreen';
 import CreatePostScreen from './src/screens/CreatePostScreen';
 import ChatScreen from './src/screens/ChatScreen';
@@ -29,6 +30,7 @@ import CommentControlsScreen from './src/screens/CommentControlsScreen';
 import TagsMentionsScreen from './src/screens/TagsMentionsScreen';
 import DeleteAccountScreen from './src/screens/DeleteAccountScreen';
 import FeedbackScreen from './src/screens/FeedbackScreen';
+import CustomerSupportScreen from './src/screens/CustomerSupportScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
 import ChildSafetyScreen from './src/screens/ChildSafetyScreen';
@@ -376,8 +378,13 @@ function AppNavigator() {
         return;
       }
 
+      const senderName = String(
+        payload?.sender?.name || payload?.sender?.username || payload?.senderInfo?.name || payload?.senderInfo?.username || payload?.senderName || ''
+      ).trim();
+      const bannerText = senderName ? `${senderName} sent you a message` : 'New message received';
+
       showRealtimeBanner(
-        'Kisi ne message kiya hai',
+        bannerText,
         () => {
           (navigationRef as any).navigate('ChatScreen', { conversationId });
         },
@@ -397,7 +404,11 @@ function AppNavigator() {
     <NavigationContainer ref={navigationRef} theme={navigationTheme}>
       <Stack.Navigator
         initialRouteName="Splash"
-        screenOptions={{ headerShown: false }}
+        screenOptions={{
+          headerShown: false,
+          freezeOnBlur: true,
+          animation: "slide_from_right",
+        }}
       >
 
         {/* Splash First */}
@@ -419,6 +430,7 @@ function AppNavigator() {
         <Stack.Screen name="Feed" component={FeedScreen} />
         <Stack.Screen name="ProfileView" component={ProfileView} />
         <Stack.Screen name="NotificationScreen" component={NotificationScreen} />
+        <Stack.Screen name="LeaderboardScreen" component={LeaderboardScreen} />
         <Stack.Screen name="CreatePostScreen" component={CreatePostScreen} />
         <Stack.Screen name="ProfilePreviewScreen" component={ProfilePreviewScreen} />
         <Stack.Screen name="FollowersFollowingScreen" component={FollowersFollowingScreen} />
@@ -428,6 +440,7 @@ function AppNavigator() {
         <Stack.Screen name="GroupDetailsScreen" component={GroupDetailsScreen} />
         <Stack.Screen name="CallScreen" component={CallScreen} />
         <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
+        <Stack.Screen name="CustomerSupportScreen" component={CustomerSupportScreen} />
         <Stack.Screen name="AccountCenterScreen" component={AccountCenterScreen} />
         <Stack.Screen name="BlockedUsersScreen" component={BlockedUsersScreen} />
         <Stack.Screen name="NotificationSettingsScreen" component={NotificationSettingsScreen} />

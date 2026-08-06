@@ -13,8 +13,10 @@ const SwipesTabPlaceholder = () => null;
 export default function BottomTabs() {
   return (
     <Tab.Navigator
+      detachInactiveScreens={true}
       screenOptions={{
         headerShown: false,
+        freezeOnBlur: true,
         animation: "fade",
       }}
       tabBar={({ navigation, state }) => (

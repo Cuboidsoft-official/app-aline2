@@ -256,9 +256,12 @@ function StoryViewerScreen({ route, navigation }: any) {
     };
   }, []);
 
+  const isAdvancingRef = useRef(false);
+
   useEffect(() => {
     setProgress(0);
     setReplyText("");
+    isAdvancingRef.current = false;
   }, [activeIndex]);
 
   useEffect(() => {
@@ -308,19 +311,29 @@ function StoryViewerScreen({ route, navigation }: any) {
     };
   }, []);
 
+  const advanceToNextStory = useCallback(() => {
+    if (isAdvancingRef.current) {
+      return;
+    }
+    isAdvancingRef.current = true;
+    setProgress(0);
+    setActiveIndex((prevIndex) => {
+      if (prevIndex >= stories.length - 1) {
+        stopAllSegmentedMusicPlayback();
+        navigation.goBack();
+        return prevIndex;
+      }
+      return prevIndex + 1;
+    });
+  }, [navigation, stories.length]);
+
   useEffect(() => {
     if (!currentStory || isStoryPaused || progress < 1) {
       return;
     }
 
-    if (activeIndex >= stories.length - 1) {
-      stopAllSegmentedMusicPlayback();
-      navigation.goBack();
-      return;
-    }
-
-    setActiveIndex((prev) => prev + 1);
-  }, [activeIndex, currentStory, navigation, isStoryPaused, progress, stories.length]);
+    advanceToNextStory();
+  }, [advanceToNextStory, currentStory, isStoryPaused, progress]);
 
   useEffect(() => {
     if (isReplyInputFocused) {
@@ -334,22 +347,29 @@ function StoryViewerScreen({ route, navigation }: any) {
   }, [navigation]);
   const storyKeyboardInset = Math.max(0, keyboardHeight - insets.bottom);
 
-  const next = () => {
+  const next = useCallback(() => {
+    if (isAdvancingRef.current) {
+      return;
+    }
+    isAdvancingRef.current = true;
     if (activeIndex >= stories.length - 1) {
       closeStoryViewer();
       return;
     }
 
+    setProgress(0);
     setActiveIndex((prev) => prev + 1);
-  };
+  }, [activeIndex, closeStoryViewer, stories.length]);
 
-  const prev = () => {
+  const prev = useCallback(() => {
     if (activeIndex <= 0) {
       return;
     }
 
+    isAdvancingRef.current = false;
+    setProgress(0);
     setActiveIndex((prevIndex) => prevIndex - 1);
-  };
+  }, [activeIndex]);
 
   const sendStoryInteractionToChat = useCallback(
     async ({ action, replyText: interactionReplyText }: { action: "like" | "reply"; replyText?: string }) => {

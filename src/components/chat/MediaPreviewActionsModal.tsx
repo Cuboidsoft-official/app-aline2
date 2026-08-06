@@ -43,8 +43,10 @@ export const MediaPreviewActionsModal: React.FC<MediaPreviewActionsModalProps> =
       Alert.alert("Saved", "Media saved successfully.");
       onClose();
     } catch (error: any) {
-      if (!String(error?.message || "").toLowerCase().includes("cancel")) {
-        Alert.alert("Error", "Could not save to gallery.");
+      console.log("Save to gallery error:", error);
+      const userMessage = String(error?.message || "Could not save to gallery.");
+      if (!userMessage.toLowerCase().includes("cancel")) {
+        Alert.alert("Error", userMessage);
       }
     } finally {
       setSaving(false);

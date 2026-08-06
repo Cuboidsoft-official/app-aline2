@@ -46,17 +46,32 @@ const extractPostShareFromUrl = (value) => {
 
 const parseSharedContentValue = (value) => {
   const rawValue = String(value || "").trim();
-  if (!rawValue.startsWith(SHARED_CONTENT_PREFIX)) {
-    return extractPostShareFromUrl(rawValue);
-  }
-
-  try {
-    const payload = JSON.parse(decodeURIComponent(rawValue.slice(SHARED_CONTENT_PREFIX.length)));
-    return payload && typeof payload === "object" ? payload : null;
-  } catch (error) {
-    console.log("shared chat payload parse error:", error);
+  if (!rawValue) {
     return null;
   }
+
+  let jsonStr = null;
+  if (rawValue.startsWith(SHARED_CONTENT_PREFIX)) {
+    jsonStr = rawValue.slice(SHARED_CONTENT_PREFIX.length);
+  } else if (rawValue.startsWith("[SHARED_CONTENT]")) {
+    jsonStr = rawValue.slice("[SHARED_CONTENT]".length);
+  }
+
+  if (jsonStr) {
+    try {
+      const decoded = jsonStr.startsWith("%7B") || jsonStr.startsWith("%7b")
+        ? decodeURIComponent(jsonStr)
+        : jsonStr;
+      const payload = JSON.parse(decoded);
+      if (payload && typeof payload === "object") {
+        return payload;
+      }
+    } catch (error) {
+      console.log("shared chat payload parse error:", error);
+    }
+  }
+
+  return extractPostShareFromUrl(rawValue);
 };
 
 export const buildSharedPostMessage = (post) => {
@@ -228,8 +243,34 @@ const parseScheduledCallValue = (value) => {
 };
 
 export const parseSharedContentMessage = (messageOrValue) => {
+  if (!messageOrValue) {
+    return null;
+  }
+
   if (typeof messageOrValue === "string") {
     return parseSharedContentValue(messageOrValue);
+  }
+
+  if (typeof messageOrValue === "object") {
+    if (messageOrValue.sharedContent) {
+      if (typeof messageOrValue.sharedContent === "object") {
+        return messageOrValue.sharedContent;
+      }
+      if (typeof messageOrValue.sharedContent === "string") {
+        const parsed = parseSharedContentValue(messageOrValue.sharedContent);
+        if (parsed) {
+          return parsed;
+        }
+      }
+    }
+
+    const nestedObj = messageOrValue.sharedPost || messageOrValue.sharedSwipe || messageOrValue.sharedStory;
+    if (nestedObj && typeof nestedObj === "object") {
+      return {
+        kind: messageOrValue.sharedSwipe ? "swipe" : messageOrValue.sharedStory ? "story" : "post",
+        ...nestedObj,
+      };
+    }
   }
 
   return parseSharedContentValue(

@@ -88,8 +88,10 @@ const OtpVerifyScreen = ({ route, navigation }: any) => {
         return;
       }
 
+      const referralCode = String(route?.params?.referralCode || "").trim().toUpperCase();
+
       if (nextStep === "set_password" || purpose === "signup") {
-        navigation.replace("CompleteProfile", { email });
+        navigation.replace("CompleteProfile", { email, referralCode });
         return;
       }
 

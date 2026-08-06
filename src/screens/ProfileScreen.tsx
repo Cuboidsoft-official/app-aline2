@@ -295,10 +295,6 @@ const ProfileScreen = ({ navigation }: any) => {
           {renderInput("Account Number", bankAccountNumber, setBankAccountNumber, false, colors, { keyboardType: "number-pad" })}
           {renderInput("IFSC Code", bankIfsc, (value) => setBankIfsc(String(value || "").toUpperCase()), false, colors, { autoCapitalize: "characters" })}
           {renderInput("Bank Name", bankName, setBankName, false, colors)}
-          {renderReadonlyField("Account Type", accountTypeLabel, colors)}
-          <Text style={[styles.helperText, { color: colors.mutedText }]}>
-            Account type is managed server-side, so special account states are assigned outside the app.
-          </Text>
           <Text style={[styles.helperText, { color: colors.mutedText }]}>
             Usernames use 3-30 lowercase letters, numbers, dots, or underscores.
           </Text>

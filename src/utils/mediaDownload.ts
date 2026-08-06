@@ -19,30 +19,63 @@ export const downloadImageAsset = async (rawUrl: string, fileNameBase = "aline2_
   const normalizedUrl = normalizeMediaUrl(rawUrl);
 
   if (!normalizedUrl) {
-    throw new Error("Image URL is missing.");
+    throw new Error("Media URL is missing.");
   }
 
   const fileName = `${fileNameBase}_${Date.now()}.${getFileExtension(normalizedUrl)}`;
 
+  // 1. Try FileSystem download & MediaLibrary save
   try {
-    const FileSystem = require("expo-file-system/legacy");
-    if (FileSystem?.downloadAsync && FileSystem?.documentDirectory) {
-      const targetFileUri = `${FileSystem.documentDirectory}${fileName}`;
+    let FileSystem: any = null;
+    try {
+      FileSystem = require("expo-file-system");
+    } catch {
+      try {
+        FileSystem = require("expo-file-system/legacy");
+      } catch {
+        FileSystem = null;
+      }
+    }
+
+    if (FileSystem?.downloadAsync && (FileSystem?.documentDirectory || FileSystem?.cacheDirectory)) {
+      const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+      const targetFileUri = `${dir}${fileName}`;
       const downloaded = await FileSystem.downloadAsync(normalizedUrl, targetFileUri);
-      return downloaded?.uri || targetFileUri;
+      const downloadedUri = downloaded?.uri || targetFileUri;
+
+      try {
+        let MediaLibrary: any = null;
+        try {
+          MediaLibrary = require("expo-media-library");
+        } catch {
+          MediaLibrary = null;
+        }
+
+        if (MediaLibrary?.saveToLibraryAsync || MediaLibrary?.createAssetAsync) {
+          const { status } = await MediaLibrary.requestPermissionsAsync();
+          if (status === "granted") {
+            if (MediaLibrary.saveToLibraryAsync) {
+              await MediaLibrary.saveToLibraryAsync(downloadedUri);
+            } else {
+              await MediaLibrary.createAssetAsync(downloadedUri);
+            }
+            return downloadedUri;
+          }
+        }
+      } catch (mediaErr) {
+        console.log("MediaLibrary save fallback notice:", mediaErr);
+      }
+
+      return downloadedUri;
     }
   } catch (error) {
-    const errorMessage = getDownloadErrorMessage(error);
-    if (errorMessage.includes("cancel")) {
-      throw error;
-    }
-
-    console.log("media download fallback error:", error);
+    console.log("FileSystem download fallback notice:", error);
   }
 
+  // 2. Fallback: Share dialog
   try {
     await Share.share({
-      title: "Download image",
+      title: "Save file",
       message: normalizedUrl,
       url: normalizedUrl,
     });
@@ -52,10 +85,14 @@ export const downloadImageAsset = async (rawUrl: string, fileNameBase = "aline2_
     if (errorMessage.includes("cancel")) {
       throw error;
     }
-
-    console.log("media share fallback error:", error);
+    console.log("Share fallback error:", error);
   }
 
-  await Linking.openURL(normalizedUrl);
-  return normalizedUrl;
+  // 3. Fallback: Open URL externally
+  try {
+    await Linking.openURL(normalizedUrl);
+    return normalizedUrl;
+  } catch (linkErr) {
+    throw new Error("Unable to download or open this media file.");
+  }
 };

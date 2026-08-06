@@ -23,10 +23,12 @@ const USERNAME_REGEX = /^(?!.*[.]{2})(?!.*[_]{2})[a-z0-9._]{3,30}$/;
 const CompleteProfileScreen = ({ route, navigation }: any) => {
   const { colors } = useAppTheme();
   const email = String(route?.params?.email || "").trim().toLowerCase();
+  const initialReferralCode = String(route?.params?.referralCode || "").trim().toUpperCase();
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [referralCode, setReferralCode] = useState(initialReferralCode);
   const [loading, setLoading] = useState(false);
 
   const handleSetPassword = async () => {
@@ -38,6 +40,7 @@ const CompleteProfileScreen = ({ route, navigation }: any) => {
 
     const cleanName = name.trim();
     const cleanUsername = username.trim().toLowerCase();
+    const cleanReferralCode = referralCode.trim().toUpperCase();
 
     if (!cleanName || cleanName.length < 2) {
       Alert.alert("Error", "Please enter your name (at least 2 characters).");
@@ -79,6 +82,7 @@ const CompleteProfileScreen = ({ route, navigation }: any) => {
         password,
         name: cleanName,
         username: cleanUsername,
+        referralCode: cleanReferralCode,
       });
 
       if (!res?.data?.success) {
@@ -173,6 +177,17 @@ const CompleteProfileScreen = ({ route, navigation }: any) => {
             autoCapitalize="none"
             autoCorrect={false}
             textContentType="password"
+            returnKeyType="next"
+          />
+
+          <TextInput
+            placeholder="Referral Code (Optional)"
+            value={referralCode}
+            onChangeText={setReferralCode}
+            style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
+            placeholderTextColor={colors.placeholder}
+            autoCapitalize="characters"
+            autoCorrect={false}
             returnKeyType="done"
             onSubmitEditing={handleSetPassword}
           />

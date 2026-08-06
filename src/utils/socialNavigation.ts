@@ -79,16 +79,48 @@ export const openNotificationContentTarget = (navigation: any, data: any) => {
 };
 
 export const openSharedContent = (navigation: any, sharedContent: any) => {
-  if (sharedContent?.kind === "post" && sharedContent?.postId) {
-    openPostInFeed(navigation, {
-      postId: sharedContent.postId,
+  if (!sharedContent) {
+    return;
+  }
+
+  const targetId = getEntityId(
+    sharedContent?.postId
+    || sharedContent?.swipeId
+    || sharedContent?.storyId
+    || sharedContent?.id
+    || sharedContent?._id
+    || sharedContent?.targetId
+    || sharedContent?.contentId
+    || sharedContent?.post?.id
+    || sharedContent?.post?._id
+    || sharedContent?.swipe?.id
+    || sharedContent?.swipe?._id,
+  );
+
+  const kind = String(
+    sharedContent?.kind || sharedContent?.type || sharedContent?.contentType || "",
+  ).trim().toLowerCase();
+
+  if (kind === "swipe" || sharedContent?.swipeId || sharedContent?.swipe) {
+    if (targetId) {
+      openSwipeInSwipes(navigation, { swipeId: targetId });
+    } else {
+      navigation.navigate("Swipes");
+    }
+    return;
+  }
+
+  if (kind === "story" && (sharedContent?.storyId || targetId)) {
+    navigation.navigate("StoryViewer", {
+      storyId: sharedContent?.storyId || targetId,
+      storyUserId: getEntityId(sharedContent?.user?.id || sharedContent?.user),
     });
     return;
   }
 
-  if (sharedContent?.kind === "swipe" && sharedContent?.swipeId) {
-    openSwipeInSwipes(navigation, {
-      swipeId: sharedContent.swipeId,
-    });
+  if (targetId) {
+    openPostInFeed(navigation, { postId: targetId });
+  } else {
+    navigation.navigate("Feed");
   }
 };

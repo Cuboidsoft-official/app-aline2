@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from "react";
+import SocialVideo from "../../features/social/components/SocialVideo";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Modal,
   View,
@@ -28,6 +29,7 @@ interface DocumentViewerModalProps {
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i;
 const DOC_EXTENSIONS = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv)$/i;
+const VIDEO_EXTENSIONS = /\.(mp4|mov|m4v|webm|mkv|3gp)$/i;
 
 export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   visible,
@@ -71,6 +73,16 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
     );
   }, [targetUrl]);
 
+  const isVideo = useMemo(() => {
+    if (!targetUrl) return false;
+    return (
+      VIDEO_EXTENSIONS.test(targetUrl) ||
+      targetUrl.startsWith("data:video/") ||
+      targetUrl.includes(".mp4") ||
+      targetUrl.includes(".mov")
+    );
+  }, [targetUrl]);
+
   const isLocalFile = useMemo(() => {
     if (!targetUrl) return false;
     return (
@@ -98,6 +110,13 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 
     return { uri: targetUrl };
   }, [targetUrl, isLocalFile, isImage]);
+
+  useEffect(() => {
+    if (visible) {
+      setHasError(false);
+      setLoading(!isImage && !isVideo);
+    }
+  }, [visible, isImage, isVideo, targetUrl]);
 
   const handleOpenExternal = async () => {
     if (!targetUrl) {
@@ -150,7 +169,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 
           <View style={styles.titleContainer}>
             <Icon
-              name={isImage ? "image-outline" : "document-text-outline"}
+              name={isImage ? "image-outline" : isVideo ? "videocam-outline" : "document-text-outline"}
               size={18}
               color="#A1A1AA"
               style={styles.titleIcon}
@@ -177,60 +196,80 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
               <Icon name="alert-circle-outline" size={48} color="#EF4444" />
               <Text style={styles.errorText}>Document URL is unavailable.</Text>
             </View>
-          ) : isImage ? (
-            <View style={styles.imageContainer}>
-              <ScrollView
-                style={styles.imageScroll}
-                contentContainerStyle={styles.imageScrollContent}
-                minimumZoomScale={1}
-                maximumZoomScale={4}
-                showsHorizontalScrollIndicator={false}
-                showsVerticalScrollIndicator={false}
-                bouncesZoom={true}
-                centerContent={true}
-              >
-                <Image
-                  source={{ uri: targetUrl }}
-                  style={styles.imagePreview}
-                  resizeMode="contain"
-                  onLoadStart={() => setLoading(true)}
-                  onLoadEnd={() => setLoading(false)}
-                  onError={() => {
-                    setLoading(false);
-                    setHasError(true);
-                  }}
-                />
-              </ScrollView>
+          ) : isVideo ? (
+            <View style={{ flex: 1, width: "100%", height: "100%", backgroundColor: "#000", justifyContent: "center", alignItems: "center" }}>
+              <SocialVideo
+                uri={targetUrl}
+                controls={true}
+                paused={false}
+                resizeMode="contain"
+                style={{ width: "100%", height: "100%" }}
+              />
             </View>
-          ) : (
-            <WebView
-              key={webViewSource.uri}
-              source={webViewSource}
-              style={styles.webView}
-              startInLoadingState
-              javaScriptEnabled
-              domStorageEnabled
-              allowFileAccess
-              allowFileAccessFromFileURLs
-              allowUniversalAccessFromFileURLs
-              originWhitelist={["*"]}
-              scalesPageToFit={true}
+          ) : isImage ? (
+            <ScrollView
+              style={{ flex: 1, width: "100%", height: "100%", backgroundColor: "#000" }}
+              contentContainerStyle={{ flexGrow: 1, justifyContent: "center", alignItems: "center" }}
+              maximumZoomScale={5}
+              minimumZoomScale={1}
+              bouncesZoom={true}
               pinchGestureEnabled={true}
-              setBuiltInZoomControls={true}
-              setDisplayZoomControls={false}
-              onLoadStart={() => {
-                setLoading(true);
-                setHasError(false);
-              }}
-              onLoadEnd={() => setLoading(false)}
-              onError={(syntheticEvent) => {
-                const { nativeEvent } = syntheticEvent;
-                console.log("WebView document load error:", nativeEvent);
-                setLoading(false);
-                setHasError(true);
-              }}
-              renderLoading={() => <ActivityIndicator size="large" color="#8B5CF6" />}
-            />
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+              centerContent={true}
+            >
+              <Image
+                source={{ uri: targetUrl }}
+                style={{ width: "100%", height: "100%" }}
+                resizeMode="contain"
+                onLoad={() => setLoading(false)}
+                onError={(err) => {
+                  console.log("Image preview load error:", err?.nativeEvent);
+                  setLoading(false);
+                  setHasError(true);
+                }}
+              />
+            </ScrollView>
+          ) : (
+            <ScrollView
+              style={{ flex: 1, width: "100%", height: "100%", backgroundColor: "#0F0F12" }}
+              contentContainerStyle={{ flex: 1, width: "100%", height: "100%" }}
+              maximumZoomScale={5}
+              minimumZoomScale={1}
+              bouncesZoom={true}
+              pinchGestureEnabled={true}
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+            >
+              <WebView
+                key={webViewSource.uri}
+                source={webViewSource}
+                style={styles.webView}
+                startInLoadingState
+                javaScriptEnabled
+                domStorageEnabled
+                allowFileAccess
+                allowFileAccessFromFileURLs
+                allowUniversalAccessFromFileURLs
+                originWhitelist={["*"]}
+                scalesPageToFit={true}
+                pinchGestureEnabled={true}
+                setBuiltInZoomControls={true}
+                setDisplayZoomControls={false}
+                onLoadStart={() => {
+                  setLoading(true);
+                  setHasError(false);
+                }}
+                onLoadEnd={() => setLoading(false)}
+                onError={(syntheticEvent) => {
+                  const { nativeEvent } = syntheticEvent;
+                  console.log("WebView document load error:", nativeEvent);
+                  setLoading(false);
+                  setHasError(true);
+                }}
+                renderLoading={() => <ActivityIndicator size="large" color="#8B5CF6" />}
+              />
+            </ScrollView>
           )}
 
           {/* Loading Indicator */}

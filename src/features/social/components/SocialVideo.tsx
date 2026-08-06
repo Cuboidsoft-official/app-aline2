@@ -64,7 +64,7 @@ function SocialVideo({
   const resolvedPosterUri = String(posterUri || "").trim();
   const usablePosterUri = isUsablePosterUri(resolvedPosterUri, resolvedUri) ? resolvedPosterUri : "";
   const containerStyle = useMemo(() => stripBackgroundColorFromStyle(style), [style]);
-  const shouldMountVideo = !!resolvedUri && !videoFailed && (!paused || controls || preload);
+  const shouldMountVideo = !!resolvedUri && !videoFailed;
   const shouldShowPoster = !!usablePosterUri && !posterFailed;
   const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0));
   const effectivePaused = paused || preload;

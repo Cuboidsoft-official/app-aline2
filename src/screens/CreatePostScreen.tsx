@@ -1466,17 +1466,12 @@ function CreatePostScreen({ navigation, route }: any) {
   }, [navigation, route?.params]);
 
   const exitComposer = useCallback(() => {
-    if (navigation.canGoBack?.()) {
-      navigation.goBack();
-      return;
-    }
-
     if (mode === "swipe") {
       navigation.getParent?.()?.navigate("Swipes");
       return;
     }
 
-    navigation.navigate("Feed");
+    navigation.navigate("Feed", { reloadFeed: true, reloadNonce: Date.now() });
   }, [mode, navigation]);
 
   const handleBackAction = useCallback(() => {
@@ -2887,9 +2882,9 @@ function CreatePostScreen({ navigation, route }: any) {
             setProgress(0.05, "Preparing post...");
             const payload = await preparePostPayload({ onProgress: handleUploadProgress });
             setProgress(0.88, "Publishing post...", "publishing");
-            await socialApi.createPost(payload);
+            const post = await socialApi.createPost(payload);
             setProgress(1, "Post uploaded", "success");
-            return;
+            return { post, postId: post.id };
           }
 
           if (mode === "story") {
@@ -2898,7 +2893,7 @@ function CreatePostScreen({ navigation, route }: any) {
             setProgress(0.88, "Publishing story...", "publishing");
             await socialApi.createStory(payload);
             setProgress(1, "Story uploaded", "success");
-            return;
+            return undefined;
           }
 
           setProgress(0.05, "Preparing swipe...");
@@ -2906,6 +2901,7 @@ function CreatePostScreen({ navigation, route }: any) {
           setProgress(0.88, "Publishing swipe...", "publishing");
           await socialApi.createSwipe(payload);
           setProgress(1, "Swipe uploaded", "success");
+          return undefined;
         },
       });
 

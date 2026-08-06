@@ -506,6 +506,7 @@ function FeedScreen({ navigation, route }: any) {
           { icon: "person-outline", label: "My Profile", screen: "ProfileView" },
           { icon: "wallet-outline", label: "User Wallet", screen: "WalletScreen" },
           { icon: "notifications-outline", label: "Notifications", screen: "NotificationScreen" },
+          { icon: "trophy-outline", label: "Leaderboard", screen: "LeaderboardScreen" },
         ],
       },
       {
@@ -526,6 +527,7 @@ function FeedScreen({ navigation, route }: any) {
         data: [
           { icon: "settings-outline", label: "Settings", screen: "SettingsScreen" },
           { icon: "chatbox-ellipses-outline", label: "Suggestion / Feedback", screen: "FeedbackScreen" },
+          { icon: "shield-alert-outline", label: "Customer Support (Report Fraud)", screen: "CustomerSupportScreen" },
           { icon: "help-circle-outline", label: "Help & Support", screen: "HelpSupportScreen" },
         ],
       },
@@ -2857,11 +2859,11 @@ const metaLine = tokens.join(" • ");
           ListHeaderComponent={isFocusedPostFeed ? null : renderHeader}
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={false}
-          initialNumToRender={4}
-          maxToRenderPerBatch={6}
+          removeClippedSubviews={Platform.OS === "android"}
+          initialNumToRender={3}
+          maxToRenderPerBatch={4}
           updateCellsBatchingPeriod={50}
-          windowSize={11}
+          windowSize={5}
           decelerationRate="normal"
           scrollEventThrottle={16}
           keyboardDismissMode="on-drag"

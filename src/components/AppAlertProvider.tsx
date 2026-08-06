@@ -296,7 +296,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(7, 12, 20, 0.44)",
   },
   card: {
-    width: "100%",
     borderWidth: 1,
     overflow: "hidden",
     shadowOffset: { width: 0, height: 16 },
@@ -305,11 +304,13 @@ const styles = StyleSheet.create({
     elevation: 18,
   },
   dialogCard: {
-    maxWidth: 410,
-    borderRadius: 28,
-    paddingHorizontal: 22,
-    paddingTop: 24,
-    paddingBottom: 20,
+    width: "88%",
+    minWidth: 280,
+    maxWidth: 340,
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 18,
   },
   sheetKeyboardWrap: {
     width: "100%",
@@ -406,6 +407,8 @@ const styles = StyleSheet.create({
   buttonRow: {
     flexDirection: "row",
     gap: 10,
+    width: "100%",
+    marginTop: 4,
   },
   buttonColumn: {
     flexDirection: "column",
@@ -420,21 +423,22 @@ const styles = StyleSheet.create({
   },
   button: {
     flex: 1,
-    minHeight: 50,
-    borderRadius: 18,
+    minHeight: 46,
+    borderRadius: 14,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 14,
+    paddingHorizontal: 10,
   },
   sheetButton: {
-    minHeight: 50,
-    borderRadius: 18,
+    minHeight: 48,
+    borderRadius: 16,
     marginBottom: 2,
   },
   buttonText: {
-    fontSize: 15,
-    fontWeight: "800",
+    fontSize: 14.5,
+    fontWeight: "700",
+    textAlign: "center",
   },
 });
 

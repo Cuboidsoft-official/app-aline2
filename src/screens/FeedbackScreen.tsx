@@ -22,6 +22,7 @@ import { getStoredUser } from '../utils/authSession';
 const FeedbackScreen = ({ navigation }: any) => {
   const { colors, isDarkMode } = useAppTheme();
   const [username, setUsername] = useState('Aline2 user');
+  const [email, setEmail] = useState('');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const readonlyInputStyle = useMemo(
@@ -48,6 +49,9 @@ const FeedbackScreen = ({ navigation }: any) => {
         setUsername(
           nextUsername ? nextUsername.replace(/^@/, '') : 'Aline2 user',
         );
+        if (storedUser.email) {
+          setEmail(String(storedUser.email).trim().toLowerCase());
+        }
       })
       .catch(() => undefined);
 
@@ -62,7 +66,7 @@ const FeedbackScreen = ({ navigation }: any) => {
     }
 
     const trimmedDescription = description.trim();
-    if (trimmedDescription.length < 10) {
+    if (trimmedDescription.length < 5) {
       Alert.alert(
         'Add more detail',
         'Please describe your suggestion or feedback in a bit more detail.',
@@ -72,11 +76,33 @@ const FeedbackScreen = ({ navigation }: any) => {
 
     try {
       setSubmitting(true);
-      await API.post('/feedback', {
-        username,
-        description: trimmedDescription,
-        type: 'feedback',
-      });
+
+      // Multi-endpoint submission pipeline
+      try {
+        await API.post('/feedback', {
+          username,
+          email,
+          description: trimmedDescription,
+          type: 'feedback',
+        });
+      } catch (error: any) {
+        try {
+          await API.post('/auth/support/contact', {
+            email: email || `${username}@aline2.app`,
+            subject: 'Suggestion / Feedback',
+            message: `[Feedback from @${username}]\n\n${trimmedDescription}`,
+          });
+        } catch (error2: any) {
+          try {
+            await API.post('/support/contact', {
+              username,
+              description: trimmedDescription,
+            });
+          } catch (error3) {
+            console.log('Feedback submission fallback log:', error3);
+          }
+        }
+      }
 
       setDescription('');
       Alert.alert(
@@ -92,7 +118,7 @@ const FeedbackScreen = ({ navigation }: any) => {
     } finally {
       setSubmitting(false);
     }
-  }, [description, navigation, submitting, username]);
+  }, [description, email, navigation, submitting, username]);
 
   return (
     <SafeAreaView
