@@ -124,6 +124,18 @@ android {
                 "kotlin/**",
                 "DebugProbesKt.bin",
             ]
+            pickFirsts += [
+                "**/libcrypto.so",
+                "**/libssl.so",
+                "**/libc++_shared.so",
+            ]
+        }
+        jniLibs {
+            pickFirsts += [
+                "**/libcrypto.so",
+                "**/libssl.so",
+                "**/libc++_shared.so",
+            ]
         }
     }
     signingConfigs {
