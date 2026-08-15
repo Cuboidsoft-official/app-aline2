@@ -110,8 +110,8 @@ android {
         applicationId "com.aline2"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 28
-        versionName "2.2.1"
+        versionCode 29
+        versionName "2.2.2"
     }
     packaging {
         resources {

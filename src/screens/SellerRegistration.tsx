@@ -190,6 +190,26 @@ type SellerProfileResponse = {
     audioCallPrice?: number | string;
     videoCallPrice?: number | string;
   };
+  serviceRates?: {
+    message?: {
+      rate1Min?: number | string;
+      rate15Min?: number | string;
+      rate30Min?: number | string;
+      rate1Hour?: number | string;
+    };
+    audio?: {
+      rate1Min?: number | string;
+      rate15Min?: number | string;
+      rate30Min?: number | string;
+      rate1Hour?: number | string;
+    };
+    video?: {
+      rate1Min?: number | string;
+      rate15Min?: number | string;
+      rate30Min?: number | string;
+      rate1Hour?: number | string;
+    };
+  };
   termsAccepted?: boolean;
   termsVersion?: string;
   termsAcceptedAt?: string;
@@ -308,6 +328,22 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [messagePrice, setMessagePrice] = useState("");
   const [audioCallPrice, setAudioCallPrice] = useState("");
   const [videoCallPrice, setVideoCallPrice] = useState("");
+
+  const [msgRate1Min, setMsgRate1Min] = useState("");
+  const [msgRate15Min, setMsgRate15Min] = useState("");
+  const [msgRate30Min, setMsgRate30Min] = useState("");
+  const [msgRate1Hour, setMsgRate1Hour] = useState("");
+
+  const [audioRate1Min, setAudioRate1Min] = useState("");
+  const [audioRate15Min, setAudioRate15Min] = useState("");
+  const [audioRate30Min, setAudioRate30Min] = useState("");
+  const [audioRate1Hour, setAudioRate1Hour] = useState("");
+
+  const [videoRate1Min, setVideoRate1Min] = useState("");
+  const [videoRate15Min, setVideoRate15Min] = useState("");
+  const [videoRate30Min, setVideoRate30Min] = useState("");
+  const [videoRate1Hour, setVideoRate1Hour] = useState("");
+
   const [promotionPostPrice, setPromotionPostPrice] = useState("");
   const [promotionStoryPrice, setPromotionStoryPrice] = useState("");
   const [promotionReelPrice, setPromotionReelPrice] = useState("");
@@ -378,13 +414,34 @@ const SellerRegistration = ({ navigation, route }: any) => {
     setServiceName(seller?.onboardingServiceName || "");
     setServiceDurationMinutes(String(seller?.onboardingServiceDurationMinutes || "15"));
     setServiceRate(String(seller?.onboardingServiceRate || ""));
-    setRate1Min(seller?.durationRates?.rate1Min ? String(seller.durationRates.rate1Min) : "");
-    setRate15Min(seller?.durationRates?.rate15Min ? String(seller.durationRates.rate15Min) : "");
-    setRate30Min(seller?.durationRates?.rate30Min ? String(seller.durationRates.rate30Min) : "");
-    setRate1Hour(seller?.durationRates?.rate1Hour ? String(seller.durationRates.rate1Hour) : "");
-    setMessagePrice(seller?.extraPricing?.messagePrice ? String(seller.extraPricing.messagePrice) : "");
-    setAudioCallPrice(seller?.extraPricing?.audioCallPrice ? String(seller.extraPricing.audioCallPrice) : "");
-    setVideoCallPrice(seller?.extraPricing?.videoCallPrice ? String(seller.extraPricing.videoCallPrice) : "");
+
+    const sRates = seller?.serviceRates;
+    const dRates = seller?.durationRates;
+    const ePricing = seller?.extraPricing;
+
+    setMsgRate1Min(sRates?.message?.rate1Min ? String(sRates.message.rate1Min) : ePricing?.messagePrice ? String(ePricing.messagePrice) : "");
+    setMsgRate15Min(sRates?.message?.rate15Min ? String(sRates.message.rate15Min) : "");
+    setMsgRate30Min(sRates?.message?.rate30Min ? String(sRates.message.rate30Min) : "");
+    setMsgRate1Hour(sRates?.message?.rate1Hour ? String(sRates.message.rate1Hour) : "");
+
+    setAudioRate1Min(sRates?.audio?.rate1Min ? String(sRates.audio.rate1Min) : dRates?.rate1Min ? String(dRates.rate1Min) : ePricing?.audioCallPrice ? String(ePricing.audioCallPrice) : "");
+    setAudioRate15Min(sRates?.audio?.rate15Min ? String(sRates.audio.rate15Min) : dRates?.rate15Min ? String(dRates.rate15Min) : "");
+    setAudioRate30Min(sRates?.audio?.rate30Min ? String(sRates.audio.rate30Min) : dRates?.rate30Min ? String(dRates.rate30Min) : "");
+    setAudioRate1Hour(sRates?.audio?.rate1Hour ? String(sRates.audio.rate1Hour) : dRates?.rate1Hour ? String(dRates.rate1Hour) : "");
+
+    setVideoRate1Min(sRates?.video?.rate1Min ? String(sRates.video.rate1Min) : ePricing?.videoCallPrice ? String(ePricing.videoCallPrice) : "");
+    setVideoRate15Min(sRates?.video?.rate15Min ? String(sRates.video.rate15Min) : "");
+    setVideoRate30Min(sRates?.video?.rate30Min ? String(sRates.video.rate30Min) : "");
+    setVideoRate1Hour(sRates?.video?.rate1Hour ? String(sRates.video.rate1Hour) : "");
+
+    setRate1Min(sRates?.audio?.rate1Min ? String(sRates.audio.rate1Min) : dRates?.rate1Min ? String(dRates.rate1Min) : "");
+    setRate15Min(sRates?.audio?.rate15Min ? String(sRates.audio.rate15Min) : dRates?.rate15Min ? String(dRates.rate15Min) : "");
+    setRate30Min(sRates?.audio?.rate30Min ? String(sRates.audio.rate30Min) : dRates?.rate30Min ? String(dRates.rate30Min) : "");
+    setRate1Hour(sRates?.audio?.rate1Hour ? String(sRates.audio.rate1Hour) : dRates?.rate1Hour ? String(dRates.rate1Hour) : "");
+    setMessagePrice(sRates?.message?.rate1Min ? String(sRates.message.rate1Min) : ePricing?.messagePrice ? String(ePricing.messagePrice) : "");
+    setAudioCallPrice(sRates?.audio?.rate1Min ? String(sRates.audio.rate1Min) : ePricing?.audioCallPrice ? String(ePricing.audioCallPrice) : "");
+    setVideoCallPrice(sRates?.video?.rate1Min ? String(sRates.video.rate1Min) : ePricing?.videoCallPrice ? String(ePricing.videoCallPrice) : "");
+
     setPromotionPostPrice(String(seller?.promotionPricing?.post || ""));
     setPromotionStoryPrice(String(seller?.promotionPricing?.story || ""));
     setPromotionReelPrice(String(seller?.promotionPricing?.reel || ""));
@@ -905,27 +962,43 @@ const SellerRegistration = ({ navigation, route }: any) => {
         return false;
       }
 
-      const r1 = Number(rate1Min) || 0;
-      if (r1 <= 0 || r1 > rateLimit1Min) {
-        Alert.alert("Validation", `Please enter a valid rate for 1 min duration (Max allowed INR ${rateLimit1Min}).`);
-        return false;
-      }
+      const checkRate = (val: string, maxLimit: number, label: string) => {
+        const num = Number(val) || 0;
+        if (num > maxLimit) {
+          Alert.alert("Validation", `${label} cannot exceed your plan limit of INR ${maxLimit}.`);
+          return false;
+        }
+        return true;
+      };
 
-      const r15 = Number(rate15Min) || 0;
-      if (r15 <= 0 || r15 > rateLimit15Min) {
-        Alert.alert("Validation", `Please enter a valid rate for 15 min duration (Max allowed INR ${rateLimit15Min}).`);
-        return false;
-      }
+      if (!checkRate(msgRate1Min, rateLimit1Min, "Message 1 min rate")) return false;
+      if (!checkRate(msgRate15Min, rateLimit15Min, "Message 15 min rate")) return false;
+      if (!checkRate(msgRate30Min, rateLimit30Min, "Message 30 min rate")) return false;
+      if (!checkRate(msgRate1Hour, rateLimit1Hour, "Message 1 hour rate")) return false;
 
-      const r30 = Number(rate30Min) || 0;
-      if (r30 <= 0 || r30 > rateLimit30Min) {
-        Alert.alert("Validation", `Please enter a valid rate for 30 min duration (Max allowed INR ${rateLimit30Min}).`);
-        return false;
-      }
+      if (!checkRate(audioRate1Min, rateLimit1Min, "Audio Call 1 min rate")) return false;
+      if (!checkRate(audioRate15Min, rateLimit15Min, "Audio Call 15 min rate")) return false;
+      if (!checkRate(audioRate30Min, rateLimit30Min, "Audio Call 30 min rate")) return false;
+      if (!checkRate(audioRate1Hour, rateLimit1Hour, "Audio Call 1 hour rate")) return false;
+    }
 
-      const r60 = Number(rate1Hour) || 0;
-      if (r60 <= 0 || r60 > rateLimit1Hour) {
-        Alert.alert("Validation", `Please enter a valid rate for 1 hour duration (Max allowed INR ${rateLimit1Hour}).`);
+    if (step === 7) {
+      const checkRate = (val: string, maxLimit: number, label: string) => {
+        const num = Number(val) || 0;
+        if (num > maxLimit) {
+          Alert.alert("Validation", `${label} cannot exceed your plan limit of INR ${maxLimit}.`);
+          return false;
+        }
+        return true;
+      };
+
+      if (!checkRate(videoRate1Min, rateLimit1Min, "Video Call 1 min rate")) return false;
+      if (!checkRate(videoRate15Min, rateLimit15Min, "Video Call 15 min rate")) return false;
+      if (!checkRate(videoRate30Min, rateLimit30Min, "Video Call 30 min rate")) return false;
+      if (!checkRate(videoRate1Hour, rateLimit1Hour, "Video Call 1 hour rate")) return false;
+
+      if (!termsAccepted) {
+        Alert.alert("Terms required", "Please read and accept the seller terms and conditions before finishing.");
         return false;
       }
     }
@@ -1105,20 +1178,36 @@ const SellerRegistration = ({ navigation, route }: any) => {
         degreeChecked,
         kycChecked,
         faceChecked,
-        onboardingServiceName: serviceName.trim(),
-        onboardingServiceDurationMinutes: 15,
-        onboardingServiceRate: Number(rate15Min) || 0,
-        onboardingServiceRateLimit: rateLimit15Min,
+        serviceRates: {
+          message: {
+            rate1Min: Number(msgRate1Min) || 0,
+            rate15Min: Number(msgRate15Min) || 0,
+            rate30Min: Number(msgRate30Min) || 0,
+            rate1Hour: Number(msgRate1Hour) || 0,
+          },
+          audio: {
+            rate1Min: Number(audioRate1Min) || 0,
+            rate15Min: Number(audioRate15Min) || 0,
+            rate30Min: Number(audioRate30Min) || 0,
+            rate1Hour: Number(audioRate1Hour) || 0,
+          },
+          video: {
+            rate1Min: Number(videoRate1Min) || 0,
+            rate15Min: Number(videoRate15Min) || 0,
+            rate30Min: Number(videoRate30Min) || 0,
+            rate1Hour: Number(videoRate1Hour) || 0,
+          },
+        },
         durationRates: {
-          rate1Min: Number(rate1Min) || 0,
-          rate15Min: Number(rate15Min) || 0,
-          rate30Min: Number(rate30Min) || 0,
-          rate1Hour: Number(rate1Hour) || 0,
+          rate1Min: Number(audioRate1Min) || Number(msgRate1Min) || 0,
+          rate15Min: Number(audioRate15Min) || Number(msgRate15Min) || 0,
+          rate30Min: Number(audioRate30Min) || Number(msgRate30Min) || 0,
+          rate1Hour: Number(audioRate1Hour) || Number(msgRate1Hour) || 0,
         },
         extraPricing: {
-          messagePrice: Number(messagePrice) || 0,
-          audioCallPrice: Number(audioCallPrice) || 0,
-          videoCallPrice: Number(videoCallPrice) || 0,
+          messagePrice: Number(msgRate1Min) || 0,
+          audioCallPrice: Number(audioRate1Min) || 0,
+          videoCallPrice: Number(videoRate1Min) || 0,
         },
         promotionPricing: {
           post: Number(promotionPostPrice) || 0,
@@ -1873,16 +1962,16 @@ const SellerRegistration = ({ navigation, route }: any) => {
     if (step === 6) {
       return (
         <>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Service pricing</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Service & Communication Rates</Text>
           <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
-            Enter service name and set compulsory rates for all 4 duration options within your plan limits.
+            Enter service name and set duration rates (1 min, 15 min, 30 min, 1 hour) for Message and Audio Call services.
           </Text>
 
           <View style={[styles.rateCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.rateLabel, { color: colors.mutedText }]}>Selected Plan Limit Overview</Text>
+            <Text style={[styles.rateLabel, { color: colors.mutedText }]}>Plan Limit Overview</Text>
             <Text style={[styles.rateValue, { color: colors.primary }]}>{selectedPlan.title}</Text>
             <Text style={[styles.rateBody, { color: colors.mutedText }]}>
-              Hourly limit: INR {selectedPlan.maxHourlyRate}/hour. Setting rates for 1 min, 15 min, 30 min, and 1 hour is compulsory.
+              Hourly limit: INR {selectedPlan.maxHourlyRate}/hr (Max caps: 1 & 15m = INR {rateLimit15Min}, 30m = INR {rateLimit30Min}, 1h = INR {rateLimit1Hour}).
             </Text>
           </View>
 
@@ -1895,41 +1984,89 @@ const SellerRegistration = ({ navigation, route }: any) => {
             placeholderTextColor={colors.placeholder}
           />
 
-          <Text style={[styles.label, { color: colors.text }]}>1 min duration rate *</Text>
+          <View style={{ marginTop: 14, marginBottom: 8 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 16 }]}>1) Message Pricing</Text>
+          </View>
+
+          <Text style={[styles.label, { color: colors.text }]}>1 min message rate</Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
-            value={rate1Min}
-            onChangeText={setRate1Min}
+            value={msgRate1Min}
+            onChangeText={setMsgRate1Min}
             placeholder={`Max allowed INR ${rateLimit1Min}`}
             placeholderTextColor={colors.placeholder}
             keyboardType="numeric"
           />
 
-          <Text style={[styles.label, { color: colors.text }]}>15 min duration rate *</Text>
+          <Text style={[styles.label, { color: colors.text }]}>15 min message rate</Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
-            value={rate15Min}
-            onChangeText={setRate15Min}
+            value={msgRate15Min}
+            onChangeText={setMsgRate15Min}
             placeholder={`Max allowed INR ${rateLimit15Min}`}
             placeholderTextColor={colors.placeholder}
             keyboardType="numeric"
           />
 
-          <Text style={[styles.label, { color: colors.text }]}>30 min duration rate *</Text>
+          <Text style={[styles.label, { color: colors.text }]}>30 min message rate</Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
-            value={rate30Min}
-            onChangeText={setRate30Min}
+            value={msgRate30Min}
+            onChangeText={setMsgRate30Min}
             placeholder={`Max allowed INR ${rateLimit30Min}`}
             placeholderTextColor={colors.placeholder}
             keyboardType="numeric"
           />
 
-          <Text style={[styles.label, { color: colors.text }]}>1 hour duration rate *</Text>
+          <Text style={[styles.label, { color: colors.text }]}>1 hour message rate</Text>
           <TextInput
             style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
-            value={rate1Hour}
-            onChangeText={setRate1Hour}
+            value={msgRate1Hour}
+            onChangeText={setMsgRate1Hour}
+            placeholder={`Max allowed INR ${rateLimit1Hour}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <View style={{ marginTop: 18, marginBottom: 8 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 16 }]}>2) Audio Call Pricing</Text>
+          </View>
+
+          <Text style={[styles.label, { color: colors.text }]}>1 min audio call rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={audioRate1Min}
+            onChangeText={setAudioRate1Min}
+            placeholder={`Max allowed INR ${rateLimit1Min}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>15 min audio call rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={audioRate15Min}
+            onChangeText={setAudioRate15Min}
+            placeholder={`Max allowed INR ${rateLimit15Min}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>30 min audio call rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={audioRate30Min}
+            onChangeText={setAudioRate30Min}
+            placeholder={`Max allowed INR ${rateLimit30Min}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>1 hour audio call rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={audioRate1Hour}
+            onChangeText={setAudioRate1Hour}
             placeholder={`Max allowed INR ${rateLimit1Hour}`}
             placeholderTextColor={colors.placeholder}
             keyboardType="numeric"
@@ -1940,44 +2077,51 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
     return (
       <>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Extra pricing & Promotion</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Video Call & Promotion Rates</Text>
         <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
-          Set message, call rates, and brand promotion pricing. Promotion rates automatically sync to your Featured Profile. You can also skip this step.
+          Set video call rates and creator promotion pricing. Promotion rates automatically sync to your Featured Profile.
         </Text>
 
-        <View style={[styles.rateCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.rateLabel, { color: colors.mutedText }]}>Call & Message Rates (Optional)</Text>
-          <Text style={[styles.rateBody, { color: colors.mutedText, marginTop: 2 }]}>
-            Set pricing for direct messaging, audio calls, and video calls.
-          </Text>
+        <View style={{ marginTop: 10, marginBottom: 8 }}>
+          <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 16 }]}>3) Video Call Pricing</Text>
         </View>
 
-        <Text style={[styles.label, { color: colors.text }]}>Message price (optional)</Text>
+        <Text style={[styles.label, { color: colors.text }]}>1 min video call rate</Text>
         <TextInput
           style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
-          value={messagePrice}
-          onChangeText={setMessagePrice}
-          placeholder="INR per message"
+          value={videoRate1Min}
+          onChangeText={setVideoRate1Min}
+          placeholder={`Max allowed INR ${rateLimit1Min}`}
           placeholderTextColor={colors.placeholder}
           keyboardType="numeric"
         />
 
-        <Text style={[styles.label, { color: colors.text }]}>Audio call price (optional)</Text>
+        <Text style={[styles.label, { color: colors.text }]}>15 min video call rate</Text>
         <TextInput
           style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
-          value={audioCallPrice}
-          onChangeText={setAudioCallPrice}
-          placeholder="INR per min"
+          value={videoRate15Min}
+          onChangeText={setVideoRate15Min}
+          placeholder={`Max allowed INR ${rateLimit15Min}`}
           placeholderTextColor={colors.placeholder}
           keyboardType="numeric"
         />
 
-        <Text style={[styles.label, { color: colors.text }]}>Video call price (optional)</Text>
+        <Text style={[styles.label, { color: colors.text }]}>30 min video call rate</Text>
         <TextInput
           style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
-          value={videoCallPrice}
-          onChangeText={setVideoCallPrice}
-          placeholder="INR per min"
+          value={videoRate30Min}
+          onChangeText={setVideoRate30Min}
+          placeholder={`Max allowed INR ${rateLimit30Min}`}
+          placeholderTextColor={colors.placeholder}
+          keyboardType="numeric"
+        />
+
+        <Text style={[styles.label, { color: colors.text }]}>1 hour video call rate</Text>
+        <TextInput
+          style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+          value={videoRate1Hour}
+          onChangeText={setVideoRate1Hour}
+          placeholder={`Max allowed INR ${rateLimit1Hour}`}
           placeholderTextColor={colors.placeholder}
           keyboardType="numeric"
         />
