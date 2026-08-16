@@ -42,6 +42,18 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Free disk space on runner
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          echo "Disk space after cleanup:"
+          df -h
+
       - name: Derive release metadata
         id: meta
         run: |
@@ -269,7 +281,11 @@ jobs:
           ANDROID_UPLOAD_KEY_PASSWORD: ${{ vars.ANDROID_UPLOAD_KEY_PASSWORD != '' && vars.ANDROID_UPLOAD_KEY_PASSWORD || secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           echo "Building Android release AAB with ${ENVFILE_VALUE}"
-          ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh aab
+      - name: Clean intermediate build files to reclaim disk space
+        run: |
+          rm -rf android/app/build/intermediates/transforms || true
+          rm -rf android/app/build/intermediates/incremental || true
+          df -h
 
       - name: Collect release artifacts
         id: collect
