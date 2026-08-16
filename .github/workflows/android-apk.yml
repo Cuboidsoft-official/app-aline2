@@ -283,6 +283,7 @@ jobs:
           ANDROID_UPLOAD_KEY_PASSWORD: ${{ vars.ANDROID_UPLOAD_KEY_PASSWORD != '' && vars.ANDROID_UPLOAD_KEY_PASSWORD || secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           echo "Building Android release AAB with ${ENVFILE_VALUE}"
+          ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh aab
       - name: Clean intermediate build files to reclaim disk space
         run: |
           rm -rf android/app/build/intermediates/transforms || true
