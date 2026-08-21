@@ -279,8 +279,8 @@ function WalletScreen({ navigation }: any) {
       }
     } catch (error: any) {
       const serverMsg = error?.response?.data?.message || "";
-      const readableMsg = getReadableApiErrorMessage(error, "Withdrawal request could not be processed.");
-      const finalErrorMessage = serverMsg || readableMsg || "Withdrawal failed.";
+      const readableMsg = getReadableApiErrorMessage(error, "Check Razorpay API, payment failed or check API provider.");
+      const finalErrorMessage = serverMsg || readableMsg || "Check Razorpay API, payment failed or check API provider.";
 
       setShowWithdrawModal(false);
       setWithdrawalErrorMsg(finalErrorMessage);
@@ -725,11 +725,11 @@ function WalletScreen({ navigation }: any) {
             </View>
 
             <Text style={[styles.errorModalTitle, { color: colors.text }]}>Withdrawal Payment Failed</Text>
-            <Text style={styles.errorModalSubtitle}>Please check the error details below</Text>
+            <Text style={styles.errorModalSubtitle}>Check Razorpay API or API Provider</Text>
 
             <View style={[styles.errorDetailsBox, { backgroundColor: isDarkMode ? "#1F1315" : "#FFF5F5", borderColor: isDarkMode ? "#3D1E22" : "#FEE2E2" }]}>
               <Text style={[styles.errorDetailsText, { color: colors.text }]}>
-                {withdrawalErrorMsg || "Withdrawal request failed."}
+                {withdrawalErrorMsg || "Check Razorpay API, payment failed or check API provider."}
               </Text>
             </View>
 
