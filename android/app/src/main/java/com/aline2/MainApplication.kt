@@ -6,10 +6,12 @@ import android.app.NotificationManager
 import android.app.Application
 import android.content.ContentResolver
 import android.content.Context
+import android.content.res.Configuration
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import java.util.Locale
 import com.aline2.arfilters.AlineArProcessorRegistry
 import com.aline2.arfilters.ArFilterPackage
 import com.aline2.callaudio.CallAudioPackage
@@ -21,6 +23,14 @@ import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 
 class MainApplication : Application(), ReactApplication {
+
+  override fun attachBaseContext(base: Context) {
+    val locale = Locale.US
+    val config = Configuration(base.resources.configuration)
+    config.setLocale(locale)
+    config.setLayoutDirection(locale)
+    super.attachBaseContext(base.createConfigurationContext(config))
+  }
 
   override val reactHost: ReactHost by lazy {
     getDefaultReactHost(
@@ -36,6 +46,11 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    Locale.setDefault(Locale.US)
+    val config = Configuration(resources.configuration)
+    config.setLocale(Locale.US)
+    config.setLayoutDirection(Locale.US)
+    resources.updateConfiguration(config, resources.displayMetrics)
     AlineArProcessorRegistry.register(applicationContext)
     createNotificationChannels()
     loadReactNative(this)
