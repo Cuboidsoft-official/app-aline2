@@ -115,11 +115,9 @@ const AI_ASSISTANT_ROW_ID = "assistant:inbox";
 
 const hasMainTabParent = (navigation: any) => {
   let currentNavigation = navigation;
-
   while (currentNavigation?.getParent) {
     currentNavigation = currentNavigation.getParent();
     const routeNames = currentNavigation?.getState?.()?.routeNames;
-
     if (
       Array.isArray(routeNames)
       && MAIN_TAB_ROUTES.every((routeName) => routeNames.includes(routeName))
@@ -223,6 +221,17 @@ const AllChatsScreen = ({ navigation, route }: any) => {
 
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const totalUnreadCount = useMemo(() => {
+    return conversations.reduce((total, conversation) => {
+      return total + Number(conversation?.unreadCount || 0);
+    }, 0);
+  }, [conversations]);
+
+  useEffect(() => {
+    navigation.setParams({
+      chatUnreadCount: totalUnreadCount,
+    });
+  }, [navigation, totalUnreadCount]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -819,7 +828,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           text: deletingConversationId === String(conversation._id) ? "Deleting..." : "Delete",
           style: "destructive",
           onPress: () => {
-            performDeleteConversation(conversation, title).catch(() => {});
+            performDeleteConversation(conversation, title).catch(() => { });
           },
         },
       ],
@@ -889,7 +898,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             textColor={colors.primary}
           />
 
-          {isOnline ? <View style={[styles.onlineDot, { borderColor: colors.card }]}/> : null}
+          {isOnline ? <View style={[styles.onlineDot, { borderColor: colors.card }]} /> : null}
         </View>
 
         <View style={styles.chatInfo}>
@@ -909,7 +918,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             </View>
           ) : renderUnreadBadge(conversation?.unreadCount)}
 
-          <Icon name={isForwardMode && isSelectedForForward ? "checkmark-circle" : "chevron-forward-outline"} size={20} color={isForwardMode && isSelectedForForward ? colors.primary : colors.mutedText}/>
+          <Icon name={isForwardMode && isSelectedForForward ? "checkmark-circle" : "chevron-forward-outline"} size={20} color={isForwardMode && isSelectedForForward ? colors.primary : colors.mutedText} />
         </View>
       </TouchableOpacity>
     );
@@ -953,7 +962,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           });
 
           if (isLocked) {
-            openLockedChat(openChat).catch(() => {});
+            openLockedChat(openChat).catch(() => { });
             return;
           }
 
@@ -1050,7 +1059,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       });
 
       if (isLocked) {
-        openLockedChat(openChat).catch(() => {});
+        openLockedChat(openChat).catch(() => { });
         return;
       }
 
@@ -1091,7 +1100,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           />
 
           {(item?.sellerUser?.isOnline || item?.otherUser?.isOnline) ? (
-            <View style={[styles.onlineDot, { borderColor: colors.card }]}/>
+            <View style={[styles.onlineDot, { borderColor: colors.card }]} />
           ) : null}
         </View>
 
@@ -1189,7 +1198,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
           });
 
           if (isLocked) {
-            openLockedChat(openChat).catch(() => {});
+            openLockedChat(openChat).catch(() => { });
             return;
           }
 
@@ -1263,7 +1272,7 @@ const AllChatsScreen = ({ navigation, route }: any) => {
             <Icon name="notifications-off-outline" size={16} color={colors.mutedText} />
           ) : null}
 
-          <Icon name={isForwardMode && isSelectedForForward ? "checkmark-circle" : "chevron-forward-outline"} size={20} color={isForwardMode && isSelectedForForward ? colors.primary : colors.mutedText}/>
+          <Icon name={isForwardMode && isSelectedForForward ? "checkmark-circle" : "chevron-forward-outline"} size={20} color={isForwardMode && isSelectedForForward ? colors.primary : colors.mutedText} />
         </View>
       </TouchableOpacity>
     );
@@ -1340,9 +1349,9 @@ const AllChatsScreen = ({ navigation, route }: any) => {
       : isForwardMode
         ? renderChat
         : ({ item }: { item: Conversation | AssistantInboxItem }) =>
-            "itemType" in item && item.itemType === "assistant"
-              ? renderAssistantConversation({ item })
-              : renderRegularConversation({ item: item as Conversation });
+          "itemType" in item && item.itemType === "assistant"
+            ? renderAssistantConversation({ item })
+            : renderRegularConversation({ item: item as Conversation });
   const keyExtractor = (item: ChatUser | Conversation | AssistantInboxItem) => item._id;
   const assistantScope = activeTab === "seller"
     ? "Seller chats inbox support"
@@ -1392,7 +1401,11 @@ const AllChatsScreen = ({ navigation, route }: any) => {
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
-        {!isInsideTabNavigator ? <AppBottomDock navigation={navigation} activeRouteName="Chats" /> : null}
+        {!isInsideTabNavigator ?
+          <AppBottomDock
+            navigation={navigation}
+            activeRouteName="Chats"
+            chatUnreadCount={totalUnreadCount} /> : null}
       </View>
     );
   }
@@ -1401,505 +1414,505 @@ const AllChatsScreen = ({ navigation, route }: any) => {
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
         <View style={styles.headerShell}>
+          <View
+            style={[
+              styles.header,
+              {
+                backgroundColor: colors.card,
+                borderColor: accentBorder,
+                borderRadius: cardRadius + 6,
+                paddingHorizontal: cardPadding,
+                paddingVertical: Math.max(chatMetrics.bubblePaddingY + 1, 14),
+              },
+            ]}
+          >
+            <View style={styles.headerCopy}>
+              <Text style={[styles.headerEyebrow, { color: accentColor, fontSize: chatMetrics.metaFontSize + 0.5 }]}>Messages</Text>
+              <Text style={[styles.headerTitle, { color: colors.text, fontSize: chatMetrics.titleFontSize + 5 }]}>Chats</Text>
+              <Text
+                style={[
+                  styles.headerSubtitle,
+                  {
+                    color: colors.mutedText,
+                    fontSize: chatMetrics.metaFontSize + 1,
+                    lineHeight: chatMetrics.metaFontSize + 7,
+                  },
+                ]}
+                numberOfLines={2}
+              >
+                {headerSubtitle}
+              </Text>
+            </View>
+
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={[
+                  styles.headerIconButton,
+                  {
+                    backgroundColor: accentSoft,
+                    borderColor: accentBorder,
+                    width: chatMetrics.headerAction + 2,
+                    height: chatMetrics.headerAction + 2,
+                    borderRadius: Math.round((chatMetrics.headerAction + 2) / 2),
+                  },
+                ]}
+                onPress={() => navigation.navigate("Search")}
+              >
+                <Icon name="search-outline" size={20} color={accentColor} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.headerIconButton,
+                  {
+                    backgroundColor: accentSoft,
+                    borderColor: accentBorder,
+                    width: chatMetrics.headerAction + 2,
+                    height: chatMetrics.headerAction + 2,
+                    borderRadius: Math.round((chatMetrics.headerAction + 2) / 2),
+                  },
+                ]}
+                onPress={() => setShowAssistant(true)}
+              >
+                <Icon name="sparkles-outline" size={20} color={accentColor} />
+              </TouchableOpacity>
+              {activeTab === "group" ? (
+                <TouchableOpacity
+                  style={[styles.headerActionButton, styles.headerIconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
+                  onPress={() => {
+                    setPublicGroupsVisible(true);
+                    loadPublicGroups().catch(() => { });
+                  }}
+                >
+                  <Icon name="globe-outline" size={20} color={accentColor} />
+                </TouchableOpacity>
+              ) : null}
+              {activeTab === "group" ? (
+                <TouchableOpacity
+                  style={[styles.headerActionButton, styles.headerIconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
+                  onPress={() => {
+                    setErrorMessage("");
+                    setGroupModalVisible(true);
+                  }}
+                >
+                  <Icon name="add-circle-outline" size={20} color={accentColor} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+        </View>
+
         <View
           style={[
-            styles.header,
+            styles.tabs,
             {
-              backgroundColor: colors.card,
-              borderColor: accentBorder,
-              borderRadius: cardRadius + 6,
-              paddingHorizontal: cardPadding,
-              paddingVertical: Math.max(chatMetrics.bubblePaddingY + 1, 14),
+              backgroundColor: tabsBackgroundColor,
+              borderColor: alpha(colors.border, isDarkMode ? "D0" : "B8"),
+              borderRadius: cardRadius,
+              padding: 5,
             },
           ]}
         >
-          <View style={styles.headerCopy}>
-            <Text style={[styles.headerEyebrow, { color: accentColor, fontSize: chatMetrics.metaFontSize + 0.5 }]}>Messages</Text>
-            <Text style={[styles.headerTitle, { color: colors.text, fontSize: chatMetrics.titleFontSize + 5 }]}>Chats</Text>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === "regular" ? { backgroundColor: accentColor } : null]}
+            onPress={() => setActiveTab("regular")}
+          >
             <Text
               style={[
-                styles.headerSubtitle,
-                {
-                  color: colors.mutedText,
-                  fontSize: chatMetrics.metaFontSize + 1,
-                  lineHeight: chatMetrics.metaFontSize + 7,
-                },
+                styles.tabText,
+                activeTab === "regular" && styles.activeTabText,
+                { color: activeTab === "regular" ? "#fff" : colors.mutedText, fontSize: tabLabelFontSize },
               ]}
-              numberOfLines={2}
+              numberOfLines={1}
             >
-              {headerSubtitle}
+              Direct
             </Text>
-          </View>
+          </TouchableOpacity>
 
-          <View style={styles.headerActions}>
-            <TouchableOpacity
+          <TouchableOpacity
+            style={[styles.tab, activeTab === "seller" ? { backgroundColor: colors.primary } : null]}
+            onPress={() => setActiveTab("seller")}
+          >
+            <Text
               style={[
-                styles.headerIconButton,
-                {
-                  backgroundColor: accentSoft,
-                  borderColor: accentBorder,
-                  width: chatMetrics.headerAction + 2,
-                  height: chatMetrics.headerAction + 2,
-                  borderRadius: Math.round((chatMetrics.headerAction + 2) / 2),
-                },
+                styles.tabText,
+                activeTab === "seller" && styles.activeTabText,
+                { color: activeTab === "seller" ? "#fff" : colors.mutedText, fontSize: tabLabelFontSize },
               ]}
-              onPress={() => navigation.navigate("Search")}
+              numberOfLines={1}
             >
-              <Icon name="search-outline" size={20} color={accentColor} />
-            </TouchableOpacity>
-            <TouchableOpacity
+              Seller
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tab, activeTab === "group" ? { backgroundColor: colors.primary } : null]}
+            onPress={() => setActiveTab("group")}
+          >
+            <Text
               style={[
-                styles.headerIconButton,
-                {
-                  backgroundColor: accentSoft,
-                  borderColor: accentBorder,
-                  width: chatMetrics.headerAction + 2,
-                  height: chatMetrics.headerAction + 2,
-                  borderRadius: Math.round((chatMetrics.headerAction + 2) / 2),
-                },
+                styles.tabText,
+                activeTab === "group" && styles.activeTabText,
+                { color: activeTab === "group" ? "#fff" : colors.mutedText, fontSize: tabLabelFontSize },
               ]}
-              onPress={() => setShowAssistant(true)}
+              numberOfLines={1}
             >
-              <Icon name="sparkles-outline" size={20} color={accentColor} />
-            </TouchableOpacity>
-          {activeTab === "group" ? (
-            <TouchableOpacity
-              style={[styles.headerActionButton, styles.headerIconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
-              onPress={() => {
-                setPublicGroupsVisible(true);
-                loadPublicGroups().catch(() => {});
-              }}
-            >
-              <Icon name="globe-outline" size={20} color={accentColor} />
-            </TouchableOpacity>
-          ) : null}
-          {activeTab === "group" ? (
-            <TouchableOpacity
-              style={[styles.headerActionButton, styles.headerIconButton, { backgroundColor: accentSoft, borderColor: accentBorder }]}
-              onPress={() => {
-                setErrorMessage("");
-                setGroupModalVisible(true);
-              }}
-            >
-              <Icon name="add-circle-outline" size={20} color={accentColor} />
-            </TouchableOpacity>
-          ) : null}
-          </View>
+              Channels
+            </Text>
+          </TouchableOpacity>
         </View>
-      </View>
 
-      <View
-        style={[
-          styles.tabs,
-          {
-            backgroundColor: tabsBackgroundColor,
-            borderColor: alpha(colors.border, isDarkMode ? "D0" : "B8"),
-            borderRadius: cardRadius,
-            padding: 5,
-          },
-        ]}
-      >
-        <TouchableOpacity
-          style={[styles.tab, activeTab === "regular" ? { backgroundColor: accentColor } : null]}
-          onPress={() => setActiveTab("regular")}
-        >
-          <Text
-            style={[
-              styles.tabText,
-              activeTab === "regular" && styles.activeTabText,
-              { color: activeTab === "regular" ? "#fff" : colors.mutedText, fontSize: tabLabelFontSize },
-            ]}
-            numberOfLines={1}
-          >
-            Direct
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, activeTab === "seller" ? { backgroundColor: colors.primary } : null]}
-          onPress={() => setActiveTab("seller")}
-        >
-          <Text
-            style={[
-              styles.tabText,
-              activeTab === "seller" && styles.activeTabText,
-              { color: activeTab === "seller" ? "#fff" : colors.mutedText, fontSize: tabLabelFontSize },
-            ]}
-            numberOfLines={1}
-          >
-            Seller
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, activeTab === "group" ? { backgroundColor: colors.primary } : null]}
-          onPress={() => setActiveTab("group")}
-        >
-          <Text
-            style={[
-              styles.tabText,
-              activeTab === "group" && styles.activeTabText,
-              { color: activeTab === "group" ? "#fff" : colors.mutedText, fontSize: tabLabelFontSize },
-            ]}
-            numberOfLines={1}
-          >
-            Channels
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {isForwardMode ? (
-        <View style={[styles.forwardBanner, { backgroundColor: colors.card, borderColor: accentBorder }]}>
-          <View style={styles.forwardBannerBody}>
-            <Icon name="arrow-redo-outline" size={18} color={accentColor} />
-            <Text style={[styles.forwardBannerText, { color: colors.text }]}>
-              {selectedForwardTargetList.length
-                ? `${selectedForwardTargetList.length} ${selectedForwardTargetList.length === 1 ? "chat" : "chats"} selected`
-                : "Select one or more chats to forward this message."}
-            </Text>
-          </View>
-          <View style={styles.forwardBannerActions}>
-            {!!selectedForwardTargetList.length ? (
-              <TouchableOpacity onPress={() => completeForward().catch(() => { })} disabled={forwarding}>
-                <Text style={[styles.forwardBannerAction, { color: colors.primary }]}>
-                  {forwarding ? "Sending..." : "Send"}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            <TouchableOpacity onPress={() => navigation.goBack()}>
-              <Text style={[styles.forwardBannerAction, { color: colors.primary }]}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : null}
-
-      <FlatList
-        data={listData}
-        keyExtractor={keyExtractor}
-        renderItem={renderListItem}
-        showsVerticalScrollIndicator={false}
-        removeClippedSubviews
-        initialNumToRender={12}
-        maxToRenderPerBatch={10}
-        windowSize={6}
-        ListHeaderComponent={renderListHeader}
-        contentContainerStyle={[
-          styles.listContent,
-          {
-            paddingHorizontal: inboxHorizontalPadding,
-            paddingBottom: bottomDockOffset + 18,
-          },
-          !listData.length ? styles.listContentEmpty : null,
-        ]}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>
-              {errorMessage
-                ? activeTab === "seller"
-                  ? "Seller chats unavailable"
-                  : activeTab === "group"
-                    ? "Channels unavailable"
-                    : "Chats unavailable"
-                : activeTab === "seller"
-                  ? "No seller chats yet"
-                  : activeTab === "group"
-                  ? "No channels yet"
-                    : "No chats yet"}
-            </Text>
-            <Text style={[styles.emptyText, { color: colors.mutedText }]}>
-              {errorMessage || (activeTab === "seller"
-                ? "Seller chats will appear here."
-                : activeTab === "group"
-                  ? "Create a private or public channel."
-                  : "Start a new chat to see it here.")}
-            </Text>
-          </View>
-        }
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => fetchChatData(true).catch(() => {})}
-            tintColor={colors.primary}
-          />
-        }
-      />
-
-      <Modal
-        visible={groupModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closeGroupModal}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Create Channel</Text>
-              <TouchableOpacity onPress={closeGroupModal}>
-                <Icon name="close-outline" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <TextInput
-              value={groupName}
-              onChangeText={setGroupName}
-              placeholder="Group name"
-              placeholderTextColor={colors.placeholder}
-              style={[styles.groupNameInput, { borderColor: colors.border, color: colors.text, backgroundColor: modalInputBackgroundColor }]}
-            />
-
-            <Text style={[styles.modalHelper, { color: colors.mutedText }]}>
-              Choose 2 to 99 people. The group can have up to 100 members including you.
-            </Text>
-
-            <View style={styles.groupModeRow}>
-              {(["private", "public"] as const).map((mode) => {
-                const isActive = groupVisibility === mode;
-                return (
-                  <TouchableOpacity
-                    key={mode}
-                    style={[
-                      styles.groupModeButton,
-                      {
-                        backgroundColor: isActive ? colors.primary : modalInputBackgroundColor,
-                        borderColor: isActive ? colors.primary : colors.border,
-                      },
-                    ]}
-                    onPress={() => setGroupVisibility(mode)}
-                  >
-                    <Text style={[styles.groupModeText, { color: isActive ? "#fff" : colors.text }]}>
-                      {mode === "public" ? "Public Channel" : "Private Channel"}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <TextInput
-              value={groupDescription}
-              onChangeText={setGroupDescription}
-              placeholder="Group description (optional)"
-              placeholderTextColor={colors.placeholder}
-              multiline
-              maxLength={240}
-              style={[styles.groupDescriptionInput, { borderColor: colors.border, color: colors.text, backgroundColor: modalInputBackgroundColor }]}
-            />
-
-            <FlatList
-              data={eligibleGroupUsers}
-              keyExtractor={(item) => item._id}
-              style={styles.groupPickerList}
-              renderItem={({ item }) => {
-                const isSelected = selectedGroupMembers.includes(item._id);
-
-                return (
-                  <TouchableOpacity
-                    style={[styles.memberRow, { borderColor: colors.border }]}
-                    onPress={() => toggleGroupMember(item._id)}
-                  >
-                    <AppAvatar
-                      uri={item.profilePic || DEFAULT_AVATAR_URL}
-                      name={item.username || item.name || (item as any)?.email || "User"}
-                      size={48}
-                      style={styles.memberAvatar}
-                      backgroundColor={colors.surface}
-                      textColor={colors.primary}
-                    />
-
-                    <View style={styles.memberMeta}>
-                      <Text style={[styles.memberName, { color: colors.text }]}>
-                        {item.username || item.name || "User"}
-                      </Text>
-                      <Text style={[styles.memberSubtitle, { color: colors.mutedText }]}>
-                        {item.name || item.category || "Aline2 member"}
-                      </Text>
-                    </View>
-
-                    <Icon
-                      name={isSelected ? "checkbox" : "square-outline"}
-                      size={22}
-                      color={isSelected ? colors.primary : colors.mutedText}
-                    />
-                  </TouchableOpacity>
-                );
-              }}
-            />
-
-            {!eligibleGroupUsers.length ? (
-              <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
-                No users are available for a new group right now.
+        {isForwardMode ? (
+          <View style={[styles.forwardBanner, { backgroundColor: colors.card, borderColor: accentBorder }]}>
+            <View style={styles.forwardBannerBody}>
+              <Icon name="arrow-redo-outline" size={18} color={accentColor} />
+              <Text style={[styles.forwardBannerText, { color: colors.text }]}>
+                {selectedForwardTargetList.length
+                  ? `${selectedForwardTargetList.length} ${selectedForwardTargetList.length === 1 ? "chat" : "chats"} selected`
+                  : "Select one or more chats to forward this message."}
               </Text>
-            ) : null}
-
-            <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
-              Selected {selectedGroupMembers.length} people. {remainingGroupSlots} spots left.
-            </Text>
-
-            <TouchableOpacity
-              style={[styles.createGroupButton, { backgroundColor: creatingGroup ? disabledCreateGroupColor : colors.primary }]}
-              onPress={createGroup}
-              disabled={creatingGroup}
-            >
-              {creatingGroup ? <ActivityIndicator color="#fff" /> : <Text style={styles.createGroupButtonText}>Create channel</Text>}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={publicGroupsVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setPublicGroupsVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Browse Public Channels</Text>
-              <TouchableOpacity onPress={() => setPublicGroupsVisible(false)}>
-                <Icon name="close-outline" size={24} color={colors.text} />
+            </View>
+            <View style={styles.forwardBannerActions}>
+              {!!selectedForwardTargetList.length ? (
+                <TouchableOpacity onPress={() => completeForward().catch(() => { })} disabled={forwarding}>
+                  <Text style={[styles.forwardBannerAction, { color: colors.primary }]}>
+                    {forwarding ? "Sending..." : "Send"}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity onPress={() => navigation.goBack()}>
+                <Text style={[styles.forwardBannerAction, { color: colors.primary }]}>Cancel</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        ) : null}
 
-            {loadingPublicGroups ? (
-              <View style={styles.publicGroupsLoader}>
-                <ActivityIndicator size="small" color={colors.primary} />
+        <FlatList
+          data={listData}
+          keyExtractor={keyExtractor}
+          renderItem={renderListItem}
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews
+          initialNumToRender={12}
+          maxToRenderPerBatch={10}
+          windowSize={6}
+          ListHeaderComponent={renderListHeader}
+          contentContainerStyle={[
+            styles.listContent,
+            {
+              paddingHorizontal: inboxHorizontalPadding,
+              paddingBottom: bottomDockOffset + 18,
+            },
+            !listData.length ? styles.listContentEmpty : null,
+          ]}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                {errorMessage
+                  ? activeTab === "seller"
+                    ? "Seller chats unavailable"
+                    : activeTab === "group"
+                      ? "Channels unavailable"
+                      : "Chats unavailable"
+                  : activeTab === "seller"
+                    ? "No seller chats yet"
+                    : activeTab === "group"
+                      ? "No channels yet"
+                      : "No chats yet"}
+              </Text>
+              <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+                {errorMessage || (activeTab === "seller"
+                  ? "Seller chats will appear here."
+                  : activeTab === "group"
+                    ? "Create a private or public channel."
+                    : "Start a new chat to see it here.")}
+              </Text>
+            </View>
+          }
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => fetchChatData(true).catch(() => { })}
+              tintColor={colors.primary}
+            />
+          }
+        />
+
+        <Modal
+          visible={groupModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={closeGroupModal}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Create Channel</Text>
+                <TouchableOpacity onPress={closeGroupModal}>
+                  <Icon name="close-outline" size={24} color={colors.text} />
+                </TouchableOpacity>
               </View>
-            ) : (
+
+              <TextInput
+                value={groupName}
+                onChangeText={setGroupName}
+                placeholder="Group name"
+                placeholderTextColor={colors.placeholder}
+                style={[styles.groupNameInput, { borderColor: colors.border, color: colors.text, backgroundColor: modalInputBackgroundColor }]}
+              />
+
+              <Text style={[styles.modalHelper, { color: colors.mutedText }]}>
+                Choose 2 to 99 people. The group can have up to 100 members including you.
+              </Text>
+
+              <View style={styles.groupModeRow}>
+                {(["private", "public"] as const).map((mode) => {
+                  const isActive = groupVisibility === mode;
+                  return (
+                    <TouchableOpacity
+                      key={mode}
+                      style={[
+                        styles.groupModeButton,
+                        {
+                          backgroundColor: isActive ? colors.primary : modalInputBackgroundColor,
+                          borderColor: isActive ? colors.primary : colors.border,
+                        },
+                      ]}
+                      onPress={() => setGroupVisibility(mode)}
+                    >
+                      <Text style={[styles.groupModeText, { color: isActive ? "#fff" : colors.text }]}>
+                        {mode === "public" ? "Public Channel" : "Private Channel"}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <TextInput
+                value={groupDescription}
+                onChangeText={setGroupDescription}
+                placeholder="Group description (optional)"
+                placeholderTextColor={colors.placeholder}
+                multiline
+                maxLength={240}
+                style={[styles.groupDescriptionInput, { borderColor: colors.border, color: colors.text, backgroundColor: modalInputBackgroundColor }]}
+              />
+
               <FlatList
-                data={publicGroups}
-                keyExtractor={(item) => String(item?._id || "")}
+                data={eligibleGroupUsers}
+                keyExtractor={(item) => item._id}
                 style={styles.groupPickerList}
-                ListEmptyComponent={(
-                  <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
-                    No public groups are available right now.
-                  </Text>
-                )}
                 renderItem={({ item }) => {
-                  const alreadyJoined = Boolean(item?.isJoined || orderedGroupConversations.some((entry) => entry._id === item._id));
+                  const isSelected = selectedGroupMembers.includes(item._id);
 
                   return (
-                    <View style={[styles.publicGroupRow, { borderColor: colors.border }]}>
-                      <View style={styles.publicGroupCopy}>
-                        <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
-                          {item?.groupName || "Public group"}
+                    <TouchableOpacity
+                      style={[styles.memberRow, { borderColor: colors.border }]}
+                      onPress={() => toggleGroupMember(item._id)}
+                    >
+                      <AppAvatar
+                        uri={item.profilePic || DEFAULT_AVATAR_URL}
+                        name={item.username || item.name || (item as any)?.email || "User"}
+                        size={48}
+                        style={styles.memberAvatar}
+                        backgroundColor={colors.surface}
+                        textColor={colors.primary}
+                      />
+
+                      <View style={styles.memberMeta}>
+                        <Text style={[styles.memberName, { color: colors.text }]}>
+                          {item.username || item.name || "User"}
                         </Text>
-                        <Text style={[styles.memberSubtitle, { color: colors.mutedText }]} numberOfLines={2}>
-                          {item?.groupDescription || `${item?.memberCount || item?.members?.length || 0} members`}
+                        <Text style={[styles.memberSubtitle, { color: colors.mutedText }]}>
+                          {item.name || item.category || "Aline2 member"}
                         </Text>
                       </View>
 
-                      <TouchableOpacity
-                        style={[
-                          styles.joinGroupButton,
-                          { backgroundColor: alreadyJoined ? modalInputBackgroundColor : colors.primary, borderColor: colors.border },
-                        ]}
-                        onPress={() => {
-                          if (alreadyJoined) {
-                            setPublicGroupsVisible(false);
-                            navigation.navigate("ChatScreen", {
-                              conversationId: item._id,
-                              conversationType: "group",
-                              groupName: item?.groupName,
-                              groupAvatar: item?.groupAvatar,
-                              memberCount: item?.memberCount || item?.members?.length || 0,
-                            });
-                            return;
-                          }
-
-                          handleJoinPublicGroup(item).catch(() => {});
-                        }}
-                      >
-                        <Text style={[styles.joinGroupButtonText, { color: alreadyJoined ? colors.text : "#fff" }]}>
-                          {alreadyJoined ? "Open" : "Join"}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
+                      <Icon
+                        name={isSelected ? "checkbox" : "square-outline"}
+                        size={22}
+                        color={isSelected ? colors.primary : colors.mutedText}
+                      />
+                    </TouchableOpacity>
                   );
                 }}
               />
-            )}
-          </View>
-        </View>
-      </Modal>
 
-      <Modal
-        visible={groupActionsVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closeGroupActions}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={closeGroupActions}>
-          <Pressable
-            style={[styles.groupActionsCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={(event) => event.stopPropagation()}
-          >
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>
-                {activeGroupConversation?.groupName || "Group options"}
+              {!eligibleGroupUsers.length ? (
+                <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
+                  No users are available for a new group right now.
+                </Text>
+              ) : null}
+
+              <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
+                Selected {selectedGroupMembers.length} people. {remainingGroupSlots} spots left.
               </Text>
-              <TouchableOpacity onPress={closeGroupActions}>
-                <Icon name="close-outline" size={24} color={colors.text} />
+
+              <TouchableOpacity
+                style={[styles.createGroupButton, { backgroundColor: creatingGroup ? disabledCreateGroupColor : colors.primary }]}
+                onPress={createGroup}
+                disabled={creatingGroup}
+              >
+                {creatingGroup ? <ActivityIndicator color="#fff" /> : <Text style={styles.createGroupButtonText}>Create channel</Text>}
               </TouchableOpacity>
             </View>
+          </View>
+        </Modal>
 
-            <TouchableOpacity
-              style={[styles.groupActionRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={() => {
-                toggleActiveGroupMute().catch(() => {});
-              }}
-              disabled={!activeGroupConversation?._id}
-            >
-              <Icon
-                name={mutedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "notifications-outline" : "notifications-off-outline"}
-                size={20}
-                color={colors.primary}
-              />
-              <Text style={[styles.groupActionText, { color: colors.text }]}>
-                {mutedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "Unmute group" : "Mute group"}
-              </Text>
-            </TouchableOpacity>
+        <Modal
+          visible={publicGroupsVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setPublicGroupsVisible(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Browse Public Channels</Text>
+                <TouchableOpacity onPress={() => setPublicGroupsVisible(false)}>
+                  <Icon name="close-outline" size={24} color={colors.text} />
+                </TouchableOpacity>
+              </View>
 
-            <TouchableOpacity
-              style={[styles.groupActionRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={() => {
-                requestActiveGroupLockToggle().catch(() => {});
-              }}
-              disabled={!activeGroupConversation?._id}
+              {loadingPublicGroups ? (
+                <View style={styles.publicGroupsLoader}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              ) : (
+                <FlatList
+                  data={publicGroups}
+                  keyExtractor={(item) => String(item?._id || "")}
+                  style={styles.groupPickerList}
+                  ListEmptyComponent={(
+                    <Text style={[styles.groupEligibilityHint, { color: colors.mutedText }]}>
+                      No public groups are available right now.
+                    </Text>
+                  )}
+                  renderItem={({ item }) => {
+                    const alreadyJoined = Boolean(item?.isJoined || orderedGroupConversations.some((entry) => entry._id === item._id));
+
+                    return (
+                      <View style={[styles.publicGroupRow, { borderColor: colors.border }]}>
+                        <View style={styles.publicGroupCopy}>
+                          <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
+                            {item?.groupName || "Public group"}
+                          </Text>
+                          <Text style={[styles.memberSubtitle, { color: colors.mutedText }]} numberOfLines={2}>
+                            {item?.groupDescription || `${item?.memberCount || item?.members?.length || 0} members`}
+                          </Text>
+                        </View>
+
+                        <TouchableOpacity
+                          style={[
+                            styles.joinGroupButton,
+                            { backgroundColor: alreadyJoined ? modalInputBackgroundColor : colors.primary, borderColor: colors.border },
+                          ]}
+                          onPress={() => {
+                            if (alreadyJoined) {
+                              setPublicGroupsVisible(false);
+                              navigation.navigate("ChatScreen", {
+                                conversationId: item._id,
+                                conversationType: "group",
+                                groupName: item?.groupName,
+                                groupAvatar: item?.groupAvatar,
+                                memberCount: item?.memberCount || item?.members?.length || 0,
+                              });
+                              return;
+                            }
+
+                            handleJoinPublicGroup(item).catch(() => { });
+                          }}
+                        >
+                          <Text style={[styles.joinGroupButtonText, { color: alreadyJoined ? colors.text : "#fff" }]}>
+                            {alreadyJoined ? "Open" : "Join"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  }}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={groupActionsVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={closeGroupActions}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={closeGroupActions}>
+            <Pressable
+              style={[styles.groupActionsCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={(event) => event.stopPropagation()}
             >
-              <Icon
-                name={lockedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "lock-open-outline" : "lock-closed-outline"}
-                size={20}
-                color={colors.primary}
-              />
-              <Text style={[styles.groupActionText, { color: colors.text }]}>
-                {lockedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "Unlock group" : "Lock group"}
-              </Text>
-            </TouchableOpacity>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>
+                  {activeGroupConversation?.groupName || "Group options"}
+                </Text>
+                <TouchableOpacity onPress={closeGroupActions}>
+                  <Icon name="close-outline" size={24} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.groupActionRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={() => {
+                  toggleActiveGroupMute().catch(() => { });
+                }}
+                disabled={!activeGroupConversation?._id}
+              >
+                <Icon
+                  name={mutedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "notifications-outline" : "notifications-off-outline"}
+                  size={20}
+                  color={colors.primary}
+                />
+                <Text style={[styles.groupActionText, { color: colors.text }]}>
+                  {mutedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "Unmute group" : "Mute group"}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.groupActionRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={() => {
+                  requestActiveGroupLockToggle().catch(() => { });
+                }}
+                disabled={!activeGroupConversation?._id}
+              >
+                <Icon
+                  name={lockedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "lock-open-outline" : "lock-closed-outline"}
+                  size={20}
+                  color={colors.primary}
+                />
+                <Text style={[styles.groupActionText, { color: colors.text }]}>
+                  {lockedConversationIds.includes(String(activeGroupConversation?._id || "")) ? "Unlock group" : "Lock group"}
+                </Text>
+              </TouchableOpacity>
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </Modal>
 
-      <ChatLockModal
-        visible={chatLockModalVisible}
-        mode={chatLockMode}
-        busy={lockingBusy}
-        onClose={() => {
-          setChatLockModalVisible(false);
-          setPendingLockedTarget(null);
-          setPendingLockChange(null);
-          setLockingBusy(false);
-        }}
-        onSubmit={handleChatLockSubmit}
-      />
+        <ChatLockModal
+          visible={chatLockModalVisible}
+          mode={chatLockMode}
+          busy={lockingBusy}
+          onClose={() => {
+            setChatLockModalVisible(false);
+            setPendingLockedTarget(null);
+            setPendingLockChange(null);
+            setLockingBusy(false);
+          }}
+          onSubmit={handleChatLockSubmit}
+        />
 
-      <AISupportSheet
-        visible={showAssistant}
-        onClose={() => setShowAssistant(false)}
-        scope={assistantScope}
-        scopeHint={assistantScopeHint}
-        conversationSummary={assistantConversationSummary}
-        recentMessages={assistantRecentMessages}
-        suggestedPrompts={assistantSuggestedPrompts}
+        <AISupportSheet
+          visible={showAssistant}
+          onClose={() => setShowAssistant(false)}
+          scope={assistantScope}
+          scopeHint={assistantScopeHint}
+          conversationSummary={assistantConversationSummary}
+          recentMessages={assistantRecentMessages}
+          suggestedPrompts={assistantSuggestedPrompts}
         />
       </SafeAreaView>
       {!isInsideTabNavigator ? <AppBottomDock navigation={navigation} activeRouteName="Chats" /> : null}
