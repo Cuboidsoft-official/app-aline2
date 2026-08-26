@@ -58,9 +58,10 @@ const bottomNavItems = [
 type AppBottomDockProps = {
   navigation: any;
   activeRouteName?: string;
+  chatUnreadCount?: number;
 };
 
-function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
+function AppBottomDock({ navigation, activeRouteName, chatUnreadCount = 0, }: AppBottomDockProps) {
   const { colors, isDarkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
   const bottomPadding = getAppBottomDockBottomPadding(insets.bottom);
@@ -183,8 +184,23 @@ function AppBottomDock({ navigation, activeRouteName }: AppBottomDockProps) {
               {item.key === "ProfileView" ? (
                 <ProfileTabAvatar focused={isActive} color={tintColor} size={22} />
               ) : (
-                <Icon name={isActive ? item.icons.active : item.icons.inactive} size={22} color={tintColor} />
+                <View style={styles.iconWrapper}>
+                  <Icon
+                    name={isActive ? item.icons.active : item.icons.inactive}
+                    size={22}
+                    color={tintColor}
+                  />
+
+                  {item.key === "Chats" && chatUnreadCount > 0 ? (
+                    <View style={styles.chatUnreadBadge}>
+                      <Text style={styles.chatUnreadBadgeText}>
+                        {chatUnreadCount > 99 ? "99+" : chatUnreadCount}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
               )}
+
               <Text
                 style={[styles.label, { color: tintColor, fontSize: labelFontSize }]}
                 numberOfLines={1}
@@ -208,6 +224,36 @@ const styles = StyleSheet.create({
     bottom: 0,
     zIndex: 60,
     elevation: 60,
+  },
+  iconWrapper: {
+    position: "relative",
+    width: 26,
+    height: 26,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  chatUnreadBadge: {
+    position: "absolute",
+    top: -7,
+    right: -9,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#FF3B30",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
+
+  chatUnreadBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+    lineHeight: 13,
+    textAlign: "center",
   },
   surface: {
     flexDirection: "row",

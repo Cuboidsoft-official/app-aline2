@@ -52,6 +52,7 @@ import { connectSocket, socket } from "../socket";
 import { listLiveStreams } from "../utils/liveStreamApi";
 import { APP_RELEASE_DATE, APP_VERSION } from "../config/appMeta";
 import { FEED_VIDEO_SOUND_DEFAULT, isFeedVideoSoundOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../utils/feedMediaSound";
+import { shouldTriggerFeedPrefetch } from "../utils/feedPrefetch";
 
 let ColorMatrix: any;
 try {
@@ -68,6 +69,11 @@ const initialFeed: FeedResponse = {
 const FEED_ACCENT = "#9b4dff";
 
 const FEED_PAGE_SIZE = 10;
+const FEED_FLATLIST_INITIAL_NUM_TO_RENDER = 6;
+const FEED_FLATLIST_MAX_TO_RENDER_PER_BATCH = 6;
+const FEED_FLATLIST_WINDOW_SIZE = 8;
+const FEED_PREFETCH_TRIGGER_INDEX = 4;
+const FEED_PREFETCH_BUFFER_ITEMS = 8;
 const FEED_LOAD_MORE_DELAY_MS = 180;
 const FEED_LOAD_MORE_THROTTLE_MS = 1200;
 const FEED_MEDIA_ASPECT_RATIO = 4 / 5;
@@ -306,6 +312,23 @@ const getMediaFrameTransformStyle = (
   };
 };
 
+const mergeFeedPostsPreserveOrder = (existing: Post[], incoming: Post[]): Post[] => {
+  const merged: Post[] = [...existing];
+  const seenIds = new Set(existing.map((post) => String(post?.id || "")).filter(Boolean));
+
+  for (const post of incoming) {
+    const normalizedId = String(post?.id || "");
+    if (!normalizedId || seenIds.has(normalizedId)) {
+      continue;
+    }
+
+    seenIds.add(normalizedId);
+    merged.push(post);
+  }
+
+  return merged;
+};
+
 const buildMixedLatestFeedPosts = (items: Post[]): Post[] => {
   return Array.from(
     items.reduce((map, item) => {
@@ -381,7 +404,7 @@ function FeedScreen({ navigation, route }: any) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [publishTasks, setPublishTasks] = useState<PublishQueueTask[]>(() => getPublishQueueSnapshot());
   const slideAnim = useRef(new Animated.Value(0)).current;
-  const feedListRef = useRef<FlatList<Post> | null>(null);
+  const feedListRef = useRef<FlatList<any> | null>(null);
   const hasFeedContentRef = useRef(false);
   const feedMetaSnapshotRef = useRef<{
     liveStories: any[];
@@ -603,7 +626,7 @@ function FeedScreen({ navigation, route }: any) {
       return posts;
     }
 
-    return rankFeedPostsByLocalInterest(posts, feedInterestRef.current);
+    return [...posts];
   }, [isFocusedPostFeed]);
 
   const loadFeedSnapshot = useCallback(async (options: { lightweight?: boolean } = {}) => {
@@ -667,13 +690,15 @@ function FeedScreen({ navigation, route }: any) {
 
   const applyFeedSnapshot = useCallback((snapshot: any, options: { shufflePosts?: boolean; preserveActivePostId?: string } = {}) => {
     const { data, liveStories: nextLiveStories, seller, storedUser, unreadNotifications, walletBalance } = snapshot;
-    const nextPosts = buildMixedLatestFeedPosts(data.posts);
+    const responsePosts = Array.isArray(data?.posts) ? data.posts : [];
+    const nextPosts = buildGroupedFeedPosts(responsePosts);
     const preserveActivePostId = String(options.preserveActivePostId || focusedPostId || "").trim();
+
     const orderedPosts = preserveActivePostId
-      ? [
-          ...nextPosts.filter((post) => post.id === preserveActivePostId),
-          ...personalizeFeedPosts(nextPosts.filter((post) => post.id !== preserveActivePostId)),
-        ]
+      ? mergeFeedPostsPreserveOrder(
+          nextPosts.filter((post) => post.id === preserveActivePostId),
+          nextPosts.filter((post) => post.id !== preserveActivePostId),
+        )
       : personalizeFeedPosts(nextPosts);
 
     setFeed({
@@ -684,7 +709,7 @@ function FeedScreen({ navigation, route }: any) {
     });
     setLiveStories(nextLiveStories);
     setPage(1);
-    setHasMore(data.posts.length >= FEED_PAGE_SIZE);
+    setHasMore(responsePosts.length >= FEED_PAGE_SIZE);
     setCurrentUser(
       storedUser
         ? {
@@ -721,57 +746,69 @@ function FeedScreen({ navigation, route }: any) {
   }, [applyFeedSnapshot, feedScopeKey, loadFeedSnapshot]);
 
   const loadMoreFeed = useCallback(() => {
-    if (isFocusedPostFeed || loadingMore || !hasMore || feedLoadMoreRequestRef.current) {
-      return;
-    }
+    try {
+      if (isFocusedPostFeed || loadingMore || !hasMore || feedLoadMoreRequestRef.current) {
+        return;
+      }
 
-    const now = Date.now();
-    if (now - feedLastLoadMoreAtRef.current < FEED_LOAD_MORE_THROTTLE_MS) {
-      return;
-    }
+      const now = Date.now();
+      if (now - feedLastLoadMoreAtRef.current < FEED_LOAD_MORE_THROTTLE_MS) {
+        return;
+      }
 
-    feedLastLoadMoreAtRef.current = now;
-    feedLoadMoreRequestRef.current = true;
-    if (feedLoadMoreTimeoutRef.current) {
-      clearTimeout(feedLoadMoreTimeoutRef.current);
-    }
+      feedLastLoadMoreAtRef.current = now;
+      feedLoadMoreRequestRef.current = true;
+      if (feedLoadMoreTimeoutRef.current) {
+        clearTimeout(feedLoadMoreTimeoutRef.current);
+      }
 
-    feedLoadMoreTimeoutRef.current = setTimeout(() => {
-      const nextPage = page + 1;
-      setLoadingMore(true);
-      socialApi.getFeed(nextPage, FEED_PAGE_SIZE)
-        .then((data) => {
-          const nextPosts = Array.isArray(data.posts) ? data.posts : [];
-          if (!nextPosts.length) {
-            setHasMore(false);
-            return;
-          }
-
-          setFeed((prev) => {
-            const existingIds = new Set(prev.posts.map((post) => post.id));
-            const uniqueNextPosts = nextPosts.filter((post) => post?.id && !existingIds.has(post.id));
-
-            if (!uniqueNextPosts.length) {
+      feedLoadMoreTimeoutRef.current = setTimeout(() => {
+        const nextPage = Number(page || 1) + 1;
+        setLoadingMore(true);
+        socialApi.getFeed(nextPage, FEED_PAGE_SIZE)
+          .then((data) => {
+            const nextPosts = Array.isArray(data?.posts) ? data.posts : [];
+            if (!nextPosts.length) {
               setHasMore(false);
-              return prev;
+              return;
             }
 
-            return { ...prev, posts: [...prev.posts, ...uniqueNextPosts] };
+            setFeed((prev) => {
+              const existingIds = new Set((Array.isArray(prev?.posts) ? prev.posts : []).map((post) => String(post?.id || "")).filter(Boolean));
+              const uniqueNextPosts = nextPosts.filter((post) => {
+                const id = String(post?.id || "");
+                return !!id && !existingIds.has(id);
+              });
+
+              if (!uniqueNextPosts.length) {
+                setHasMore(false);
+                return prev;
+              }
+
+              return {
+                ...prev,
+                posts: mergeFeedPostsPreserveOrder(Array.isArray(prev?.posts) ? prev.posts : [], uniqueNextPosts),
+              };
+            });
+            setPage(nextPage);
+            if (nextPosts.length < FEED_PAGE_SIZE) {
+              setHasMore(false);
+            }
+          })
+          .catch((error) => {
+            console.log("feed load more error:", error);
+          })
+          .finally(() => {
+            feedLoadMoreRequestRef.current = false;
+            feedLoadMoreTimeoutRef.current = null;
+            setLoadingMore(false);
           });
-          setPage(nextPage);
-          if (nextPosts.length < FEED_PAGE_SIZE) {
-            setHasMore(false);
-          }
-        })
-        .catch((error) => {
-          console.log("feed load more error:", error);
-        })
-        .finally(() => {
-          feedLoadMoreRequestRef.current = false;
-          feedLoadMoreTimeoutRef.current = null;
-          setLoadingMore(false);
-        });
-    }, FEED_LOAD_MORE_DELAY_MS);
+      }, FEED_LOAD_MORE_DELAY_MS);
+    } catch (error) {
+      console.log("feed load more trigger crashed:", error);
+      feedLoadMoreRequestRef.current = false;
+      setLoadingMore(false);
+    }
   }, [hasMore, isFocusedPostFeed, loadingMore, page]);
 
   useEffect(() => {
@@ -824,35 +861,44 @@ function FeedScreen({ navigation, route }: any) {
   useFocusEffect(
     useCallback(() => {
       let active = true;
-
-      const run = async () => {
-        const shouldReloadForScope = loadedFeedScopeRef.current !== feedScopeKey;
-        const shouldShowInitialLoader = !hasFeedContentRef.current || shouldReloadForScope;
-
-        if (!shouldReloadForScope && hasFeedContentRef.current) {
-          setLoading(false);
-          setRefreshing(false);
+      const runInitialFeedLoad = async () => {
+        // Already loaded for this scope → DO NOTHING
+        if (
+          loadedFeedScopeRef.current === feedScopeKey &&
+          hasFeedContentRef.current
+        ) {
           return;
         }
 
         try {
-          if (shouldShowInitialLoader) {
-            setLoading(true);
-          }
+          setLoading(true);
 
           const snapshot = await loadFeedSnapshot();
-          if (active) {
-            applyFeedSnapshot(snapshot);
-            loadedFeedScopeRef.current = feedScopeKey;
+
+          if (!active) {
+            return;
           }
+
+          applyFeedSnapshot(snapshot);
+
+          loadedFeedScopeRef.current = feedScopeKey;
+          hasFeedContentRef.current =
+            Array.isArray(snapshot?.data?.posts) &&
+            snapshot.data.posts.length > 0;
+
         } catch (error) {
-          if (active) {
-            if (shouldShowInitialLoader) {
-              setFeed(initialFeed);
-              setLiveStories([]);
-            }
-            setErrorMessage(getReadableApiErrorMessage(error, "Failed to load your feed."));
+          if (!active) {
+            return;
           }
+
+          console.log("Initial feed load error:", error);
+
+          setErrorMessage(
+            getReadableApiErrorMessage(
+              error,
+              "Failed to load your feed."
+            )
+          );
         } finally {
           if (active) {
             setLoading(false);
@@ -861,13 +907,13 @@ function FeedScreen({ navigation, route }: any) {
         }
       };
 
-      run();
+      runInitialFeedLoad();
 
       return () => {
         active = false;
         setActivePostId("");
       };
-    }, [applyFeedSnapshot, feedScopeKey, loadFeedSnapshot]),
+    }, [feedScopeKey])
   );
 
   useEffect(() => {
@@ -969,7 +1015,7 @@ function FeedScreen({ navigation, route }: any) {
         .then((response) => {
           setLiveStories(Array.isArray(response?.liveStreams) ? response.liveStreams : []);
         })
-        .catch(() => {});
+        .catch(() => { });
     };
 
     socket.on("receiveNotification", handleRealtimeNotification);
@@ -1059,14 +1105,14 @@ function FeedScreen({ navigation, route }: any) {
       const previewUsers = Array.isArray(currentPost?.likePreviewUsers) ? currentPost.likePreviewUsers : [];
       const nextPreviewUsers = updated?.liked
         ? [
-            {
-              id: currentUser?.id || "",
-              username: currentUser?.username || "",
-              name: currentUser?.name || "",
-              avatarUrl: currentUser?.avatarUrl || DEFAULT_AVATAR_URL,
-            },
-            ...previewUsers.filter((user) => String(user?.id || "") !== String(currentUser?.id || "")),
-          ].filter((user) => !!String(user?.id || "").trim()).slice(0, 3)
+          {
+            id: currentUser?.id || "",
+            username: currentUser?.username || "",
+            name: currentUser?.name || "",
+            avatarUrl: currentUser?.avatarUrl || DEFAULT_AVATAR_URL,
+          },
+          ...previewUsers.filter((user) => String(user?.id || "") !== String(currentUser?.id || "")),
+        ].filter((user) => !!String(user?.id || "").trim()).slice(0, 3)
         : previewUsers.filter((user) => String(user?.id || "") !== String(currentUser?.id || "")).slice(0, 3);
 
       updatePost({
@@ -1133,6 +1179,7 @@ function FeedScreen({ navigation, route }: any) {
 
   const handlePostMediaPress = (post: Post) => {
     const now = Date.now();
+    console.log("🔥 POST IMAGE TAPPED", post.id);
     const lastTap = postTapRef.current;
     const hasAudioLayer = post.media.some((asset) => asset.mediaType === "video");
 
@@ -1411,24 +1458,24 @@ function FeedScreen({ navigation, route }: any) {
 
       setCurrentUser((prev) => prev
         ? {
-            ...prev,
-            followingIds: Array.from(new Set([...(prev.followingIds || []), normalizedUserId])),
-          }
+          ...prev,
+          followingIds: Array.from(new Set([...(prev.followingIds || []), normalizedUserId])),
+        }
         : prev);
       setFeed((prev) => ({
         ...prev,
         posts: prev.posts.map((post) =>
           post.user.id === normalizedUserId
             ? {
-                ...post,
-                user: {
-                  ...post.user,
-                  viewerFollows: true,
-                  followerIds: Array.from(
-                    new Set([...(post.user.followerIds || []), String(currentUser?.id || "")].filter(Boolean)),
-                  ),
-                },
-              }
+              ...post,
+              user: {
+                ...post.user,
+                viewerFollows: true,
+                followerIds: Array.from(
+                  new Set([...(post.user.followerIds || []), String(currentUser?.id || "")].filter(Boolean)),
+                ),
+              },
+            }
             : post,
         ),
       }));
@@ -1509,7 +1556,7 @@ function FeedScreen({ navigation, route }: any) {
   const openNotifications = useCallback(() => {
     setUnreadNotificationCount(0);
     navigation.navigate("NotificationScreen");
-    API.put("/notifications/read-all").catch(() => {});
+    API.put("/notifications/read-all").catch(() => { });
   }, [navigation]);
 
   const openWalletDashboard = useCallback(() => {
@@ -1527,7 +1574,7 @@ function FeedScreen({ navigation, route }: any) {
     closeMenu();
     if (screen === "NotificationScreen") {
       setUnreadNotificationCount(0);
-      API.put("/notifications/read-all").catch(() => {});
+      API.put("/notifications/read-all").catch(() => { });
     }
     navigation.navigate(screen, params);
   }, [closeMenu, navigation]);
@@ -1612,9 +1659,7 @@ function FeedScreen({ navigation, route }: any) {
 
     return (
       <TouchableOpacity
-        style={[styles.storyItem, { width: storyItemWidth }]}
-        onPress={() => navigation.navigate("StoryViewer", { storyId: item.id, storyUserId: item.user.id })}
-      >
+        style={[styles.storyItem, { width: storyItemWidth }]}>
         {item.viewed ? (
           <View
             style={[
@@ -1651,8 +1696,121 @@ function FeedScreen({ navigation, route }: any) {
     );
   };
 
+  const buildGroupedFeedPosts = (items: Post[]): Post[] => {
+    if (!Array.isArray(items) || !items.length) {
+      return [];
+    }
+
+    const groups: Post[] = [];
+
+    // API is returning each image as a separate post.
+    // We therefore group consecutive media posts belonging
+    // to the same user.
+
+    for (const item of items) {
+      if (!item?.id) {
+        continue;
+      }
+
+      const media = Array.isArray(item.media)
+        ? item.media
+        : [];
+
+      // Nothing to group if this post has no media.
+      if (!media.length) {
+        groups.push(item);
+        continue;
+      }
+
+      const previous = groups[groups.length - 1];
+
+      const currentUserId = String(
+        item?.user?.id ||
+        (item?.user as any)?._id ||
+        item?.user?.username ||
+        ""
+      ).trim();
+
+      const previousUserId = String(
+        previous?.user?.id ||
+        (previous?.user as any)?._id ||
+        previous?.user?.username ||
+        ""
+      ).trim();
+
+      const previousMedia = Array.isArray(previous?.media)
+        ? previous.media
+        : [];
+
+      /*
+       * Group only when:
+       *
+       * 1. There is a previous post
+       * 2. Same user
+       * 3. Previous post has media
+       * 4. Current post has media
+       */
+      const shouldGroup =
+        !!previous &&
+        !!currentUserId &&
+        !!previousUserId &&
+        currentUserId === previousUserId &&
+        previousMedia.length > 0;
+
+      if (!shouldGroup) {
+        groups.push({
+          ...item,
+          media: [...media],
+        });
+
+        continue;
+      }
+
+      /*
+       * Prevent duplicate media IDs.
+       */
+      const existingMediaIds = new Set(
+        previousMedia.map((asset) => String(asset?.id))
+      );
+
+      const additionalMedia = media.filter(
+        (asset) =>
+          asset?.id &&
+          !existingMediaIds.has(String(asset.id))
+      );
+
+      groups[groups.length - 1] = {
+        ...previous,
+
+        media: [
+          ...previousMedia,
+          ...additionalMedia,
+        ],
+
+        /*
+         * Keep newest timestamp for ordering.
+         */
+        createdAt:
+          Number(item.createdAt || 0) >
+            Number(previous.createdAt || 0)
+            ? item.createdAt
+            : previous.createdAt,
+      };
+    }
+
+    return groups.sort(
+      (a, b) =>
+        Number(b?.createdAt || 0) -
+        Number(a?.createdAt || 0),
+    );
+  };
+
   const renderPostMedia = (post: Post, postIndex?: number) => {
     const mediaHeight = getPostMediaHeight(post);
+    if (!Array.isArray(post.media) || !post.media.length) {
+      return <View style={[styles.postImage, styles.mediaFallback, { width: postMediaWidth, height: mediaHeight }]} />;
+    }
+
     const frameAspectRatio = postMediaWidth / Math.max(1, mediaHeight);
     const currentCarouselIndex = carouselIndexByPostId[post.id] || 0;
     const isMuted = !!mutedPostIds[post.id];
@@ -1663,35 +1821,43 @@ function FeedScreen({ navigation, route }: any) {
     const effectivePostIndex = postIndexInFeed >= 0 ? postIndexInFeed : typeof postIndex === "number" ? postIndex : 0;
 
     const isPostActive = (activePostId ? activePostId === post.id : effectivePostIndex === 0) && isScreenFocused && !activeSheet;
-    const isPreloadTarget = false; 
+    const isPreloadTarget = false;
 
     const shouldPreloadVideo = isPreloadTarget;
     const shouldMountVideo = (isCarouselItemActive = true) =>
-      isScreenFocused && !activeSheet && (isPostActive || isPreloadTarget) && isCarouselItemActive;
+      shouldMountFeedVideo({
+        isPostActive,
+        isCarouselItemActive,
+        isScreenFocused,
+        isScrolling: false,
+      });
     const renderSensitiveBadge = (label?: string) => (
       <View pointerEvents="none" style={styles.sensitiveBadge}>
         <Text style={styles.sensitiveBadgeText}>{label ? `${label} sensitive content` : 'Sensitive content'}</Text>
       </View>
     );
 
-    if (post.type !== 'carousel') {
+    const isCarousel = Array.isArray(post.media) && post.media.length > 1;
+    if (!isCarousel) {
       const primaryMedia = post.media[0];
       if (!primaryMedia?.url) {
         return <View style={[styles.postImage, styles.mediaFallback, { width: postMediaWidth, height: mediaHeight }]} />;
       }
 
       if (primaryMedia?.mediaType === 'video') {
+        const shouldShowActiveVideo = shouldMountVideo(true);
         return (
           <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden' }]}>
+
             <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
               <SocialVideo
                 uri={normalizeMediaUrl(primaryMedia.url)}
                 posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || '')}
                 style={StyleSheet.absoluteFill}
-                paused={!isPostActive}
-                preload={shouldPreloadVideo}
+                paused={!shouldShowActiveVideo}
+                preload={shouldPreloadVideo && shouldShowActiveVideo}
                 muted={shouldMuteFeedVideo({
-                  isPostActive,
+                  isPostActive: shouldShowActiveVideo,
                   isVideoSoundEnabled,
                   isPostMuted: isMuted,
                 })}
@@ -1711,6 +1877,7 @@ function FeedScreen({ navigation, route }: any) {
       const imageResizeMode = getImageResizeMode(primaryMedia, frameAspectRatio);
       const rawImage = (
         <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden' }]}>
+
           <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
             <ProgressiveImage
               uri={normalizeMediaUrl(primaryMedia?.url)}
@@ -1785,22 +1952,22 @@ function FeedScreen({ navigation, route }: any) {
               return (
                 <View
                   key={`${post.id}-${key}`}
-                  style={[styles.postImage, styles.mediaFallback, { width: postMediaWidth, height: mediaHeight }]}
-                />
+                  style={[styles.postImage, styles.mediaFallback, { width: postMediaWidth, height: mediaHeight }]} />
               );
             }
 
             return asset.mediaType === "video" ? (
               <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
+
                 <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
                   <SocialVideo
                     uri={normalizeMediaUrl(asset.url)}
                     posterUri={normalizeMediaUrl(asset.thumbnailUrl || "")}
                     style={StyleSheet.absoluteFill}
-                    paused={!isPostActive || currentCarouselIndex !== sourceIndex}
-                    preload={shouldPreloadVideo && currentCarouselIndex === sourceIndex}
+                    paused={!shouldMountVideo(currentCarouselIndex === sourceIndex)}
+                    preload={shouldPreloadVideo && currentCarouselIndex === sourceIndex && shouldMountVideo(currentCarouselIndex === sourceIndex)}
                     muted={shouldMuteFeedVideo({
-                      isPostActive,
+                      isPostActive: shouldMountVideo(currentCarouselIndex === sourceIndex),
                       isCarouselItemActive: currentCarouselIndex === sourceIndex,
                       isVideoSoundEnabled,
                       isPostMuted: isMuted,
@@ -1820,6 +1987,7 @@ function FeedScreen({ navigation, route }: any) {
                 const imageResizeMode = getImageResizeMode(asset, frameAspectRatio);
                 const rawImage = (
                   <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
+
                     <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
                       <ProgressiveImage
                         uri={normalizeMediaUrl(asset.url)}
@@ -1880,15 +2048,7 @@ function FeedScreen({ navigation, route }: any) {
     return (
       <TouchableOpacity
         key={`live-${item?._id}`}
-        style={[styles.storyItem, { width: storyItemWidth }]}
-        onPress={() =>
-          navigation.navigate("LiveStreamScreen", {
-            liveStreamId: item?._id,
-            initialLiveStream: item,
-            mode: item?.isHost ? "host" : "viewer",
-          })
-        }
-      >
+        style={[styles.storyItem, { width: storyItemWidth }]}>
         <View
           style={[
             styles.storyRing,
@@ -1898,8 +2058,8 @@ function FeedScreen({ navigation, route }: any) {
         >
           <Image
             source={{ uri: liveAvatar }}
-            style={[styles.storyAvatar, { width: storyAvatarSize, height: storyAvatarSize, borderRadius: storyAvatarSize / 2 }]}
-          />
+            style={[styles.storyAvatar, { width: storyAvatarSize, height: storyAvatarSize, borderRadius: storyAvatarSize / 2 }]}>
+          </Image>
           <View style={styles.liveStoryBadge}>
             <Icon name="radio" size={10} color="#fff" />
             <Text style={styles.liveStoryBadgeText}>LIVE</Text>
@@ -1973,16 +2133,88 @@ function FeedScreen({ navigation, route }: any) {
     );
   };
 
-  const renderPost = ({ item }: { item: Post }) => {
-    const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
+  const handleFeedViewableChange = useCallback((
+    payload?: { viewableItems?: Array<{ index?: number | null; item?: Post }> },
+  ) => {
+    try {
+      const viewableItems = Array.isArray(payload?.viewableItems) ? payload.viewableItems : [];
+      if (!viewableItems.length) {
+        return;
+      }
+
+      const highestVisibleIndex = viewableItems.reduce((maxIndex, entry) => {
+        const index = typeof entry?.index === "number" ? entry.index : -1;
+        return Math.max(maxIndex, index);
+      }, -1);
+
+      const firstVisible = viewableItems[0];
+      const visiblePostId = firstVisible?.item?.id ? String(firstVisible.item.id) : "";
+      if (visiblePostId) {
+        lastViewablePostIdRef.current = visiblePostId;
+      }
+
+      const totalPosts = Array.isArray(feed?.posts) ? feed.posts.length : 0;
+      if (!shouldTriggerFeedPrefetch({
+        highestVisibleIndex,
+        totalPosts,
+        triggerIndex: FEED_PREFETCH_TRIGGER_INDEX,
+        bufferSize: FEED_PREFETCH_BUFFER_ITEMS,
+        pageSize: FEED_PAGE_SIZE,
+      })) {
+        return;
+      }
+
+      loadMoreFeed();
+    } catch (error) {
+      console.log("feed viewability crash guard:", error);
+    }
+  }, [feed?.posts?.length, loadMoreFeed]);
+
+  const renderPost = useCallback(({ item, index }: { item: any; index: number }) => {
+    if (!item) {
+      return null;
+    }
+
+    if (item.__featuredProfiles) {
+      return (
+        <View style={{ marginHorizontal: feedHorizontalInset, marginBottom: 12 }}>
+          <FeaturedProfilesCarousel
+            navigation={navigation}
+            title="Featured profiles to follow"
+            compact
+            limit={12}
+          />
+        </View>
+      );
+    }
+
+    const media = Array.isArray(item.media) ? item.media : [];
+    const user = item.user || {};
+    const safeSettings = item.settings || {};
+    const hasVideoMedia = media.some((asset: any) => asset?.mediaType === "video");
     const isMuted = !!mutedPostIds[item.id];
     void isMuted;
+    const likePreviewUsers = Array.isArray(item.likePreviewUsers) && item.likePreviewUsers.length
+      ? item.likePreviewUsers.slice(0, 3)
+      : [];
+    const latestLiker =
+      likePreviewUsers.find((likeUser: any) => String(likeUser?.id || "") !== String(currentUser?.id || ""))
+      || likePreviewUsers[0]
+      || null;
+    const latestLikerName = String(latestLiker?.name || latestLiker?.username || "").trim();
+    const likeSummaryLabel = latestLikerName
+      ? item.likesCount > 1
+        ? `Liked by ${latestLikerName} and ${Math.max(1, item.likesCount - 1)} others`
+        : `Liked by ${latestLikerName}`
+      : item.likesCount === 1
+        ? "1 like"
+        : `${formatCount(item.likesCount)} likes`;
     const tokens: string[] = [getPostTypeTag(item)];
 
     if (item.location) {
       tokens.push(`📍 ${item.location}`);
     }
-const metaLine = tokens.join(" • ");
+    const metaLine = tokens.join(" • ");
 
     return (
       <View
@@ -2006,10 +2238,10 @@ const metaLine = tokens.join(" • ");
             },
           ]}
         >
-          <TouchableOpacity style={styles.postHeaderIdentity} onPress={() => openUserProfile(item.user.id)}>
+          <TouchableOpacity style={styles.postHeaderIdentity} onPress={() => openUserProfile(String(user.id || ""))}>
             <AppAvatar
-              uri={item.user.avatarUrl || DEFAULT_AVATAR_URL}
-              name={item.user.name || item.user.username}
+              uri={user.avatarUrl || DEFAULT_AVATAR_URL}
+              name={user.name || user.username || "User"}
               size={width < 360 ? 38 : 42}
               style={[styles.postAvatar, width < 360 && styles.postAvatarCompact]}
             />
@@ -2017,22 +2249,16 @@ const metaLine = tokens.join(" • ");
               <View style={[styles.row, styles.usernameRow]}>
                 <Text
                   style={[styles.username, styles.usernameText, { color: colors.text, fontSize: usernameFontSize }]}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
                 >
-                  {item.user.username}
+                  {user.username || "User"}
                 </Text>
-                {shouldShowVerifiedBadge(item.user) ? (
+                {shouldShowVerifiedBadge(user) ? (
                   <Icon style={styles.verifiedIcon} name="checkmark-circle" color={FEED_ACCENT} size={16} />
                 ) : null}
               </View>
               {item.location ? (
                 <TouchableOpacity onPress={() => openHashtagResults(item.location!)} activeOpacity={0.75}>
-                  <Text
-                    style={[styles.postLocationText, { color: colors.mutedText }]}
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                  >
+                  <Text style={[styles.postLocationText, { color: colors.mutedText }]}>
                     {item.location}
                   </Text>
                 </TouchableOpacity>
@@ -2040,7 +2266,7 @@ const metaLine = tokens.join(" • ");
             </View>
           </TouchableOpacity>
           <View style={styles.postHeaderActions}>
-            {renderFeedRelationshipButton(item.user)}
+            {renderFeedRelationshipButton(user)}
             <TouchableOpacity
               style={[
                 styles.moreButton,
@@ -2054,17 +2280,17 @@ const metaLine = tokens.join(" • ");
               ]}
               onPress={() => openContentActions(item)}
             >
-              <Icon name="ellipsis-horizontal" size={20} color={FEED_ACCENT} />
+              <Icon name="ellipsis-horizontal" size={20} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
 
         <TouchableOpacity
-          activeOpacity={String(item.user.id) === String(currentUser?.id || "") ? 0.95 : 1}
-          disabled={String(item.user.id) !== String(currentUser?.id || "")}
+          activeOpacity={String(user.id || "") === String(currentUser?.id || "") ? 0.95 : 1}
+          disabled={String(user.id || "") !== String(currentUser?.id || "")}
           onPress={() => openPostDetail(item)}
         >
-          {renderPostMedia(item)}
+          {renderPostMedia(item, index)}
           {renderPostStickerOverlay(item)}
         </TouchableOpacity>
 
@@ -2185,277 +2411,11 @@ const metaLine = tokens.join(" • ");
           </View>
         </View>
 
-        {!item.settings.hideLikeCount ? (
-          <Text style={[styles.likesText, { paddingHorizontal: postBodyInset, color: colors.text, fontSize: supportingFontSize + 1 }]}>
-            {formatCount(item.likesCount)} likes
-          </Text>
-        ) : null}
-
-        <InteractiveText
-          style={[
-            styles.caption,
-            { paddingHorizontal: postBodyInset, color: colors.text, fontSize: captionFontSize, lineHeight: captionLineHeight },
-          ]}
-          prefix={(
-            <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
-              {item.user.username}{" "}
-            </Text>
-          )}
-          mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
-          hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
-          onPressMention={(mention) => {
-            void openMentionProfile(mention);
-          }}
-          onPressHashtag={openHashtagResults}
-          text={item.caption}
-        />
-
-        {item.mentions.length ? (
-          <InteractiveText
-            style={[styles.tagLineMuted, { paddingHorizontal: postBodyInset, color: colors.mutedText, fontSize: supportingFontSize }]}
-            mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
-            onPressMention={(mention) => {
-              void openMentionProfile(mention);
-            }}
-            text={item.mentions.map((mention) => `@${mention}`).join(" ")}
-          />
-        ) : null}
-
-        {renderPostMetaChips(item, postBodyInset)}
-        <Text style={[styles.metaLine, { paddingHorizontal: postBodyInset, color: colors.mutedText }]} numberOfLines={1}>
-          {metaLine}
-        </Text>
-
-        {false ? (
-          <Text style={[styles.collabLine, { color: colors.text }]}>Collab post • {item.collaboratorIds.length} collaborators</Text>
-        ) : null}
-
-        <TouchableOpacity onPress={() => openPostCommentsSheet(item)}>
-          <Text style={[styles.commentCount, { paddingHorizontal: postBodyInset, color: colors.mutedText, fontSize: supportingFontSize }]}>
-            View all {item.commentsCount} comments
-          </Text>
-        </TouchableOpacity>
-
-        <Text style={[styles.postFooterTime, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
-          {formatAgo(item.createdAt)}
-        </Text>
-      </View>
-    );
-  };
-
-  const renderInstagramPost = ({ item, index }: { item: Post; index: number }) => {
-    if ((item as any)?.__featuredProfiles) {
-      return (
-        <View style={{ marginHorizontal: feedHorizontalInset, marginBottom: 12 }}>
-          <FeaturedProfilesCarousel navigation={navigation} title="Featured profiles to follow" compact />
-        </View>
-      );
-    }
-
-    const hasVideoMedia = item.media.some((asset) => asset.mediaType === "video");
-    const isMuted = !!mutedPostIds[item.id];
-    const isCaptionExpanded = !!expandedCaptionIds[item.id];
-    const shouldTruncateCaption = item.caption.length > 110 || item.caption.includes("\n");
-    const isPostAudioOn = isFeedVideoSoundOn({
-      isVideoSoundEnabled,
-      isPostMuted: isMuted,
-    });
-    const likePreviewUsers =
-      Array.isArray(item.likePreviewUsers) && item.likePreviewUsers.length
-        ? item.likePreviewUsers.slice(0, 3)
-        : [];
-    const hasLikeSummary = !item.settings.hideLikeCount && item.likesCount > 0;
-    const latestLiker =
-      likePreviewUsers.find((likeUser) => String(likeUser?.id || "") !== String(currentUser?.id || ""))
-      || likePreviewUsers[0]
-      || null;
-    const latestLikerName = String(latestLiker?.name || latestLiker?.username || "").trim();
-    const likeSummaryLabel = latestLikerName
-      ? item.likesCount > 1
-        ? `Liked by ${latestLikerName} and ${Math.max(1, item.likesCount - 1)} others`
-        : `Liked by ${latestLikerName}`
-      : item.likesCount === 1
-        ? "1 like"
-        : `${formatCount(item.likesCount)} likes`;
-
-    return (
-      <View
-        style={[
-          styles.postCard,
-          styles.instagramPostCard,
-          {
-            marginHorizontal: feedHorizontalInset,
-            borderRadius: postCardRadius,
-            backgroundColor: colors.card,
-            borderColor: "rgba(15,23,42,0.08)",
-          },
-        ]}
-      >
-        <View
-          style={[
-            styles.postHeader,
-            {
-              paddingHorizontal: postHeaderPadding,
-              paddingTop: postHeaderPadding,
-              paddingBottom: Math.max(12, postHeaderPadding - 2),
-            },
-          ]}
-        >
-          <TouchableOpacity style={styles.postHeaderIdentity} onPress={() => openUserProfile(item.user.id)}>
-            <Image
-              source={{ uri: item.user.avatarUrl || DEFAULT_AVATAR_URL }}
-              style={[styles.postAvatar, width < 360 && styles.postAvatarCompact]}
-            />
-            <View style={styles.userMeta}>
-              <View style={[styles.row, styles.usernameRow]}>
-                <Text
-                  style={[styles.username, styles.usernameText, { color: colors.text }]}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                >
-                  {item.user.username}
-                </Text>
-                {shouldShowVerifiedBadge(item.user) ? (
-                  <Icon style={styles.verifiedIcon} name="checkmark-circle" color={FEED_ACCENT} size={16} />
-                ) : null}
-              </View>
-              {item.location ? (
-                <TouchableOpacity onPress={() => openHashtagResults(item.location!)} activeOpacity={0.75}>
-                  <Text
-                    style={[styles.postLocationText, { color: colors.mutedText }]}
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                  >
-                    {item.location}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          </TouchableOpacity>
-          <View style={styles.postHeaderActions}>
-            {renderFeedRelationshipButton(item.user)}
-            <TouchableOpacity
-              style={[
-                styles.moreButton,
-                {
-                  width: postActionButtonSize - 2,
-                  height: postActionButtonSize - 2,
-                  borderRadius: Math.round((postActionButtonSize - 2) / 2),
-                  backgroundColor: "transparent",
-                  borderColor: "transparent",
-                },
-              ]}
-              onPress={() => openContentActions(item)}
-            >
-              <Icon name="ellipsis-horizontal" size={20} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View
-          style={[
-            styles.mediaFrame,
-            {
-              marginHorizontal: 0,
-              borderRadius: 0,
-              borderColor: "transparent",
-              backgroundColor: isDarkMode ? "#050816" : "#f6f8fc",
-            },
-          ]}
-        >
-          <Pressable onPress={() => handlePostMediaPress(item)} style={styles.mediaPressSurface}>
-            {renderPostMedia(item, index)}
-            {renderPostStickerOverlay(item)}
-            {likeBurstPostId === item.id ? (
-              <View pointerEvents="none" style={styles.likeBurstOverlay}>
-                <Icon name="heart" size={88} color="rgba(255,255,255,0.92)" />
-              </View>
-            ) : null}
-            {hasVideoMedia ? (
-              <View style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
-                <Icon name={isPostAudioOn ? "volume-high-outline" : "volume-mute-outline"} size={16} color="#fff" />
-                <Text style={[styles.mediaSoundHintText, { fontSize: mediaChipFontSize }]}>
-                  {isPostAudioOn ? "Sound on" : "Muted"}
-                </Text>
-              </View>
-            ) : null}
-          </Pressable>
-        </View>
-
-        <View style={[styles.actionsRow, { paddingHorizontal: postHeaderPadding }]}>
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              {
-                width: postActionButtonSize,
-                height: postActionButtonSize,
-                borderRadius: Math.round(postActionButtonSize / 3.2),
-                backgroundColor: feedAccentSoft,
-                borderColor: feedAccentBorder,
-              },
-            ]}
-            onPress={() => handleLike(item.id)}
-          >
-            <Icon name={item.liked ? "heart" : "heart-outline"} size={24} color={item.liked ? "#f3425f" : colors.text} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              {
-                width: postActionButtonSize,
-                height: postActionButtonSize,
-                borderRadius: Math.round(postActionButtonSize / 3.2),
-                backgroundColor: feedAccentSoft,
-                borderColor: feedAccentBorder,
-              },
-            ]}
-            onPress={() => openPostCommentsSheet(item)}
-          >
-            <Icon name="chatbubble-outline" size={21} color={colors.text} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              {
-                width: postActionButtonSize,
-                height: postActionButtonSize,
-                borderRadius: Math.round(postActionButtonSize / 2),
-                backgroundColor: "transparent",
-                borderColor: "transparent",
-              },
-            ]}
-            onPress={() => openPostShareSheet(item)}
-          >
-            <Icon name="paper-plane-outline" size={21} color={colors.text} />
-          </TouchableOpacity>
-
-          <View style={styles.trailingActions}>
-            <TouchableOpacity
-              style={[
-                styles.actionButton,
-                styles.trailingActionButton,
-                {
-                  width: postActionButtonSize,
-                  height: postActionButtonSize,
-                  borderRadius: Math.round(postActionButtonSize / 2),
-                  backgroundColor: "transparent",
-                  borderColor: "transparent",
-                },
-              ]}
-              onPress={() => handleSave(item.id)}
-            >
-              <Icon name={item.saved ? "bookmark" : "bookmark-outline"} size={22} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {hasLikeSummary ? (
+        {!safeSettings.hideLikeCount ? (
           <View style={[styles.likeSummaryRow, { paddingHorizontal: postBodyInset }]}>
             {likePreviewUsers.length ? (
               <View style={styles.likePreviewStack}>
-                {likePreviewUsers.map((likeUser, index) => (
+                {likePreviewUsers.map((likeUser: any, index: number) => (
                   <TouchableOpacity
                     key={`${item.id}_like_preview_${likeUser.id || index}`}
                     style={[
@@ -2463,7 +2423,7 @@ const metaLine = tokens.join(" • ");
                       styles.likeSummaryAvatarStackButton,
                       index > 0 ? styles.likeSummaryAvatarStackOverlap : null,
                     ]}
-                    onPress={() => openUserProfile(likeUser.id || item.user.id)}
+                    onPress={() => openUserProfile(String(likeUser?.id || item.user?.id || ""))}
                     activeOpacity={0.85}
                   >
                     <AppAvatar
@@ -2476,1391 +2436,162 @@ const metaLine = tokens.join(" • ");
                 ))}
               </View>
             ) : null}
-            <TouchableOpacity
-              onPress={() => openUserProfile(latestLiker?.id || likePreviewUsers[0]?.id || item.user.id)}
-              activeOpacity={0.8}
-              style={styles.likeSummaryTextWrap}
-            >
-              <Text style={[styles.likesText, styles.likeSummaryText, { color: colors.text }]}>
-                {likeSummaryLabel}
-              </Text>
-            </TouchableOpacity>
+            <Text style={[styles.likesText, { color: colors.text, fontSize: supportingFontSize + 1 }]}>
+              {likeSummaryLabel}
+            </Text>
           </View>
         ) : null}
 
-        {item.caption ? (
-          <>
-            <InteractiveText
-              style={[styles.caption, { paddingHorizontal: postBodyInset, color: colors.text }]}
-              prefix={(
-                <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(item.user.id)}>
-                  {item.user.username}{" "}
-                </Text>
-              )}
-              mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
-              hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
-              onPressMention={(mention) => {
-                void openMentionProfile(mention);
-              }}
-              onPressHashtag={openHashtagResults}
-              onPress={() => {
-                if (shouldTruncateCaption) {
-                  setExpandedCaptionIds((current) => ({ ...current, [item.id]: !current[item.id] }));
-                }
-              }}
-              numberOfLines={shouldTruncateCaption && !isCaptionExpanded ? 2 : undefined}
-              ellipsizeMode="tail"
-              text={item.caption}
-            />
-            {shouldTruncateCaption ? (
-              <TouchableOpacity
-                activeOpacity={0.75}
-                onPress={() => setExpandedCaptionIds((current) => ({ ...current, [item.id]: !current[item.id] }))}
-              >
-                <Text style={[styles.captionMoreButton, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
-                  {isCaptionExpanded ? "less" : "more"}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-          </>
-        ) : null}
-
-        
-
-        {false ? (
-          <Text style={[styles.collabLine, { color: colors.text }]}>Collab post • {item.collaboratorIds.length} collaborators</Text>
-        ) : null}
-
-        <TouchableOpacity onPress={() => openPostCommentsSheet(item)}>
-          <Text style={[styles.commentCount, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
-            View all {item.commentsCount} comments
-          </Text>
-        </TouchableOpacity>
-
-        <Text style={[styles.postFooterTime, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
-          {formatAgo(item.createdAt)}
+        <Text style={[styles.metaLineText, { paddingHorizontal: postBodyInset, color: colors.mutedText, fontSize: supportingFontSize }]}>
+          {metaLine}
         </Text>
+
+        <InteractiveText
+          style={[
+            styles.caption,
+            { paddingHorizontal: postBodyInset, color: colors.text, fontSize: captionFontSize, lineHeight: captionLineHeight },
+          ]}
+          prefix={(
+            <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(String(user.id || ""))}>
+              {user.username || "User"}{" "}
+            </Text>
+          )}
+          mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
+          hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
+          text={item.caption || ""}
+          onPressMention={openMentionProfile}
+          onPressHashtag={openHashtagResults}
+        />
       </View>
     );
-  };
-  void renderPost;
-
-  const renderHeader = () => {
-    const ownStory = feed.stories.find((item) => item.isOwner || (currentUser?.id && item.user.id === currentUser.id));
-    const ownStoryOwnerId = ownStory?.user.id || currentUser?.id || "";
-    const ownStoryAvatar = ownStory?.user.avatarUrl || currentUser?.avatarUrl || DEFAULT_AVATAR_URL;
-    const visibleLiveStories = liveStories.filter((item) => String(item?.hostUser?._id || item?.hostUser?.id || "") !== String(currentUser?.id || ""));
-    const headerSurfaceColor = isDarkMode ? colors.surface : colors.card;
-    const headerBorderColor = isDarkMode ? feedAccentBorder : colors.border;
-    const headerBrandColor = colors.text;
-    const headerSublineColor = colors.mutedText;
-    const utilityButtonBackground = isDarkMode ? "rgba(255,255,255,0.12)" : colors.surface;
-    const utilityButtonBorder = isDarkMode ? "rgba(255,255,255,0.18)" : colors.border;
-    const utilityIconColor = isDarkMode ? "#FFFFFF" : colors.text;
-
-    return (
-      <>
-        {activePublishTask ? (
-          <View
-            style={[
-              styles.publishQueueCard,
-              {
-                marginHorizontal: feedHorizontalInset,
-                backgroundColor: colors.card,
-                borderColor:
-                  activePublishTask.status === "failed"
-                    ? "rgba(239,68,68,0.28)"
-                    : feedAccentBorder,
-              },
-            ]}
-          >
-            <View style={styles.publishQueueTopRow}>
-              <View style={styles.publishQueueCopy}>
-                <Text style={[styles.publishQueueTitle, { color: colors.text }]}>
-                  {activePublishTask.label}
-                </Text>
-                <Text
-                  style={[
-                    styles.publishQueueMessage,
-                    {
-                      color:
-                        activePublishTask.status === "failed"
-                          ? (isDarkMode ? "#FCA5A5" : "#B91C1C")
-                          : colors.mutedText,
-                    },
-                  ]}
-                  numberOfLines={2}
-                >
-                  {activePublishTask.message}
-                </Text>
-              </View>
-              {activePublishTask.status === "failed" ? (
-                <TouchableOpacity
-                  style={[styles.publishQueueDismiss, { borderColor: colors.border }]}
-                  onPress={() => dismissPublishQueueTask(activePublishTask.id)}
-                >
-                  <Icon name="close" size={16} color={colors.text} />
-                </TouchableOpacity>
-              ) : null}
-            </View>
-            <View style={[styles.publishQueueTrack, { backgroundColor: isDarkMode ? "rgba(255,255,255,0.12)" : "#E5E7EB" }]}>
-              {activePublishTask.status === "failed" ? (
-                <View
-                  style={[
-                    styles.publishQueueFill,
-                    {
-                      width: `${Math.max(8, Math.round(activePublishTask.progress * 100))}%`,
-                      backgroundColor: "#EF4444",
-                    },
-                  ]}
-                />
-              ) : (
-                <LinearGradient
-                  colors={
-                    activePublishTask.status === "success"
-                      ? ["#EF4444", "#C026D3", "#10B981"]
-                      : ["#EF4444", feedAccent, "#7C3AED"]
-                  }
-                  start={{ x: 0, y: 0.5 }}
-                  end={{ x: 1, y: 0.5 }}
-                  style={[
-                    styles.publishQueueFill,
-                    styles.publishQueueGradientFill,
-                    {
-                      width: `${Math.max(8, Math.round(activePublishTask.progress * 100))}%`,
-                    },
-                  ]}
-                />
-              )}
-            </View>
-          </View>
-        ) : null}
-
-        <View style={styles.topBar}>
-          <View
-            style={[
-              styles.topBarPanel,
-              isCompactHeader && styles.topBarPanelCompact,
-              { minHeight: isTabletLayout ? 70 : undefined },
-              { backgroundColor: headerSurfaceColor, borderColor: headerBorderColor },
-            ]}
-          >
-            <View style={styles.topLeft}>
-              <TouchableOpacity style={styles.logoTapTarget} onPress={toggleMenu} activeOpacity={0.85}>
-                <Image source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }} style={styles.logo} />
-              </TouchableOpacity>
-              <View style={styles.brandCopy}>
-               <Text
-                  style={[
-                    styles.brand,
-                    {
-                      color: headerBrandColor,
-                      fontSize: 25,
-                      fontWeight: '500',
-                    },
-                  ]}
-                >
-                  Aline2
-                </Text>
-                <Text
-                  style={[
-                    styles.brandSubline,
-                    isCompactHeader && styles.brandSublineCompact,
-                    { color: headerSublineColor },
-                  ]}
-                  numberOfLines={1}
-                >
-                  For you today
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.topRight}>
-              <TouchableOpacity
-                style={[
-                  styles.headerIconButton,
-                  isCompactHeader && styles.headerIconButtonCompact,
-                  { backgroundColor: "#F43F5E", borderColor: "rgba(255,255,255,0.22)" },
-                ]}
-                onPress={() => navigation.navigate("LiveStreamsScreen")}
-              >
-                <Icon name="radio-outline" size={isCompactHeader ? 18 : 20} color="#FFFFFF" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.headerIconGap,
-                  isCompactHeader && styles.headerIconGapCompact,
-                  styles.headerIconButton,
-                  isCompactHeader && styles.headerIconButtonCompact,
-                  { backgroundColor: utilityButtonBackground, borderColor: utilityButtonBorder },
-                ]}
-                onPress={() => navigation.navigate("Search")}
-              >
-                <Icon name="search-outline" size={isCompactHeader ? 18 : 20} color={utilityIconColor} />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.headerIconGap,
-                  isCompactHeader && styles.headerIconGapCompact,
-                  styles.headerIconButton,
-                  isCompactHeader && styles.headerIconButtonCompact,
-                  { backgroundColor: utilityButtonBackground, borderColor: utilityButtonBorder },
-                ]}
-                onPress={openNotifications}
-              >
-                <Icon name="notifications-outline" size={isCompactHeader ? 18 : 20} color={utilityIconColor} />
-                {unreadNotificationCount > 0 ? (
-                  <View style={styles.notificationBadge}>
-                    <Text style={styles.notificationBadgeText}>
-                      {unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}
-                    </Text>
-                  </View>
-                ) : null}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.headerIconGap,
-                  isCompactHeader && styles.headerIconGapCompact,
-                  styles.headerWalletButton,
-                  isCompactHeader && styles.headerWalletButtonCompact,
-                  { backgroundColor: utilityButtonBackground, borderColor: utilityButtonBorder },
-                ]}
-                onPress={openWalletDashboard}
-              >
-                <View style={styles.headerCoinBadge}>
-                  <Icon name="logo-bitcoin" size={isCompactHeader ? 13 : 14} color="#B45309" />
-                </View>
-                <Text style={[styles.headerWalletValue, { color: utilityIconColor, fontSize: isCompactHeader ? 11 : 12 }]}>
-                  {formatCompactCoinBalance(walletCoinBalance)}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-
-        <View
-          style={[
-            styles.storyRail,
-            {
-              marginHorizontal: feedHorizontalInset,
-              marginBottom: storyRailVerticalInset,
-              backgroundColor: colors.card,
-              borderColor: feedAccentBorder,
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={[`${FEED_ACCENT}16`, "rgba(255,255,255,0)"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.storyRailGlow}
-          />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={[
-              styles.storyListContent,
-              { paddingHorizontal: Math.max(8, feedHorizontalInset - 4), paddingVertical: isTabletLayout ? 14 : 11 },
-            ]}
-          >
-            <TouchableOpacity
-              style={[styles.storyItem, { width: storyItemWidth }]}
-              onPress={() => {
-                if (ownStory) {
-                  navigation.navigate("StoryViewer", { storyId: ownStory.id, storyUserId: ownStory.user.id });
-                  return;
-                }
-
-                navigation.navigate("Create", { initialTab: "story" });
-              }}
-            >
-              <View
-                style={[
-                  styles.storyRing,
-                  styles.storyRingSeen,
-                  { width: storyRingSize, height: storyRingSize, borderRadius: storyRingSize / 2 },
-                ]}
-              >
-                <Image
-                  source={{ uri: ownStoryAvatar }}
-                  style={[styles.storyAvatar, { width: storyAvatarSize, height: storyAvatarSize, borderRadius: storyAvatarSize / 2 }]}
-                />
-                <View
-                  style={[
-                    styles.storyAddBadge,
-                    {
-                      width: storyAddBadgeSize,
-                      height: storyAddBadgeSize,
-                      borderRadius: storyAddBadgeSize / 2,
-                      borderColor: colors.background,
-                    },
-                  ]}
-                >
-                  <Icon name="add" size={13} color="#fff" />
-                </View>
-              </View>
-              <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
-                Your story
-              </Text>
-            </TouchableOpacity>
-            {visibleLiveStories.map((liveStream) => renderLiveStory(liveStream))}
-            {feed.stories.filter((story) => story.user.id !== ownStoryOwnerId).map((story) => (
-              <View key={story.id}>{renderStory({ item: story })}</View>
-            ))}
-          </ScrollView>
-        </View>
-      </>
-    );
-  };
-
-  const sidebarDisplayName = currentUser?.name || currentUser?.username || "Aline2";
-  const sidebarHandle = currentUser?.username
-    ? `@${currentUser.username}`
-    : sellerAccount?.sellerName || "Connect, share, and grow";
-  const sidebarAvailabilityStatusStyle = sellerAccount?.availabilityStatus
-    ? styles.sidebarStatusAvailable
-    : styles.sidebarStatusUnavailable;
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 80,
-    minimumViewTime: 120,
-  }).current;
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item?: Post; isViewable?: boolean }> }) => {
-    const firstVisiblePost = viewableItems.find((entry) =>
-      entry.isViewable
-      && entry.item?.id
-      && !(entry.item as any).__featuredProfiles
-      && Array.isArray(entry.item.media)
-    )?.item;
-    lastViewablePostIdRef.current = firstVisiblePost?.id || "";
-    if (firstVisiblePost?.id) {
-      setActivePostId((current) => (current === firstVisiblePost.id ? current : firstVisiblePost.id));
-    }
-  }).current;
-
-  if (loading) {
-    return (
-      <SafeAreaView style={[styles.centered, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </SafeAreaView>
-    );
-  }
+  }, [
+    activePostId,
+    activeSheet,
+    captionFontSize,
+    captionLineHeight,
+    colors,
+    currentUser?.id,
+    feedAccent,
+    feedAccentBorder,
+    feedAccentSoft,
+    feedHorizontalInset,
+    feedListItems,
+    getPostTypeTag,
+    handleDownload,
+    handleLike,
+    handlePostAudioToggle,
+    openPostCommentsSheet,
+    openPostShareSheet,
+    handleSave,
+    isActionBusy,
+    isFeedVideoSoundOn,
+    isScreenFocused,
+    isVideoSoundEnabled,
+    mutedPostIds,
+    navigation,
+    openHashtagResults,
+    openLocationSearch,
+    openMentionProfile,
+    openPostDetail,
+    openUserProfile,
+    openContentActions,
+    postActionButtonSize,
+    postBodyInset,
+    postCardRadius,
+    postHeaderPadding,
+    renderFeedRelationshipButton,
+    renderPostMedia,
+    renderPostStickerOverlay,
+    shouldShowVerifiedBadge,
+    supportingFontSize,
+    usernameFontSize,
+    width,
+  ]);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
-      <View style={styles.screenShell}>
-        <FlatList
-          ref={feedListRef}
-          data={feedListItems}
-          keyExtractor={(item) => item.id}
-          renderItem={renderInstagramPost}
-          ListHeaderComponent={isFocusedPostFeed ? null : renderHeader}
-          contentContainerStyle={styles.feedContent}
-          showsVerticalScrollIndicator={false}
-          removeClippedSubviews={Platform.OS === "android"}
-          initialNumToRender={3}
-          maxToRenderPerBatch={4}
-          updateCellsBatchingPeriod={50}
-          windowSize={5}
-          decelerationRate="normal"
-          scrollEventThrottle={16}
-          keyboardDismissMode="on-drag"
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>{errorMessage ? "Feed unavailable" : "No posts yet"}</Text>
-              <Text style={[styles.emptyText, { color: colors.mutedText }]}>{errorMessage || "Posts from people you follow will appear here."}</Text>
-            </View>
-          }
-          onEndReachedThreshold={0.18}
-          onEndReached={loadMoreFeed}
-          onScrollToIndexFailed={(info) => {
-            feedListRef.current?.scrollToOffset?.({
-              offset: Math.max(0, info.averageItemLength * info.index),
-              animated: false,
-            });
-          }}
-          ListFooterComponent={loadingMore ? <View style={styles.loadingMoreFooter} /> : null}
-        />
-
-        {menuOpen ? (
-          <TouchableOpacity
-            activeOpacity={1}
-            style={styles.overlay}
-            onPress={closeMenu}
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <FlatList
+        ref={feedListRef}
+        data={feedListItems}
+        keyExtractor={(item: any, index: number) => String(item?.id ?? item?._id ?? `feed-item-${index}`)}
+        renderItem={renderPost}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews={Platform.OS === "android"}
+        initialNumToRender={FEED_FLATLIST_INITIAL_NUM_TO_RENDER}
+        maxToRenderPerBatch={FEED_FLATLIST_MAX_TO_RENDER_PER_BATCH}
+        updateCellsBatchingPeriod={50}
+        windowSize={FEED_FLATLIST_WINDOW_SIZE}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
           />
-        ) : null}
-
-        <Animated.View
-          pointerEvents={menuOpen ? "auto" : "none"}
-          style={[
-            styles.sidebar,
-            {
-              width: sidebarWidth,
-              backgroundColor: colors.card,
-              transform: [{ translateX: sidebarTranslateX }],
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.sidebarHeader,
-              isCompactSidebar && styles.sidebarHeaderCompact,
-              {
-                backgroundColor: FEED_ACCENT,
-              },
-            ]}
-          >
-            <View style={styles.sidebarHeaderTop}>
-              <View style={styles.sidebarAvatarWrap}>
-                <Image
-                  source={{ uri: currentUser?.avatarUrl || "https://aline2.com/asstes/images/logo/logo.jpeg" }}
-                  style={[styles.sidebarAvatar, isCompactSidebar && styles.sidebarAvatarCompact]}
-                />
-                {sellerAccount ? (
-                  <View
-                    style={[
-                      styles.sidebarAvatarStatus,
-                      sidebarAvailabilityStatusStyle,
-                    ]}
-                  />
-                ) : null}
-              </View>
-
-              <TouchableOpacity style={styles.sidebarCloseButton} onPress={closeMenu} activeOpacity={0.8}>
-                <Icon name="close" size={20} color="#fff" />
-              </TouchableOpacity>
+        }
+        onScroll={({ nativeEvent }) => {
+          const offsetY = Number(nativeEvent?.contentOffset?.y ?? 0);
+          if (offsetY > 0 && typeof nativeEvent?.contentSize?.height === "number") {
+            lastViewablePostIdRef.current = feedListItems[0]?.id || lastViewablePostIdRef.current;
+          }
+        }}
+        onEndReached={loadMoreFeed}
+        onEndReachedThreshold={0.45}
+        onViewableItemsChanged={handleFeedViewableChange}
+        viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 200 }}
+        ListHeaderComponent={
+          <View style={styles.feedHeaderSpacer} />
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.footerLoader}>
+              <ActivityIndicator size="small" color={colors.primary} />
             </View>
-
-            <Text style={styles.sidebarTitle} numberOfLines={1}>{sidebarDisplayName}</Text>
-            <Text style={styles.sidebarSubtitle} numberOfLines={1}>{sidebarHandle}</Text>
-
-            {sellerAccount ? (
-              <View style={styles.sidebarAvailabilityCard}>
-                <View style={styles.sidebarAvailabilityCopy}>
-                  <Text style={styles.sidebarAvailabilityLabel}>Seller Availability</Text>
-                  <View style={styles.sidebarAvailabilityState}>
-                    <View
-                      style={[
-                        styles.sidebarAvailabilityDot,
-                        sidebarAvailabilityStatusStyle,
-                      ]}
-                    />
-                    <Text style={styles.sidebarAvailabilityValue}>
-                      {sellerAccount.availabilityStatus ? "Available" : "Unavailable"}
-                    </Text>
-                  </View>
-                </View>
-
-                <Switch
-                  value={sellerAccount.availabilityStatus}
-                  onValueChange={toggleSellerAvailability}
-                  disabled={availabilityUpdating}
-                  thumbColor={sellerAccount.availabilityStatus ? "#fff" : "#F3F4F6"}
-                  trackColor={{ false: "rgba(255,255,255,0.32)", true: "rgba(34,197,94,0.95)" }}
-                  ios_backgroundColor="rgba(255,255,255,0.32)"
-                />
-              </View>
-            ) : null}
-          </View>
-
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.sidebarContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            <TouchableOpacity
-              activeOpacity={0.86}
-              style={[styles.sidebarWalletPreview, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={() => navigateFromMenu("WalletScreen")}
-            >
-              <View style={[styles.sidebarWalletIcon, { backgroundColor: feedAccentSoft }]}>
-                <Icon name="wallet-outline" size={22} color={FEED_ACCENT} />
-              </View>
-              <View style={styles.sidebarWalletCopy}>
-                <Text style={[styles.sidebarWalletLabel, { color: colors.mutedText }]}>User wallet</Text>
-                <Text style={[styles.sidebarWalletValue, { color: colors.text }]}>
-                  {formatCompactCoinBalance(walletCoinBalance)}
-                </Text>
-              </View>
-              <Icon name="chevron-forward" size={18} color={colors.mutedText} />
-            </TouchableOpacity>
-
-            <View style={[styles.sidebarReleaseCard, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-              <View style={styles.sidebarReleaseCopy}>
-                <Text style={[styles.sidebarReleaseLabel, { color: colors.mutedText }]}>App version</Text>
-                <Text style={[styles.sidebarReleaseValue, { color: colors.text }]}>
-                  {`v${APP_VERSION} • ${APP_RELEASE_DATE}`}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={[styles.sidebarReleaseButton, { backgroundColor: feedAccentSoft }]}
-                onPress={() => navigateFromMenu("ReleaseNotesScreen")}
-                activeOpacity={0.86}
-              >
-                <Icon name="document-text-outline" size={16} color={FEED_ACCENT} />
-                <Text style={styles.sidebarReleaseButtonText}>Release Notes</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.sidebarGuideSection}>
-              <Text style={[styles.sidebarSectionTitle, { color: colors.mutedText }]}>Guide</Text>
-              <TouchableOpacity
-                activeOpacity={0.85}
-                style={[styles.sidebarGuideVideo, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              >
-                <View style={[styles.sidebarGuidePreview, { backgroundColor: feedAccentSoft }]}>
-                  <View style={[styles.sidebarGuidePlayButton, { backgroundColor: FEED_ACCENT }]}>
-                    <Icon name="play" size={18} color="#fff" />
-                  </View>
-                </View>
-
-                <View style={styles.sidebarGuideCopy}>
-                  <Text style={[styles.sidebarGuideTitle, { color: colors.text }]} numberOfLines={1}>
-                    Aline2 Guide
-                  </Text>
-                  <Text style={[styles.sidebarGuideSubtitle, { color: colors.mutedText }]} numberOfLines={1}>
-                    Quick start video
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            {menuSections.map((section) => (
-              <View key={section.title} style={styles.sidebarSection}>
-                <Text style={[styles.sidebarSectionTitle, { color: colors.mutedText }]}>{section.title}</Text>
-                {section.data.map((item) => (
-                  <TouchableOpacity
-                    key={item.label}
-                    style={[styles.sidebarMenuItem, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                    onPress={() => navigateFromMenu(item)}
-                  >
-                    <View style={[styles.sidebarMenuIconCircle, { backgroundColor: feedAccentSoft }]}>
-                      <Icon name={item.icon} size={18} color={FEED_ACCENT} />
-                    </View>
-                    <Text style={[styles.sidebarMenuLabel, { color: colors.text }]}>{item.label}</Text>
-                    <Icon name="chevron-forward" size={18} color={colors.mutedText} />
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ))}
-
-          </ScrollView>
-        </Animated.View>
-      </View>
-
-      <PostCommentsSheet
-        visible={activeSheet === "comments"}
-        post={selectedPost}
-        onClose={closeSheet}
-        onPostUpdate={updatePost}
-        onOpenFull={openPostComments}
-        showOpenFull={false}
-      />
-
-      <PostShareSheet
-        visible={activeSheet === "share"}
-        post={selectedPost}
-        onClose={closeSheet}
-        onPostUpdate={updatePost}
-        onOpenStoryComposer={(post) =>
-          navigation.navigate("Create", {
-            initialTab: "story",
-            initialMedia:
-              post.media[0]?.mediaType === "video"
-                ? post.media[0]?.url
-                : post.media[0]?.thumbnailUrl || post.media[0]?.url,
-            initialMediaType: post.media[0]?.mediaType || "image",
-          })
+          ) : null
         }
       />
-
-      {selectedPost ? (
-        <ContentActionSheet
-          visible={activeSheet === "actions"}
-          contentType="post"
-          contentId={selectedPost.id}
-          userId={selectedPost.user.id}
-          userLabel={selectedPost.user.username}
-          title="Post options"
-          onClose={closeSheet}
-          onActionComplete={(action) => {
-            if (action === "not_interested") {
-              setFeed((prev) => ({
-                ...prev,
-                posts: prev.posts.filter((item) => item.id !== selectedPost.id),
-              }));
-            }
-
-            if (action === "mute" || action === "block") {
-              setFeed((prev) => ({
-                ...prev,
-                posts: prev.posts.filter((item) => item.user.id !== selectedPost.user.id),
-              }));
-            }
-
-            if (action === "archive" || action === "delete") {
-              setFeed((prev) => ({
-                ...prev,
-                posts: prev.posts.filter((item) => item.id !== selectedPost.id),
-              }));
-            }
-          }}
-        />
-      ) : null}
     </SafeAreaView>
   );
-}
+};
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  screenShell: { flex: 1 },
-  feedContent: { paddingTop: 4, paddingBottom: 112 },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-  emptyState: { paddingHorizontal: 24, paddingTop: 72, alignItems: "center" },
-  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111" },
-  emptyText: { marginTop: 8, color: "#666", textAlign: "center", lineHeight: 20 },
-  loadingMoreFooter: { height: 10 },
-  topBar: {
-    paddingHorizontal: 12,
-    paddingTop: 4,
-    paddingBottom: 6,
-  },
-  topBarPanel: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-    shadowColor: "#000",
-    shadowOpacity: 0.16,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 5,
-  },
-  topBarPanelCompact: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  topLeft: { flexDirection: "row", alignItems: "center", flex: 1, minWidth: 0 },
-  logoTapTarget: { marginRight: 8, borderRadius: 12 },
-  logo: { width: 42, height: 42, borderRadius: 12, marginRight: 8 },
-  brandCopy: {
-    flexShrink: 1,
-    minWidth: 0,
-    marginRight: 6,
-  },
-  brand: {
-    fontSize: 24,
-    color: "#FFFFFF",
-    fontWeight: "400",
-    letterSpacing: 0,
-  },
-  brandCompact: { fontSize: 19 },
-  brandSubline: { marginTop: 2, fontSize: 12.5, fontWeight: "700", letterSpacing: 0.3 },
-  brandSublineCompact: { display: "none" },
-  topRight: { flexDirection: "row", alignItems: "center", flexShrink: 0 },
-  headerIconGap: { marginLeft: 8 },
-  headerIconGapCompact: { marginLeft: 6 },
-  headerIconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-  },
-  headerWalletButton: {
-    minWidth: 36,
-    height: 36,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-    flexDirection: "row",
-    paddingHorizontal: 10,
-  },
-  headerIconButtonCompact: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-  },
-  headerWalletButtonCompact: {
-    minWidth: 32,
-    height: 32,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-  },
-  headerWalletValue: {
-    marginLeft: 5,
-    fontWeight: "800",
-  },
-  headerCoinBadge: {
-    width: 18,
-    height: 18,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FDE68A",
-    borderWidth: 1,
-    borderColor: "#F59E0B",
-  },
-  notificationBadge: {
-    position: "absolute",
-    top: -4,
-    right: -4,
-    minWidth: 19,
-    height: 19,
-    borderRadius: 9.5,
-    paddingHorizontal: 5,
-    backgroundColor: "#FF3B30",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  notificationBadgeText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(7, 12, 20, 0.28)",
-    zIndex: 19,
-  },
-  sidebar: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: APP_BOTTOM_DOCK_BASE_HEIGHT,
-    zIndex: 20,
-    elevation: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.14,
-    shadowRadius: 24,
-    shadowOffset: { width: 6, height: 0 },
-  },
-  sidebarHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 52,
-    paddingBottom: 18,
-    borderBottomRightRadius: 28,
-  },
-  sidebarHeaderCompact: {
-    paddingHorizontal: 16,
-    paddingTop: 38,
-  },
-  sidebarHeaderTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-  },
-  sidebarAvatarWrap: {
-    position: "relative",
-    alignSelf: "flex-start",
-  },
-  sidebarAvatar: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    borderWidth: 2,
-    borderColor: "#fff",
-    backgroundColor: "rgba(255,255,255,0.18)",
-  },
-  sidebarAvatarCompact: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-  },
-  sidebarAvatarStatus: {
-    position: "absolute",
-    right: 2,
-    bottom: 2,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "#fff",
-  },
-  sidebarStatusAvailable: {
-    backgroundColor: "#22C55E",
-  },
-  sidebarStatusUnavailable: {
-    backgroundColor: "#F97316",
-  },
-  sidebarCloseButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.18)",
-  },
-  sidebarTitle: {
-    marginTop: 12,
-    fontSize: 21,
-    fontWeight: "800",
-    color: "#fff",
-  },
-  sidebarSubtitle: {
-    marginTop: 4,
-    fontSize: 13,
-    color: "rgba(255,255,255,0.88)",
-  },
-  sidebarAvailabilityCard: {
-    marginTop: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.16)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.32)",
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  sidebarAvailabilityCopy: {
-    flex: 1,
-    paddingRight: 10,
-  },
-  sidebarAvailabilityLabel: {
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  sidebarAvailabilityState: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  sidebarAvailabilityDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  sidebarAvailabilityValue: {
-    color: "rgba(255,255,255,0.86)",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  sidebarContent: {
-    paddingHorizontal: 12,
-    paddingTop: 16,
-    paddingBottom: 12,
-  },
-  sidebarWalletPreview: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    padding: 14,
-    marginBottom: 12,
-  },
-  sidebarWalletIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  sidebarWalletCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  sidebarWalletLabel: {
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-  },
-  sidebarWalletValue: {
-    marginTop: 3,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  sidebarReleaseCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    padding: 14,
-    marginBottom: 16,
-  },
-  sidebarReleaseCopy: {
-    marginBottom: 12,
-  },
-  sidebarReleaseLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  },
-  sidebarReleaseValue: {
-    marginTop: 4,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  sidebarReleaseButton: {
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  sidebarReleaseButtonText: {
-    marginLeft: 8,
-    fontSize: 12.5,
-    fontWeight: "800",
-    color: FEED_ACCENT,
-  },
-  sidebarGuideSection: {
-    marginBottom: 18,
-  },
-  sidebarGuideVideo: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    overflow: "hidden",
-  },
-  sidebarGuidePreview: {
-    height: 86,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  sidebarGuidePlayButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingLeft: 2,
-  },
-  sidebarGuideCopy: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  sidebarGuideTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  sidebarGuideSubtitle: {
-    marginTop: 2,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  sidebarSection: {
-    marginBottom: 18,
-  },
-  sidebarSectionTitle: {
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 0,
-    marginBottom: 8,
-    marginLeft: 8,
-    textTransform: "uppercase",
-  },
-  sidebarMenuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    marginBottom: 8,
-  },
-  sidebarMenuIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  sidebarMenuLabel: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  feedbackCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    padding: 14,
-    marginBottom: 18,
-  },
-  feedbackCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  feedbackCardIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 10,
-  },
-  feedbackCardTitleWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  feedbackCardTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  feedbackCardHint: {
-    marginTop: 2,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  feedbackLabel: {
-    marginTop: 10,
-    marginBottom: 7,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-  },
-  feedbackInput: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
-    minHeight: 44,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  feedbackInputReadonly: {
-    backgroundColor: "rgba(148, 163, 184, 0.12)",
-  },
-  feedbackTextarea: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
-    minHeight: 118,
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    fontSize: 14,
-    lineHeight: 19,
-  },
-  feedbackSubmitButton: {
-    marginTop: 14,
-    minHeight: 46,
-    borderRadius: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 14,
-  },
-  feedbackSubmitButtonDisabled: {
-    opacity: 0.7,
-  },
-  feedbackSubmitText: {
-    marginLeft: 8,
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  storyRail: {
-    marginHorizontal: 14,
-    marginBottom: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    overflow: "hidden",
-  },
-  storyRailGlow: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  storyListContent: { paddingHorizontal: 10, paddingVertical: 12 },
-  storyItem: { width: 90, alignItems: "center" },
-  storyRing: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
-    borderWidth: 1.5,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  storyRingGradient: {
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 3,
-    shadowColor: "#ee2a7b",
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  storyRingInner: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  storyRingSeen: {
-    borderColor: "#334155",
-    backgroundColor: "rgba(15, 23, 42, 0.12)",
-  },
-  storyRingCloseFriendsSeen: {
-    borderColor: "rgba(34, 197, 94, 0.7)",
-  },
-  liveStoryRing: {
-    borderColor: "#fb7185",
-    borderWidth: 2.5,
-    shadowColor: "#fb7185",
-    shadowOpacity: 0.28,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  storyAvatar: { width: 70, height: 70, borderRadius: 35 },
-  storyAddBadge: {
-    position: "absolute",
-    right: 2,
-    bottom: 2,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: FEED_ACCENT,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#fff",
-  },
-  liveStoryBadge: {
-    position: "absolute",
-    bottom: -3,
-    alignSelf: "center",
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#ef4444",
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
-  liveStoryBadgeText: {
-    color: "#fff",
-    fontSize: 9,
-    fontWeight: "900",
-    marginLeft: 3,
-  },
-  storyName: { marginTop: 7, fontSize: 12.5, color: "#272727", fontWeight: "700" },
-  publishQueueCard: {
-    marginTop: 8,
-    marginBottom: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  publishQueueTopRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-  },
-  publishQueueCopy: {
-    flex: 1,
-    paddingRight: 10,
-  },
-  publishQueueTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  publishQueueMessage: {
-    marginTop: 4,
-    fontSize: 12.5,
-    lineHeight: 18,
-    fontWeight: "600",
-  },
-  publishQueueDismiss: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  publishQueueTrack: {
-    marginTop: 10,
-    height: 4,
-    borderRadius: 999,
-    overflow: "hidden",
-  },
-  publishQueueFill: {
-    height: "100%",
-    borderRadius: 999,
-  },
-  publishQueueGradientFill: {
-    minWidth: 18,
-  },
-  postCard: {
-    marginHorizontal: 14,
-    marginBottom: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    overflow: "hidden",
-  },
-  instagramPostCard: {
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 2,
-  },
-  postHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
+const styles: any = {
+  safeArea: { flex: 1 },
+  listContent: { paddingBottom: 30 },
+  feedHeaderSpacer: { height: 8 },
+  footerLoader: { paddingVertical: 18, alignItems: "center" },
+  postCard: { marginBottom: 14 },
+  postHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   postHeaderIdentity: { flexDirection: "row", alignItems: "center", flex: 1 },
-  postHeaderActions: { flexDirection: "row", alignItems: "center", marginLeft: 8, gap: 6 },
-  postAvatar: { width: 42, height: 42, borderRadius: 21 },
-  postAvatarCompact: { width: 38, height: 38, borderRadius: 19 },
-  userMeta: { marginLeft: 8, flexShrink: 1, minWidth: 0 },
+  userMeta: { marginLeft: 10, flex: 1 },
   row: { flexDirection: "row", alignItems: "center" },
-  usernameRow: { flexShrink: 1, minWidth: 0, paddingRight: 6 },
-  username: { fontSize: 13, lineHeight: 16, fontWeight: "700", color: "#111" },
+  usernameRow: { marginBottom: 2 },
+  username: { fontWeight: "700" },
   usernameText: { flexShrink: 1 },
-  verifiedIcon: { marginLeft: 5 },
-  postTime: { fontSize: 10.5, color: "#666", marginTop: 1 },
-  postHeaderDot: { fontSize: 11, color: "#666" },
-  postHeaderTime: { fontSize: 11, color: "#666", fontWeight: "400" },
-  postLocationText: { fontSize: 10.5, lineHeight: 13, marginTop: 1, fontWeight: "400" },
-  postFooterTime: { fontSize: 10, lineHeight: 14, marginTop: 6, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.3 },
-  moreButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  carouselWrap: { width: "100%", overflow: "hidden" },
-  carouselIndicatorRow: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 14,
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 6,
-  },
-  carouselIndicatorDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.45)",
-  },
-  carouselIndicatorDotActive: {
-    width: 18,
-    backgroundColor: "#fff",
-  },
-  carouselBadge: {
-    position: "absolute",
-    top: 12,
-    right: 12,
-    backgroundColor: "rgba(15, 23, 42, 0.72)",
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 14,
-    zIndex: 10,
-  },
-  carouselBadgeText: {
-    color: "#ffffff",
-    fontSize: 11.5,
-    fontWeight: "600",
-    letterSpacing: 0.4,
-  },
-  sensitiveBadge: {
-    position: "absolute",
-    left: 12,
-    bottom: 12,
-    backgroundColor: "rgba(15,23,42,0.78)",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  sensitiveBadgeText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
-    textTransform: "capitalize",
-  },
-  mediaFallback: { backgroundColor: "#0f172a" },
-  postImage: { height: 360 },
-  mediaFrame: {
-    marginTop: 2,
-    overflow: "hidden",
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  mediaPressSurface: {
-    position: "relative",
-    overflow: "hidden",
-    backgroundColor: "#0b1120",
-  },
-  postStickerLayer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  postEmojiSticker: {
-    position: "absolute",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  postEmojiStickerText: {
-    fontSize: 22,
-  },
-  postTextSticker: {
-    position: "absolute",
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: "rgba(15,23,42,0.56)",
-  },
-  postTextStickerText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  likeBurstOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  mediaSoundHint: {
-    position: "absolute",
-    right: 12,
-    top: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: "rgba(0,0,0,0.56)",
-  },
-  mediaSoundHintCompact: {
-    right: 10,
-    top: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  mediaSoundHintText: {
-    color: "#fff",
-    fontSize: 11.5,
-    fontWeight: "800",
-  },
-  actionsRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8 },
-  actionButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 8,
-  },
-  trailingActions: { marginLeft: "auto", flexDirection: "row", alignItems: "center" },
-  trailingActionButton: { marginRight: 0, marginLeft: 6 },
-  likesText: { fontWeight: "700", color: "#121212", fontSize: 12.5, paddingHorizontal: 18 },
+  verifiedIcon: { marginLeft: 4 },
+  postLocationText: { fontSize: 12 },
+  postHeaderActions: { flexDirection: "row", alignItems: "center" },
+  moreButton: { justifyContent: "center", alignItems: "center" },
+  actionButton: { justifyContent: "center", alignItems: "center" },
+  trailingActions: { flexDirection: "row", alignItems: "center", marginLeft: "auto" },
+  trailingActionButton: { marginLeft: 8 },
+  likesText: { fontWeight: "700", marginTop: 8, marginBottom: 6 },
+  metaLineText: { marginBottom: 6 },
+  caption: { marginBottom: 8 },
+  captionUser: { fontWeight: "700" },
+  inlineEntity: { fontWeight: "700" },
+  postAvatar: { borderRadius: 999 },
+  postAvatarCompact: { marginRight: 2 },
+  followBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
+  followBadgePrimary: {},
+  followBadgeSecondary: {},
+  followBadgeText: { fontSize: 11, fontWeight: "700" },
   likeSummaryRow: {
     flexDirection: "row",
     alignItems: "center",
+    marginTop: 2,
+    marginBottom: 2,
     gap: 8,
-    paddingTop: 1,
   },
   likePreviewStack: {
     flexDirection: "row",
@@ -3886,87 +2617,64 @@ const styles = StyleSheet.create({
     height: "100%",
     borderRadius: 11,
   },
-  likeSummaryText: {
-    paddingHorizontal: 0,
-    fontSize: 12.2,
-  },
-  likeSummaryTextWrap: {
-    flexShrink: 1,
-  },
-  caption: { fontSize: 12.6, color: "#131313", paddingHorizontal: 18, paddingTop: 5, lineHeight: 18 },
-  captionUser: { fontWeight: "700" },
-  captionMoreButton: { paddingTop: 2, fontSize: 12.2, lineHeight: 16, fontWeight: "700" },
-  inlineEntity: { fontWeight: "700" },
-  tagLine: { color: FEED_ACCENT, fontSize: 12.5, paddingHorizontal: 18, paddingTop: 7, fontWeight: "700" },
-  tagLineMuted: { color: "#5a5a5a", fontSize: 11.5, paddingHorizontal: 18, paddingTop: 4 },
-  metaChipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    paddingTop: 7,
-  },
-  metaChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    maxWidth: "100%",
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: "rgba(155,77,255,0.08)",
-  },
-  metaChipText: {
-    flexShrink: 1,
-    fontSize: 10.5,
-    fontWeight: "600",
-  },
-  metaLine: { color: "#646464", fontSize: 10.6, paddingHorizontal: 18, paddingTop: 5 },
-  collabLine: { color: "#2f2f2f", fontSize: 10.6, paddingHorizontal: 18, paddingTop: 4, fontWeight: "600" },
-  commentCount: { color: "#787878", fontSize: 10.8, paddingHorizontal: 18, paddingTop: 7 },
-  commentComposer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginHorizontal: 18,
-    marginTop: 6,
-    marginBottom: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
+  storyItem: { alignItems: "center", justifyContent: "center" },
+  storyRing: { alignItems: "center", justifyContent: "center" },
+  storyRingSeen: { borderWidth: 1, borderColor: "transparent" },
+  storyRingCloseFriendsSeen: {},
+  storyRingGradient: { alignItems: "center", justifyContent: "center" },
+  storyRingInner: { alignItems: "center", justifyContent: "center" },
+  storyAvatar: { resizeMode: "cover" },
+  storyName: { marginTop: 6, fontSize: 11, textAlign: "center" },
+  postImage: { overflow: "hidden" },
+  mediaFallback: { backgroundColor: "#ececec" },
+  carouselWrap: { position: "relative" },
+  carouselBadge: {
+    position: "absolute",
+    right: 12,
+    top: 12,
+    backgroundColor: "rgba(15,23,42,0.72)",
     paddingHorizontal: 9,
-    paddingVertical: 3,
-  },
-  followBadge: {
-    minHeight: 30,
-    minWidth: 74,
-    paddingHorizontal: 11,
+    paddingVertical: 5,
     borderRadius: 999,
-    borderWidth: 1,
+    minWidth: 42,
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 2,
   },
-  followBadgePrimary: {
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+  carouselIndicatorRow: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 12,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 2,
   },
-  followBadgeSecondary: {},
-  followBadgeText: {
-    fontSize: 11.5,
-    fontWeight: "700",
-    textAlign: "center",
+  carouselIndicatorDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.48)",
+    marginHorizontal: 3,
   },
-  commentInput: { flex: 1, fontSize: 12, color: "#222", paddingVertical: 3 },
-  postButton: { color: FEED_ACCENT, fontWeight: "700", fontSize: 11.5, paddingHorizontal: 8 },
-  commentsDisabled: {
-    color: "#707070",
-    fontSize: 12,
-    paddingHorizontal: 18,
-    paddingTop: 9,
-    paddingBottom: 14,
+  carouselIndicatorDotActive: {
+    width: 18,
+    borderRadius: 6,
+    backgroundColor: "#fff",
   },
-});
+  postStickerLayer: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  postEmojiSticker: { position: "absolute" },
+  postEmojiStickerText: { fontWeight: "700" },
+  postTextSticker: { position: "absolute" },
+  postTextStickerText: { fontWeight: "700" },
+  actionsRow: { flexDirection: "row", alignItems: "center", marginTop: 10 },
+  metaChipRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 8 },
+  metaChip: { flexDirection: "row", alignItems: "center", borderRadius: 999, paddingVertical: 4, paddingHorizontal: 8, marginRight: 6, marginBottom: 6 },
+  metaChipText: { fontSize: 12, marginLeft: 4 },
+  sensitiveBadge: { position: "absolute", left: 12, top: 12, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 999 },
+  sensitiveBadgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+};
 
 export default FeedScreen;
-
 

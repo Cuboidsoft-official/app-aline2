@@ -25,6 +25,7 @@ interface DocumentViewerModalProps {
   url: string | null | undefined;
   fileName?: string | null;
   onClose: () => void;
+  onAddToStory?: (mediaUrl: string, mediaType: "image" | "video") => void;
 }
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i;
@@ -36,6 +37,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   url,
   fileName,
   onClose,
+  onAddToStory,
 }) => {
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -148,7 +150,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType="fade"
       transparent={false}
       onRequestClose={onClose}
       statusBarTranslucent
@@ -174,9 +176,9 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
               color="#A1A1AA"
               style={styles.titleIcon}
             />
-            <Text style={styles.headerTitle} numberOfLines={1}>
+            {/*<Text style={styles.headerTitle} numberOfLines={1}>
               {displayName}
-            </Text>
+            </Text>*/}
           </View>
 
           <TouchableOpacity
@@ -202,7 +204,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
                 uri={targetUrl}
                 controls={true}
                 paused={false}
-                resizeMode="contain"
+                resizeMode="cover"
                 style={{ width: "100%", height: "100%" }}
               />
             </View>
@@ -221,7 +223,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
               <Image
                 source={{ uri: targetUrl }}
                 style={{ width: "100%", height: "100%" }}
-                resizeMode="contain"
+                resizeMode="cover"
                 onLoad={() => setLoading(false)}
                 onError={(err) => {
                   console.log("Image preview load error:", err?.nativeEvent);
@@ -313,6 +315,10 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
           onClose={() => setShowActionsModal(false)}
           mediaUrl={targetUrl}
           fileName={displayName}
+          onAddToStory={() => {
+            onClose();
+            onAddToStory?.(targetUrl, isVideo ? "video" : "image");
+          }}
         />
       </SafeAreaView>
     </Modal>
