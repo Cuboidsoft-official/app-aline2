@@ -67,7 +67,7 @@ export const resolveCameraCaptureMediaType = async (
       resolve(value);
     };
 
-    Alert.alert(
+    Alert.sheet(
       title,
       message,
       [
