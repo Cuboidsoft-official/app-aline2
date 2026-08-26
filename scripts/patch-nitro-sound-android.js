@@ -14,6 +14,31 @@ if (!fs.existsSync(targetFile)) {
   process.exit(0);
 }
 
+const autolinkOriginal = path.join(
+  __dirname,
+  "..",
+  "node_modules",
+  "react-native-nitro-sound",
+  "nitrogen",
+  "generated",
+  "android",
+  "NitroSound+autolinking.gradle",
+);
+const autolinkSafe = path.join(
+  __dirname,
+  "..",
+  "node_modules",
+  "react-native-nitro-sound",
+  "nitrogen",
+  "generated",
+  "android",
+  "NitroSoundAutolinking.gradle",
+);
+
+if (fs.existsSync(autolinkOriginal)) {
+  fs.copyFileSync(autolinkOriginal, autolinkSafe);
+}
+
 const cleanContent = `def getExtOrDefault(name) {
   return rootProject.ext.has(name) ? rootProject.ext.get(name) : project.properties['Sound_' + name]
 }
@@ -25,12 +50,6 @@ def reactNativeArchitectures() {
 
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
-
-android {
-  compileSdk 36
-}
-
-apply from: '../nitrogen/generated/android/NitroSound+autolinking.gradle'
 
 def getExtOrIntegerDefault(name) {
   if (rootProject.ext.has(name)) return rootProject.ext.get(name)
@@ -109,7 +128,8 @@ android {
     main {
       java.srcDirs += [
         "generated/java",
-        "generated/jni"
+        "generated/jni",
+        "\${project.projectDir}/../nitrogen/generated/android/kotlin"
       ]
     }
   }
