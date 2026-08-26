@@ -1,30 +1,41 @@
-import { Linking, Share } from "react-native";
-
 import { normalizeMediaUrl } from "./mediaUrls";
 
-const getFileExtension = (value: string) => {
+export class GallerySaveError extends Error {
+  code: "missing-url" | "permission" | "download" | "unsupported";
+
+  constructor(code: GallerySaveError["code"], message: string) {
+    super(message);
+    this.name = "GallerySaveError";
+    this.code = code;
+  }
+}
+
+export const getMediaFileExtension = (value: string, fallback = "jpg") => {
   try {
     const url = new URL(value);
     const matchedExtension = url.pathname.match(/\.([a-z0-9]+)$/i)?.[1];
-    return matchedExtension ? matchedExtension.toLowerCase() : "jpg";
+    return matchedExtension ? matchedExtension.toLowerCase() : fallback;
   } catch {
-    return "jpg";
+    return fallback;
   }
 };
 
-const getDownloadErrorMessage = (error: unknown) =>
-  String((error as { message?: string })?.message || "").toLowerCase();
-
-export const downloadImageAsset = async (rawUrl: string, fileNameBase = "aline2_post") => {
+export const saveMediaToGallery = async (rawUrl: string, fileNameBase = "aline2_post") => {
   const normalizedUrl = normalizeMediaUrl(rawUrl);
 
   if (!normalizedUrl) {
-    throw new Error("Media URL is missing.");
+    throw new GallerySaveError("missing-url", "Media URL is missing.");
   }
 
-  const fileName = `${fileNameBase}_${Date.now()}.${getFileExtension(normalizedUrl)}`;
+  const safeBaseName = String(fileNameBase || "aline2_post")
+    .replace(/[^a-z0-9._-]+/gi, "_")
+    .replace(/\.+$/, "") || "aline2_post";
+  const existingExtension = safeBaseName.match(/\.([a-z0-9]+)$/i)?.[1];
+  const extension = getMediaFileExtension(normalizedUrl, existingExtension || "jpg");
+  const fileName = existingExtension
+    ? `${safeBaseName.replace(/\.[a-z0-9]+$/i, "")}_${Date.now()}.${existingExtension}`
+    : `${safeBaseName}_${Date.now()}.${extension}`;
 
-  // 1. Try FileSystem download & MediaLibrary save
   try {
     let FileSystem: any = null;
     try {
@@ -37,62 +48,67 @@ export const downloadImageAsset = async (rawUrl: string, fileNameBase = "aline2_
       }
     }
 
-    if (FileSystem?.downloadAsync && (FileSystem?.documentDirectory || FileSystem?.cacheDirectory)) {
-      const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
-      const targetFileUri = `${dir}${fileName}`;
-      const downloaded = await FileSystem.downloadAsync(normalizedUrl, targetFileUri);
-      const downloadedUri = downloaded?.uri || targetFileUri;
-
-      try {
-        let MediaLibrary: any = null;
-        try {
-          MediaLibrary = require("expo-media-library");
-        } catch {
-          MediaLibrary = null;
-        }
-
-        if (MediaLibrary?.saveToLibraryAsync || MediaLibrary?.createAssetAsync) {
-          const { status } = await MediaLibrary.requestPermissionsAsync();
-          if (status === "granted") {
-            if (MediaLibrary.saveToLibraryAsync) {
-              await MediaLibrary.saveToLibraryAsync(downloadedUri);
-            } else {
-              await MediaLibrary.createAssetAsync(downloadedUri);
-            }
-            return downloadedUri;
-          }
-        }
-      } catch (mediaErr) {
-        console.log("MediaLibrary save fallback notice:", mediaErr);
-      }
-
-      return downloadedUri;
+    if (!FileSystem?.downloadAsync || (!FileSystem?.documentDirectory && !FileSystem?.cacheDirectory)) {
+      throw new GallerySaveError("unsupported", "Gallery saving is unavailable on this device.");
     }
-  } catch (error) {
-    console.log("FileSystem download fallback notice:", error);
-  }
 
-  // 2. Fallback: Share dialog
-  try {
-    await Share.share({
-      title: "Save file",
-      message: normalizedUrl,
-      url: normalizedUrl,
-    });
-    return normalizedUrl;
-  } catch (error) {
-    const errorMessage = getDownloadErrorMessage(error);
-    if (errorMessage.includes("cancel")) {
+    const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+    const targetFileUri = `${dir}${fileName}`;
+    const downloaded = await FileSystem.downloadAsync(normalizedUrl, targetFileUri);
+    const downloadedUri = downloaded?.uri || targetFileUri;
+
+    let MediaLibrary: any = null;
+    try {
+      MediaLibrary = require("expo-media-library");
+    } catch {
+      MediaLibrary = null;
+    }
+
+    if (!MediaLibrary?.saveToLibraryAsync && !MediaLibrary?.createAssetAsync) {
+      throw new GallerySaveError("unsupported", "Gallery saving is unavailable on this device.");
+    }
+
+    const requestPermissions = MediaLibrary.requestPermissionsAsync;
+    let permission: any = null;
+    if (typeof requestPermissions === "function") {
+      permission = await requestPermissions(true).catch(async () => {
+        if (typeof requestPermissions === "function") {
+          return requestPermissions({ writeOnly: true });
+        }
+        return { status: "denied" };
+      });
+    }
+
+    if (permission?.status !== "granted") {
+      throw new GallerySaveError("permission", "Gallery permission is required to save this media.");
+    }
+
+    if (MediaLibrary.saveToLibraryAsync) {
+      try {
+        await MediaLibrary.saveToLibraryAsync(downloadedUri);
+      } catch (saveError) {
+        if (typeof MediaLibrary.createAssetAsync !== "function") {
+          throw saveError;
+        }
+        await MediaLibrary.createAssetAsync(downloadedUri);
+      }
+    } else {
+      await MediaLibrary.createAssetAsync(downloadedUri);
+    }
+
+    return downloadedUri;
+  } catch (error: any) {
+    const message = String(error?.message || "").toLowerCase();
+    if (error instanceof GallerySaveError) {
       throw error;
     }
-    console.log("Share fallback error:", error);
-  }
-
-  // 3. Fallback: Open URL externally
-  try {
-    await Linking.openURL(normalizedUrl);
-    return normalizedUrl;
-  } catch (linkErr) {
-    throw new Error("Unable to download or open this media file.");
+    if (message.includes("gallery") || message.includes("permission")) {
+      throw new GallerySaveError("permission", error?.message || "Gallery permission is required to save this media.");
+    }
+    console.log("FileSystem download error:", error);
+    throw new GallerySaveError("download", "Could not download this media for the gallery.");
   }
 };
+
+// Keep the old export for existing callers while exposing the gallery-specific operation clearly.
+export const downloadImageAsset = saveMediaToGallery;
