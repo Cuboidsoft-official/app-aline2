@@ -16,16 +16,18 @@ import {
   Linking,
   Keyboard,
   Platform,
+  PanResponder,
   useWindowDimensions,
-  StyleProp,
-  ViewStyle,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../utils/appAlert";
+import { wrapTextAt32Chars } from "../utils/wrapText";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { Swipeable } from "react-native-gesture-handler";
 import Icon from "react-native-vector-icons/Ionicons";
+import Svg, { Path as SvgPath, Text as SvgText } from "react-native-svg";
+import ViewShot, { captureRef } from "react-native-view-shot";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import {
   errorCodes,
@@ -66,6 +68,7 @@ import {
   startCallSession,
 } from "../utils/callApi";
 import { CHAT_THEME_LIST } from "../utils/chatThemes";
+import { getMessageDateLabel } from "../utils/messageDate";
 import {
   getLastIncomingUnseenMessage,
   mergeMessageReaction,
@@ -92,7 +95,14 @@ import SocialVideo from "../features/social/components/SocialVideo";
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { showModerationBlockedSheet } from "../utils/moderationNotice";
 import DocumentViewerModal from "../components/chat/DocumentViewerModal";
-import MediaPreviewActionsModal from "../components/chat/MediaPreviewActionsModal";
+import {
+  getAttachmentPreviewCountLabel,
+  getAttachmentPreviewThumbs,
+} from "../utils/chatAttachmentPreview";
+import {
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+} from "react-native";
 import { ensureCameraPermission, resolveCameraCaptureMediaType } from "../utils/permissions";
 import { normalizeMediaFieldsDeep, normalizeMediaUrl } from "../utils/mediaUrls";
 import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../utils/mentionComposer";
@@ -222,6 +232,20 @@ interface PendingVoiceNote {
   name: string;
   type: string;
   duration: number;
+}
+
+interface AttachmentMarkupStroke {
+  id: number;
+  points: Array<{ x: number; y: number }>;
+  color: string;
+  width: number;
+}
+
+interface AttachmentMarkupText {
+  id: number;
+  text: string;
+  x: number;
+  y: number;
 }
 
 interface MessagePreviewState {
@@ -521,6 +545,14 @@ const getDocumentPickerMessage = (error: any): string => {
   }
 };
 
+const pointsToSvgPath = (points: Array<{ x: number; y: number }>): string => {
+  if (!points.length) {
+    return "";
+  }
+
+  return points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`).join(" ");
+};
+
 const messageRenderKeyCache = new WeakMap<object, string>();
 let nextSyntheticMessageKey = 0;
 
@@ -676,10 +708,10 @@ const buildOptimisticMessage = ({
     mediaUrl: mediaUrl || file?.uri || "",
     attachment: file
       ? {
-          url: file.uri,
-          fileName: file.name,
-          thumbnailUrl: file.uri,
-        }
+        url: file.uri,
+        fileName: file.name,
+        thumbnailUrl: file.uri,
+      }
       : undefined,
     duration,
     sender: { _id: currentUserId },
@@ -899,6 +931,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
   const [errorMessage, setErrorMessage] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagination, setPagination] = useState<PaginationState>({ nextCursor: null, hasMore: false, limit: 30 });
@@ -919,6 +952,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [scheduleCallDurationMinutes, setScheduleCallDurationMinutes] = useState("30");
   const [scheduleCallAgenda, setScheduleCallAgenda] = useState("");
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const autoLoadingEarlierRef = useRef(false);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -926,7 +960,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     const showSubscription = Keyboard.addListener(showEvent, () => {
       setIsKeyboardVisible(true);
       setTimeout(() => {
-        scrollToLatestMessage(false);
+        messageListRef.current?.scrollToEnd?.({ animated: false });
       }, 100);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
@@ -979,9 +1013,16 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const pendingAttachment = pendingAttachments[0] || null;
   const [pendingVoiceNote, setPendingVoiceNote] = useState<PendingVoiceNote | null>(null);
+  const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState(0);
+  const [showAttachmentPreview, setShowAttachmentPreview] = useState(false);
+  const [attachmentPreviewTool, setAttachmentPreviewTool] = useState<"edit" | "highlight" | "erase" | "text" | null>(null);
+  const [attachmentMarkupStrokes, setAttachmentMarkupStrokes] = useState<AttachmentMarkupStroke[]>([]);
+  const [attachmentMarkupTexts, setAttachmentMarkupTexts] = useState<AttachmentMarkupText[]>([]);
+  const [attachmentTextDraft, setAttachmentTextDraft] = useState("");
+  const [editedAttachmentUris, setEditedAttachmentUris] = useState<Record<string, string>>({});
+  const attachmentStageRef = useRef<any>(null);
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
   const [documentPreview, setDocumentPreview] = useState<{ url: string; fileName?: string } | null>(null);
-  const [showPreviewActionsModal, setShowPreviewActionsModal] = useState(false);
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
   const [showAssistant, setShowAssistant] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState("");
@@ -1065,12 +1106,12 @@ const ChatScreen = ({ navigation, route }: any) => {
               )
             )
             || (
-            (
-              item?._optimistic
-              && String(getMessageSenderId(item) || "") === String(currentUserId || "")
-              && buildMessageSignature(item) === nextSignature
-            )
-            || isNearDuplicateMessage(item, normalizedMessage)
+              (
+                item?._optimistic
+                && String(getMessageSenderId(item) || "") === String(currentUserId || "")
+                && buildMessageSignature(item) === nextSignature
+              )
+              || isNearDuplicateMessage(item, normalizedMessage)
             )
           )
         ) {
@@ -1306,29 +1347,29 @@ const ChatScreen = ({ navigation, route }: any) => {
     try {
       const resolvedConversationId = await ensureConversation();
 
-        if (!resolvedConversationId) {
-          throw new Error("Unable to open this conversation for calling.");
-        }
+      if (!resolvedConversationId) {
+        throw new Error("Unable to open this conversation for calling.");
+      }
 
-        const response = await startCallSession({
-          conversationId: resolvedConversationId,
-          callType,
-        });
+      const response = await startCallSession({
+        conversationId: resolvedConversationId,
+        callType,
+      });
 
       const nextCallSession = response?.callSession || null;
       const nextCallSessionId = String(nextCallSession?._id || "");
 
-        if (!nextCallSessionId) {
-          throw new Error("Call session could not be created.");
-        }
+      if (!nextCallSessionId) {
+        throw new Error("Call session could not be created.");
+      }
 
-        void joinConversationRealtime(resolvedConversationId);
+      void joinConversationRealtime(resolvedConversationId);
 
-        sendCallEventLog({
-          targetConversationId: resolvedConversationId,
-          callSessionId: nextCallSessionId,
-          callType,
-        }).catch((error) => {
+      sendCallEventLog({
+        targetConversationId: resolvedConversationId,
+        callSessionId: nextCallSessionId,
+        callType,
+      }).catch((error) => {
         console.log("call event log error:", error);
       });
 
@@ -1764,10 +1805,10 @@ const ChatScreen = ({ navigation, route }: any) => {
       if (res?.message) {
         const mergedReplyMessage = replyToMessage
           ? {
-              ...res.message,
-              replyToMessageId: res.message?.replyToMessageId || replyToMessageId,
-              replyToMessage: res.message?.replyToMessage || replyToMessage,
-            }
+            ...res.message,
+            replyToMessageId: res.message?.replyToMessageId || replyToMessageId,
+            replyToMessage: res.message?.replyToMessage || replyToMessage,
+          }
           : res.message;
 
         mergeMessage(mergedReplyMessage);
@@ -1823,7 +1864,7 @@ const ChatScreen = ({ navigation, route }: any) => {
 
     composerSendPressLockRef.current = true;
     action()
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => {
         composerSendPressLockRef.current = false;
       });
@@ -1868,12 +1909,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const compactHeaderActionSize = Math.max(chatMetrics.headerAction - 4, 30);
   const compactHeaderTitleSize = Math.max(chatMetrics.titleFontSize - 3, 13);
   const compactHeaderStatusSize = Math.max(chatMetrics.statusFontSize - 1, 10.5);
-  const minimumWideBubbleWidth = Math.min(
-    Math.max(134, Math.round(width * 0.38)),
-    Math.round(width * 0.66),
-  );
   const compactBubbleMaxWidth = width < 360 ? "76%" : width < 430 ? "69%" : "65%";
-  const wideContentBubbleMaxWidth = width < 360 ? "86%" : width < 430 ? "82%" : "78%";
   const callEventBubbleWidth = Math.min(Math.max(Math.round(width * 0.52), 164), 216);
   const mediaBubbleWidth = Math.min(width * 0.56, 192);
   const isChannelConversation = isGroupConversation && groupMeta.groupVisibility === "public";
@@ -2129,10 +2165,139 @@ const ChatScreen = ({ navigation, route }: any) => {
       return;
     }
 
+    setAttachmentPreviewIndex(0);
+    setAttachmentMarkupStrokes([]);
+    setAttachmentMarkupTexts([]);
+    setAttachmentTextDraft("");
+    setEditedAttachmentUris({});
     setPendingAttachments(nextAttachments);
     setPendingVoiceNote(null);
     setShowTools(false);
   }, []);
+
+  const attachmentPreviewItems = useMemo(
+    () => pendingAttachments.filter((item) => item.kind === "image"),
+    [pendingAttachments],
+  );
+
+  const attachmentPreviewMeta = useMemo(
+    () => getAttachmentPreviewThumbs(attachmentPreviewItems, 4),
+    [attachmentPreviewItems],
+  );
+
+  const activeAttachmentPreview = attachmentPreviewItems[attachmentPreviewIndex] || attachmentPreviewItems[0] || null;
+
+  const openAttachmentPreview = useCallback((index = 0) => {
+    if (!pendingAttachments.length) {
+      return;
+    }
+
+    setAttachmentPreviewIndex(index);
+    setShowAttachmentPreview(true);
+  }, [pendingAttachments.length]);
+
+  const closeAttachmentPreview = useCallback(() => {
+    setShowAttachmentPreview(false);
+    setAttachmentPreviewTool(null);
+    setAttachmentTextDraft("");
+  }, []);
+
+  const captureCurrentAttachment = useCallback(async (): Promise<string | null> => {
+    if (!activeAttachmentPreview || (!attachmentMarkupStrokes.length && !attachmentMarkupTexts.length)) {
+      return null;
+    }
+
+    try {
+      const capturedUri = await captureRef(attachmentStageRef, {
+        format: "png",
+        quality: 0.85,
+        result: "tmpfile",
+      });
+      setEditedAttachmentUris((current) => ({ ...current, [activeAttachmentPreview.uri]: capturedUri }));
+      return capturedUri;
+    } catch (error) {
+      console.warn("Attachment markup capture failed; sending the original image.", error);
+      return null;
+    }
+  }, [activeAttachmentPreview, attachmentMarkupStrokes.length, attachmentMarkupTexts.length]);
+
+  const selectAttachmentPreview = useCallback(async (index: number) => {
+    await captureCurrentAttachment();
+    setAttachmentMarkupStrokes([]);
+    setAttachmentMarkupTexts([]);
+    setAttachmentTextDraft("");
+    setAttachmentPreviewIndex(index);
+  }, [captureCurrentAttachment]);
+
+  const handleAttachmentPreviewAction = useCallback((tool: "edit" | "highlight" | "erase" | "text") => {
+    setAttachmentPreviewTool(tool);
+    if (tool !== "text") {
+      setAttachmentTextDraft("");
+    }
+  }, []);
+
+  const addAttachmentText = useCallback(() => {
+    const text = attachmentTextDraft.trim();
+    if (!text) {
+      return;
+    }
+
+    setAttachmentMarkupTexts((current) => [
+      ...current,
+      {
+        id: Date.now(),
+        text,
+        x: 24,
+        y: 72 + current.length * 42,
+      },
+    ]);
+    setAttachmentTextDraft("");
+    setAttachmentPreviewTool(null);
+  }, [attachmentTextDraft]);
+
+  const attachmentMarkupPanResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => attachmentPreviewTool === "edit" || attachmentPreviewTool === "highlight" || attachmentPreviewTool === "erase",
+    onMoveShouldSetPanResponder: () => attachmentPreviewTool === "edit" || attachmentPreviewTool === "highlight" || attachmentPreviewTool === "erase",
+    onPanResponderGrant: (event) => {
+      const { locationX, locationY } = event.nativeEvent;
+      if (attachmentPreviewTool === "erase") {
+        setAttachmentMarkupStrokes((current) => current.filter((stroke) => {
+          return !stroke.points.some((point) => Math.hypot(point.x - locationX, point.y - locationY) < 28);
+        }));
+        return;
+      }
+
+      setAttachmentMarkupStrokes((current) => [
+        ...current,
+        {
+          id: Date.now(),
+          points: [{ x: locationX, y: locationY }],
+          color: attachmentPreviewTool === "highlight" ? "#FFE45C" : "#FF4D6D",
+          width: attachmentPreviewTool === "highlight" ? 18 : 4,
+        },
+      ]);
+    },
+    onPanResponderMove: (event) => {
+      const { locationX, locationY } = event.nativeEvent;
+      if (attachmentPreviewTool === "erase") {
+        setAttachmentMarkupStrokes((current) => current.filter((stroke) => {
+          return !stroke.points.some((point) => Math.hypot(point.x - locationX, point.y - locationY) < 28);
+        }));
+        return;
+      }
+
+      setAttachmentMarkupStrokes((current) => {
+        const lastStroke = current[current.length - 1];
+        if (!lastStroke) {
+          return current;
+        }
+        return [
+          ...current.slice(0, -1),
+          { ...lastStroke, points: [...lastStroke.points, { x: locationX, y: locationY }] },
+        ];
+      });
+    },
+  }), [attachmentPreviewTool]);
 
   const sendImageAttachment = useCallback(async () => {
     try {
@@ -2155,7 +2320,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
   }, [queueAttachmentPreview]);
 
-  const sendCameraAttachment = useCallback(async () => {
+  const captureCameraAttachment = useCallback(async (defaultMediaType: "mixed" | "photo" | "video" = "mixed") => {
     const hasPermission = await ensureCameraPermission(
       "Allow Aline2 to use your camera for chat photo and video attachments.",
     );
@@ -2165,10 +2330,12 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
 
     try {
-      const mediaType = await resolveCameraCaptureMediaType("mixed", {
-        title: "Send from camera",
-        message: "Choose whether you want to capture a photo or record a video for this chat.",
-      });
+      const mediaType = defaultMediaType === "mixed"
+        ? await resolveCameraCaptureMediaType("mixed", {
+          title: "Send from camera",
+          message: "Choose whether you want to capture a photo or record a video for this chat.",
+        })
+        : defaultMediaType;
       if (!mediaType) {
         return;
       }
@@ -2193,6 +2360,14 @@ const ChatScreen = ({ navigation, route }: any) => {
     }
   }, [queueAttachmentPreview]);
 
+  const sendCameraAttachment = useCallback(async () => {
+    await captureCameraAttachment("mixed");
+  }, [captureCameraAttachment]);
+
+  const sendVideoAttachment = useCallback(async () => {
+    await captureCameraAttachment("video");
+  }, [captureCameraAttachment]);
+
   const sendPendingAttachment = useCallback(async () => {
     if (!pendingAttachments.length || pendingAttachmentSendLockRef.current || uploading) {
       return;
@@ -2201,7 +2376,21 @@ const ChatScreen = ({ navigation, route }: any) => {
     try {
       pendingAttachmentSendLockRef.current = true;
       setUploading(true);
-      for (const attachment of pendingAttachments) {
+      const currentCapturedUri = await captureCurrentAttachment();
+      const preparedAttachments = pendingAttachments.map((attachment) => {
+        const editedUri = editedAttachmentUris[attachment.uri]
+          || (attachment.uri === activeAttachmentPreview?.uri ? currentCapturedUri || "" : "");
+        const isEditedImage = attachment.kind === "image" && Boolean(editedUri);
+        return {
+          ...attachment,
+          uri: editedUri || attachment.uri,
+          name: isEditedImage
+            ? `${attachment.name.replace(/\.[^/.]+$/, "")}.png`
+            : attachment.name,
+          type: isEditedImage ? "image/png" : attachment.type,
+        };
+      });
+      for (const attachment of preparedAttachments) {
         await checkChatMediaModeration({
           file: {
             uri: attachment.uri,
@@ -2213,21 +2402,26 @@ const ChatScreen = ({ navigation, route }: any) => {
       }
 
       for (let index = 0; index < pendingAttachments.length; index += 1) {
-        const attachment = pendingAttachments[index];
+        const preparedAttachment = preparedAttachments[index];
         await submitMessage({
           text: index === 0 ? text.trim() : "",
           file: {
-            uri: attachment.uri,
-            name: attachment.name,
-            type: attachment.type,
+            uri: preparedAttachment.uri,
+            name: preparedAttachment.name,
+            type: preparedAttachment.type,
           },
-          messageType: attachment.kind,
+          messageType: preparedAttachment.kind,
           replyToMessageId: index === 0 ? replyingToMessageId : undefined,
           replyToMessage: index === 0 ? replyingToMessage : undefined,
         });
       }
       setText("");
       setPendingAttachments([]);
+      setAttachmentPreviewIndex(0);
+      setAttachmentMarkupStrokes([]);
+      setAttachmentMarkupTexts([]);
+      setAttachmentTextDraft("");
+      setEditedAttachmentUris({});
     } catch (error: any) {
       console.log("attachment message send error:", error);
       if (showModerationBlockedSheet(error, { fallbackMessage: "This attachment could not be sent right now." })) {
@@ -2238,7 +2432,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       pendingAttachmentSendLockRef.current = false;
       setUploading(false);
     }
-  }, [pendingAttachments, replyingToMessage, replyingToMessageId, submitMessage, text, uploading]);
+  }, [activeAttachmentPreview?.uri, captureCurrentAttachment, editedAttachmentUris, pendingAttachments, replyingToMessage, replyingToMessageId, submitMessage, text, uploading]);
 
   const sendDocumentAttachment = useCallback(async () => {
     try {
@@ -2532,6 +2726,12 @@ const ChatScreen = ({ navigation, route }: any) => {
       action: sendCameraAttachment,
     },
     {
+      id: "video",
+      name: "Video",
+      icon: "videocam",
+      action: sendVideoAttachment,
+    },
+    {
       id: "audio",
       name: "Audio",
       icon: "musical-notes",
@@ -2564,8 +2764,26 @@ const ChatScreen = ({ navigation, route }: any) => {
         setShowScheduleCallComposer(true);
       },
     }] : []),
-  ], [canScheduleCall, sendAudioAttachment, sendCameraAttachment, sendDocumentAttachment, sendImageAttachment]);
+  ], [canScheduleCall, sendAudioAttachment, sendCameraAttachment, sendDocumentAttachment, sendImageAttachment, sendVideoAttachment]);
 
+  const handleMessagesScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+
+    // User has reached the older-message/top boundary
+    if (
+      offsetY <= 80 &&
+      pagination?.hasMore &&
+      !loadingMore &&
+      !autoLoadingEarlierRef.current
+    ) {
+      autoLoadingEarlierRef.current = true;
+
+      loadMoreMessages()
+        .finally(() => {
+          autoLoadingEarlierRef.current = false;
+        });
+    }
+  };
   const loadMoreMessages = useCallback(async () => {
     if (!currentConversationId || !pagination?.hasMore || !pagination?.nextCursor || loadingMore) {
       return;
@@ -2782,7 +3000,14 @@ const ChatScreen = ({ navigation, route }: any) => {
 
   // ─── Render message ───────────────────────────────────────────────────────
 
-  const renderMessage = ({ item }: { item: ChatMessage }) => {
+  const renderMessage = ({ item, index }: { item: ChatMessage, index: number; }) => {
+    const currentDateLabel = getMessageDateLabel(item?.createdAt);
+    const previousMessage = index > 0 ? messages[index - 1] : null;
+    const previousDateLabel = previousMessage
+      ? getMessageDateLabel(previousMessage?.createdAt)
+      : null;
+    const shouldShowDateSeparator =
+      index === 0 || currentDateLabel !== previousDateLabel;
     const isMine = String(getMessageSenderId(item)) === String(currentUserId || "");
     const isSystemMessage = String(item?.messageType || "") === "system";
     const senderId = String(getMessageSenderId(item) || "");
@@ -2829,6 +3054,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     const messageTimeLabel = formatMessageTime(item?.createdAt);
     if (isSystemMessage && !scheduledCall) {
       return (
+
         <View style={styles.systemMessageRow}>
           <View style={[styles.systemMessagePill, { backgroundColor: alpha(colors.surface, "E8"), borderColor: alpha(colors.border, "86") }]}>
             <Text style={[styles.systemMessageText, { color: colors.mutedText }]}>
@@ -2841,6 +3067,7 @@ const ChatScreen = ({ navigation, route }: any) => {
             ) : null}
           </View>
         </View>
+
       );
     }
     const isEmojiOnly = !locationPayload && !sharedContent && !callEvent && !scheduledCall && !attachment?.url && isEmojiOnlyText(textValue);
@@ -2880,7 +3107,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     const bubbleTextColor = isMine ? "#fff" : colors.text;
     const bubbleMetaColor = isMine ? "rgba(255,255,255,0.72)" : colors.mutedText;
     const messageStatusIcon = seenCount > 0 ? "checkmark-done" : "checkmark";
-    const messageStatusIconColor = seenCount > 0 ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.72)";
+    const messageStatusIconColor = seenCount > 0 ? "#34B7F1" : "rgba(255,255,255,0.72)";
     const incomingBubbleBg = colors.card;
     const incomingBubbleBorder = alpha(colors.border, "CC");
     const outgoingMediaBubbleColor = alpha(primaryThemeColor, "2C");
@@ -2913,12 +3140,44 @@ const ChatScreen = ({ navigation, route }: any) => {
           startReplyToMessage(item);
         }}
       >
+        {shouldShowDateSeparator ? (
+          <View
+            style={{
+              width: "100%",
+              alignItems: "center",
+              justifyContent: "center",
+              marginVertical: 12,
+              paddingVertical: 6,
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: "#ffffff",
+                borderRadius: 20,
+                paddingHorizontal: 14,
+                paddingVertical: 6,
+              }}
+            >
+              <Text
+                style={{
+                  color: "#333333",
+                  fontSize: 12,
+                  fontWeight: "700",
+                }}
+              >
+                {currentDateLabel || "TODAY"}
+              </Text>
+            </View>
+          </View>
+        ) : null}
         <View
           style={[
             styles.messageRow,
             isMine ? { justifyContent: "flex-end" } : { justifyContent: "flex-start" }
           ]}
         >
+
+
           {showGroupSender ? (
             <TouchableOpacity
               activeOpacity={0.86}
@@ -2969,7 +3228,11 @@ const ChatScreen = ({ navigation, route }: any) => {
                   paddingVertical: chatMetrics.bubblePaddingY,
                   borderRadius: chatMetrics.bubbleRadius,
                   maxWidth: compactBubbleMaxWidth,
-                  minWidth: replyPreview ? 140 : 80,
+                  minWidth: textValue.length >= 32
+                    ? Math.min(width * 0.65, 310)
+                    : replyPreview
+                      ? 140
+                      : 80,
                 } : isCardBubble ? {
                   padding: 4,
                   borderRadius: 16,
@@ -3006,318 +3269,318 @@ const ChatScreen = ({ navigation, route }: any) => {
                 isHighlighted ? styles.messageBubbleHighlighted : null,
               ]}
             >
-            {replyPreview ? (
-              <TouchableOpacity
-                activeOpacity={0.82}
-                onPress={() => {
-                  focusMessageById(replyPreview.id).catch((error) => {
-                    console.log("reply target focus error:", error);
-                  });
-                }}
-                style={[
-                  styles.replyPreviewCard,
-                  isMine ? styles.replyPreviewCardMine : null,
-                  isMine ? styles.replyPreviewCardMineAligned : styles.replyPreviewCardOtherAligned,
-                ]}
-              >
-                <View style={[styles.replyPreviewBar, isMine ? styles.replyPreviewBarMine : null]} />
-                <View style={styles.replyPreviewBody}>
-                  <Text style={[styles.replyPreviewAuthor, isMine ? styles.replyPreviewAuthorMine : null, { fontSize: chatMetrics.metaFontSize + 0.5 }]} numberOfLines={1}>
-                    {replyPreview.author}
-                  </Text>
-                  <Text style={[styles.replyPreviewSnippet, isMine ? styles.replyPreviewSnippetMine : null, { fontSize: chatMetrics.metaFontSize, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={1}>
-                    {replyPreview.snippet}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ) : null}
-
-            {sharedContent?.kind === "post" || sharedContent?.kind === "story" || sharedContent?.kind === "swipe" ? (
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => {
-                  if (sharedContent?.kind === "post" || sharedContent?.kind === "swipe") {
-                    openSharedContent(navigation, sharedContent);
-                    return;
-                  }
-                  if (sharedContent?.kind === "story" && sharedContent?.storyId) {
-                    navigation.navigate("StoryViewer", {
-                      storyId: sharedContent.storyId,
-                      storyUserId: sharedUser?.id,
+              {replyPreview ? (
+                <TouchableOpacity
+                  activeOpacity={0.82}
+                  onPress={() => {
+                    focusMessageById(replyPreview.id).catch((error) => {
+                      console.log("reply target focus error:", error);
                     });
-                  }
-                }}
-                style={[styles.sharedPostCard, isMine ? styles.sharedPostCardMine : null]}
-              >
-                <View style={styles.sharedPostHeader}>
-                  <AppAvatar
-                    uri={normalizeMediaUrl(sharedUser?.avatarUrl || sharedUser?.avatar || DEFAULT_AVATAR_URL)}
-                    name={sharedUser?.name || sharedUser?.username || "Aline2"}
-                    size={30}
-                    style={styles.sharedPostAvatar}
-                  />
-                  <View style={styles.sharedPostMeta}>
-                    <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]} numberOfLines={1}>
-                      {sharedAuthorUsername
-                        ? `@${sharedAuthorUsername}`
-                        : sharedUser?.name || (sharedContent?.kind === "story" ? "Aline2 story" : sharedContent?.kind === "swipe" ? "Aline2 swipe" : "Aline2 post")}
+                  }}
+                  style={[
+                    styles.replyPreviewCard,
+                    isMine ? styles.replyPreviewCardMine : null,
+                    isMine ? styles.replyPreviewCardMineAligned : styles.replyPreviewCardOtherAligned,
+                  ]}
+                >
+                  <View style={[styles.replyPreviewBar, isMine ? styles.replyPreviewBarMine : null]} />
+                  <View style={styles.replyPreviewBody}>
+                    <Text style={[styles.replyPreviewAuthor, isMine ? styles.replyPreviewAuthorMine : null, { fontSize: chatMetrics.metaFontSize + 0.5 }]} numberOfLines={1}>
+                      {replyPreview.author}
                     </Text>
-                    <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : null, { fontSize: chatMetrics.metaFontSize }]} numberOfLines={1}>
-                      {sharedContent?.kind === "story"
-                        ? sharedContent?.interaction?.type === "reply"
-                          ? "Story reply"
-                          : sharedContent?.interaction?.type === "like"
-                            ? "Story like"
-                            : "Shared story"
-                        : sharedContent?.kind === "swipe"
-                          ? "Shared swipe"
-                          : "Shared post"}
+                    <Text style={[styles.replyPreviewSnippet, isMine ? styles.replyPreviewSnippetMine : null, { fontSize: chatMetrics.metaFontSize, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={1}>
+                      {replyPreview.snippet}
                     </Text>
                   </View>
-                </View>
+                </TouchableOpacity>
+              ) : null}
 
-                {sharedContent?.kind === "story" && sharedContent?.interaction?.text ? (
-                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, styles.sharedStoryReplyText, { fontSize: chatMetrics.metaFontSize + 0.5, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={2}>
-                    {sharedContent.interaction.text}
-                  </Text>
-                ) : null}
-
-                {sharedMediaUrl ? (
-                  <Image
-                    source={{ uri: normalizeMediaUrl(sharedMediaUrl) }}
-                    style={styles.sharedPostImage}
-                    resizeMode="cover"
-                  />
-                ) : null}
-
-                {sharedContentCaption ? (
-                  <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, { fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]} numberOfLines={3}>
-                    {sharedContentCaption}
-                  </Text>
-                ) : null}
-
-              </TouchableOpacity>
-            ) : null}
-
-            {callEvent ? (
-              <View style={[styles.callEventCard, isMine ? styles.callEventCardMine : null]}>
-                <View style={[styles.callEventIcon, isMine ? styles.callEventIconMine : null]}>
-                  <Icon
-                    name={callEvent.icon}
-                    size={15}
-                    color={isMine ? "#fff" : primaryThemeColor}
-                  />
-                </View>
-                <View style={styles.callEventBody}>
-                  <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]}>{callEvent.label}</Text>
-                  <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null, { fontSize: chatMetrics.metaFontSize }]}>
-                    {messageTimeLabel ? `${callEvent.meta} • ${messageTimeLabel}` : callEvent.meta}
-                  </Text>
-                </View>
-              </View>
-            ) : null}
-
-            {scheduledCall ? (
-              <TouchableOpacity
-                activeOpacity={scheduledCall.calendarUrl ? 0.85 : 1}
-                disabled={!scheduledCall.calendarUrl}
-                onPress={() => {
-                  if (!scheduledCall.calendarUrl) {
-                    return;
-                  }
-
-                  Linking.openURL(scheduledCall.calendarUrl).catch((error) => {
-                    console.log("scheduled call calendar open error:", error);
-                  });
-                }}
-                style={[styles.callEventCard, isMine ? styles.callEventCardMine : null]}
-              >
-                <View style={[styles.callEventIcon, isMine ? styles.callEventIconMine : null]}>
-                  <Icon
-                    name="calendar-outline"
-                    size={15}
-                    color={isMine ? "#fff" : primaryThemeColor}
-                  />
-                </View>
-                <View style={styles.callEventBody}>
-                  <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]}>
-                    {scheduledCall.label}
-                  </Text>
-                  <View style={styles.scheduledCallMetaRow}>
-                    <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null, styles.scheduledCallPrimaryMeta, { fontSize: chatMetrics.metaFontSize }]}>
-                      {scheduledCall.meta}
-                    </Text>
-                    <View style={[styles.scheduledCallDurationBadge, isMine ? styles.scheduledCallDurationBadgeMine : null]}>
-                      <Text style={[styles.scheduledCallDurationBadgeText, isMine ? styles.scheduledCallDurationBadgeTextMine : null, { fontSize: Math.max(10, chatMetrics.metaFontSize - 0.5) }]}>
-                        {`${scheduledCall.durationMinutes} min`}
+              {sharedContent?.kind === "post" || sharedContent?.kind === "story" || sharedContent?.kind === "swipe" ? (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => {
+                    if (sharedContent?.kind === "post" || sharedContent?.kind === "swipe") {
+                      openSharedContent(navigation, sharedContent);
+                      return;
+                    }
+                    if (sharedContent?.kind === "story" && sharedContent?.storyId) {
+                      navigation.navigate("StoryViewer", {
+                        storyId: sharedContent.storyId,
+                        storyUserId: sharedUser?.id,
+                      });
+                    }
+                  }}
+                  style={[styles.sharedPostCard, isMine ? styles.sharedPostCardMine : null]}
+                >
+                  <View style={styles.sharedPostHeader}>
+                    <AppAvatar
+                      uri={normalizeMediaUrl(sharedUser?.avatarUrl || sharedUser?.avatar || DEFAULT_AVATAR_URL)}
+                      name={sharedUser?.name || sharedUser?.username || "Aline2"}
+                      size={30}
+                      style={styles.sharedPostAvatar}
+                    />
+                    <View style={styles.sharedPostMeta}>
+                      <Text style={[styles.sharedPostAuthor, isMine ? styles.sharedPostAuthorMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]} numberOfLines={1}>
+                        {sharedAuthorUsername
+                          ? `@${sharedAuthorUsername}`
+                          : sharedUser?.name || (sharedContent?.kind === "story" ? "Aline2 story" : sharedContent?.kind === "swipe" ? "Aline2 swipe" : "Aline2 post")}
+                      </Text>
+                      <Text style={[styles.sharedPostLabel, isMine ? styles.sharedPostLabelMine : null, { fontSize: chatMetrics.metaFontSize }]} numberOfLines={1}>
+                        {sharedContent?.kind === "story"
+                          ? sharedContent?.interaction?.type === "reply"
+                            ? "Story reply"
+                            : sharedContent?.interaction?.type === "like"
+                              ? "Story like"
+                              : "Shared story"
+                          : sharedContent?.kind === "swipe"
+                            ? "Shared swipe"
+                            : "Shared post"}
                       </Text>
                     </View>
                   </View>
-                  {scheduledCall.calendarUrl ? (
-                    <Text style={[styles.callEventLink, isMine ? styles.callEventLinkMine : null, { fontSize: chatMetrics.metaFontSize }]}>
-                      Open calendar invite
+
+                  {sharedContent?.kind === "story" && sharedContent?.interaction?.text ? (
+                    <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, styles.sharedStoryReplyText, { fontSize: chatMetrics.metaFontSize + 0.5, lineHeight: chatMetrics.metaFontSize + 6 }]} numberOfLines={2}>
+                      {sharedContent.interaction.text}
                     </Text>
                   ) : null}
-                </View>
-              </TouchableOpacity>
-            ) : null}
 
-            {mediaBubbleKind === "image" ? (
-              <View style={[styles.mediaCard, isGifBubble ? styles.gifMediaCard : null, isStickerBubble ? styles.stickerMediaCard : null]}>
-                <Image
-                  source={{ uri: normalizeMediaUrl(attachment?.url || "") }}
-                  style={[
-                    styles.messageImage,
-                    {
-                      width: mediaBubbleWidth,
-                      height: isStickerBubble ? 168 : Math.min(width * 0.5, 188),
-                    },
-                    isStickerBubble ? styles.stickerImage : null,
-                  ]}
-                  resizeMode={isStickerBubble ? "contain" : "contain"}
-                />
-                {isGifBubble ? (
-                  <View style={[styles.mediaTypeBadge, isMine ? styles.mediaTypeBadgeMine : null]}>
-                    <Text style={styles.mediaTypeBadgeText}>GIF</Text>
+                  {sharedMediaUrl ? (
+                    <Image
+                      source={{ uri: normalizeMediaUrl(sharedMediaUrl) }}
+                      style={styles.sharedPostImage}
+                      resizeMode="cover"
+                    />
+                  ) : null}
+
+                  {sharedContentCaption ? (
+                    <Text style={[styles.sharedPostCaption, isMine ? styles.sharedPostCaptionMine : null, { fontSize: chatMetrics.metaFontSize + 1, lineHeight: chatMetrics.metaFontSize + 7 }]} numberOfLines={3}>
+                      {sharedContentCaption}
+                    </Text>
+                  ) : null}
+
+                </TouchableOpacity>
+              ) : null}
+
+              {callEvent ? (
+                <View style={[styles.callEventCard, isMine ? styles.callEventCardMine : null]}>
+                  <View style={[styles.callEventIcon, isMine ? styles.callEventIconMine : null]}>
+                    <Icon
+                      name={callEvent.icon}
+                      size={15}
+                      color={isMine ? "#fff" : primaryThemeColor}
+                    />
                   </View>
-                ) : null}
-              </View>
-            ) : null}
-
-            {mediaBubbleKind === "video" ? (
-              <View style={styles.mediaCard}>
-                {attachment?.thumbnailUrl ? (
-                  <Image
-                    source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl) }}
-                    style={[
-                      styles.messageImage,
-                      {
-                        width: mediaBubbleWidth,
-                        height: Math.min(width * 0.48, 176),
-                      },
-                    ]}
-                  />
-                ) : (
-                  <SocialVideo
-                    uri={normalizeMediaUrl(attachment?.url || (item as any)?.mediaUrl || "")}
-                    paused={true}
-                    controls={false}
-                    resizeMode="cover"
-                    style={[
-                      styles.messageImage,
-                      {
-                        width: mediaBubbleWidth,
-                        height: Math.min(width * 0.48, 176),
-                      },
-                    ]}
-                  />
-                )}
-                <View style={[styles.mediaOverlayBadge, isMine ? styles.mediaOverlayBadgeMine : null]}>
-                  <Icon name="play" size={13} color="#fff" />
-                </View>
-                <View style={[styles.mediaTypeBadge, isMine ? styles.mediaTypeBadgeMine : null]}>
-                  <Text style={styles.mediaTypeBadgeText}>VIDEO</Text>
-                </View>
-              </View>
-            ) : null}
-
-            {mediaBubbleKind === "voice" ? (
-              <VoiceMessageBubble
-                audioUrl={attachment?.url || ""}
-                durationSeconds={Number(item?.duration || 0)}
-                isMine={isMine}
-                accentColor={primaryThemeColor}
-                label={item?.messageType === "voice" ? "" : getAttachmentDisplayName(item)}
-              />
-            ) : null}
-
-            {hasDocumentBubble ? (
-              <View style={[styles.documentCard, isMine ? styles.documentCardMine : styles.documentCardOther]}>
-                <View style={[styles.documentIconBox, isMine ? styles.documentIconBoxMine : styles.documentIconBoxOther]}>
-                  <Icon name="document-text" size={24} color={isMine ? "#FFFFFF" : PRIMARY} />
-                </View>
-                <View style={styles.documentTextContainer}>
-                  <Text
-                    style={[styles.documentName, isMine ? styles.myDocumentName : styles.otherDocumentName]}
-                    numberOfLines={2}
-                  >
-                    {getAttachmentDisplayName(item)}
-                  </Text>
-                  <Text style={[styles.documentSubtext, isMine ? styles.myDocumentSubtext : styles.otherDocumentSubtext]}>
-                    Document • Tap to open
-                  </Text>
-                </View>
-              </View>
-            ) : null}
-
-            {shouldRenderMessageText && (
-              <InteractiveText
-                style={[
-                  styles.messageText,
-                  isMine && styles.myMessageText,
-                  isEmojiOnly ? styles.emojiOnlyText : null,
-                  {
-                    color: bubbleTextColor,
-                    fontSize: isEmojiOnly ? Math.max(chatMetrics.bodyFontSize + 10, 24) : chatMetrics.bodyFontSize,
-                    lineHeight: isEmojiOnly ? Math.max(chatMetrics.bodyLineHeight + 10, 28) : chatMetrics.bodyLineHeight,
-                  },
-                ]}
-                mentionStyle={[styles.messageMentionText, isMine && styles.myMessageMentionText]}
-                onPressMention={isGroupConversation ? openMentionedGroupMember : undefined}
-                text={textValue}
-                textBreakStrategy="highQuality"
-                lineBreakStrategyIOS="standard"
-              >
-                {item?.isEdited ? (
-                  <Text style={{ fontSize: 11, fontStyle: "italic", opacity: 0.6 }}> edited</Text>
-                ) : null}
-              </InteractiveText>
-            )}
-
-            {!locationPayload && !sharedContent && !callEvent && !scheduledCall && !isMediaBubble && !isEmojiOnly && linkPreview?.url ? (
-              <MessageLinkPreview
-                preview={linkPreview}
-                isMine={isMine}
-                onPress={() => {
-                  Linking.openURL(String(linkPreview.url)).catch((error) => {
-                    console.log("link preview open error:", error);
-                  });
-                }}
-              />
-            ) : null}
-
-            {locationPayload ? (
-              <View style={[styles.locationCard, isMine && styles.myLocationCard]}>
-                <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
-                <View style={styles.locationBody}>
-                  <Text
-                    style={[styles.locationTitle, isMine && styles.myLocationTitle, { fontSize: chatMetrics.metaFontSize + 1 }]}
-                    numberOfLines={2}
-                    ellipsizeMode="tail"
-                  >
-                    {locationPayload.label}
-                  </Text>
-                  <Text style={[styles.locationLink, isMine && styles.myLocationLink, { fontSize: chatMetrics.metaFontSize }]}>
-                    Open in Maps
-                  </Text>
-                </View>
-              </View>
-            ) : null}
-
-            {!!reactions.length && (
-              <View style={styles.reactionRow}>
-                {reactions.map((reaction) => (
-                  <View
-                    key={`${item?._id || "message"}-${reaction?.emoji || "reaction"}`}
-                    style={[styles.reactionChip, isMine && styles.myReactionChip]}
-                  >
-                    <Text style={[styles.reactionText, { color: bubbleTextColor, fontSize: chatMetrics.metaFontSize }]}>
-                      {reaction?.emoji} {Array.isArray(reaction?.users) ? reaction.users.length : 0}
+                  <View style={styles.callEventBody}>
+                    <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]}>{callEvent.label}</Text>
+                    <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null, { fontSize: chatMetrics.metaFontSize }]}>
+                      {messageTimeLabel ? `${callEvent.meta} • ${messageTimeLabel}` : callEvent.meta}
                     </Text>
                   </View>
-                ))}
-              </View>
-            )}
+                </View>
+              ) : null}
+
+              {scheduledCall ? (
+                <TouchableOpacity
+                  activeOpacity={scheduledCall.calendarUrl ? 0.85 : 1}
+                  disabled={!scheduledCall.calendarUrl}
+                  onPress={() => {
+                    if (!scheduledCall.calendarUrl) {
+                      return;
+                    }
+
+                    Linking.openURL(scheduledCall.calendarUrl).catch((error) => {
+                      console.log("scheduled call calendar open error:", error);
+                    });
+                  }}
+                  style={[styles.callEventCard, isMine ? styles.callEventCardMine : null]}
+                >
+                  <View style={[styles.callEventIcon, isMine ? styles.callEventIconMine : null]}>
+                    <Icon
+                      name="calendar-outline"
+                      size={15}
+                      color={isMine ? "#fff" : primaryThemeColor}
+                    />
+                  </View>
+                  <View style={styles.callEventBody}>
+                    <Text style={[styles.callEventTitle, isMine ? styles.callEventTitleMine : null, { fontSize: chatMetrics.metaFontSize + 1 }]}>
+                      {scheduledCall.label}
+                    </Text>
+                    <View style={styles.scheduledCallMetaRow}>
+                      <Text style={[styles.callEventMeta, isMine ? styles.callEventMetaMine : null, styles.scheduledCallPrimaryMeta, { fontSize: chatMetrics.metaFontSize }]}>
+                        {scheduledCall.meta}
+                      </Text>
+                      <View style={[styles.scheduledCallDurationBadge, isMine ? styles.scheduledCallDurationBadgeMine : null]}>
+                        <Text style={[styles.scheduledCallDurationBadgeText, isMine ? styles.scheduledCallDurationBadgeTextMine : null, { fontSize: Math.max(10, chatMetrics.metaFontSize - 0.5) }]}>
+                          {`${scheduledCall.durationMinutes} min`}
+                        </Text>
+                      </View>
+                    </View>
+                    {scheduledCall.calendarUrl ? (
+                      <Text style={[styles.callEventLink, isMine ? styles.callEventLinkMine : null, { fontSize: chatMetrics.metaFontSize }]}>
+                        Open calendar invite
+                      </Text>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+              ) : null}
+
+              {mediaBubbleKind === "image" ? (
+                <View style={[styles.mediaCard, isGifBubble ? styles.gifMediaCard : null, isStickerBubble ? styles.stickerMediaCard : null]}>
+                  <Image
+                    source={{ uri: normalizeMediaUrl(attachment?.url || "") }}
+                    style={[
+                      styles.messageImage,
+                      {
+                        width: mediaBubbleWidth,
+                        height: isStickerBubble ? 168 : Math.min(width * 0.5, 188),
+                      },
+                      isStickerBubble ? styles.stickerImage : null,
+                    ]}
+                    resizeMode={isStickerBubble ? "contain" : "contain"}
+                  />
+                  {isGifBubble ? (
+                    <View style={[styles.mediaTypeBadge, isMine ? styles.mediaTypeBadgeMine : null]}>
+                      <Text style={styles.mediaTypeBadgeText}>GIF</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {mediaBubbleKind === "video" ? (
+                <View style={styles.mediaCard}>
+                  {attachment?.thumbnailUrl ? (
+                    <Image
+                      source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl) }}
+                      style={[
+                        styles.messageImage,
+                        {
+                          width: mediaBubbleWidth,
+                          height: Math.min(width * 0.48, 176),
+                        },
+                      ]}
+                    />
+                  ) : (
+                    <SocialVideo
+                      uri={normalizeMediaUrl(attachment?.url || (item as any)?.mediaUrl || "")}
+                      paused={true}
+                      controls={false}
+                      resizeMode="cover"
+                      style={[
+                        styles.messageImage,
+                        {
+                          width: mediaBubbleWidth,
+                          height: Math.min(width * 0.48, 176),
+                        },
+                      ]}
+                    />
+                  )}
+                  <View style={[styles.mediaOverlayBadge, isMine ? styles.mediaOverlayBadgeMine : null]}>
+                    <Icon name="play" size={13} color="#fff" />
+                  </View>
+                  <View style={[styles.mediaTypeBadge, isMine ? styles.mediaTypeBadgeMine : null]}>
+                    <Text style={styles.mediaTypeBadgeText}>VIDEO</Text>
+                  </View>
+                </View>
+              ) : null}
+
+              {mediaBubbleKind === "voice" ? (
+                <VoiceMessageBubble
+                  audioUrl={attachment?.url || ""}
+                  durationSeconds={Number(item?.duration || 0)}
+                  isMine={isMine}
+                  accentColor={primaryThemeColor}
+                  label={item?.messageType === "voice" ? "" : getAttachmentDisplayName(item)}
+                />
+              ) : null}
+
+              {hasDocumentBubble ? (
+                <View style={[styles.documentCard, isMine ? styles.documentCardMine : styles.documentCardOther]}>
+                  <View style={[styles.documentIconBox, isMine ? styles.documentIconBoxMine : styles.documentIconBoxOther]}>
+                    <Icon name="document-text" size={24} color={isMine ? "#FFFFFF" : PRIMARY} />
+                  </View>
+                  <View style={styles.documentTextContainer}>
+                    <Text
+                      style={[styles.documentName, isMine ? styles.myDocumentName : styles.otherDocumentName]}
+                      numberOfLines={2}
+                    >
+                      {getAttachmentDisplayName(item)}
+                    </Text>
+                    <Text style={[styles.documentSubtext, isMine ? styles.myDocumentSubtext : styles.otherDocumentSubtext]}>
+                      Document • Tap to open
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+
+              {shouldRenderMessageText && (
+                <InteractiveText
+                  style={[
+                    styles.messageText,
+                    isMine && styles.myMessageText,
+                    isEmojiOnly ? styles.emojiOnlyText : null,
+                    {
+                      color: bubbleTextColor,
+                      fontSize: isEmojiOnly ? Math.max(chatMetrics.bodyFontSize + 10, 24) : chatMetrics.bodyFontSize,
+                      lineHeight: isEmojiOnly ? Math.max(chatMetrics.bodyLineHeight + 10, 28) : chatMetrics.bodyLineHeight,
+                    },
+                  ]}
+                  mentionStyle={[styles.messageMentionText, isMine && styles.myMessageMentionText]}
+                  onPressMention={isGroupConversation ? openMentionedGroupMember : undefined}
+                  text={wrapTextAt32Chars(textValue, 32)}
+                  textBreakStrategy="highQuality"
+                  lineBreakStrategyIOS="standard"
+                >
+                  {item?.isEdited ? (
+                    <Text style={{ fontSize: 11, fontStyle: "italic", opacity: 0.6 }}> edited</Text>
+                  ) : null}
+                </InteractiveText>
+              )}
+
+              {!locationPayload && !sharedContent && !callEvent && !scheduledCall && !isMediaBubble && !isEmojiOnly && linkPreview?.url ? (
+                <MessageLinkPreview
+                  preview={linkPreview}
+                  isMine={isMine}
+                  onPress={() => {
+                    Linking.openURL(String(linkPreview.url)).catch((error) => {
+                      console.log("link preview open error:", error);
+                    });
+                  }}
+                />
+              ) : null}
+
+              {locationPayload ? (
+                <View style={[styles.locationCard, isMine && styles.myLocationCard]}>
+                  <Icon name="location-outline" size={18} color={isMine ? "#fff" : PRIMARY} />
+                  <View style={styles.locationBody}>
+                    <Text
+                      style={[styles.locationTitle, isMine && styles.myLocationTitle, { fontSize: chatMetrics.metaFontSize + 1 }]}
+                      numberOfLines={2}
+                      ellipsizeMode="tail"
+                    >
+                      {locationPayload.label}
+                    </Text>
+                    <Text style={[styles.locationLink, isMine && styles.myLocationLink, { fontSize: chatMetrics.metaFontSize }]}>
+                      Open in Maps
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+
+              {!!reactions.length && (
+                <View style={styles.reactionRow}>
+                  {reactions.map((reaction) => (
+                    <View
+                      key={`${item?._id || "message"}-${reaction?.emoji || "reaction"}`}
+                      style={[styles.reactionChip, isMine && styles.myReactionChip]}
+                    >
+                      <Text style={[styles.reactionText, { color: bubbleTextColor, fontSize: chatMetrics.metaFontSize }]}>
+                        {reaction?.emoji} {Array.isArray(reaction?.users) ? reaction.users.length : 0}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </TouchableOpacity>
             {!callEvent && !scheduledCall ? (
               <View style={[styles.messageMetaRow, isMine ? styles.messageMetaRowMine : styles.messageMetaRowOther]}>
@@ -3575,6 +3838,8 @@ const ChatScreen = ({ navigation, route }: any) => {
             removeClippedSubviews={Platform.OS === "android"}
             initialNumToRender={10}
             maxToRenderPerBatch={8}
+            onScroll={handleMessagesScroll}
+            scrollEventThrottle={100}
             updateCellsBatchingPeriod={50}
             windowSize={5}
             keyboardShouldPersistTaps="handled"
@@ -3596,18 +3861,16 @@ const ChatScreen = ({ navigation, route }: any) => {
               />
             }
             ListHeaderComponent={
-              pagination?.hasMore ? (
-                <TouchableOpacity
-                  style={styles.loadEarlierButton}
-                  onPress={loadMoreMessages}
-                  disabled={loadingMore}
+              pagination?.hasMore && loadingMore ? (
+                <View
+                  style={{
+                    alignItems: "center",
+                    justifyContent: "center",
+                    paddingVertical: 8,
+                  }}
                 >
-                  {loadingMore ? (
-                    <ActivityIndicator color={PRIMARY} />
-                  ) : (
-                    <Text style={[styles.loadEarlierText, { fontSize: chatMetrics.metaFontSize + 1 }]}>Load earlier messages</Text>
-                  )}
-                </TouchableOpacity>
+                  <ActivityIndicator color={PRIMARY} />
+                </View>
               ) : null
             }
             ListEmptyComponent={
@@ -3671,66 +3934,66 @@ const ChatScreen = ({ navigation, route }: any) => {
           minHeight={460}
         >
           <View style={styles.locationComposerSheet}>
-              <Text style={styles.locationComposerTitle}>Share location</Text>
-              <Text style={styles.locationComposerText}>
-                Pick current location, choose a nearby place, or type any address. We will send a Maps link in chat.
-              </Text>
-              <View style={styles.locationQuickActions}>
-                <TouchableOpacity
-                  style={styles.locationQuickAction}
-                  onPress={useCurrentLocation}
-                  disabled={uploading || locatingCurrentPosition}
-                >
-                  <Icon name="navigate-outline" size={16} color="#fff" />
-                  <Text style={styles.locationQuickActionText}>
-                    {locatingCurrentPosition ? "Detecting..." : "Current"}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.locationQuickAction}
-                  onPress={() => setLocationDraft("Nearby places")}
-                  disabled={uploading}
-                >
-                  <Icon name="map-outline" size={16} color="#fff" />
-                  <Text style={styles.locationQuickActionText}>Nearby</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.locationQuickAction}
-                  onPress={() => setLocationDraft("")}
-                  disabled={uploading}
-                >
-                  <Icon name="create-outline" size={16} color="#fff" />
-                  <Text style={styles.locationQuickActionText}>Manual</Text>
-                </TouchableOpacity>
-              </View>
-              <TextInput
-                style={styles.locationComposerInput}
-                value={locationDraft}
-                onChangeText={setLocationDraft}
-                placeholder="Coffee shop, MG Road, airport..."
-                placeholderTextColor="#888"
-                editable={!uploading}
-              />
-              <View style={styles.locationComposerActions}>
-                <TouchableOpacity
-                  style={styles.locationSecondaryButton}
-                  onPress={() => {
-                    setShowLocationComposer(false);
-                    setLocationDraft("");
-                  }}
-                  disabled={uploading}
-                >
-                  <Text style={styles.locationSecondaryText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.locationPrimaryButton}
-                  onPress={sendLocationMessage}
-                  disabled={uploading}
-                >
-                  {uploading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.locationPrimaryText}>Send</Text>}
-                </TouchableOpacity>
-              </View>
+            <Text style={styles.locationComposerTitle}>Share location</Text>
+            <Text style={styles.locationComposerText}>
+              Pick current location, choose a nearby place, or type any address. We will send a Maps link in chat.
+            </Text>
+            <View style={styles.locationQuickActions}>
+              <TouchableOpacity
+                style={styles.locationQuickAction}
+                onPress={useCurrentLocation}
+                disabled={uploading || locatingCurrentPosition}
+              >
+                <Icon name="navigate-outline" size={16} color="#fff" />
+                <Text style={styles.locationQuickActionText}>
+                  {locatingCurrentPosition ? "Detecting..." : "Current"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.locationQuickAction}
+                onPress={() => setLocationDraft("Nearby places")}
+                disabled={uploading}
+              >
+                <Icon name="map-outline" size={16} color="#fff" />
+                <Text style={styles.locationQuickActionText}>Nearby</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.locationQuickAction}
+                onPress={() => setLocationDraft("")}
+                disabled={uploading}
+              >
+                <Icon name="create-outline" size={16} color="#fff" />
+                <Text style={styles.locationQuickActionText}>Manual</Text>
+              </TouchableOpacity>
             </View>
+            <TextInput
+              style={styles.locationComposerInput}
+              value={locationDraft}
+              onChangeText={setLocationDraft}
+              placeholder="Coffee shop, MG Road, airport..."
+              placeholderTextColor="#888"
+              editable={!uploading}
+            />
+            <View style={styles.locationComposerActions}>
+              <TouchableOpacity
+                style={styles.locationSecondaryButton}
+                onPress={() => {
+                  setShowLocationComposer(false);
+                  setLocationDraft("");
+                }}
+                disabled={uploading}
+              >
+                <Text style={styles.locationSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.locationPrimaryButton}
+                onPress={sendLocationMessage}
+                disabled={uploading}
+              >
+                {uploading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.locationPrimaryText}>Send</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
         </DraggableBottomSheet>
 
         <Modal visible={showScheduleCallComposer} transparent animationType="fade">
@@ -3920,6 +4183,169 @@ const ChatScreen = ({ navigation, route }: any) => {
         />
 
         <Modal
+          visible={showAttachmentPreview && !!attachmentPreviewItems.length}
+          transparent={false}
+          animationType="fade"
+          onRequestClose={closeAttachmentPreview}
+          statusBarTranslucent
+        >
+          <SafeAreaView style={styles.attachmentPreviewFullscreen}>
+            <StatusBar barStyle="light-content" backgroundColor="#090D14" />
+            <View style={styles.attachmentPreviewHeader}>
+              <TouchableOpacity
+                style={styles.previewHeaderButton}
+                onPress={closeAttachmentPreview}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Icon name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+
+              <View style={styles.attachmentPreviewHeaderMeta}>
+                {attachmentPreviewItems.length > 1 ? (
+                  <View style={styles.attachmentPreviewCountBadge}>
+                    <Text style={styles.attachmentPreviewCountBadgeText}>{attachmentPreviewItems.length}</Text>
+                  </View>
+                ) : null}
+                <Text style={styles.attachmentPreviewHeaderTitle} numberOfLines={1}>
+                  {attachmentPreviewItems.length > 1 ? getAttachmentPreviewCountLabel(attachmentPreviewItems) : "Photo preview"}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.previewHeaderSendButton, attachmentPreviewItems.length > 1 && styles.previewHeaderSendButtonMulti]}
+                onPress={() => {
+                  closeAttachmentPreview();
+                  runComposerSendAction(sendPendingAttachment);
+                }}
+                disabled={sending || uploading || !canComposeGroupMessage}
+              >
+                {attachmentPreviewItems.length > 1 ? (
+                  <Text style={styles.previewHeaderSendButtonText}>{attachmentPreviewItems.length}</Text>
+                ) : (
+                  <Icon name="send" size={18} color="#fff" />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {attachmentPreviewItems.length > 1 ? (
+              <View style={styles.attachmentPreviewStrip}>
+                {attachmentPreviewMeta.visible.map((item, index) => (
+                  <TouchableOpacity
+                    key={`${item.uri}-${index}`}
+                    style={[
+                      styles.attachmentPreviewStripItem,
+                      attachmentPreviewIndex === index && styles.attachmentPreviewStripItemActive,
+                    ]}
+                    onPress={() => selectAttachmentPreview(index)}
+                  >
+                    <Image source={{ uri: item.uri }} style={styles.attachmentPreviewStripImage} />
+                  </TouchableOpacity>
+                ))}
+                {attachmentPreviewMeta.extraCount > 0 ? (
+                  <View style={[styles.attachmentPreviewStripItem, styles.attachmentPreviewStripItemMore]}>
+                    <Text style={styles.attachmentPreviewStripMoreText}>+{attachmentPreviewMeta.extraCount}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            <ViewShot
+              ref={attachmentStageRef}
+              style={styles.attachmentPreviewStage}
+              options={{ format: "png", quality: 0.92, result: "tmpfile" }}
+            >
+              {activeAttachmentPreview ? (
+                <Image source={{ uri: activeAttachmentPreview.uri }} style={styles.attachmentPreviewStageImage} resizeMode="contain" />
+              ) : (
+                <View style={styles.attachmentPreviewEmptyState}>
+                  <Icon name="image-outline" size={42} color="#9ca3af" />
+                  <Text style={styles.attachmentPreviewEmptyStateText}>No image selected</Text>
+                </View>
+              )}
+              <View style={styles.attachmentMarkupLayer} {...attachmentMarkupPanResponder.panHandlers}>
+                <Svg width="100%" height="100%" style={styles.attachmentMarkupSvg}>
+                  {attachmentMarkupStrokes.map((stroke) => (
+                    <SvgPath
+                      key={stroke.id}
+                      d={pointsToSvgPath(stroke.points)}
+                      stroke={stroke.color}
+                      strokeWidth={stroke.width}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      opacity={stroke.color === "#FFE45C" ? 0.62 : 1}
+                      fill="none"
+                    />
+                  ))}
+                  {attachmentMarkupTexts.map((markupText) => (
+                    <SvgText
+                      key={markupText.id}
+                      x={markupText.x}
+                      y={markupText.y}
+                      fill="#fff"
+                      fontSize="24"
+                      fontWeight="700"
+                      stroke="#090D14"
+                      strokeWidth="3"
+                      strokeOpacity="0.72"
+                    >
+                      {markupText.text}
+                    </SvgText>
+                  ))}
+                </Svg>
+              </View>
+            </ViewShot>
+
+            {attachmentPreviewTool === "text" ? (
+              <View style={styles.attachmentTextComposer}>
+                <TextInput
+                  value={attachmentTextDraft}
+                  onChangeText={setAttachmentTextDraft}
+                  placeholder="Type text on photo"
+                  placeholderTextColor="#9ca3af"
+                  style={styles.attachmentTextInput}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={addAttachmentText}
+                />
+                <TouchableOpacity style={styles.attachmentTextAddButton} onPress={addAttachmentText}>
+                  <Icon name="checkmark" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            <View style={styles.attachmentPreviewTools}>
+              {[
+                { key: "edit", label: "Edit" },
+                { key: "highlight", label: "Highlight" },
+                { key: "erase", label: "Erase" },
+                { key: "text", label: "Text" },
+              ].map((tool) => (
+                <TouchableOpacity
+                  key={tool.key}
+                  style={[
+                    styles.attachmentPreviewTool,
+                    attachmentPreviewTool === tool.key && styles.attachmentPreviewToolActive,
+                  ]}
+                  onPress={() => handleAttachmentPreviewAction(tool.key as "edit" | "highlight" | "erase" | "text")}
+                >
+                  <Text style={styles.attachmentPreviewToolText}>{tool.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {attachmentPreviewTool ? (
+              <View style={styles.attachmentPreviewToolStatus}>
+                <Text style={styles.attachmentPreviewToolStatusText}>
+                  {attachmentPreviewTool === "text"
+                    ? "Type text, then tap the check button"
+                    : `${attachmentPreviewTool.charAt(0).toUpperCase() + attachmentPreviewTool.slice(1)} mode enabled - draw on the photo`}
+                </Text>
+              </View>
+            ) : null}
+          </SafeAreaView>
+        </Modal>
+
+        <Modal
           visible={!!messagePreview}
           transparent={false}
           animationType="fade"
@@ -3940,7 +4366,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   posterUri={messagePreview.imageUrl}
                   controls={true}
                   paused={false}
-                  resizeMode="contain"
+                  resizeMode="cover"
                   style={styles.previewVideo}
                 />
               </View>
@@ -3948,7 +4374,7 @@ const ChatScreen = ({ navigation, route }: any) => {
               <Image
                 source={{ uri: messagePreview?.imageUrl || "" }}
                 style={styles.previewImage}
-                resizeMode="contain"
+                resizeMode="cover"
               />
             )}
             {messagePreview?.title ? (
@@ -3959,11 +4385,18 @@ const ChatScreen = ({ navigation, route }: any) => {
           </View>
         </Modal>
 
+
         <DocumentViewerModal
           visible={!!documentPreview}
           url={documentPreview?.url}
           fileName={documentPreview?.fileName}
           onClose={() => setDocumentPreview(null)}
+          onAddToStory={(mediaUrl, mediaType) => {
+            navigation.navigate("MainApp", {
+              screen: "Create",
+              params: { initialTab: "story", initialMedia: mediaUrl, initialMediaType: mediaType },
+            });
+          }}
         />
 
         <AISupportSheet
@@ -4031,8 +4464,29 @@ const ChatScreen = ({ navigation, route }: any) => {
 
             {pendingAttachment ? (
               <View style={[styles.attachmentPreviewCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
-                <View style={styles.attachmentPreviewBody}>
-                  {pendingAttachment.kind === "image" ? (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => openAttachmentPreview(attachmentPreviewIndex)}
+                  style={styles.attachmentPreviewBody}
+                >
+                  {pendingAttachments.length > 1 && pendingAttachment.kind === "image" ? (
+                    <View style={styles.attachmentPreviewMultiThumb}>
+                      {getAttachmentPreviewThumbs(pendingAttachments, 3).visible.map((item, index) => (
+                        <Image
+                          key={`${item.uri}-${index}`}
+                          source={{ uri: item.uri }}
+                          style={styles.attachmentPreviewMultiThumbImage}
+                        />
+                      ))}
+                      {getAttachmentPreviewThumbs(pendingAttachments, 3).extraCount > 0 ? (
+                        <View style={styles.attachmentPreviewMultiThumbOverflow}>
+                          <Text style={styles.attachmentPreviewMultiThumbOverflowText}>
+                            +{getAttachmentPreviewThumbs(pendingAttachments, 3).extraCount}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : pendingAttachment.kind === "image" ? (
                     <Image source={{ uri: pendingAttachment.uri }} style={styles.attachmentPreviewImage} />
                   ) : (
                     <View style={[styles.attachmentPreviewVideo, { backgroundColor: primaryThemeColor }]}>
@@ -4046,9 +4500,14 @@ const ChatScreen = ({ navigation, route }: any) => {
                         : pendingAttachment.kind === "image" ? "Image ready to send" : "Video ready to send"}
                     </Text>
                     <Text style={[styles.attachmentPreviewSubtitle, { color: colors.mutedText }]} numberOfLines={1}>
-                      {pendingAttachments.length > 1 ? "Each attachment will be prepared before sending." : pendingAttachment.name}
+                      {pendingAttachments.length > 1 ? getAttachmentPreviewCountLabel(pendingAttachments) : pendingAttachment.name}
                     </Text>
                   </View>
+                  {pendingAttachments.length > 1 ? (
+                    <View style={styles.attachmentPreviewCountPill}>
+                      <Text style={styles.attachmentPreviewCountPillText}>{pendingAttachments.length}</Text>
+                    </View>
+                  ) : null}
                   <TouchableOpacity
                     onPress={() => setPendingAttachments([])}
                     disabled={uploading}
@@ -4056,7 +4515,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   >
                     <Icon name="close-circle" size={20} color={colors.mutedText} />
                   </TouchableOpacity>
-                </View>
+                </TouchableOpacity>
               </View>
             ) : null}
             {pendingVoiceNote ? (
@@ -4142,7 +4601,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   <TouchableOpacity
                     style={styles.inlineActionIcon}
                     onPress={() => {
-                      sendCameraAttachment().catch(() => {});
+                      sendCameraAttachment().catch(() => { });
                     }}
                     disabled={uploading || !canComposeGroupMessage}
                   >
@@ -4186,7 +4645,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   color={primaryThemeColor}
                   disabled={uploading || !canComposeGroupMessage}
                   onSend={(voiceFile) => {
-                    sendVoiceMessage(voiceFile).catch(() => {});
+                    sendVoiceMessage(voiceFile).catch(() => { });
                   }}
                 />
               )}
@@ -4531,6 +4990,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   messageContentColumn: {
+    width: "100%",
     minWidth: 0,
     flexShrink: 1,
   },
@@ -4732,6 +5192,25 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
+  },
+  dateSeparator: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 10,
+  },
+
+  dateSeparatorText: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: appFonts.semibold,
+    fontWeight: "600",
+    color: "#667085",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 999,
+    overflow: "hidden",
   },
   sharedPostMeta: {
     marginLeft: 8,
@@ -5205,6 +5684,37 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 12,
   },
+  attachmentPreviewMultiThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "rgba(123,63,228,0.12)",
+    position: "relative",
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  attachmentPreviewMultiThumbImage: {
+    width: "50%",
+    height: "50%",
+    borderWidth: 1,
+    borderColor: "#fff",
+  },
+  attachmentPreviewMultiThumbOverflow: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    width: "50%",
+    height: "50%",
+    backgroundColor: "rgba(7,10,19,0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachmentPreviewMultiThumbOverflowText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
   attachmentPreviewVideo: {
     width: 44,
     height: 44,
@@ -5215,6 +5725,21 @@ const styles = StyleSheet.create({
   attachmentPreviewMeta: {
     flex: 1,
     marginLeft: 10,
+  },
+  attachmentPreviewCountPill: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: PRIMARY,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    marginRight: 8,
+  },
+  attachmentPreviewCountPillText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
   },
   pendingVoicePreview: {
     flexDirection: "row",
@@ -5248,6 +5773,190 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 24,
+  },
+  attachmentPreviewFullscreen: {
+    flex: 1,
+    backgroundColor: "#090D14",
+  },
+  attachmentPreviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  attachmentPreviewHeaderMeta: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  attachmentPreviewHeaderTitle: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  attachmentPreviewCountBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: PRIMARY,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  attachmentPreviewCountBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  previewHeaderButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  previewHeaderSendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: PRIMARY,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  previewHeaderSendButtonMulti: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  previewHeaderSendButtonText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  attachmentPreviewStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  attachmentPreviewStripItem: {
+    width: 54,
+    height: 54,
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  attachmentPreviewStripItemActive: {
+    borderColor: PRIMARY,
+  },
+  attachmentPreviewStripImage: {
+    width: "100%",
+    height: "100%",
+  },
+  attachmentPreviewStripItemMore: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  attachmentPreviewStripMoreText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 17,
+  },
+  attachmentPreviewStage: {
+    flex: 1,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 20,
+    backgroundColor: "#0F172A",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachmentPreviewStageImage: {
+    width: "100%",
+    height: "100%",
+  },
+  attachmentMarkupLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  attachmentMarkupSvg: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  attachmentPreviewEmptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachmentPreviewEmptyStateText: {
+    color: "#d1d5db",
+    marginTop: 10,
+    fontSize: 14,
+  },
+  attachmentPreviewTools: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 8,
+  },
+  attachmentPreviewTool: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachmentPreviewToolActive: {
+    backgroundColor: PRIMARY,
+  },
+  attachmentPreviewToolText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  attachmentPreviewToolStatus: {
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+  },
+  attachmentPreviewToolStatusText: {
+    color: "#d1d5db",
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  attachmentTextComposer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginTop: 10,
+    padding: 6,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.09)",
+  },
+  attachmentTextInput: {
+    flex: 1,
+    minHeight: 36,
+    paddingHorizontal: 10,
+    color: "#fff",
+    fontSize: 14,
+  },
+  attachmentTextAddButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: PRIMARY,
   },
   previewActionsButton: {
     position: "absolute",
@@ -5301,6 +6010,16 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
+  },
+  sendBtnMulti: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+  },
+  sendBtnMultiText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
   },
   inlineActions: {
     flexDirection: "row",
