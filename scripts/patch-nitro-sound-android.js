@@ -14,26 +14,120 @@ if (!fs.existsSync(targetFile)) {
   process.exit(0);
 }
 
-let source = fs.readFileSync(targetFile, "utf8");
-
-const autolinkLine = "apply from: '../nitrogen/generated/android/NitroSound+autolinking.gradle'\n";
-source = source.replace(autolinkLine, "");
-
-const androidNeedle = 'android {\n';
-if (source.includes(androidNeedle) && !source.includes("NitroSound+autolinking.gradle")) {
-  const replacement = `android {\n  compileSdk 36\n  ${autolinkLine}`;
-  source = source.replace(androidNeedle, replacement);
+const cleanContent = `def getExtOrDefault(name) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : project.properties['Sound_' + name]
 }
 
-source = source.replace(/compileSdk\s+getExtOrIntegerDefault\("compileSdkVersion"\)/gu, "compileSdk 36");
-source = source.replace(/minSdk\s+getExtOrIntegerDefault\("minSdkVersion"\)/gu, "minSdk 24");
-source = source.replace(/targetSdk\s+getExtOrIntegerDefault\("targetSdkVersion"\)/gu, "targetSdk 36");
-
-const namespaceNeedle = '  namespace "com.margelo.nitro.sound"\n';
-const insertion = `${namespaceNeedle}  ndkVersion getExtOrDefault("ndkVersion")\n`;
-
-if (!source.includes('  ndkVersion getExtOrDefault("ndkVersion")\n') && source.includes(namespaceNeedle)) {
-  source = source.replace(namespaceNeedle, insertion);
+def reactNativeArchitectures() {
+  def value = rootProject.getProperties().get("reactNativeArchitectures")
+  return value ? value.split(",") : ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
 }
 
-fs.writeFileSync(targetFile, source);
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+android {
+  compileSdk 36
+}
+
+apply from: '../nitrogen/generated/android/NitroSound+autolinking.gradle'
+
+def getExtOrIntegerDefault(name) {
+  if (rootProject.ext.has(name)) return rootProject.ext.get(name)
+  if (project.hasProperty("Sound_" + name) && project.properties["Sound_" + name]) return (project.properties["Sound_" + name]).toInteger()
+  if (name == "compileSdkVersion" || name == "targetSdkVersion") return 36
+  if (name == "minSdkVersion") return 24
+  return 36
+}
+
+android {
+  namespace "com.margelo.nitro.sound"
+  ndkVersion getExtOrDefault("ndkVersion")
+
+  compileSdk 36
+
+  defaultConfig {
+    minSdk 24
+    targetSdk 36
+
+    externalNativeBuild {
+      cmake {
+        cppFlags "-frtti -fexceptions -Wall -fstack-protector-all"
+        arguments "-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+        abiFilters (*reactNativeArchitectures())
+      }
+    }
+
+    consumerProguardFiles "consumer-rules.pro"
+  }
+
+  externalNativeBuild {
+    cmake {
+      path "CMakeLists.txt"
+    }
+  }
+
+  packagingOptions {
+    resources {
+      excludes += [
+              "META-INF",
+              "META-INF/**"
+      ]
+    }
+    jniLibs {
+      excludes += [
+              "**/libjsi.so",
+              "**/libreactnative.so",
+              "**/libfbjni.so",
+              "**/libc++_shared.so",
+              "**/libNitroModules.so"
+      ]
+    }
+  }
+
+  buildFeatures {
+    buildConfig true
+    prefab true
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+    }
+  }
+
+  lintOptions {
+    disable "GradleCompatible"
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_1_8
+    targetCompatibility JavaVersion.VERSION_1_8
+  }
+
+  sourceSets {
+    main {
+      java.srcDirs += [
+        "generated/java",
+        "generated/jni"
+      ]
+    }
+  }
+}
+
+repositories {
+  mavenCentral()
+  google()
+}
+
+def kotlin_version = getExtOrDefault("kotlinVersion")
+
+dependencies {
+  implementation "com.facebook.react:react-android"
+  implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+  implementation project(":react-native-nitro-modules")
+}
+`;
+
+fs.writeFileSync(targetFile, cleanContent);
