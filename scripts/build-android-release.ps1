@@ -25,6 +25,7 @@ if ($env:ANDROID_UPLOAD_STORE_FILE) {
   }
 }
 
+$env:ORG_GRADLE_PROJECT_newArchEnabled = "true"
 $env:ENVFILE = ".env.production"
 
 switch ($Mode) {
@@ -52,11 +53,37 @@ switch ($Mode) {
 
 Push-Location $androidDir
 try {
+  Write-Host "Generating autolinking package list..."
+  & .\gradlew.bat :app:generateAutolinkingPackageList --no-daemon --console=plain --max-workers=1
+
+  $listPrewarmScript = Join-Path $root "scripts/ci/list_android_codegen_prewarm_tasks.js"
+  if (Test-Path $listPrewarmScript) {
+    $prewarmTasks = node $listPrewarmScript
+    if ($prewarmTasks) {
+      $prewarmTaskList = $prewarmTasks -split "`r?`n" | Where-Object { $_.Trim() }
+      if ($prewarmTaskList.Count -gt 0) {
+        Write-Host "Prewarming codegen tasks: $($prewarmTaskList -join ' ')"
+        $prewarmArgs = $prewarmTaskList + @("--no-daemon", "--console=plain", "--max-workers=1")
+        & .\gradlew.bat @prewarmArgs
+      }
+    }
+  }
+
+  Write-Host "Generating new architecture autolinking files..."
+  & .\gradlew.bat :app:generateAutolinkingNewArchitectureFiles --no-daemon --console=plain --max-workers=1
+
+  $filterScript = Join-Path $root "scripts/ci/filter_android_autolinking.js"
+  if (Test-Path $filterScript) {
+    node $filterScript
+  }
+
+  Write-Host "Building $task..."
   $gradleArgs = @(
     $task,
     "--no-daemon",
     "--console=plain",
-    "--max-workers=1"
+    "--max-workers=1",
+    "-x", "generateAutolinkingNewArchitectureFiles"
   ) + $extraGradleArgs
 
   & .\gradlew.bat @gradleArgs
