@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Image, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
+import { ActivityIndicator, Animated, Image, PanResponder, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 import Video from "react-native-video";
 import { stripBackgroundColorFromStyle } from "./mediaSurfaceStyle";
 
@@ -55,11 +55,14 @@ function SocialVideo({
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
   const videoRef = useRef<any>(null);
   const durationRef = useRef(0);
+  const trackWidthRef = useRef(0);
+
   const [posterFailed, setPosterFailed] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [videoProgress, setVideoProgress] = useState(0);
+
   const resolvedUri = String(uri || "").trim();
   const resolvedPosterUri = String(posterUri || "").trim();
   const usablePosterUri = isUsablePosterUri(resolvedPosterUri, resolvedUri) ? resolvedPosterUri : "";
@@ -76,6 +79,28 @@ function SocialVideo({
       useNativeDriver: true,
     }).start();
   }, [placeholderOpacity]);
+
+  const handleSeekFromEvent = useCallback((evt: any) => {
+    const locX = evt?.nativeEvent?.locationX ?? 0;
+    const width = trackWidthRef.current || 1;
+    const ratio = Math.max(0, Math.min(1, locX / width));
+    setVideoProgress(ratio);
+    if (durationRef.current > 0) {
+      videoRef.current?.seek?.(ratio * durationRef.current);
+    }
+  }, []);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => handleSeekFromEvent(evt),
+        onPanResponderMove: (evt) => handleSeekFromEvent(evt),
+        onPanResponderRelease: (evt) => handleSeekFromEvent(evt),
+      }),
+    [handleSeekFromEvent]
+  );
 
   useEffect(() => {
     placeholderOpacity.stopAnimation();
@@ -94,8 +119,6 @@ function SocialVideo({
     } else if (preload) {
       placeholderOpacity.stopAnimation();
       placeholderOpacity.setValue(1);
-      setVideoProgress(0);
-    } else if (paused) {
       setVideoProgress(0);
     }
   }, [preload, paused, isVideoReady, fadeOutPoster, placeholderOpacity]);
@@ -243,7 +266,10 @@ function SocialVideo({
           ) : null}
           {showProgressBar && !preload ? (
             <View
-              pointerEvents="none"
+              onLayout={(e) => {
+                trackWidthRef.current = e.nativeEvent.layout.width;
+              }}
+              {...panResponder.panHandlers}
               style={[
                 styles.progressBarTrack,
                 progressBarBottomOffset !== undefined ? { bottom: progressBarBottomOffset } : null,
@@ -286,13 +312,13 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: 3.5,
+    height: 4,
     backgroundColor: "rgba(255, 255, 255, 0.35)",
     zIndex: 999,
     elevation: 10,
   },
   progressBarFill: {
-    height: "100%",
+    height: 4,
     backgroundColor: "#ffffff",
     borderRadius: 2,
     shadowColor: "#000",

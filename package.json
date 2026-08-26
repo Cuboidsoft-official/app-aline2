@@ -72,6 +72,7 @@
     "react-native-vector-icons": "^10.3.0",
     "react-native-video": "^6.19.1",
     "react-native-video-trim": "^6.1.0",
+    "react-native-view-shot": "^3.8.0",
     "react-native-walkthrough-tooltip": "^1.6.0",
     "react-native-webrtc": "^124.0.7",
     "react-native-webview": "^13.16.1",
