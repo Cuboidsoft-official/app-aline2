@@ -51,6 +51,15 @@ switch ($Mode) {
   }
 }
 
+Write-Host "Running postinstall patches..."
+Push-Location $root
+try {
+  npm run postinstall
+}
+finally {
+  Pop-Location
+}
+
 Push-Location $androidDir
 try {
   Write-Host "Generating autolinking package list..."

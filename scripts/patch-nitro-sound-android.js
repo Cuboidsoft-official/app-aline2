@@ -16,21 +16,10 @@ if (!fs.existsSync(targetFile)) {
 
 let source = fs.readFileSync(targetFile, "utf8");
 
-const oldFunction = `def getExtOrIntegerDefault(name) {
-  return rootProject.ext.has(name) ? rootProject.ext.get(name) : (project.properties["Sound_" + name]).toInteger()
-}`;
-
-const newFunction = `def getExtOrIntegerDefault(name) {
-  if (rootProject.ext.has(name)) return rootProject.ext.get(name)
-  if (project.hasProperty("Sound_" + name) && project.properties["Sound_" + name]) return (project.properties["Sound_" + name]).toInteger()
-  if (name == "compileSdkVersion" || name == "targetSdkVersion") return 36
-  if (name == "minSdkVersion") return 24
-  return 36
-}`;
-
-if (source.includes(oldFunction)) {
-  source = source.replace(oldFunction, newFunction);
-}
+// Directly set compileSdk, minSdk, targetSdk in android block
+source = source.replace(/compileSdk\s+getExtOrIntegerDefault\("compileSdkVersion"\)/gu, "compileSdk 36");
+source = source.replace(/minSdk\s+getExtOrIntegerDefault\("minSdkVersion"\)/gu, "minSdk 24");
+source = source.replace(/targetSdk\s+getExtOrIntegerDefault\("targetSdkVersion"\)/gu, "targetSdk 36");
 
 const needle = '  namespace "com.margelo.nitro.sound"\n';
 const insertion = `${needle}\n  ndkVersion getExtOrDefault("ndkVersion")\n`;
