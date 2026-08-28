@@ -1179,7 +1179,6 @@ function FeedScreen({ navigation, route }: any) {
 
   const handlePostMediaPress = (post: Post) => {
     const now = Date.now();
-    console.log("🔥 POST IMAGE TAPPED", post.id);
     const lastTap = postTapRef.current;
     const hasAudioLayer = post.media.some((asset) => asset.mediaType === "video");
 
@@ -1659,7 +1658,9 @@ function FeedScreen({ navigation, route }: any) {
 
     return (
       <TouchableOpacity
-        style={[styles.storyItem, { width: storyItemWidth }]}>
+        style={[styles.storyItem, { width: storyItemWidth }]}
+        onPress={() => navigation.navigate("StoryViewer", { storyId: item.id, storyUserId: item.user.id })}
+      >
         {item.viewed ? (
           <View
             style={[
@@ -2133,6 +2134,214 @@ function FeedScreen({ navigation, route }: any) {
     );
   };
 
+  const renderHeader = () => {
+    const ownStory = feed.stories.find((item) => item.isOwner || (currentUser?.id && item.user.id === currentUser.id));
+    const ownStoryOwnerId = ownStory?.user.id || currentUser?.id || "";
+    const ownStoryAvatar = ownStory?.user.avatarUrl || currentUser?.avatarUrl || DEFAULT_AVATAR_URL;
+    const visibleLiveStories = liveStories.filter((item) => String(item?.hostUser?._id || item?.hostUser?.id || "") !== String(currentUser?.id || ""));
+    const headerSurfaceColor = isDarkMode ? colors.surface : colors.card;
+    const headerBorderColor = isDarkMode ? feedAccentBorder : colors.border;
+    const utilityButtonBackground = isDarkMode ? "rgba(255,255,255,0.12)" : colors.surface;
+    const utilityButtonBorder = isDarkMode ? "rgba(255,255,255,0.18)" : colors.border;
+    const utilityIconColor = isDarkMode ? "#FFFFFF" : colors.text;
+
+    return (
+      <>
+        {activePublishTask ? (
+          <View
+            style={[
+              styles.publishQueueCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: activePublishTask.status === "failed" ? "rgba(239,68,68,0.28)" : feedAccentBorder,
+              },
+            ]}
+          >
+            <View style={styles.publishQueueTopRow}>
+              <View style={styles.publishQueueCopy}>
+                <Text style={[styles.publishQueueTitle, { color: colors.text }]}>{activePublishTask.label}</Text>
+                <Text
+                  style={[
+                    styles.publishQueueMessage,
+                    { color: activePublishTask.status === "failed" ? (isDarkMode ? "#FCA5A5" : "#B91C1C") : colors.mutedText },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {activePublishTask.message}
+                </Text>
+              </View>
+              {activePublishTask.status === "failed" ? (
+                <TouchableOpacity
+                  style={[styles.publishQueueDismiss, { borderColor: colors.border }]}
+                  onPress={() => dismissPublishQueueTask(activePublishTask.id)}
+                >
+                  <Icon name="close" size={16} color={colors.text} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <View style={[styles.publishQueueTrack, { backgroundColor: isDarkMode ? "rgba(255,255,255,0.12)" : "#E5E7EB" }]}>
+              {activePublishTask.status === "failed" ? (
+                <View
+                  style={[
+                    styles.publishQueueFill,
+                    { width: `${Math.max(8, Math.round(activePublishTask.progress * 100))}%`, backgroundColor: "#EF4444" },
+                  ]}
+                />
+              ) : (
+                <LinearGradient
+                  colors={activePublishTask.status === "success" ? ["#EF4444", "#C026D3", "#10B981"] : ["#EF4444", feedAccent, "#7C3AED"]}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={[
+                    styles.publishQueueFill,
+                    styles.publishQueueGradientFill,
+                    { width: `${Math.max(8, Math.round(activePublishTask.progress * 100))}%` },
+                  ]}
+                />
+              )}
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.topBar}>
+          <View
+            style={[
+              styles.topBarPanel,
+              isCompactHeader && styles.topBarPanelCompact,
+              { minHeight: isTabletLayout ? 70 : undefined, backgroundColor: headerSurfaceColor, borderColor: headerBorderColor },
+            ]}
+          >
+            <View style={styles.topLeft}>
+              <TouchableOpacity style={styles.logoTapTarget} onPress={toggleMenu} activeOpacity={0.85}>
+                <Image source={{ uri: "https://aline2.com/asstes/images/logo/logo.jpeg" }} style={styles.logo} />
+              </TouchableOpacity>
+              <View style={styles.brandCopy}>
+                <Text style={[styles.brand, { color: colors.text, fontSize: 25, fontWeight: "500" }]}>Aline2</Text>
+                <Text
+                  style={[styles.brandSubline, isCompactHeader && styles.brandSublineCompact, { color: colors.mutedText }]}
+                  numberOfLines={1}
+                >
+                  For you today
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.topRight}>
+              <TouchableOpacity
+                style={[styles.headerIconButton, isCompactHeader && styles.headerIconButtonCompact, { backgroundColor: "#F43F5E", borderColor: "rgba(255,255,255,0.22)" }]}
+                onPress={() => navigation.navigate("LiveStreamsScreen")}
+              >
+                <Icon name="radio-outline" size={isCompactHeader ? 18 : 20} color="#FFFFFF" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.headerIconGap,
+                  isCompactHeader && styles.headerIconGapCompact,
+                  styles.headerIconButton,
+                  isCompactHeader && styles.headerIconButtonCompact,
+                  { backgroundColor: utilityButtonBackground, borderColor: utilityButtonBorder },
+                ]}
+                onPress={() => navigation.navigate("Search")}
+              >
+                <Icon name="search-outline" size={isCompactHeader ? 18 : 20} color={utilityIconColor} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.headerIconGap,
+                  isCompactHeader && styles.headerIconGapCompact,
+                  styles.headerIconButton,
+                  isCompactHeader && styles.headerIconButtonCompact,
+                  { backgroundColor: utilityButtonBackground, borderColor: utilityButtonBorder },
+                ]}
+                onPress={openNotifications}
+              >
+                <Icon name="notifications-outline" size={isCompactHeader ? 18 : 20} color={utilityIconColor} />
+                {unreadNotificationCount > 0 ? (
+                  <View style={styles.notificationBadge}>
+                    <Text style={styles.notificationBadgeText}>{unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}</Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.headerIconGap,
+                  isCompactHeader && styles.headerIconGapCompact,
+                  styles.headerWalletButton,
+                  isCompactHeader && styles.headerWalletButtonCompact,
+                  { backgroundColor: utilityButtonBackground, borderColor: utilityButtonBorder },
+                ]}
+                onPress={openWalletDashboard}
+              >
+                <View style={styles.headerCoinBadge}>
+                  <Icon name="logo-bitcoin" size={isCompactHeader ? 13 : 14} color="#B45309" />
+                </View>
+                <Text style={[styles.headerWalletValue, { color: utilityIconColor, fontSize: isCompactHeader ? 11 : 12 }]}>
+                  {formatCompactCoinBalance(walletCoinBalance)}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.storyRail,
+            { marginHorizontal: feedHorizontalInset, marginBottom: storyRailVerticalInset, backgroundColor: colors.card, borderColor: feedAccentBorder },
+          ]}
+        >
+          <LinearGradient
+            colors={[`${FEED_ACCENT}16`, "rgba(255,255,255,0)"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.storyRailGlow}
+          />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={[styles.storyListContent, { paddingHorizontal: Math.max(8, feedHorizontalInset - 4), paddingVertical: isTabletLayout ? 14 : 11 }]}
+          >
+            <TouchableOpacity
+              style={[styles.storyItem, { width: storyItemWidth }]}
+              onPress={() => {
+                if (ownStory) {
+                  navigation.navigate("StoryViewer", { storyId: ownStory.id, storyUserId: ownStory.user.id });
+                  return;
+                }
+
+                navigation.navigate("Create", { initialTab: "story" });
+              }}
+            >
+              <View style={[styles.storyRing, styles.storyRingSeen, { width: storyRingSize, height: storyRingSize, borderRadius: storyRingSize / 2 }]}>
+                <Image
+                  source={{ uri: ownStoryAvatar }}
+                  style={[styles.storyAvatar, { width: storyAvatarSize, height: storyAvatarSize, borderRadius: storyAvatarSize / 2 }]}
+                />
+                <View
+                  style={[
+                    styles.storyAddBadge,
+                    { width: storyAddBadgeSize, height: storyAddBadgeSize, borderRadius: storyAddBadgeSize / 2, borderColor: colors.background },
+                  ]}
+                >
+                  <Icon name="add" size={13} color="#fff" />
+                </View>
+              </View>
+              <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
+                Your story
+              </Text>
+            </TouchableOpacity>
+            {visibleLiveStories.map((liveStream) => renderLiveStory(liveStream))}
+            {feed.stories.filter((story) => story.user.id !== ownStoryOwnerId).map((story) => (
+              <View key={story.id}>{renderStory({ item: story })}</View>
+            ))}
+          </ScrollView>
+        </View>
+      </>
+    );
+  };
+
   const handleFeedViewableChange = useCallback((
     payload?: { viewableItems?: Array<{ index?: number | null; item?: Post }> },
   ) => {
@@ -2151,6 +2360,8 @@ function FeedScreen({ navigation, route }: any) {
       const visiblePostId = firstVisible?.item?.id ? String(firstVisible.item.id) : "";
       if (visiblePostId) {
         lastViewablePostIdRef.current = visiblePostId;
+        // Keep the active (playing) post in sync with what's actually on screen while scrolling.
+        setActivePostId((current) => (current === visiblePostId ? current : visiblePostId));
       }
 
       const totalPosts = Array.isArray(feed?.posts) ? feed.posts.length : 0;
@@ -2215,6 +2426,8 @@ function FeedScreen({ navigation, route }: any) {
       tokens.push(`📍 ${item.location}`);
     }
     const metaLine = tokens.join(" • ");
+    const isCaptionExpanded = !!expandedCaptionIds[item.id];
+    const isCaptionTruncatable = String(item.caption || "").length > 110 || String(item.caption || "").includes("\n");
 
     return (
       <View
@@ -2285,14 +2498,35 @@ function FeedScreen({ navigation, route }: any) {
           </View>
         </View>
 
-        <TouchableOpacity
-          activeOpacity={String(user.id || "") === String(currentUser?.id || "") ? 0.95 : 1}
-          disabled={String(user.id || "") !== String(currentUser?.id || "")}
-          onPress={() => openPostDetail(item)}
+        <Pressable
+          style={styles.mediaPressSurface}
+          onPress={() => {
+            handlePostMediaPress(item);
+            if (String(user.id || "") === String(currentUser?.id || "")) {
+              openPostDetail(item);
+            }
+          }}
         >
           {renderPostMedia(item, index)}
           {renderPostStickerOverlay(item)}
-        </TouchableOpacity>
+          {likeBurstPostId === item.id ? (
+            <View pointerEvents="none" style={styles.likeBurstOverlay}>
+              <Icon name="heart" size={88} color="rgba(255,255,255,0.92)" />
+            </View>
+          ) : null}
+          {hasVideoMedia ? (
+            <View style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
+              <Icon
+                name={isFeedVideoSoundOn({ isVideoSoundEnabled, isPostMuted: isMuted }) ? "volume-high-outline" : "volume-mute-outline"}
+                size={16}
+                color="#fff"
+              />
+              <Text style={[styles.mediaSoundHintText, { fontSize: mediaChipFontSize }]}>
+                {isFeedVideoSoundOn({ isVideoSoundEnabled, isPostMuted: isMuted }) ? "Sound on" : "Muted"}
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
 
         <View style={[styles.actionsRow, { paddingHorizontal: postHeaderPadding }]}>
           <TouchableOpacity
@@ -2446,22 +2680,55 @@ function FeedScreen({ navigation, route }: any) {
           {metaLine}
         </Text>
 
-        <InteractiveText
-          style={[
-            styles.caption,
-            { paddingHorizontal: postBodyInset, color: colors.text, fontSize: captionFontSize, lineHeight: captionLineHeight },
-          ]}
-          prefix={(
-            <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(String(user.id || ""))}>
-              {user.username || "User"}{" "}
+        {item.caption ? (
+          <>
+            <InteractiveText
+              style={[
+                styles.caption,
+                { paddingHorizontal: postBodyInset, color: colors.text, fontSize: captionFontSize, lineHeight: captionLineHeight },
+              ]}
+              prefix={(
+                <Text style={[styles.captionUser, { color: colors.text }]} onPress={() => openUserProfile(String(user.id || ""))}>
+                  {user.username || "User"}{" "}
+                </Text>
+              )}
+              mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
+              hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
+              text={item.caption || ""}
+              onPressMention={openMentionProfile}
+              onPressHashtag={openHashtagResults}
+              onPress={() => {
+                if (isCaptionTruncatable) {
+                  setExpandedCaptionIds((current) => ({ ...current, [item.id]: !current[item.id] }));
+                }
+              }}
+              numberOfLines={isCaptionTruncatable && !isCaptionExpanded ? 2 : undefined}
+              ellipsizeMode="tail"
+            />
+            {isCaptionTruncatable ? (
+              <TouchableOpacity
+                activeOpacity={0.75}
+                onPress={() => setExpandedCaptionIds((current) => ({ ...current, [item.id]: !current[item.id] }))}
+              >
+                <Text style={[styles.captionMoreButton, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
+                  {isCaptionExpanded ? "less" : "more"}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
+        ) : null}
+
+        {item.commentsCount > 0 ? (
+          <TouchableOpacity onPress={() => openPostCommentsSheet(item)}>
+            <Text style={[styles.commentCount, { paddingHorizontal: postBodyInset, color: colors.mutedText, fontSize: supportingFontSize }]}>
+              View all {item.commentsCount} comments
             </Text>
-          )}
-          mentionStyle={[styles.inlineEntity, { color: feedAccent }]}
-          hashtagStyle={[styles.inlineEntity, { color: feedAccent }]}
-          text={item.caption || ""}
-          onPressMention={openMentionProfile}
-          onPressHashtag={openHashtagResults}
-        />
+          </TouchableOpacity>
+        ) : null}
+
+        <Text style={[styles.postFooterTime, { paddingHorizontal: postBodyInset, color: colors.mutedText }]}>
+          {formatAgo(item.createdAt)}
+        </Text>
       </View>
     );
   }, [
@@ -2471,6 +2738,7 @@ function FeedScreen({ navigation, route }: any) {
     captionLineHeight,
     colors,
     currentUser?.id,
+    expandedCaptionIds,
     feedAccent,
     feedAccentBorder,
     feedAccentSoft,
@@ -2480,6 +2748,9 @@ function FeedScreen({ navigation, route }: any) {
     handleDownload,
     handleLike,
     handlePostAudioToggle,
+    handlePostMediaPress,
+    likeBurstPostId,
+    mediaChipFontSize,
     openPostCommentsSheet,
     openPostShareSheet,
     handleSave,
@@ -2509,7 +2780,7 @@ function FeedScreen({ navigation, route }: any) {
   ]);
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top"]}>
       <FlatList
         ref={feedListRef}
         data={feedListItems}
@@ -2540,9 +2811,7 @@ function FeedScreen({ navigation, route }: any) {
         onEndReachedThreshold={0.45}
         onViewableItemsChanged={handleFeedViewableChange}
         viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 200 }}
-        ListHeaderComponent={
-          <View style={styles.feedHeaderSpacer} />
-        }
+        ListHeaderComponent={isFocusedPostFeed ? <View style={styles.feedHeaderSpacer} /> : renderHeader}
         ListFooterComponent={
           loadingMore ? (
             <View style={styles.footerLoader}>
@@ -2551,6 +2820,196 @@ function FeedScreen({ navigation, route }: any) {
           ) : null
         }
       />
+
+      {menuOpen ? (
+        <TouchableOpacity activeOpacity={1} style={styles.overlay} onPress={closeMenu} />
+      ) : null}
+
+      <Animated.View
+        pointerEvents={menuOpen ? "auto" : "none"}
+        style={[
+          styles.sidebar,
+          { width: sidebarWidth, backgroundColor: colors.card, transform: [{ translateX: sidebarTranslateX }] },
+        ]}
+      >
+        <View style={[styles.sidebarHeader, isCompactSidebar && styles.sidebarHeaderCompact, { backgroundColor: FEED_ACCENT }]}>
+          <View style={styles.sidebarHeaderTop}>
+            <View style={styles.sidebarAvatarWrap}>
+              <Image
+                source={{ uri: currentUser?.avatarUrl || "https://aline2.com/asstes/images/logo/logo.jpeg" }}
+                style={[styles.sidebarAvatar, isCompactSidebar && styles.sidebarAvatarCompact]}
+              />
+              {sellerAccount ? (
+                <View
+                  style={[
+                    styles.sidebarAvatarStatus,
+                    sellerAccount.availabilityStatus ? styles.sidebarStatusAvailable : styles.sidebarStatusUnavailable,
+                  ]}
+                />
+              ) : null}
+            </View>
+
+            <TouchableOpacity style={styles.sidebarCloseButton} onPress={closeMenu} activeOpacity={0.8}>
+              <Icon name="close" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.sidebarTitle} numberOfLines={1}>
+            {currentUser?.name || currentUser?.username || "Aline2"}
+          </Text>
+          <Text style={styles.sidebarSubtitle} numberOfLines={1}>
+            {currentUser?.username ? `@${currentUser.username}` : sellerAccount?.sellerName || "Connect, share, and grow"}
+          </Text>
+
+          {sellerAccount ? (
+            <View style={styles.sidebarAvailabilityCard}>
+              <View style={styles.sidebarAvailabilityCopy}>
+                <Text style={styles.sidebarAvailabilityLabel}>Seller Availability</Text>
+                <View style={styles.sidebarAvailabilityState}>
+                  <View
+                    style={[
+                      styles.sidebarAvailabilityDot,
+                      sellerAccount.availabilityStatus ? styles.sidebarStatusAvailable : styles.sidebarStatusUnavailable,
+                    ]}
+                  />
+                  <Text style={styles.sidebarAvailabilityValue}>
+                    {sellerAccount.availabilityStatus ? "Available" : "Unavailable"}
+                  </Text>
+                </View>
+              </View>
+
+              <Switch
+                value={sellerAccount.availabilityStatus}
+                onValueChange={toggleSellerAvailability}
+                disabled={availabilityUpdating}
+                thumbColor={sellerAccount.availabilityStatus ? "#fff" : "#F3F4F6"}
+                trackColor={{ false: "rgba(255,255,255,0.32)", true: "rgba(34,197,94,0.95)" }}
+                ios_backgroundColor="rgba(255,255,255,0.32)"
+              />
+            </View>
+          ) : null}
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sidebarContent} keyboardShouldPersistTaps="handled">
+          <TouchableOpacity
+            activeOpacity={0.86}
+            style={[styles.sidebarWalletPreview, { borderColor: colors.border, backgroundColor: colors.surface }]}
+            onPress={() => navigateFromMenu("WalletScreen")}
+          >
+            <View style={[styles.sidebarWalletIcon, { backgroundColor: feedAccentSoft }]}>
+              <Icon name="wallet-outline" size={22} color={FEED_ACCENT} />
+            </View>
+            <View style={styles.sidebarWalletCopy}>
+              <Text style={[styles.sidebarWalletLabel, { color: colors.mutedText }]}>User wallet</Text>
+              <Text style={[styles.sidebarWalletValue, { color: colors.text }]}>{formatCompactCoinBalance(walletCoinBalance)}</Text>
+            </View>
+            <Icon name="chevron-forward" size={18} color={colors.mutedText} />
+          </TouchableOpacity>
+
+          <View style={[styles.sidebarReleaseCard, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <View style={styles.sidebarReleaseCopy}>
+              <Text style={[styles.sidebarReleaseLabel, { color: colors.mutedText }]}>App version</Text>
+              <Text style={[styles.sidebarReleaseValue, { color: colors.text }]}>{`v${APP_VERSION} • ${APP_RELEASE_DATE}`}</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.sidebarReleaseButton, { backgroundColor: feedAccentSoft }]}
+              onPress={() => navigateFromMenu("ReleaseNotesScreen")}
+              activeOpacity={0.86}
+            >
+              <Icon name="document-text-outline" size={16} color={FEED_ACCENT} />
+              <Text style={styles.sidebarReleaseButtonText}>Release Notes</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.sidebarGuideSection}>
+            <Text style={[styles.sidebarSectionTitle, { color: colors.mutedText }]}>Guide</Text>
+            <TouchableOpacity activeOpacity={0.85} style={[styles.sidebarGuideVideo, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+              <View style={[styles.sidebarGuidePreview, { backgroundColor: feedAccentSoft }]}>
+                <View style={[styles.sidebarGuidePlayButton, { backgroundColor: FEED_ACCENT }]}>
+                  <Icon name="play" size={18} color="#fff" />
+                </View>
+              </View>
+              <View style={styles.sidebarGuideCopy}>
+                <Text style={[styles.sidebarGuideTitle, { color: colors.text }]} numberOfLines={1}>
+                  Aline2 Guide
+                </Text>
+                <Text style={[styles.sidebarGuideSubtitle, { color: colors.mutedText }]} numberOfLines={1}>
+                  Quick start video
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {menuSections.map((section) => (
+            <View key={section.title} style={styles.sidebarSection}>
+              <Text style={[styles.sidebarSectionTitle, { color: colors.mutedText }]}>{section.title}</Text>
+              {section.data.map((item: any) => (
+                <TouchableOpacity
+                  key={item.label}
+                  style={[styles.sidebarMenuItem, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                  onPress={() => navigateFromMenu(item)}
+                >
+                  <View style={[styles.sidebarMenuIconCircle, { backgroundColor: feedAccentSoft }]}>
+                    <Icon name={item.icon} size={18} color={FEED_ACCENT} />
+                  </View>
+                  <Text style={[styles.sidebarMenuLabel, { color: colors.text }]}>{item.label}</Text>
+                  <Icon name="chevron-forward" size={18} color={colors.mutedText} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          ))}
+        </ScrollView>
+      </Animated.View>
+
+      <PostCommentsSheet
+        visible={activeSheet === "comments"}
+        post={selectedPost}
+        onClose={closeSheet}
+        onPostUpdate={updatePost}
+        onOpenFull={openPostComments}
+        showOpenFull={false}
+      />
+
+      <PostShareSheet
+        visible={activeSheet === "share"}
+        post={selectedPost}
+        onClose={closeSheet}
+        onPostUpdate={updatePost}
+        onOpenStoryComposer={(post) =>
+          navigation.navigate("Create", {
+            initialTab: "story",
+            initialMedia: post.media[0]?.mediaType === "video" ? post.media[0]?.url : post.media[0]?.thumbnailUrl || post.media[0]?.url,
+            initialMediaType: post.media[0]?.mediaType || "image",
+          })
+        }
+      />
+
+      {selectedPost ? (
+        <ContentActionSheet
+          visible={activeSheet === "actions"}
+          contentType="post"
+          contentId={selectedPost.id}
+          userId={selectedPost.user.id}
+          userLabel={selectedPost.user.username}
+          title="Post options"
+          onClose={closeSheet}
+          onActionComplete={(action) => {
+            if (action === "not_interested" || action === "archive" || action === "delete") {
+              setFeed((prev) => ({
+                ...prev,
+                posts: prev.posts.filter((item) => item.id !== selectedPost.id),
+              }));
+            }
+
+            if (action === "mute" || action === "block") {
+              setFeed((prev) => ({
+                ...prev,
+                posts: prev.posts.filter((item) => item.user.id !== selectedPost.user.id),
+              }));
+            }
+          }}
+        />
+      ) : null}
     </SafeAreaView>
   );
 };
@@ -2663,6 +3122,12 @@ const styles: any = {
     borderRadius: 6,
     backgroundColor: "#fff",
   },
+  carouselBadgeText: {
+    color: "#ffffff",
+    fontSize: 11.5,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+  },
   postStickerLayer: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   postEmojiSticker: { position: "absolute" },
   postEmojiStickerText: { fontWeight: "700" },
@@ -2674,6 +3139,215 @@ const styles: any = {
   metaChipText: { fontSize: 12, marginLeft: 4 },
   sensitiveBadge: { position: "absolute", left: 12, top: 12, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 999 },
   sensitiveBadgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  mediaPressSurface: { position: "relative", overflow: "hidden" },
+  likeBurstOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  mediaSoundHint: {
+    position: "absolute",
+    right: 12,
+    top: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(0,0,0,0.56)",
+  },
+  mediaSoundHintCompact: { right: 10, top: 10, paddingHorizontal: 8, paddingVertical: 5 },
+  mediaSoundHintText: { color: "#fff", fontSize: 11.5, fontWeight: "800" },
+  captionMoreButton: { paddingTop: 2, fontSize: 12.2, lineHeight: 16, fontWeight: "700" },
+  commentCount: { fontSize: 10.8, paddingTop: 7 },
+  postFooterTime: { fontSize: 10, marginTop: 6, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.3 },
+
+  // Header / top bar
+  topBar: { paddingHorizontal: 12, paddingTop: 4, paddingBottom: 6 },
+  topBarPanel: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    shadowColor: "#000",
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
+  },
+  topBarPanelCompact: { paddingHorizontal: 10, paddingVertical: 7 },
+  topLeft: { flexDirection: "row", alignItems: "center", flex: 1, minWidth: 0 },
+  logoTapTarget: { marginRight: 8, borderRadius: 12 },
+  logo: { width: 42, height: 42, borderRadius: 12, marginRight: 8 },
+  brandCopy: { flexShrink: 1, minWidth: 0, marginRight: 6 },
+  brand: { fontSize: 24, color: "#FFFFFF", fontWeight: "400", letterSpacing: 0 },
+  brandSubline: { marginTop: 2, fontSize: 12.5, fontWeight: "700", letterSpacing: 0.3 },
+  brandSublineCompact: { display: "none" },
+  topRight: { flexDirection: "row", alignItems: "center", flexShrink: 0 },
+  headerIconGap: { marginLeft: 8 },
+  headerIconGapCompact: { marginLeft: 6 },
+  headerIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  headerWalletButton: {
+    minWidth: 36,
+    height: 36,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+    flexDirection: "row",
+    paddingHorizontal: 10,
+  },
+  headerIconButtonCompact: { width: 32, height: 32, borderRadius: 10 },
+  headerWalletButtonCompact: { minWidth: 32, height: 32, borderRadius: 10, paddingHorizontal: 8 },
+  headerWalletValue: { marginLeft: 5, fontWeight: "800" },
+  headerCoinBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FDE68A",
+    borderWidth: 1,
+    borderColor: "#F59E0B",
+  },
+  notificationBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 19,
+    height: 19,
+    borderRadius: 9.5,
+    paddingHorizontal: 5,
+    backgroundColor: "#FF3B30",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notificationBadgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
+
+  // Story rail
+  storyRail: { marginHorizontal: 14, marginBottom: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, overflow: "hidden" },
+  storyRailGlow: { ...StyleSheet.absoluteFillObject },
+  storyListContent: { paddingHorizontal: 10, paddingVertical: 12 },
+  storyAddBadge: {
+    position: "absolute",
+    right: 2,
+    bottom: 2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: FEED_ACCENT,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#fff",
+  },
+  liveStoryRing: {
+    borderColor: "#fb7185",
+    borderWidth: 2.5,
+    shadowColor: "#fb7185",
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  liveStoryBadge: {
+    position: "absolute",
+    bottom: -3,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ef4444",
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  liveStoryBadgeText: { color: "#fff", fontSize: 9, fontWeight: "900", marginLeft: 3 },
+
+  // Publish queue banner
+  publishQueueCard: { marginTop: 8, marginBottom: 12, marginHorizontal: 14, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12 },
+  publishQueueTopRow: { flexDirection: "row", alignItems: "flex-start" },
+  publishQueueCopy: { flex: 1, paddingRight: 10 },
+  publishQueueTitle: { fontSize: 14, fontWeight: "800" },
+  publishQueueMessage: { marginTop: 4, fontSize: 12.5, lineHeight: 18, fontWeight: "600" },
+  publishQueueDismiss: { width: 28, height: 28, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
+  publishQueueTrack: { marginTop: 10, height: 4, borderRadius: 999, overflow: "hidden" },
+  publishQueueFill: { height: "100%", borderRadius: 999 },
+  publishQueueGradientFill: { minWidth: 18 },
+
+  // Sidebar menu
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(7, 12, 20, 0.28)", zIndex: 19 },
+  sidebar: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: APP_BOTTOM_DOCK_BASE_HEIGHT,
+    zIndex: 20,
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.14,
+    shadowRadius: 24,
+    shadowOffset: { width: 6, height: 0 },
+  },
+  sidebarHeader: { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 18, borderBottomRightRadius: 28 },
+  sidebarHeaderCompact: { paddingHorizontal: 16, paddingTop: 38 },
+  sidebarHeaderTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  sidebarAvatarWrap: { position: "relative", alignSelf: "flex-start" },
+  sidebarAvatar: { width: 68, height: 68, borderRadius: 34, borderWidth: 2, borderColor: "#fff", backgroundColor: "rgba(255,255,255,0.18)" },
+  sidebarAvatarCompact: { width: 58, height: 58, borderRadius: 29 },
+  sidebarAvatarStatus: { position: "absolute", right: 2, bottom: 2, width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: "#fff" },
+  sidebarStatusAvailable: { backgroundColor: "#22C55E" },
+  sidebarStatusUnavailable: { backgroundColor: "#F97316" },
+  sidebarCloseButton: { width: 34, height: 34, borderRadius: 17, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(255,255,255,0.18)" },
+  sidebarTitle: { marginTop: 12, fontSize: 21, fontWeight: "800", color: "#fff" },
+  sidebarSubtitle: { marginTop: 4, fontSize: 13, color: "rgba(255,255,255,0.88)" },
+  sidebarAvailabilityCard: {
+    marginTop: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.32)",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  sidebarAvailabilityCopy: { flex: 1, paddingRight: 10 },
+  sidebarAvailabilityLabel: { color: "#fff", fontSize: 13, fontWeight: "800" },
+  sidebarAvailabilityState: { flexDirection: "row", alignItems: "center", marginTop: 4 },
+  sidebarAvailabilityDot: { width: 7, height: 7, borderRadius: 4, marginRight: 6 },
+  sidebarAvailabilityValue: { color: "rgba(255,255,255,0.86)", fontSize: 12, fontWeight: "600" },
+  sidebarContent: { paddingHorizontal: 12, paddingTop: 16, paddingBottom: 12 },
+  sidebarWalletPreview: { flexDirection: "row", alignItems: "center", borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, padding: 14, marginBottom: 12 },
+  sidebarWalletIcon: { width: 42, height: 42, borderRadius: 16, alignItems: "center", justifyContent: "center", marginRight: 12 },
+  sidebarWalletCopy: { flex: 1, minWidth: 0 },
+  sidebarWalletLabel: { fontSize: 12, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.3 },
+  sidebarWalletValue: { marginTop: 3, fontSize: 18, fontWeight: "900" },
+  sidebarReleaseCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, padding: 14, marginBottom: 16 },
+  sidebarReleaseCopy: { marginBottom: 12 },
+  sidebarReleaseLabel: { fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.4 },
+  sidebarReleaseValue: { marginTop: 4, fontSize: 15, fontWeight: "800" },
+  sidebarReleaseButton: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 10 },
+  sidebarReleaseButtonText: { marginLeft: 8, fontSize: 12.5, fontWeight: "800", color: FEED_ACCENT },
+  sidebarGuideSection: { marginBottom: 18 },
+  sidebarGuideVideo: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, overflow: "hidden" },
+  sidebarGuidePreview: { height: 86, justifyContent: "center", alignItems: "center" },
+  sidebarGuidePlayButton: { width: 42, height: 42, borderRadius: 21, justifyContent: "center", alignItems: "center", paddingLeft: 2 },
+  sidebarGuideCopy: { paddingHorizontal: 12, paddingVertical: 10 },
+  sidebarGuideTitle: { fontSize: 14, fontWeight: "800" },
+  sidebarGuideSubtitle: { marginTop: 2, fontSize: 12, fontWeight: "600" },
+  sidebarSection: { marginBottom: 18 },
+  sidebarSectionTitle: { fontSize: 12, fontWeight: "700", marginBottom: 8, marginLeft: 8, textTransform: "uppercase" },
+  sidebarMenuItem: { flexDirection: "row", alignItems: "center", borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 8 },
+  sidebarMenuIconCircle: { width: 36, height: 36, borderRadius: 18, justifyContent: "center", alignItems: "center", marginRight: 12 },
+  sidebarMenuLabel: { flex: 1, fontSize: 15, fontWeight: "600" },
 };
 
 export default FeedScreen;
