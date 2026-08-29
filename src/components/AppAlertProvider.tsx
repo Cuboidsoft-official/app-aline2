@@ -120,6 +120,7 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
   const secureTextEntry = activeAlert?.kind === "prompt" && activeAlert.promptType === "secure-text";
   const shouldStackButtons = (activeAlert?.buttons.length || 0) > 2;
   const isSheetPresentation = activeAlert?.presentation === "sheet";
+  const useTallSheet = isSheetPresentation && activeAlert?.options?.tallSheet === true;
   const showsSheetHero = isSheetPresentation && activeAlert?.kind === "alert";
   const dialogVisible = Boolean(activeAlert) && !isSheetPresentation;
   const sheetVisible = Boolean(activeAlert) && isSheetPresentation;
@@ -268,12 +269,12 @@ function AppAlertProvider({ children }: { children: React.ReactNode }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      <DraggableBottomSheet
+       <DraggableBottomSheet
         visible={sheetVisible}
         onClose={handleBackdropPress}
-        snapPoints={[0.3, 0.42, 0.56]}
-        initialSnapIndex={0}
-        minHeight={246}
+        snapPoints={useTallSheet ? [0.42, 0.56, 0.7] : [0.3, 0.42, 0.56]}
+        initialSnapIndex={useTallSheet ? 1 : 0}
+        minHeight={useTallSheet ? 420 : 246}
         maxHeightRatio={0.86}
       >
         {renderAlertContent(true)}
