@@ -12,6 +12,7 @@ export type AppAlertButton = {
 export type AppAlertOptions = {
   cancelable?: boolean;
   onDismiss?: () => void;
+  tallSheet?: boolean;
 };
 
 export type AppAlertPresentation = "dialog" | "sheet";
