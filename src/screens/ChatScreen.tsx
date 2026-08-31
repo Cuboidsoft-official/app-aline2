@@ -4332,7 +4332,7 @@ const ChatScreen = ({ navigation, route }: any) => {
 
             {attachmentPreviewItems.length > 1 ? (
               <View style={styles.attachmentPreviewStrip}>
-                {attachmentPreviewMeta.visible.map((item, index) => (
+                {attachmentPreviewMeta.visible.map((item: any, index: number) => (
                   <TouchableOpacity
                     key={`${item.uri}-${index}`}
                     style={[
@@ -4591,7 +4591,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                 >
                   {pendingAttachments.length > 1 && pendingAttachment.kind === "image" ? (
                     <View style={styles.attachmentPreviewMultiThumb}>
-                      {getAttachmentPreviewThumbs(pendingAttachments, 3).visible.map((item, index) => (
+                      {getAttachmentPreviewThumbs(pendingAttachments, 3).visible.map((item: any, index: number) => (
                         <Image
                           key={`${item.uri}-${index}`}
                           source={{ uri: item.uri }}

@@ -30,14 +30,17 @@ import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { uploadDocumentAsset, uploadImageAsset } from "../utils/uploadMedia";
 import { DEFAULT_AVATAR_URL, DEFAULT_COVER_URL } from "../constants/defaultAssets";
 import { useAppTheme } from "../theme/AppThemeContext";
-import { ensureCameraPermission } from "../utils/permissions";
+import { ensureCameraPermission, ensureMicrophonePermission } from "../utils/permissions";
+import { createManagedSound, type ManagedNitroSound } from "../utils/nitroSound";
 import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import { getStoredRefreshToken, getStoredSessionMeta, getStoredToken, getStoredUser, setStoredSession } from "../utils/authSession";
 
 const DEFAULT_COVER = DEFAULT_COVER_URL;
 const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 7;
 const SELLER_TERMS_VERSION = "seller_terms_v2";
+const VOICE_VERIFICATION_PHRASE =
+  "I want to become a seller on Aline2, so I am uploading my voice verification.";
 const SELLER_TERMS_PARAGRAPHS = [
   "By registering as a seller on Aline2, I confirm that I am joining this platform by my own consent, with a clear understanding of the responsibilities that come with offering paid services, chats, calls, promotions, consultations, or any other seller activity through my account. I understand that my seller profile represents me, and I agree to use Aline2 in a respectful, lawful, professional, and honest manner.",
   "I agree that I will not misbehave with any buyer, user, customer, company, creator, or Aline2 team member. Misbehavior includes rude, abusive, threatening, insulting, manipulative, discriminatory, or unsafe conduct in chat, call, video, booking, promotion, or any other interaction. I also agree that I will not sexually harass anyone, make sexual comments or requests, pressure anyone for personal contact, send inappropriate content, or behave in any way that makes another person uncomfortable, unsafe, or disrespected.",
@@ -48,14 +51,20 @@ const SELLER_TERMS_PARAGRAPHS = [
 const SELLER_TERMS_CONTENT = SELLER_TERMS_PARAGRAPHS.join("\n\n");
 
 const SPECIALIZATION_OPTIONS = [
+  "Doctor",
+  "Lawyer",
+  "Engineer",
+  "CA",
+  "ICS",
+  "Other",
+];
+
+const OTHER_SPECIALIZATION_SUGGESTIONS = [
   "Creator",
   "Business",
-  "Lawyer",
-  "Doctor",
   "Coach",
   "Consultant",
   "Trainer",
-  "Other",
 ];
 
 const PLAN_OPTIONS = [
@@ -146,7 +155,9 @@ type SellerProfileResponse = {
   degree?: string;
   certificateType?: string;
   registrationNumber?: string;
+  identityDocType?: string;
   aadhaar?: string;
+  passportNumber?: string;
   pan?: string;
   bankAccountName?: string;
   bankAccountNumber?: string;
@@ -168,6 +179,37 @@ type SellerProfileResponse = {
     story?: number | string;
     reel?: number | string;
   };
+  durationRates?: {
+    rate1Min?: number | string;
+    rate15Min?: number | string;
+    rate30Min?: number | string;
+    rate1Hour?: number | string;
+  };
+  extraPricing?: {
+    messagePrice?: number | string;
+    audioCallPrice?: number | string;
+    videoCallPrice?: number | string;
+  };
+  serviceRates?: {
+    message?: {
+      rate1Min?: number | string;
+      rate15Min?: number | string;
+      rate30Min?: number | string;
+      rate1Hour?: number | string;
+    };
+    audio?: {
+      rate1Min?: number | string;
+      rate15Min?: number | string;
+      rate30Min?: number | string;
+      rate1Hour?: number | string;
+    };
+    video?: {
+      rate1Min?: number | string;
+      rate15Min?: number | string;
+      rate30Min?: number | string;
+      rate1Hour?: number | string;
+    };
+  };
   termsAccepted?: boolean;
   termsVersion?: string;
   termsAcceptedAt?: string;
@@ -175,8 +217,11 @@ type SellerProfileResponse = {
   degreeDoc?: string;
   licenseDoc?: string;
   aadhaarDoc?: string;
+  idProofFront?: string;
+  idProofBack?: string;
   panDoc?: string;
   idProof?: string;
+  voiceVerificationDoc?: string;
   faceCheckDoc?: string;
   profilePic?: string;
   coverPic?: string;
@@ -222,7 +267,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [errorMessage, setErrorMessage] = useState("");
   const [activeDropdown, setActiveDropdown] = useState<DropdownField | null>(null);
   const [termsVisible, setTermsVisible] = useState(false);
-  const [paymentVerified, setPaymentVerified] = useState(mode === "edit");
+  const [paymentVerified, setPaymentVerified] = useState(false);
   const [subscriptionId, setSubscriptionId] = useState("");
   const [subscriptionProcessing, setSubscriptionProcessing] = useState(false);
 
@@ -247,6 +292,8 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [licenseDoc, setLicenseDoc] = useState<DocumentFile | null>(null);
   const [degreeChecked, setDegreeChecked] = useState(false);
 
+  const [identityDocType, setIdentityDocType] = useState<"Aadhaar" | "Passport">("Aadhaar");
+  const [passportNumber, setPassportNumber] = useState("");
   const [aadhaar, setAadhaar] = useState("");
   const [pan, setPan] = useState("");
   const [bankAccountName, setBankAccountName] = useState("");
@@ -254,8 +301,15 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [bankIfsc, setBankIfsc] = useState("");
   const [bankName, setBankName] = useState("");
   const [aadhaarDoc, setAadhaarDoc] = useState<DocumentFile | null>(null);
+  const [idProofFront, setIdProofFront] = useState<DocumentFile | null>(null);
+  const [idProofBack, setIdProofBack] = useState<DocumentFile | null>(null);
   const [panDoc, setPanDoc] = useState<DocumentFile | null>(null);
   const [idProof, setIdProof] = useState<DocumentFile | null>(null);
+  const [voiceDoc, setVoiceDoc] = useState<DocumentFile | null>(null);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingTimer, setRecordingTimer] = useState(0);
+  const [isPlayingVoice, setIsPlayingVoice] = useState(false);
+  const managedSoundRef = React.useRef<ManagedNitroSound | null>(null);
   const [kycChecked, setKycChecked] = useState(false);
 
   const [faceCheckPreview, setFaceCheckPreview] = useState<string | null>(null);
@@ -267,6 +321,29 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [serviceName, setServiceName] = useState("");
   const [serviceDurationMinutes, setServiceDurationMinutes] = useState("15");
   const [serviceRate, setServiceRate] = useState("");
+  const [rate1Min, setRate1Min] = useState("");
+  const [rate15Min, setRate15Min] = useState("");
+  const [rate30Min, setRate30Min] = useState("");
+  const [rate1Hour, setRate1Hour] = useState("");
+  const [messagePrice, setMessagePrice] = useState("");
+  const [audioCallPrice, setAudioCallPrice] = useState("");
+  const [videoCallPrice, setVideoCallPrice] = useState("");
+
+  const [msgRate1Min, setMsgRate1Min] = useState("");
+  const [msgRate15Min, setMsgRate15Min] = useState("");
+  const [msgRate30Min, setMsgRate30Min] = useState("");
+  const [msgRate1Hour, setMsgRate1Hour] = useState("");
+
+  const [audioRate1Min, setAudioRate1Min] = useState("");
+  const [audioRate15Min, setAudioRate15Min] = useState("");
+  const [audioRate30Min, setAudioRate30Min] = useState("");
+  const [audioRate1Hour, setAudioRate1Hour] = useState("");
+
+  const [videoRate1Min, setVideoRate1Min] = useState("");
+  const [videoRate15Min, setVideoRate15Min] = useState("");
+  const [videoRate30Min, setVideoRate30Min] = useState("");
+  const [videoRate1Hour, setVideoRate1Hour] = useState("");
+
   const [promotionPostPrice, setPromotionPostPrice] = useState("");
   const [promotionStoryPrice, setPromotionStoryPrice] = useState("");
   const [promotionReelPrice, setPromotionReelPrice] = useState("");
@@ -278,6 +355,10 @@ const SellerRegistration = ({ navigation, route }: any) => {
   );
   const durationMinutes = Number(serviceDurationMinutes) || 0;
   const rateLimit = Math.floor((selectedPlan.maxHourlyRate * durationMinutes) / 60);
+  const rateLimit15Min = Math.floor((selectedPlan.maxHourlyRate * 15) / 60);
+  const rateLimit1Min = rateLimit15Min;
+  const rateLimit30Min = Math.floor((selectedPlan.maxHourlyRate * 30) / 60);
+  const rateLimit1Hour = selectedPlan.maxHourlyRate;
   const specializationValue = specialization === "Other" ? customSpecialization.trim() : specialization;
   const areProfessionalDetailsOptional = specialization === "Other";
 
@@ -300,7 +381,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
     setAvatar(seller?.profilePic || null);
     setCover(seller?.coverPic || null);
     setPremiumPlan(seller?.subscriptionPlan?.code || seller?.premiumPlan || "PLAN_100");
-    setPaymentVerified(Boolean(seller?.subscriptionPlan?.code));
+    setPaymentVerified(Boolean(mode === "edit" && seller?.onboardingCompleted));
     setSubscriptionId("");
     setExperience(seller?.experience || "");
     setDegree(seller?.degree || "");
@@ -309,22 +390,58 @@ const SellerRegistration = ({ navigation, route }: any) => {
     setDegreeDoc(toDocumentFile(seller?.degreeDoc));
     setLicenseDoc(toDocumentFile(seller?.licenseDoc));
     setDegreeChecked(Boolean(seller?.degreeChecked || seller?.degreeDoc));
+    setIdentityDocType(seller?.identityDocType === "Passport" ? "Passport" : "Aadhaar");
+    setPassportNumber(seller?.passportNumber || "");
     setAadhaar(seller?.aadhaar || "");
     setPan(seller?.pan || "");
     setBankAccountName(seller?.bankAccountName || "");
     setBankAccountNumber(seller?.bankAccountNumber || "");
     setBankIfsc(seller?.bankIfsc || "");
     setBankName(seller?.bankName || "");
-    setAadhaarDoc(toDocumentFile(seller?.aadhaarDoc));
+    const frontDoc = toDocumentFile(seller?.idProofFront || seller?.aadhaarDoc);
+    const backDoc = toDocumentFile(seller?.idProofBack || seller?.idProof);
+    const voiceFile = toDocumentFile(seller?.voiceVerificationDoc);
+    setAadhaarDoc(frontDoc);
+    setIdProofFront(frontDoc);
+    setIdProof(backDoc);
+    setIdProofBack(backDoc);
     setPanDoc(toDocumentFile(seller?.panDoc));
-    setIdProof(toDocumentFile(seller?.idProof));
-    setKycChecked(Boolean(seller?.kycChecked || seller?.aadhaarDoc || seller?.panDoc));
+    setVoiceDoc(voiceFile);
+    setKycChecked(Boolean(seller?.kycChecked || (frontDoc && backDoc && voiceFile)));
     setFaceCheckPreview(seller?.faceCheckDoc || null);
     setFaceCheckDoc(toDocumentFile(seller?.faceCheckDoc));
     setFaceChecked(Boolean(seller?.faceChecked || seller?.faceCheckDoc));
     setServiceName(seller?.onboardingServiceName || "");
     setServiceDurationMinutes(String(seller?.onboardingServiceDurationMinutes || "15"));
     setServiceRate(String(seller?.onboardingServiceRate || ""));
+
+    const sRates = seller?.serviceRates;
+    const dRates = seller?.durationRates;
+    const ePricing = seller?.extraPricing;
+
+    setMsgRate1Min(sRates?.message?.rate1Min ? String(sRates.message.rate1Min) : ePricing?.messagePrice ? String(ePricing.messagePrice) : "");
+    setMsgRate15Min(sRates?.message?.rate15Min ? String(sRates.message.rate15Min) : "");
+    setMsgRate30Min(sRates?.message?.rate30Min ? String(sRates.message.rate30Min) : "");
+    setMsgRate1Hour(sRates?.message?.rate1Hour ? String(sRates.message.rate1Hour) : "");
+
+    setAudioRate1Min(sRates?.audio?.rate1Min ? String(sRates.audio.rate1Min) : dRates?.rate1Min ? String(dRates.rate1Min) : ePricing?.audioCallPrice ? String(ePricing.audioCallPrice) : "");
+    setAudioRate15Min(sRates?.audio?.rate15Min ? String(sRates.audio.rate15Min) : dRates?.rate15Min ? String(dRates.rate15Min) : "");
+    setAudioRate30Min(sRates?.audio?.rate30Min ? String(sRates.audio.rate30Min) : dRates?.rate30Min ? String(dRates.rate30Min) : "");
+    setAudioRate1Hour(sRates?.audio?.rate1Hour ? String(sRates.audio.rate1Hour) : dRates?.rate1Hour ? String(dRates.rate1Hour) : "");
+
+    setVideoRate1Min(sRates?.video?.rate1Min ? String(sRates.video.rate1Min) : ePricing?.videoCallPrice ? String(ePricing.videoCallPrice) : "");
+    setVideoRate15Min(sRates?.video?.rate15Min ? String(sRates.video.rate15Min) : "");
+    setVideoRate30Min(sRates?.video?.rate30Min ? String(sRates.video.rate30Min) : "");
+    setVideoRate1Hour(sRates?.video?.rate1Hour ? String(sRates.video.rate1Hour) : "");
+
+    setRate1Min(sRates?.audio?.rate1Min ? String(sRates.audio.rate1Min) : dRates?.rate1Min ? String(dRates.rate1Min) : "");
+    setRate15Min(sRates?.audio?.rate15Min ? String(sRates.audio.rate15Min) : dRates?.rate15Min ? String(dRates.rate15Min) : "");
+    setRate30Min(sRates?.audio?.rate30Min ? String(sRates.audio.rate30Min) : dRates?.rate30Min ? String(dRates.rate30Min) : "");
+    setRate1Hour(sRates?.audio?.rate1Hour ? String(sRates.audio.rate1Hour) : dRates?.rate1Hour ? String(dRates.rate1Hour) : "");
+    setMessagePrice(sRates?.message?.rate1Min ? String(sRates.message.rate1Min) : ePricing?.messagePrice ? String(ePricing.messagePrice) : "");
+    setAudioCallPrice(sRates?.audio?.rate1Min ? String(sRates.audio.rate1Min) : ePricing?.audioCallPrice ? String(ePricing.audioCallPrice) : "");
+    setVideoCallPrice(sRates?.video?.rate1Min ? String(sRates.video.rate1Min) : ePricing?.videoCallPrice ? String(ePricing.videoCallPrice) : "");
+
     setPromotionPostPrice(String(seller?.promotionPricing?.post || ""));
     setPromotionStoryPrice(String(seller?.promotionPricing?.story || ""));
     setPromotionReelPrice(String(seller?.promotionPricing?.reel || ""));
@@ -393,6 +510,168 @@ const SellerRegistration = ({ navigation, route }: any) => {
     });
   };
 
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (isRecordingVoice) {
+      interval = setInterval(() => {
+        setRecordingTimer((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isRecordingVoice]);
+
+  useEffect(() => {
+    return () => {
+      if (managedSoundRef.current) {
+        try {
+          managedSoundRef.current.dispose();
+        } catch {
+          // noop
+        }
+      }
+    };
+  }, []);
+
+  const startVoiceRecording = useCallback(async () => {
+    try {
+      const hasPermission = await ensureMicrophonePermission(
+        "Allow Aline2 to use your microphone to record your seller voice verification.",
+      );
+
+      if (!hasPermission) {
+        Alert.alert("Permission required", "Microphone permission is required to record your voice verification.");
+        return;
+      }
+
+      if (!managedSoundRef.current || managedSoundRef.current.isDisposed()) {
+        managedSoundRef.current = createManagedSound();
+      }
+
+      const sound = managedSoundRef.current;
+      await sound.startRecorder();
+      setIsRecordingVoice(true);
+      setRecordingTimer(0);
+      setKycChecked(false);
+    } catch (error: any) {
+      console.log("startVoiceRecording error:", error);
+      Alert.alert("Recording failed", getReadableApiErrorMessage(error, "Could not start voice recording."));
+    }
+  }, []);
+
+  const stopVoiceRecording = useCallback(async () => {
+    try {
+      if (!managedSoundRef.current || !isRecordingVoice) {
+        return;
+      }
+
+      const recordedUri = await managedSoundRef.current.stopRecorder();
+      setIsRecordingVoice(false);
+
+      if (recordedUri) {
+        setVoiceDoc({
+          uri: recordedUri,
+          name: `voice_verification_${Date.now()}.m4a`,
+          type: "audio/m4a",
+        });
+        setKycChecked(false);
+      }
+    } catch (error: any) {
+      console.log("stopVoiceRecording error:", error);
+      setIsRecordingVoice(false);
+      Alert.alert("Recording error", getReadableApiErrorMessage(error, "Could not save voice recording."));
+    }
+  }, [isRecordingVoice]);
+
+  const togglePlayVoiceAudio = useCallback(async () => {
+    try {
+      if (!voiceDoc?.uri) return;
+
+      if (isPlayingVoice) {
+        if (managedSoundRef.current) {
+          await managedSoundRef.current.stopPlayer();
+        }
+        setIsPlayingVoice(false);
+        return;
+      }
+
+      if (!managedSoundRef.current || managedSoundRef.current.isDisposed()) {
+        managedSoundRef.current = createManagedSound();
+      }
+
+      const sound = managedSoundRef.current;
+      sound.addPlaybackEndListener(() => {
+        setIsPlayingVoice(false);
+      });
+
+      setIsPlayingVoice(true);
+      await sound.startPlayer(voiceDoc.uri);
+    } catch (error: any) {
+      console.log("togglePlayVoiceAudio error:", error);
+      setIsPlayingVoice(false);
+    }
+  }, [isPlayingVoice, voiceDoc?.uri]);
+
+  const normalizePickedDocument = useCallback(async (file: DocumentPickerResponse): Promise<DocumentFile> => {
+    const fileName = file.name || `document_${Date.now()}`;
+
+    if (file.isVirtual || String(file.uri || "").startsWith("content://")) {
+      const convertVirtualFileToType = file.isVirtual
+        ? file.convertibleToMimeTypes?.find((item) => item.mimeType === "application/pdf")?.mimeType ||
+          file.convertibleToMimeTypes?.[0]?.mimeType
+        : undefined;
+
+      const [localCopy] = await keepLocalCopy({
+        destination: "cachesDirectory",
+        files: [
+          {
+            uri: file.uri,
+            fileName,
+            convertVirtualFileToType,
+          },
+        ],
+      });
+
+      if (!localCopy || localCopy.status !== "success") {
+        throw new Error(localCopy?.copyError || "Unable to access the selected document.");
+      }
+
+      return {
+        uri: localCopy.localUri,
+        name: fileName,
+        type: file.type,
+      };
+    }
+
+    return {
+      uri: file.uri,
+      name: fileName,
+      type: file.type,
+    };
+  }, []);
+
+  const pickVoiceAudio = useCallback(async () => {
+    try {
+      const [file] = await pick({
+        mode: "import",
+        allowMultiSelection: false,
+        type: [types.audio],
+      });
+
+      if (file?.uri) {
+        const normalized = await normalizePickedDocument(file);
+        setVoiceDoc(normalized);
+        setKycChecked(false);
+      }
+    } catch (error) {
+      const message = getDocumentPickerMessage(error);
+      if (message) {
+        Alert.alert("Error", message);
+      }
+    }
+  }, [normalizePickedDocument]);
+
   const captureFaceCheck = useCallback(async () => {
     try {
       setFaceCaptureLoading(true);
@@ -450,44 +729,6 @@ const SellerRegistration = ({ navigation, route }: any) => {
     } finally {
       setFaceCaptureLoading(false);
     }
-  }, []);
-
-  const normalizePickedDocument = useCallback(async (file: DocumentPickerResponse): Promise<DocumentFile> => {
-    const fileName = file.name || `document_${Date.now()}`;
-
-    if (file.isVirtual || String(file.uri || "").startsWith("content://")) {
-      const convertVirtualFileToType = file.isVirtual
-        ? file.convertibleToMimeTypes?.find((item) => item.mimeType === "application/pdf")?.mimeType ||
-          file.convertibleToMimeTypes?.[0]?.mimeType
-        : undefined;
-
-      const [localCopy] = await keepLocalCopy({
-        destination: "cachesDirectory",
-        files: [
-          {
-            uri: file.uri,
-            fileName,
-            convertVirtualFileToType,
-          },
-        ],
-      });
-
-      if (!localCopy || localCopy.status !== "success") {
-        throw new Error(localCopy?.copyError || "Unable to access the selected document.");
-      }
-
-      return {
-        uri: localCopy.localUri,
-        name: fileName,
-        type: file.type,
-      };
-    }
-
-    return {
-      uri: file.uri,
-      name: fileName,
-      type: file.type,
-    };
   }, []);
 
   const pickDocument = async (setter: (value: DocumentFile | null) => void) => {
@@ -612,8 +853,25 @@ const SellerRegistration = ({ navigation, route }: any) => {
   };
 
   const handleKycCheck = () => {
-    if (!aadhaar.trim() || !aadhaarDoc) {
-      Alert.alert("KYC", "Complete Aadhaar details and upload first.");
+    const docNumber = identityDocType === "Passport" ? passportNumber.trim() : aadhaar.trim();
+    const docName = identityDocType === "Passport" ? "Passport" : "Aadhaar card";
+    const frontPhoto = idProofFront || aadhaarDoc;
+    const backPhoto = idProofBack || idProof;
+
+    if (!docNumber) {
+      Alert.alert("Identity check", `Please enter your ${docName} number.`);
+      return;
+    }
+    if (!frontPhoto) {
+      Alert.alert("Identity check", `Please upload the Front side photo of your ${docName}.`);
+      return;
+    }
+    if (!backPhoto) {
+      Alert.alert("Identity check", `Please upload the Back side photo of your ${docName}.`);
+      return;
+    }
+    if (!voiceDoc) {
+      Alert.alert("Identity check", "Please record or upload your voice verification statement.");
       return;
     }
 
@@ -664,12 +922,25 @@ const SellerRegistration = ({ navigation, route }: any) => {
     }
 
     if (step === 4) {
-      if (!aadhaar.trim()) {
-        Alert.alert("Validation", "Please enter Aadhaar number.");
+      const docNumber = identityDocType === "Passport" ? passportNumber.trim() : aadhaar.trim();
+      const docName = identityDocType === "Passport" ? "Passport" : "Aadhaar card";
+      const frontPhoto = idProofFront || aadhaarDoc;
+      const backPhoto = idProofBack || idProof;
+
+      if (!docNumber) {
+        Alert.alert("Validation", `Please enter ${docName} number.`);
         return false;
       }
-      if (!aadhaarDoc) {
-        Alert.alert("Validation", "Please upload Aadhaar document.");
+      if (!frontPhoto) {
+        Alert.alert("Validation", `Please upload ${docName} Front side photo.`);
+        return false;
+      }
+      if (!backPhoto) {
+        Alert.alert("Validation", `Please upload ${docName} Back side photo.`);
+        return false;
+      }
+      if (!voiceDoc) {
+        Alert.alert("Validation", "Please record or upload your voice verification statement.");
         return false;
       }
       if (!kycChecked) {
@@ -678,25 +949,61 @@ const SellerRegistration = ({ navigation, route }: any) => {
       }
     }
 
-    if (step === 6) {
-      const rate = Number(serviceRate) || 0;
+    if (step === 5) {
+      if (!faceChecked && !faceCheckDoc && !faceCheckPreview) {
+        Alert.alert("Selfie required", "Please take a clear verification selfie before continuing.");
+        return false;
+      }
+    }
 
+    if (step === 6) {
       if (!serviceName.trim()) {
         Alert.alert("Validation", "Please enter service name.");
         return false;
       }
-      if (durationMinutes <= 0) {
-        Alert.alert("Validation", "Please select service duration.");
+
+      const checkRate = (val: string, maxLimit: number, label: string) => {
+        const num = Number(val) || 0;
+        if (num > maxLimit) {
+          Alert.alert("Validation", `${label} cannot exceed your plan limit of INR ${maxLimit}.`);
+          return false;
+        }
+        return true;
+      };
+
+      if (!checkRate(msgRate1Min, rateLimit1Min, "Message 1 min rate")) return false;
+      if (!checkRate(msgRate15Min, rateLimit15Min, "Message 15 min rate")) return false;
+      if (!checkRate(msgRate30Min, rateLimit30Min, "Message 30 min rate")) return false;
+      if (!checkRate(msgRate1Hour, rateLimit1Hour, "Message 1 hour rate")) return false;
+
+      if (!checkRate(audioRate1Min, rateLimit1Min, "Audio Call 1 min rate")) return false;
+      if (!checkRate(audioRate15Min, rateLimit15Min, "Audio Call 15 min rate")) return false;
+      if (!checkRate(audioRate30Min, rateLimit30Min, "Audio Call 30 min rate")) return false;
+      if (!checkRate(audioRate1Hour, rateLimit1Hour, "Audio Call 1 hour rate")) return false;
+    }
+
+    if (step === 7) {
+      const checkRate = (val: string, maxLimit: number, label: string) => {
+        const num = Number(val) || 0;
+        if (num > maxLimit) {
+          Alert.alert("Validation", `${label} cannot exceed your plan limit of INR ${maxLimit}.`);
+          return false;
+        }
+        return true;
+      };
+
+      if (!checkRate(videoRate1Min, rateLimit1Min, "Video Call 1 min rate")) return false;
+      if (!checkRate(videoRate15Min, rateLimit15Min, "Video Call 15 min rate")) return false;
+      if (!checkRate(videoRate30Min, rateLimit30Min, "Video Call 30 min rate")) return false;
+      if (!checkRate(videoRate1Hour, rateLimit1Hour, "Video Call 1 hour rate")) return false;
+
+      if (!termsAccepted) {
+        Alert.alert("Terms required", "Please read and accept the seller terms and conditions before finishing.");
         return false;
       }
-      if (rate <= 0) {
-        Alert.alert("Validation", "Please enter service rate.");
-        return false;
-      }
-      if (rate > rateLimit) {
-        Alert.alert("Rate limit", `For ${durationMinutes} min, max allowed rate is INR ${rateLimit}.`);
-        return false;
-      }
+    }
+
+    if (step === 7) {
       if (!termsAccepted) {
         Alert.alert("Terms required", "Please read and accept the seller terms and conditions before finishing.");
         return false;
@@ -707,6 +1014,15 @@ const SellerRegistration = ({ navigation, route }: any) => {
   };
 
   const handleNext = () => {
+    if (step === 2 && !paymentVerified) {
+      if (!bio.trim()) {
+        Alert.alert("Description required", "Please add a description before payment.");
+        return;
+      }
+      startSubscriptionPayment();
+      return;
+    }
+
     if (!validateCurrentStep()) return;
     setStep((prev) => Math.min(TOTAL_STEPS, prev + 1));
   };
@@ -732,75 +1048,82 @@ const SellerRegistration = ({ navigation, route }: any) => {
         category: "Seller",
         name: name.trim() || storedUser?.name || "",
         profilePic: avatar || storedUser?.profilePic || "",
-        coverPic: cover || storedUser?.coverPic || "",
+    coverPic: cover || storedUser?.coverPic || "",
       },
     });
   }, [avatar, cover, name]);
 
-  const startSubscriptionPayment = useCallback(async () => {
-    try {
+  const startSubscriptionPayment = useCallback(
+    async (targetPlanKey?: string) => {
+      const planCodeToUse = (targetPlanKey as PlanKey) || premiumPlan;
+      const targetPlanObj = PLAN_OPTIONS.find((plan) => plan.key === planCodeToUse) || selectedPlan;
+
       if (!name.trim()) {
-        Alert.alert("Seller name", "Enter seller name before plan payment.");
+        Alert.alert("Seller name required", "Please enter seller name before payment.");
         return;
       }
 
       if (!specializationValue) {
-        Alert.alert("Specialization", "Select specialization before plan payment.");
+        Alert.alert("Specialization required", "Select specialization before plan payment.");
         return;
       }
 
       if (!bio.trim()) {
-        Alert.alert("Description", "Add a seller description before payment.");
+        Alert.alert("Description required", "Add a seller description before payment.");
         return;
       }
 
       setSubscriptionProcessing(true);
 
-      const orderRes = await API.post("/seller/subscription/order", {
-        planCode: premiumPlan,
-        sellerName: name.trim(),
-        specialization: specializationValue,
-        bio: bio.trim(),
-        referralCode: referralCode.trim().toUpperCase(),
-      });
+      try {
+        const orderRes = await API.post("/seller/subscription/order", {
+          planCode: planCodeToUse,
+          sellerName: name.trim(),
+          specialization: specializationValue,
+          bio: bio.trim(),
+          referralCode: referralCode.trim().toUpperCase(),
+        });
 
-      const nextSubscriptionId = String(
-        orderRes?.data?.subscription?._id || orderRes?.data?.payment?.subscriptionId || "",
-      );
-      const paymentPayload = orderRes?.data?.payment;
+        const nextSubscriptionId = String(
+          orderRes?.data?.subscription?._id || orderRes?.data?.payment?.subscriptionId || "",
+        );
+        const paymentPayload = orderRes?.data?.payment;
 
-      if (!paymentPayload || !nextSubscriptionId) {
-        throw new Error("Subscription payment could not be prepared.");
+        if (!paymentPayload || !nextSubscriptionId) {
+          throw new Error("Subscription payment could not be prepared.");
+        }
+
+        const checkoutResult = await openRazorpayCheckout({
+          ...paymentPayload,
+          name: "Aline2 Seller Plan",
+          description: `${targetPlanObj.title} subscription`,
+        });
+
+        await API.post(`/seller/subscription/${nextSubscriptionId}/verify`, checkoutResult);
+
+        setPremiumPlan(planCodeToUse);
+        setSubscriptionId(nextSubscriptionId);
+        setPaymentVerified(true);
+        setErrorMessage("");
+        Alert.alert("Payment successful", "Subscription activated. Next step is open now.");
+        setStep((prev) => Math.min(TOTAL_STEPS, Math.max(prev + 1, 3)));
+      } catch (error: any) {
+        setPaymentVerified(false);
+        setSubscriptionId("");
+        setStep((prev) => Math.min(prev, 2));
+        if (error?.code === 0) {
+          Alert.alert("Payment cancelled", "Subscription payment was not completed.");
+        } else {
+          const nextMessage = getReadableApiErrorMessage(error, "Subscription payment failed");
+          setErrorMessage(nextMessage);
+          Alert.alert("Payment failed", nextMessage);
+        }
+      } finally {
+        setSubscriptionProcessing(false);
       }
-
-      const checkoutResult = await openRazorpayCheckout({
-        ...paymentPayload,
-        name: "Aline2 Seller Plan",
-        description: `${selectedPlan.title} subscription`,
-      });
-
-      await API.post(`/seller/subscription/${nextSubscriptionId}/verify`, checkoutResult);
-
-      setSubscriptionId(nextSubscriptionId);
-      setPaymentVerified(true);
-      setErrorMessage("");
-      Alert.alert("Payment successful", "Subscription activated. Next step is open now.");
-      setStep((prev) => Math.min(TOTAL_STEPS, Math.max(prev + 1, 3)));
-    } catch (error: any) {
-      setPaymentVerified(false);
-      setSubscriptionId("");
-      setStep((prev) => Math.min(prev, 2));
-      if (error?.code === 0) {
-        Alert.alert("Payment cancelled", "Subscription payment was not completed.");
-      } else {
-        const nextMessage = getReadableApiErrorMessage(error, "Subscription payment failed");
-        setErrorMessage(nextMessage);
-        Alert.alert("Payment failed", nextMessage);
-      }
-    } finally {
-      setSubscriptionProcessing(false);
-    }
-  }, [bio, name, premiumPlan, selectedPlan.title, specializationValue]);
+    },
+    [bio, name, premiumPlan, referralCode, selectedPlan, specializationValue],
+  );
 
   const submitSellerRegistration = async () => {
     try {
@@ -808,25 +1131,15 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
       setLoading(true);
 
-      const [
-        uploadedProfilePic,
-        uploadedCoverPic,
-        uploadedDegreeDoc,
-        uploadedLicenseDoc,
-        uploadedAadhaarDoc,
-        uploadedPanDoc,
-        uploadedIdProof,
-        uploadedFaceCheckDoc,
-      ] = await Promise.all([
-        uploadImageOrKeep(avatarFile, avatar),
-        uploadImageOrKeep(coverFile, cover),
-        uploadDocumentOrKeep(degreeDoc),
-        uploadDocumentOrKeep(licenseDoc),
-        uploadDocumentOrKeep(aadhaarDoc),
-        uploadDocumentOrKeep(panDoc),
-        uploadDocumentOrKeep(idProof),
-        uploadImageOrKeep(faceCheckDoc, faceCheckPreview),
-      ]);
+      const uploadedProfilePic = await uploadImageOrKeep(avatarFile, avatar);
+      const uploadedCoverPic = await uploadImageOrKeep(coverFile, cover);
+      const uploadedDegreeDoc = await uploadDocumentOrKeep(degreeDoc);
+      const uploadedLicenseDoc = await uploadDocumentOrKeep(licenseDoc);
+      const uploadedIdProofFront = await uploadDocumentOrKeep(idProofFront || aadhaarDoc);
+      const uploadedIdProofBack = await uploadDocumentOrKeep(idProofBack || idProof);
+      const uploadedPanDoc = await uploadDocumentOrKeep(panDoc);
+      const uploadedVoiceDoc = await uploadDocumentOrKeep(voiceDoc);
+      const uploadedFaceCheckDoc = await uploadImageOrKeep(faceCheckDoc, faceCheckPreview);
 
       const payload = {
         sellerName: name.trim(),
@@ -842,7 +1155,9 @@ const SellerRegistration = ({ navigation, route }: any) => {
         degree,
         certificateType,
         registrationNumber: registrationNumber.trim(),
+        identityDocType,
         aadhaar: aadhaar.trim(),
+        passportNumber: passportNumber.trim(),
         pan: pan.trim(),
         bankAccountName: bankAccountName.trim(),
         bankAccountNumber: bankAccountNumber.trim(),
@@ -851,19 +1166,49 @@ const SellerRegistration = ({ navigation, route }: any) => {
         referralCode: referralCode.trim().toUpperCase(),
         degreeDoc: uploadedDegreeDoc,
         licenseDoc: uploadedLicenseDoc,
-        aadhaarDoc: uploadedAadhaarDoc,
+        aadhaarDoc: uploadedIdProofFront,
+        idProofFront: uploadedIdProofFront,
+        idProof: uploadedIdProofBack,
+        idProofBack: uploadedIdProofBack,
         panDoc: uploadedPanDoc,
-        idProof: uploadedIdProof,
+        voiceVerificationDoc: uploadedVoiceDoc,
         faceCheckDoc: uploadedFaceCheckDoc,
         profilePic: uploadedProfilePic,
         coverPic: uploadedCoverPic,
         degreeChecked,
         kycChecked,
         faceChecked,
-        onboardingServiceName: serviceName.trim(),
-        onboardingServiceDurationMinutes: durationMinutes,
-        onboardingServiceRate: Number(serviceRate) || 0,
-        onboardingServiceRateLimit: rateLimit,
+        serviceRates: {
+          message: {
+            rate1Min: Number(msgRate1Min) || 0,
+            rate15Min: Number(msgRate15Min) || 0,
+            rate30Min: Number(msgRate30Min) || 0,
+            rate1Hour: Number(msgRate1Hour) || 0,
+          },
+          audio: {
+            rate1Min: Number(audioRate1Min) || 0,
+            rate15Min: Number(audioRate15Min) || 0,
+            rate30Min: Number(audioRate30Min) || 0,
+            rate1Hour: Number(audioRate1Hour) || 0,
+          },
+          video: {
+            rate1Min: Number(videoRate1Min) || 0,
+            rate15Min: Number(videoRate15Min) || 0,
+            rate30Min: Number(videoRate30Min) || 0,
+            rate1Hour: Number(videoRate1Hour) || 0,
+          },
+        },
+        durationRates: {
+          rate1Min: Number(audioRate1Min) || Number(msgRate1Min) || 0,
+          rate15Min: Number(audioRate15Min) || Number(msgRate15Min) || 0,
+          rate30Min: Number(audioRate30Min) || Number(msgRate30Min) || 0,
+          rate1Hour: Number(audioRate1Hour) || Number(msgRate1Hour) || 0,
+        },
+        extraPricing: {
+          messagePrice: Number(msgRate1Min) || 0,
+          audioCallPrice: Number(audioRate1Min) || 0,
+          videoCallPrice: Number(videoRate1Min) || 0,
+        },
         promotionPricing: {
           post: Number(promotionPostPrice) || 0,
           story: Number(promotionStoryPrice) || 0,
@@ -1075,9 +1420,45 @@ const SellerRegistration = ({ navigation, route }: any) => {
                   style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.text }]}
                   value={customSpecialization}
                   onChangeText={setCustomSpecialization}
-                  placeholder="Enter specialization"
+                  placeholder="Enter or select your specialization"
                   placeholderTextColor={colors.placeholder}
                 />
+                <Text style={[styles.fieldHint, { color: colors.mutedText, marginTop: -4, marginBottom: 8 }]}>
+                  Select a quick option below or type your own custom profession:
+                </Text>
+                <View style={styles.chipWrap}>
+                  {OTHER_SPECIALIZATION_SUGGESTIONS.map((chip) => {
+                    const isSelected = customSpecialization.trim().toLowerCase() === chip.toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={chip}
+                        style={[
+                          styles.suggestionChip,
+                          {
+                            backgroundColor: isSelected ? `${colors.primary}18` : colors.card,
+                            borderColor: isSelected ? colors.primary : colors.border,
+                          },
+                        ]}
+                        onPress={() => setCustomSpecialization(chip)}
+                        activeOpacity={0.85}
+                      >
+                        <Icon
+                          name={isSelected ? "checkmark" : "add"}
+                          size={14}
+                          color={isSelected ? colors.primary : colors.text}
+                        />
+                        <Text
+                          style={[
+                            styles.suggestionChipText,
+                            { color: isSelected ? colors.primary : colors.text, fontWeight: isSelected ? "800" : "600" },
+                          ]}
+                        >
+                          {chip}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </>
             ) : null}
           </View>
@@ -1123,11 +1504,14 @@ const SellerRegistration = ({ navigation, route }: any) => {
                     { backgroundColor: colors.card, borderColor: selected ? colors.primary : colors.border },
                   ]}
                   onPress={() => {
-                    if (plan.key !== premiumPlan) {
-                      setPremiumPlan(plan.key);
-                      setPaymentVerified(false);
-                      setSubscriptionId("");
+                    if (paymentVerified && plan.key === premiumPlan) {
+                      Alert.alert("Plan active", `You have already activated the ${plan.title} plan.`);
+                      return;
                     }
+                    setPremiumPlan(plan.key);
+                    setPaymentVerified(false);
+                    setSubscriptionId("");
+                    startSubscriptionPayment(plan.key);
                   }}
                   activeOpacity={0.9}
                 >
@@ -1136,6 +1520,22 @@ const SellerRegistration = ({ navigation, route }: any) => {
                     <Text style={[styles.planPrice, { color: colors.primary }]}>INR {plan.amount}</Text>
                   </View>
                   <Text style={[styles.planBody, { color: colors.mutedText }]}>{plan.description}</Text>
+
+                  <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center" }}>
+                    {selected && paymentVerified ? (
+                      <View style={{ backgroundColor: "#118B5018", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, flexDirection: "row", alignItems: "center" }}>
+                        <Icon name="checkmark-circle" size={14} color="#118B50" />
+                        <Text style={{ fontSize: 12, fontWeight: "700", color: "#118B50", marginLeft: 4 }}>Paid ✓</Text>
+                      </View>
+                    ) : (
+                      <View style={{ backgroundColor: `${colors.primary}12`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, flexDirection: "row", alignItems: "center" }}>
+                        <Icon name="card-outline" size={14} color={colors.primary} />
+                        <Text style={{ fontSize: 12, fontWeight: "700", color: colors.primary, marginLeft: 4 }}>
+                          {selected ? `Tap to Pay INR ${plan.amount}` : `Select & Pay INR ${plan.amount}`}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </TouchableOpacity>
               );
             })}
@@ -1160,7 +1560,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
                 { backgroundColor: paymentVerified ? "#118B50" : colors.primary },
                 subscriptionProcessing && styles.buttonDisabled,
               ]}
-              onPress={startSubscriptionPayment}
+              onPress={() => startSubscriptionPayment()}
               disabled={subscriptionProcessing}
               activeOpacity={0.9}
             >
@@ -1223,15 +1623,222 @@ const SellerRegistration = ({ navigation, route }: any) => {
     }
 
     if (step === 4) {
+      const isPassport = identityDocType === "Passport";
+
       return (
         <>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Aadhaar & Identity details</Text>
-          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Complete identity verification details.</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Identity details</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
+            Select your identity document and upload clear photos of both Front and Back sides.
+          </Text>
 
-          <Text style={[styles.label, { color: colors.text }]}>Aadhaar number</Text>
-          <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={aadhaar} onChangeText={(text) => { setAadhaar(text); setKycChecked(false); }} placeholder="XXXX XXXX XXXX" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
+          <Text style={[styles.label, { color: colors.text }]}>Select document type</Text>
+          <View style={styles.docTypeRow}>
+            <TouchableOpacity
+              style={[
+                styles.docTypeTab,
+                { backgroundColor: colors.card, borderColor: !isPassport ? colors.primary : colors.border },
+                !isPassport && { backgroundColor: `${colors.primary}12` },
+              ]}
+              onPress={() => {
+                setIdentityDocType("Aadhaar");
+                setKycChecked(false);
+              }}
+              activeOpacity={0.85}
+            >
+              <Icon
+                name="card-outline"
+                size={20}
+                color={!isPassport ? colors.primary : colors.mutedText}
+              />
+              <Text
+                style={[
+                  styles.docTypeTabText,
+                  { color: !isPassport ? colors.primary : colors.text, fontWeight: !isPassport ? "800" : "600" },
+                ]}
+              >
+                Aadhaar Card
+              </Text>
+            </TouchableOpacity>
 
-          {renderUpload("Aadhaar upload", aadhaarDoc, (file) => { setAadhaarDoc(file); setKycChecked(false); })}
+            <TouchableOpacity
+              style={[
+                styles.docTypeTab,
+                { backgroundColor: colors.card, borderColor: isPassport ? colors.primary : colors.border },
+                isPassport && { backgroundColor: `${colors.primary}12` },
+              ]}
+              onPress={() => {
+                setIdentityDocType("Passport");
+                setKycChecked(false);
+              }}
+              activeOpacity={0.85}
+            >
+              <Icon
+                name="book-outline"
+                size={20}
+                color={isPassport ? colors.primary : colors.mutedText}
+              />
+              <Text
+                style={[
+                  styles.docTypeTabText,
+                  { color: isPassport ? colors.primary : colors.text, fontWeight: isPassport ? "800" : "600" },
+                ]}
+              >
+                Passport
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {!isPassport ? (
+            <>
+              <Text style={[styles.label, { color: colors.text }]}>Aadhaar card number</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+                value={aadhaar}
+                onChangeText={(text) => {
+                  setAadhaar(text);
+                  setKycChecked(false);
+                }}
+                placeholder="XXXX XXXX XXXX"
+                placeholderTextColor={colors.placeholder}
+                keyboardType="numeric"
+              />
+            </>
+          ) : (
+            <>
+              <Text style={[styles.label, { color: colors.text }]}>Passport number</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+                value={passportNumber}
+                onChangeText={(text) => {
+                  setPassportNumber(text);
+                  setKycChecked(false);
+                }}
+                placeholder="Enter Passport number (e.g. A1234567)"
+                placeholderTextColor={colors.placeholder}
+                autoCapitalize="characters"
+              />
+            </>
+          )}
+
+          <Text style={[styles.label, { color: colors.text }]}>Upload document photos (Front & Back)</Text>
+          <Text style={[styles.fieldHint, { color: colors.mutedText, marginTop: -2, marginBottom: 8 }]}>
+            {isPassport
+              ? "Upload clear photos of your Passport front page and back/address page."
+              : "Upload clear photos of your Aadhaar card front side and back side."}
+          </Text>
+
+          {renderUpload(
+            isPassport ? "Passport Front Page photo" : "Aadhaar Front Side photo",
+            idProofFront || aadhaarDoc,
+            (file) => {
+              setIdProofFront(file);
+              setAadhaarDoc(file);
+              setKycChecked(false);
+            },
+          )}
+
+          {renderUpload(
+            isPassport ? "Passport Back Page photo" : "Aadhaar Back Side photo",
+            idProofBack || idProof,
+            (file) => {
+              setIdProofBack(file);
+              setIdProof(file);
+              setKycChecked(false);
+            },
+          )}
+
+          <Text style={[styles.label, { color: colors.text }]}>Voice verification</Text>
+          <Text style={[styles.fieldHint, { color: colors.mutedText, marginTop: -2, marginBottom: 8 }]}>
+            Speak the required phrase clearly to verify your voice identity.
+          </Text>
+
+          <View style={[styles.phraseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.phraseHeader}>
+              <Icon name="mic-outline" size={18} color={colors.primary} />
+              <Text style={[styles.phraseTitle, { color: colors.primary }]}>Read out loud phrase</Text>
+            </View>
+            <Text style={[styles.phraseText, { color: colors.text }]}>
+              "{VOICE_VERIFICATION_PHRASE}"
+            </Text>
+          </View>
+
+          <View style={[styles.voiceCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            {isRecordingVoice ? (
+              <View style={styles.recordingRow}>
+                <View style={styles.recordingDot} />
+                <Text style={[styles.recordingTimer, { color: colors.text }]}>
+                  Recording... {String(Math.floor(recordingTimer / 60)).padStart(2, "0")}:{String(recordingTimer % 60).padStart(2, "0")}
+                </Text>
+                <TouchableOpacity
+                  style={styles.stopRecordButton}
+                  onPress={stopVoiceRecording}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="square" size={14} color="#fff" />
+                  <Text style={styles.stopRecordText}>Stop</Text>
+                </TouchableOpacity>
+              </View>
+            ) : voiceDoc ? (
+              <View style={styles.voicePreviewRow}>
+                <TouchableOpacity
+                  style={[styles.voicePlayButton, { backgroundColor: colors.primary }]}
+                  onPress={togglePlayVoiceAudio}
+                  activeOpacity={0.85}
+                >
+                  <Icon name={isPlayingVoice ? "pause" : "play"} size={18} color="#fff" />
+                </TouchableOpacity>
+
+                <View style={styles.voiceMeta}>
+                  <Text style={[styles.voiceFileName, { color: colors.text }]} numberOfLines={1}>
+                    {voiceDoc.name || "Voice_verification.m4a"}
+                  </Text>
+                  <Text style={[styles.voiceStatusText, { color: colors.mutedText }]}>
+                    {isPlayingVoice ? "Playing audio..." : "Voice recorded"}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.voiceRerecordButton}
+                  onPress={startVoiceRecording}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="refresh-outline" size={16} color={colors.primary} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.voiceDeleteButton}
+                  onPress={() => {
+                    setVoiceDoc(null);
+                    setKycChecked(false);
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="trash-outline" size={16} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.voiceActionRow}>
+                <TouchableOpacity
+                  style={[styles.recordButton, { backgroundColor: colors.primary }]}
+                  onPress={startVoiceRecording}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="mic" size={18} color="#fff" />
+                  <Text style={styles.recordButtonText}>Record Voice</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.uploadAudioButton, { borderColor: colors.border, backgroundColor: colors.background }]}
+                  onPress={pickVoiceAudio}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="document-attach-outline" size={18} color={colors.text} />
+                  <Text style={[styles.uploadAudioText, { color: colors.text }]}>Upload Audio</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
 
           <TouchableOpacity style={[styles.checkButton, kycChecked && styles.checkButtonDone]} onPress={handleKycCheck}>
             <Icon name={kycChecked ? "checkmark-circle" : "card-outline"} size={18} color="#fff" />
@@ -1278,7 +1885,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
         <>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Face check</Text>
           <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
-            Take a clear selfie for verification. This step is optional for now, and you can continue without a selfie while testing later screens.
+            Take a clear selfie for identity verification. A clean, centered photo is required before proceeding.
           </Text>
 
           <View style={[styles.faceStatusCard, { backgroundColor: faceStatusBackground }]}>
@@ -1352,42 +1959,209 @@ const SellerRegistration = ({ navigation, route }: any) => {
       );
     }
 
+    if (step === 6) {
+      return (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Service & Communication Rates</Text>
+          <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
+            Enter service name and set duration rates (1 min, 15 min, 30 min, 1 hour) for Message and Audio Call services.
+          </Text>
+
+          <View style={[styles.rateCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.rateLabel, { color: colors.mutedText }]}>Plan Limit Overview</Text>
+            <Text style={[styles.rateValue, { color: colors.primary }]}>{selectedPlan.title}</Text>
+            <Text style={[styles.rateBody, { color: colors.mutedText }]}>
+              Hourly limit: INR {selectedPlan.maxHourlyRate}/hr (Max caps: 1 & 15m = INR {rateLimit15Min}, 30m = INR {rateLimit30Min}, 1h = INR {rateLimit1Hour}).
+            </Text>
+          </View>
+
+          <Text style={[styles.label, { color: colors.text }]}>Service name *</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={serviceName}
+            onChangeText={setServiceName}
+            placeholder="Consultation, legal call, brand review"
+            placeholderTextColor={colors.placeholder}
+          />
+
+          <View style={{ marginTop: 14, marginBottom: 8 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 16 }]}>1) Message Pricing</Text>
+          </View>
+
+          <Text style={[styles.label, { color: colors.text }]}>1 min message rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={msgRate1Min}
+            onChangeText={setMsgRate1Min}
+            placeholder={`Max allowed INR ${rateLimit1Min}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>15 min message rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={msgRate15Min}
+            onChangeText={setMsgRate15Min}
+            placeholder={`Max allowed INR ${rateLimit15Min}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>30 min message rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={msgRate30Min}
+            onChangeText={setMsgRate30Min}
+            placeholder={`Max allowed INR ${rateLimit30Min}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>1 hour message rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={msgRate1Hour}
+            onChangeText={setMsgRate1Hour}
+            placeholder={`Max allowed INR ${rateLimit1Hour}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <View style={{ marginTop: 18, marginBottom: 8 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 16 }]}>2) Audio Call Pricing</Text>
+          </View>
+
+          <Text style={[styles.label, { color: colors.text }]}>1 min audio call rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={audioRate1Min}
+            onChangeText={setAudioRate1Min}
+            placeholder={`Max allowed INR ${rateLimit1Min}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>15 min audio call rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={audioRate15Min}
+            onChangeText={setAudioRate15Min}
+            placeholder={`Max allowed INR ${rateLimit15Min}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>30 min audio call rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={audioRate30Min}
+            onChangeText={setAudioRate30Min}
+            placeholder={`Max allowed INR ${rateLimit30Min}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>1 hour audio call rate</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+            value={audioRate1Hour}
+            onChangeText={setAudioRate1Hour}
+            placeholder={`Max allowed INR ${rateLimit1Hour}`}
+            placeholderTextColor={colors.placeholder}
+            keyboardType="numeric"
+          />
+        </>
+      );
+    }
+
     return (
       <>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Service pricing</Text>
-        <Text style={[styles.sectionBody, { color: colors.mutedText }]}>Rate limit depends on your selected plan.</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Video Call & Promotion Rates</Text>
+        <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
+          Set video call rates and creator promotion pricing. Promotion rates automatically sync to your Featured Profile.
+        </Text>
 
-        <View style={[styles.rateCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.rateLabel, { color: colors.mutedText }]}>Max allowed for this duration</Text>
-          <Text style={[styles.rateValue, { color: colors.primary }]}>INR {rateLimit || 0}</Text>
-          <Text style={[styles.rateBody, { color: colors.mutedText }]}>
-            {selectedPlan.title}: INR {selectedPlan.maxHourlyRate}/hour. Example: 15 min max INR {Math.floor((selectedPlan.maxHourlyRate * 15) / 60)}.
+        <View style={{ marginTop: 10, marginBottom: 8 }}>
+          <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 16 }]}>3) Video Call Pricing</Text>
+        </View>
+
+        <Text style={[styles.label, { color: colors.text }]}>1 min video call rate</Text>
+        <TextInput
+          style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+          value={videoRate1Min}
+          onChangeText={setVideoRate1Min}
+          placeholder={`Max allowed INR ${rateLimit1Min}`}
+          placeholderTextColor={colors.placeholder}
+          keyboardType="numeric"
+        />
+
+        <Text style={[styles.label, { color: colors.text }]}>15 min video call rate</Text>
+        <TextInput
+          style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+          value={videoRate15Min}
+          onChangeText={setVideoRate15Min}
+          placeholder={`Max allowed INR ${rateLimit15Min}`}
+          placeholderTextColor={colors.placeholder}
+          keyboardType="numeric"
+        />
+
+        <Text style={[styles.label, { color: colors.text }]}>30 min video call rate</Text>
+        <TextInput
+          style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+          value={videoRate30Min}
+          onChangeText={setVideoRate30Min}
+          placeholder={`Max allowed INR ${rateLimit30Min}`}
+          placeholderTextColor={colors.placeholder}
+          keyboardType="numeric"
+        />
+
+        <Text style={[styles.label, { color: colors.text }]}>1 hour video call rate</Text>
+        <TextInput
+          style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+          value={videoRate1Hour}
+          onChangeText={setVideoRate1Hour}
+          placeholder={`Max allowed INR ${rateLimit1Hour}`}
+          placeholderTextColor={colors.placeholder}
+          keyboardType="numeric"
+        />
+
+        <View style={[styles.rateCard, { backgroundColor: colors.card, borderColor: colors.border, marginTop: 14 }]}>
+          <Text style={[styles.rateLabel, { color: colors.primary }]}>Promotion Pricing (Featured Profile Sync)</Text>
+          <Text style={[styles.rateBody, { color: colors.mutedText, marginTop: 2 }]}>
+            Rates entered here will automatically populate your Featured Profile for creator brand promotions.
           </Text>
         </View>
 
-        <Text style={[styles.label, { color: colors.text }]}>Service name</Text>
-        <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={serviceName} onChangeText={setServiceName} placeholder="Consultation, legal call, brand review" placeholderTextColor={colors.placeholder} />
+        <Text style={[styles.label, { color: colors.text }]}>Post promotion price (optional)</Text>
+        <TextInput
+          style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+          value={promotionPostPrice}
+          onChangeText={setPromotionPostPrice}
+          placeholder="INR for one post"
+          placeholderTextColor={colors.placeholder}
+          keyboardType="numeric"
+        />
 
-        {renderDropdownField("Duration", "duration", serviceDurationMinutes ? `${serviceDurationMinutes} min` : "", "Select duration")}
+        <Text style={[styles.label, { color: colors.text }]}>Story promotion price (optional)</Text>
+        <TextInput
+          style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+          value={promotionStoryPrice}
+          onChangeText={setPromotionStoryPrice}
+          placeholder="INR for one story"
+          placeholderTextColor={colors.placeholder}
+          keyboardType="numeric"
+        />
 
-        <Text style={[styles.label, { color: colors.text }]}>Your rate</Text>
-        <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={serviceRate} onChangeText={setServiceRate} placeholder={`Max INR ${rateLimit || 0}`} placeholderTextColor={colors.placeholder} keyboardType="numeric" />
-
-        <View style={[styles.rateCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.rateLabel, { color: colors.mutedText }]}>Promotion pricing</Text>
-          <Text style={[styles.rateBody, { color: colors.mutedText }]}>
-            Set creator rates for brand promotions. These prices are shown in the promotion marketplace.
-          </Text>
-        </View>
-
-        <Text style={[styles.label, { color: colors.text }]}>Post promotion price</Text>
-        <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={promotionPostPrice} onChangeText={setPromotionPostPrice} placeholder="INR for one post" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
-
-        <Text style={[styles.label, { color: colors.text }]}>Story promotion price</Text>
-        <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={promotionStoryPrice} onChangeText={setPromotionStoryPrice} placeholder="INR for one story" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
-
-        <Text style={[styles.label, { color: colors.text }]}>Reel promotion price</Text>
-        <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={promotionReelPrice} onChangeText={setPromotionReelPrice} placeholder="INR for one reel" placeholderTextColor={colors.placeholder} keyboardType="numeric" />
+        <Text style={[styles.label, { color: colors.text }]}>Reel promotion price (optional)</Text>
+        <TextInput
+          style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+          value={promotionReelPrice}
+          onChangeText={setPromotionReelPrice}
+          placeholder="INR for one reel"
+          placeholderTextColor={colors.placeholder}
+          keyboardType="numeric"
+        />
 
         <View style={[styles.termsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.termsHeader}>
@@ -1470,7 +2244,7 @@ const SellerRegistration = ({ navigation, route }: any) => {
 
             {step < TOTAL_STEPS ? (
               <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
-                <Text style={styles.primaryButtonText}>{step === 5 && !faceChecked ? "Skip for now" : "Continue"}</Text>
+                <Text style={styles.primaryButtonText}>Continue</Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity style={[styles.primaryButton, loading && styles.buttonDisabled]} onPress={submitSellerRegistration} disabled={loading}>
@@ -1870,4 +2644,177 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   modalCloseText: { color: "#fff", fontWeight: "800" },
+  docTypeRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  docTypeTab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 13,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+  },
+  docTypeTabText: {
+    marginLeft: 8,
+    fontSize: 14,
+  },
+  phraseCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  phraseHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  phraseTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    marginLeft: 6,
+  },
+  phraseText: {
+    fontSize: 13,
+    fontStyle: "italic",
+    lineHeight: 19,
+    fontWeight: "600",
+  },
+  voiceCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  recordingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  recordingDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#EF4444",
+  },
+  recordingTimer: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  stopRecordButton: {
+    backgroundColor: "#EF4444",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  stopRecordText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 13,
+    marginLeft: 6,
+  },
+  voicePreviewRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  voicePlayButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voiceMeta: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 8,
+  },
+  voiceFileName: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  voiceStatusText: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  voiceRerecordButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(123,77,255,0.12)",
+    marginRight: 6,
+  },
+  voiceDeleteButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(239,68,68,0.12)",
+  },
+  voiceActionRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  recordButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  recordButtonText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  uploadAudioButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  uploadAudioText: {
+    fontWeight: "700",
+    fontSize: 14,
+    marginLeft: 6,
+  },
+  chipWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  suggestionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  suggestionChipText: {
+    fontSize: 13,
+    marginLeft: 4,
+  },
 });

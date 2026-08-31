@@ -94,6 +94,8 @@ function WalletScreen({ navigation }: any) {
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawalsEnabled, setWithdrawalsEnabled] = useState(true);
   const [withdrawalConfig, setWithdrawalConfig] = useState<any>(null);
+  const [withdrawalErrorModalVisible, setWithdrawalErrorModalVisible] = useState(false);
+  const [withdrawalErrorMsg, setWithdrawalErrorMsg] = useState("");
 
   const accent = colors.primary;
   const bg = isDarkMode ? "#070B14" : "#F4F1FF";
@@ -276,10 +278,13 @@ function WalletScreen({ navigation }: any) {
         loadData().catch(() => undefined);
       }
     } catch (error: any) {
-      Alert.alert(
-        "Withdrawal Failed",
-        getReadableApiErrorMessage(error, "Withdrawal request could not be processed."),
-      );
+      const serverMsg = error?.response?.data?.message || "";
+      const readableMsg = getReadableApiErrorMessage(error, "Check Razorpay API, payment failed or check API provider.");
+      const finalErrorMessage = serverMsg || readableMsg || "Check Razorpay API, payment failed or check API provider.";
+
+      setShowWithdrawModal(false);
+      setWithdrawalErrorMsg(finalErrorMessage);
+      setWithdrawalErrorModalVisible(true);
     } finally {
       setWithdrawing(false);
     }
@@ -701,6 +706,43 @@ function WalletScreen({ navigation }: any) {
           )) : <Text style={[styles.emptyText, { color: textSecondary }]}>Appointments and booking payments will appear here.</Text>}
         </View>
       </View>
+
+      <Modal
+        visible={withdrawalErrorModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setWithdrawalErrorModalVisible(false)}
+      >
+        <View style={styles.errorModalOverlay}>
+          <TouchableOpacity
+            style={styles.withdrawModalBackdrop}
+            activeOpacity={1}
+            onPress={() => setWithdrawalErrorModalVisible(false)}
+          />
+          <View style={[styles.errorModalCard, { backgroundColor: panel, borderColor: border }]}>
+            <View style={styles.errorIconWrap}>
+              <Icon name="warning-outline" size={32} color="#EF4444" />
+            </View>
+
+            <Text style={[styles.errorModalTitle, { color: colors.text }]}>Withdrawal Payment Failed</Text>
+            <Text style={styles.errorModalSubtitle}>Check Razorpay API or API Provider</Text>
+
+            <View style={[styles.errorDetailsBox, { backgroundColor: isDarkMode ? "#1F1315" : "#FFF5F5", borderColor: isDarkMode ? "#3D1E22" : "#FEE2E2" }]}>
+              <Text style={[styles.errorDetailsText, { color: colors.text }]}>
+                {withdrawalErrorMsg || "Check Razorpay API, payment failed or check API provider."}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.errorModalBtn, { backgroundColor: accent }]}
+              onPress={() => setWithdrawalErrorModalVisible(false)}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.errorModalBtnText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showWithdrawModal}
@@ -1318,5 +1360,67 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  errorModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.70)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  errorModalCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 20,
+    padding: 22,
+    borderWidth: 1,
+    alignItems: "center",
+  },
+  errorIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#FEF2F2",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  errorModalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  errorModalSubtitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#EF4444",
+    textAlign: "center",
+    marginBottom: 14,
+  },
+  errorDetailsBox: {
+    width: "100%",
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 18,
+  },
+  errorDetailsText: {
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+    fontWeight: "500",
+  },
+  errorModalBtn: {
+    width: "100%",
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  errorModalBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
   },
 });

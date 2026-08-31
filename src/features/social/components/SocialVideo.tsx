@@ -61,6 +61,8 @@ function SocialVideo({
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
   const videoRef = useRef<any>(null);
   const durationRef = useRef(0);
+  const trackWidthRef = useRef(0);
+
   const [posterFailed, setPosterFailed] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
@@ -105,6 +107,28 @@ function SocialVideo({
       useNativeDriver: true,
     }).start();
   }, [placeholderOpacity]);
+
+  const handleSeekFromEvent = useCallback((evt: any) => {
+    const locX = evt?.nativeEvent?.locationX ?? 0;
+    const width = trackWidthRef.current || 1;
+    const ratio = Math.max(0, Math.min(1, locX / width));
+    setVideoProgress(ratio);
+    if (durationRef.current > 0) {
+      videoRef.current?.seek?.(ratio * durationRef.current);
+    }
+  }, []);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => handleSeekFromEvent(evt),
+        onPanResponderMove: (evt) => handleSeekFromEvent(evt),
+        onPanResponderRelease: (evt) => handleSeekFromEvent(evt),
+      }),
+    [handleSeekFromEvent]
+  );
 
   useEffect(() => {
     placeholderOpacity.stopAnimation();

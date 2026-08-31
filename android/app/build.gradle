@@ -110,8 +110,8 @@ android {
         applicationId "com.aline2"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 28
-        versionName "2.2.1"
+        versionCode 30
+        versionName "2.2.3"
     }
     packaging {
         resources {
@@ -123,6 +123,18 @@ android {
                 "META-INF/NOTICE*",
                 "kotlin/**",
                 "DebugProbesKt.bin",
+            ]
+            pickFirsts += [
+                "**/libcrypto.so",
+                "**/libssl.so",
+                "**/libc++_shared.so",
+            ]
+        }
+        jniLibs {
+            pickFirsts += [
+                "**/libcrypto.so",
+                "**/libssl.so",
+                "**/libc++_shared.so",
             ]
         }
     }
