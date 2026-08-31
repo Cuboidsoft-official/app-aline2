@@ -12,7 +12,7 @@ import {
   Alert,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
-import { GallerySaveError, saveMediaToGallery } from "../../utils/mediaDownload";
+import { GallerySaveError, saveCapturedImageToGallery, saveMediaToGallery } from "../../utils/mediaDownload";
 
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import ShareTargetsList, {
@@ -30,6 +30,8 @@ interface MediaPreviewActionsModalProps {
   onClose: () => void;
   mediaUrl: string | null | undefined;
   fileName?: string | null;
+  mediaType?: "image" | "video";
+  captureImage?: () => Promise<string>;
   onAddToStory?: () => void;
 }
 
@@ -38,6 +40,8 @@ export const MediaPreviewActionsModal: React.FC<MediaPreviewActionsModalProps> =
   onClose,
   mediaUrl,
   fileName,
+  mediaType,
+  captureImage,
   onAddToStory,
 }) => {
   const [saving, setSaving] = useState(false);
@@ -132,11 +136,17 @@ export const MediaPreviewActionsModal: React.FC<MediaPreviewActionsModalProps> =
 
     try {
       setSaving(true);
-      await saveMediaToGallery(targetUrl, fileName || "aline2_post");
+      if (mediaType === "image" && captureImage) {
+        // Skip the network download entirely for images that are already
+        // rendered on screen — capture the visible <Image> instead.
+        await saveCapturedImageToGallery(captureImage);
+      } else {
+        await saveMediaToGallery(targetUrl, fileName || "aline2_post");
+      }
       Alert.alert("Saved", "Media saved successfully to your Gallery.");
       onClose();
     } catch (error: any) {
-      console.error("Save to Gallery error:", error);
+      console.error("Save to Gallery error:", error?.code, error?.message, error);
       const message = error?.message || "Could not save media to your Gallery.";
 
       if (error instanceof GallerySaveError && error.code === "permission") {
@@ -153,6 +163,14 @@ export const MediaPreviewActionsModal: React.FC<MediaPreviewActionsModalProps> =
               });
             },
           },
+        ]);
+        return;
+      }
+
+      if (error instanceof GallerySaveError && ["download", "network", "timeout"].includes(error.code)) {
+        Alert.alert("Error", message, [
+          { text: "Cancel", style: "cancel" },
+          { text: "Retry", onPress: () => handleSaveToGallery() },
         ]);
         return;
       }
