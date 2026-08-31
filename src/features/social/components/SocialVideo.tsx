@@ -23,6 +23,9 @@ type SocialVideoProps = {
   showBufferingLoader?: boolean;
   showProgressBar?: boolean;
   progressBarBottomOffset?: number;
+  progressBarTrackColor?: string;
+  progressBarFillColor?: string;
+  progressBarThumbColor?: string;
 };
 
 const isLikelyVideoUri = (value: string): boolean =>
@@ -51,6 +54,9 @@ function SocialVideo({
   showBufferingLoader = true,
   showProgressBar = false,
   progressBarBottomOffset,
+  progressBarTrackColor = "rgba(255, 255, 255, 0.35)",
+  progressBarFillColor = "#ffffff",
+  progressBarThumbColor = "#ffffff",
 }: SocialVideoProps) {
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
   const videoRef = useRef<any>(null);
@@ -62,7 +68,7 @@ function SocialVideo({
   const [isBuffering, setIsBuffering] = useState(false);
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [videoProgress, setVideoProgress] = useState(0);
-
+  const [progressBarWidth, setProgressBarWidth] = useState(0);
   const resolvedUri = String(uri || "").trim();
   const resolvedPosterUri = String(posterUri || "").trim();
   const usablePosterUri = isUsablePosterUri(resolvedPosterUri, resolvedUri) ? resolvedPosterUri : "";
@@ -71,6 +77,28 @@ function SocialVideo({
   const shouldShowPoster = !!usablePosterUri && !posterFailed;
   const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0));
   const effectivePaused = paused || preload;
+
+  const seekToProgress = useCallback((locationX: number) => {
+    if (progressBarWidth <= 0 || durationRef.current <= 0) {
+      return;
+    }
+
+    const nextProgress = Math.max(0, Math.min(1, locationX / progressBarWidth));
+    setVideoProgress(nextProgress);
+    videoRef.current?.seek?.(nextProgress * durationRef.current);
+  }, [progressBarWidth]);
+
+  const progressBarResponder = useMemo(
+    () => PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (event) => seekToProgress(event.nativeEvent.locationX),
+      onPanResponderMove: (event) => seekToProgress(event.nativeEvent.locationX),
+      onPanResponderRelease: (event) => seekToProgress(event.nativeEvent.locationX),
+      onPanResponderTerminationRequest: () => false,
+    }),
+    [seekToProgress],
+  );
 
   const fadeOutPoster = useCallback(() => {
     Animated.timing(placeholderOpacity, {
@@ -124,13 +152,13 @@ function SocialVideo({
   }, [preload, paused, isVideoReady, fadeOutPoster, placeholderOpacity]);
 
   useEffect(() => {
-    if (!restartKey || !videoRef.current || paused || preload) {
+    if (!restartKey || !videoRef.current || preload) {
       return;
     }
 
     videoRef.current.seek?.(0);
     setVideoProgress(0);
-  }, [paused, preload, restartKey]);
+  }, [preload, restartKey]);
 
   useEffect(() => {
     [usablePosterUri]
@@ -266,19 +294,31 @@ function SocialVideo({
           ) : null}
           {showProgressBar && !preload ? (
             <View
-              onLayout={(e) => {
-                trackWidthRef.current = e.nativeEvent.layout.width;
-              }}
-              {...panResponder.panHandlers}
               style={[
                 styles.progressBarTrack,
                 progressBarBottomOffset !== undefined ? { bottom: progressBarBottomOffset } : null,
               ]}
+              onLayout={(event) => setProgressBarWidth(event.nativeEvent.layout.width)}
+              {...progressBarResponder.panHandlers}
             >
+              <View pointerEvents="none" style={[styles.progressBarRail, { backgroundColor: progressBarTrackColor }]} />
               <View
                 style={[
                   styles.progressBarFill,
-                  { width: `${Math.max(0, Math.min(100, videoProgress * 100))}%` },
+                  {
+                    width: `${Math.max(0, Math.min(100, videoProgress * 100))}%`,
+                    backgroundColor: progressBarFillColor,
+                  },
+                ]}
+              />
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.progressBarThumb,
+                  {
+                    left: `${Math.max(0, Math.min(100, videoProgress * 100))}%`,
+                    backgroundColor: progressBarThumbColor,
+                  },
                 ]}
               />
             </View>
@@ -312,10 +352,18 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: 4,
-    backgroundColor: "rgba(255, 255, 255, 0.35)",
+    height: 18,
+    justifyContent: "center",
     zIndex: 999,
     elevation: 10,
+  },
+  progressBarRail: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.35)",
   },
   progressBarFill: {
     height: 4,
@@ -326,6 +374,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 2,
     elevation: 3,
+  },
+  progressBarThumb: {
+    position: "absolute",
+    width: 14,
+    height: 14,
+    marginLeft: -7,
+    borderRadius: 7,
+    backgroundColor: "#ffffff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.35,
+    shadowRadius: 2,
+    elevation: 4,
   },
 });
 

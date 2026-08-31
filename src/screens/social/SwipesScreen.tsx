@@ -28,7 +28,7 @@ import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../../components/AppBottomDock";
+import AppBottomDock, { getAppBottomDockHeight } from "../../components/AppBottomDock";
 import DraggableBottomSheet from "../../components/DraggableBottomSheet";
 import CommentThreadSheet from "../../features/social/components/CommentThreadSheet";
 import CommentAudioBubble from "../../features/social/components/CommentAudioBubble";
@@ -42,6 +42,7 @@ import { CommentAudioFile, ReportReason, SocialUser, Swipe, SwipeComment } from 
 import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../../hooks/useSegmentedMusicPlayback";
 import { toUserSafeMessage } from "../../features/social/validation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
+import { getAdjacentSwipeIndex, SwipeNavigationDirection } from "../../utils/swipeNavigation";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
 import { shouldShowVerifiedBadge } from "../../utils/verificationBadges";
 import { buildSharedPostMessage } from "../../utils/chatPresentation";
@@ -331,8 +332,7 @@ function SwipesScreen({ navigation, route }: any) {
     syncKey: activeSwipePlaybackCycle,
     pauseWhenInactive: true,
   });
-  const bottomDockPadding = APP_BOTTOM_DOCK_BASE_HEIGHT
-    + Math.max(insets.bottom + (Platform.OS === "android" ? 8 : 0), Platform.OS === "ios" ? 14 : 20);
+  const bottomDockPadding = getAppBottomDockHeight(insets.bottom);
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 85,
     minimumViewTime: 100,
@@ -349,6 +349,21 @@ function SwipesScreen({ navigation, route }: any) {
     // Keep playback tied to viewability so music switches as soon as the next
     // swipe becomes dominant instead of waiting for scroll momentum to finish.
   }, []);
+
+  const navigateToAdjacentSwipe = useCallback((direction: SwipeNavigationDirection) => {
+    if (!swipes.length) {
+      return;
+    }
+
+    const targetIndex = getAdjacentSwipeIndex(activeSwipeIndexRef.current, direction, swipes.length);
+    if (targetIndex === activeSwipeIndexRef.current) {
+      return;
+    }
+
+    activeSwipeIndexRef.current = targetIndex;
+    setActiveSwipeIndex(targetIndex);
+    swipeListRef.current?.scrollToIndex({ index: targetIndex, animated: true });
+  }, [swipes.length]);
 
   const isBusy = (type: "like" | "save" | "share", swipeId: string): boolean =>
     !!busyActions[`${type}_${swipeId}`];
@@ -1099,7 +1114,7 @@ function SwipesScreen({ navigation, route }: any) {
           onPressIn={handleSwipePressIn}
           onPressOut={handleSwipePressOut}
         >
-          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
             <SocialVideo
               uri={normalizeMediaUrl(item.media.url)}
               posterUri={normalizeMediaUrl(item.thumbnailUrl || item.media.thumbnailUrl || item.media.url)}
@@ -1119,6 +1134,8 @@ function SwipesScreen({ navigation, route }: any) {
               showBufferingLoader={false}
               showProgressBar={isActive}
               progressBarBottomOffset={bottomDockPadding}
+              progressBarFillColor="#EF4444"
+              progressBarThumbColor="#EF4444"
             />
           </View>
           {item.media.sensitiveContent?.isSensitive ? (
@@ -1145,6 +1162,17 @@ function SwipesScreen({ navigation, route }: any) {
         <LinearGradient pointerEvents="none" colors={["rgba(0,0,0,0.74)", "rgba(0,0,0,0.12)", "transparent"]} style={styles.topGradient} />
         <LinearGradient pointerEvents="none" colors={["transparent", "rgba(0,0,0,0.42)", "rgba(0,0,0,0.88)"]} style={styles.bottomGradient} />
         <View pointerEvents="box-none" style={[styles.overlay, { paddingBottom: bottomDockPadding + 12 }, isHoldingToPause && { opacity: 0 }]}>
+          {isActive ? (
+            <TouchableOpacity
+              accessibilityLabel={isUserPaused ? "Play video" : "Pause video"}
+              accessibilityRole="button"
+              activeOpacity={0.82}
+              style={styles.videoPlaybackButton}
+              onPress={() => setIsUserPaused((current) => !current)}
+            >
+              <Icon name={isUserPaused ? "play" : "pause"} size={28} color="#fff" style={isUserPaused ? { marginLeft: 3 } : undefined} />
+            </TouchableOpacity>
+          ) : null}
           <View pointerEvents="box-none" style={styles.topBar}>
             <Text style={styles.screenTitle}>Swipes</Text>
             <TouchableOpacity style={styles.createButton} onPress={openSwipeComposer}>
@@ -1154,6 +1182,28 @@ function SwipesScreen({ navigation, route }: any) {
               </LinearGradient>
             </TouchableOpacity>
           </View>
+          {isActive ? (
+            <View pointerEvents="box-none" style={styles.reelNavigationControls}>
+              <TouchableOpacity
+                accessibilityLabel="Previous swipe"
+                accessibilityRole="button"
+                disabled={activeSwipeIndex <= 0}
+                onPress={() => navigateToAdjacentSwipe("previous")}
+                style={[styles.reelNavigationButton, activeSwipeIndex <= 0 && styles.reelNavigationButtonDisabled]}
+              >
+                <Icon name="chevron-up" size={22} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityLabel="Next swipe"
+                accessibilityRole="button"
+                disabled={activeSwipeIndex >= swipes.length - 1}
+                onPress={() => navigateToAdjacentSwipe("next")}
+                style={[styles.reelNavigationButton, activeSwipeIndex >= swipes.length - 1 && styles.reelNavigationButtonDisabled]}
+              >
+                <Icon name="chevron-down" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          ) : null}
           <View pointerEvents="box-none" style={styles.bottomRow}>
             <View pointerEvents="box-none" style={styles.bottomTextBlock}>
               <View style={styles.userMetaBlock}>
@@ -1305,6 +1355,7 @@ function SwipesScreen({ navigation, route }: any) {
         renderItem={renderSwipe}
         onLayout={onListLayout}
         snapToInterval={viewportHeight}
+        pagingEnabled
         snapToAlignment="start"
         disableIntervalMomentum
         decelerationRate="fast"
@@ -1808,6 +1859,27 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 12 },
+  reelNavigationControls: {
+    position: "absolute",
+    right: 10,
+    top: "42%",
+    gap: 10,
+    alignItems: "center",
+    zIndex: 20,
+  },
+  reelNavigationButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.42)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.32)",
+  },
+  reelNavigationButtonDisabled: {
+    opacity: 0.35,
+  },
   screenTitle: { color: "rgba(255,255,255,0.82)", fontSize: 20, fontWeight: "800" },
   createButton: {
     overflow: "hidden",
@@ -2150,6 +2222,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1.5,
     borderColor: "rgba(255, 255, 255, 0.35)",
+  },
+  videoPlaybackButton: {
+    position: "absolute",
+    alignSelf: "center",
+    top: "42%",
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.52)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    zIndex: 20,
   },
 });
 

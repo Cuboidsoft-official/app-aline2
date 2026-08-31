@@ -1,5 +1,5 @@
 import SocialVideo from "../../features/social/components/SocialVideo";
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Modal,
   View,
@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Linking,
   Alert,
-  Image,
   SafeAreaView,
   StatusBar,
   Platform,
@@ -19,6 +18,7 @@ import { WebView } from "react-native-webview";
 import Icon from "react-native-vector-icons/Ionicons";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import MediaPreviewActionsModal from "./MediaPreviewActionsModal";
+import PinchZoomImage, { PinchZoomImageHandle } from "./PinchZoomImage";
 
 interface DocumentViewerModalProps {
   visible: boolean;
@@ -31,6 +31,7 @@ interface DocumentViewerModalProps {
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i;
 const DOC_EXTENSIONS = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv)$/i;
 const VIDEO_EXTENSIONS = /\.(mp4|mov|m4v|webm|mkv|3gp)$/i;
+const HEADER_HEIGHT = 56;
 
 export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   visible,
@@ -42,6 +43,14 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [showActionsModal, setShowActionsModal] = useState(false);
+  const imageViewerRef = useRef<PinchZoomImageHandle>(null);
+
+  // The header now floats above full-bleed content instead of pushing it
+  // down, so images/videos render edge-to-edge with no reserved gap. The
+  // PDF/document WebView still needs a top offset so it doesn't render
+  // underneath the floating header buttons; compute it dynamically instead
+  // of a fixed guess so it works across different status bar heights.
+  const headerOffset = HEADER_HEIGHT + (Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 4 : 4);
 
   const targetUrl = useMemo(() => {
     return normalizeMediaUrl(url || "");
@@ -155,43 +164,10 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#0F0F12" />
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.headerButton}
-            onPress={onClose}
-            activeOpacity={0.7}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Icon name="close" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-
-          <View style={styles.titleContainer}>
-            <Icon
-              name={isImage ? "image-outline" : isVideo ? "videocam-outline" : "document-text-outline"}
-              size={18}
-              color="#A1A1AA"
-              style={styles.titleIcon}
-            />
-            {/*<Text style={styles.headerTitle} numberOfLines={1}>
-              {displayName}
-            </Text>*/}
-          </View>
-
-          <TouchableOpacity
-            style={styles.headerButton}
-            onPress={() => setShowActionsModal(true)}
-            activeOpacity={0.7}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Icon name="ellipsis-vertical" size={22} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Content Body */}
+        {/* Content Body (full-bleed, no reserved header space) */}
         <View style={styles.body}>
           {!targetUrl ? (
             <View style={styles.errorContainer}>
@@ -199,42 +175,29 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
               <Text style={styles.errorText}>Document URL is unavailable.</Text>
             </View>
           ) : isVideo ? (
-            <View style={{ flex: 1, width: "100%", height: "100%", backgroundColor: "#000", justifyContent: "center", alignItems: "center" }}>
+            <View style={styles.videoContainer}>
               <SocialVideo
                 uri={targetUrl}
                 controls={true}
                 paused={false}
-                resizeMode="cover"
-                style={{ width: "100%", height: "100%" }}
+                resizeMode="contain"
+                style={StyleSheet.absoluteFill}
               />
             </View>
           ) : isImage ? (
-            <ScrollView
-              style={{ flex: 1, width: "100%", height: "100%", backgroundColor: "#000" }}
-              contentContainerStyle={{ flexGrow: 1, justifyContent: "center", alignItems: "center" }}
-              maximumZoomScale={5}
-              minimumZoomScale={1}
-              bouncesZoom={true}
-              pinchGestureEnabled={true}
-              showsHorizontalScrollIndicator={false}
-              showsVerticalScrollIndicator={false}
-              centerContent={true}
-            >
-              <Image
-                source={{ uri: targetUrl }}
-                style={{ width: "100%", height: "100%" }}
-                resizeMode="cover"
-                onLoad={() => setLoading(false)}
-                onError={(err) => {
-                  console.log("Image preview load error:", err?.nativeEvent);
-                  setLoading(false);
-                  setHasError(true);
-                }}
-              />
-            </ScrollView>
+            <PinchZoomImage
+              ref={imageViewerRef}
+              uri={targetUrl}
+              onLoad={() => setLoading(false)}
+              onError={(err) => {
+                console.log("Image preview load error:", err?.nativeEvent);
+                setLoading(false);
+                setHasError(true);
+              }}
+            />
           ) : (
             <ScrollView
-              style={{ flex: 1, width: "100%", height: "100%", backgroundColor: "#0F0F12" }}
+              style={[styles.docScroll, { marginTop: headerOffset }]}
               contentContainerStyle={{ flex: 1, width: "100%", height: "100%" }}
               maximumZoomScale={5}
               minimumZoomScale={1}
@@ -276,7 +239,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 
           {/* Loading Indicator */}
           {loading && !hasError && (
-            <View style={styles.loadingOverlay}>
+            <View style={styles.loadingOverlay} pointerEvents="none">
               <ActivityIndicator size="large" color="#8B5CF6" />
               <Text style={styles.loadingText}>Opening document...</Text>
             </View>
@@ -310,17 +273,58 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             </View>
           )}
         </View>
+
+        {/* Floating header, overlaid on top of full-bleed content */}
+        <SafeAreaView style={styles.headerSafeArea} pointerEvents="box-none">
+          <View style={styles.header} pointerEvents="box-none">
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={onClose}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Icon name="close" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={styles.titleContainer}>
+              <Icon
+                name={isImage ? "image-outline" : isVideo ? "videocam-outline" : "document-text-outline"}
+                size={18}
+                color="#A1A1AA"
+                style={styles.titleIcon}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={() => setShowActionsModal(true)}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Icon name="ellipsis-vertical" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+
         <MediaPreviewActionsModal
           visible={showActionsModal}
           onClose={() => setShowActionsModal(false)}
           mediaUrl={targetUrl}
           fileName={displayName}
+          mediaType={isImage ? "image" : isVideo ? "video" : undefined}
+          captureImage={isImage ? async () => {
+            const uri = await imageViewerRef.current?.captureAsync();
+            if (!uri) {
+              throw new Error("Image capture is unavailable.");
+            }
+            return uri;
+          } : undefined}
           onAddToStory={() => {
             onClose();
             onAddToStory?.(targetUrl, isVideo ? "video" : "image");
           }}
         />
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 };
@@ -328,26 +332,32 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0F0F12",
+    backgroundColor: "#000000",
+  },
+  headerSafeArea: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
   },
   header: {
-    height: 56,
+    height: HEADER_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#1F1F24",
-    backgroundColor: "#16161A",
-    marginTop: Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0,
+    marginTop: Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 4 : 4,
   },
   headerButton: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
   },
   titleContainer: {
     flex: 1,
@@ -367,8 +377,22 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
-    backgroundColor: "#0F0F12",
+    backgroundColor: "#000000",
     position: "relative",
+  },
+  videoContainer: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#000000",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  docScroll: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#0F0F12",
   },
   webView: {
     flex: 1,

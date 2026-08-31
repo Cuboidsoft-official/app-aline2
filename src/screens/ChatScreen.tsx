@@ -911,6 +911,61 @@ const buildScheduledCallPreview = (message: ChatMessage): ScheduledCallPreview |
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
+// Renders a chat image/video thumbnail at its real aspect ratio (capped to
+// maxWidth/maxHeight) instead of forcing a fixed box, so there's no cropping
+// or letterboxed gray space around the media.
+const ChatAutoSizedImage: React.FC<{
+  uri: string;
+  maxWidth: number;
+  maxHeight: number;
+  style?: any;
+  resizeMode?: "cover" | "contain";
+}> = ({ uri, maxWidth, maxHeight, style, resizeMode = "cover" }) => {
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSize(null);
+    if (!uri) {
+      return undefined;
+    }
+
+    Image.getSize(
+      uri,
+      (naturalWidth, naturalHeight) => {
+        if (cancelled || !naturalWidth || !naturalHeight) {
+          return;
+        }
+        const ratio = naturalWidth / naturalHeight;
+        let displayWidth = Math.min(maxWidth, naturalWidth);
+        let displayHeight = displayWidth / ratio;
+        if (displayHeight > maxHeight) {
+          displayHeight = maxHeight;
+          displayWidth = displayHeight * ratio;
+        }
+        setSize({ width: displayWidth, height: displayHeight });
+      },
+      () => {
+        if (!cancelled) {
+          setSize({ width: maxWidth, height: maxWidth });
+        }
+      }
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [uri, maxWidth, maxHeight]);
+
+  return (
+    <Image
+      source={{ uri }}
+      style={[{ width: size?.width || maxWidth, height: size?.height || maxWidth }, style]}
+      resizeMode={resizeMode}
+    />
+  );
+};
+
 const ChatScreen = ({ navigation, route }: any) => {
   const colors = CHAT_DARK_COLORS;
   const insets = useSafeAreaInsets();
@@ -1021,6 +1076,51 @@ const ChatScreen = ({ navigation, route }: any) => {
   const [attachmentTextDraft, setAttachmentTextDraft] = useState("");
   const [editedAttachmentUris, setEditedAttachmentUris] = useState<Record<string, string>>({});
   const attachmentStageRef = useRef<any>(null);
+  // Date.now() can repeat when strokes/text are added within the same
+  // millisecond (fast drawing), causing duplicate React keys and glitchy
+  // redraws. A monotonic counter guarantees a unique id every time.
+  const attachmentMarkupIdRef = useRef(0);
+  const nextAttachmentMarkupId = useCallback(() => {
+    attachmentMarkupIdRef.current += 1;
+    return attachmentMarkupIdRef.current;
+  }, []);
+  const attachmentMarkupTextsRef = useRef<AttachmentMarkupText[]>([]);
+  useEffect(() => {
+    attachmentMarkupTextsRef.current = attachmentMarkupTexts;
+  }, [attachmentMarkupTexts]);
+  const attachmentTextDragAnchorRef = useRef<{ id: number; x: number; y: number } | null>(null);
+  const attachmentTextDragRespondersRef = useRef<Map<number, ReturnType<typeof PanResponder.create>>>(new Map());
+  const getAttachmentTextDragResponder = useCallback((textId: number) => {
+    const cached = attachmentTextDragRespondersRef.current.get(textId);
+    if (cached) {
+      return cached;
+    }
+    const responder = PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        const current = attachmentMarkupTextsRef.current.find((item) => item.id === textId);
+        attachmentTextDragAnchorRef.current = { id: textId, x: current?.x ?? 0, y: current?.y ?? 0 };
+      },
+      onPanResponderMove: (_event, gestureState) => {
+        const anchor = attachmentTextDragAnchorRef.current;
+        if (!anchor || anchor.id !== textId) {
+          return;
+        }
+        const nextX = anchor.x + gestureState.dx;
+        const nextY = anchor.y + gestureState.dy;
+        setAttachmentMarkupTexts((prev) => prev.map((item) => (item.id === textId ? { ...item, x: nextX, y: nextY } : item)));
+      },
+      onPanResponderRelease: () => {
+        attachmentTextDragAnchorRef.current = null;
+      },
+      onPanResponderTerminate: () => {
+        attachmentTextDragAnchorRef.current = null;
+      },
+    });
+    attachmentTextDragRespondersRef.current.set(textId, responder);
+    return responder;
+  }, []);
   const [messagePreview, setMessagePreview] = useState<MessagePreviewState | null>(null);
   const [documentPreview, setDocumentPreview] = useState<{ url: string; fileName?: string } | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
@@ -2245,7 +2345,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     setAttachmentMarkupTexts((current) => [
       ...current,
       {
-        id: Date.now(),
+        id: nextAttachmentMarkupId(),
         text,
         x: 24,
         y: 72 + current.length * 42,
@@ -2253,7 +2353,7 @@ const ChatScreen = ({ navigation, route }: any) => {
     ]);
     setAttachmentTextDraft("");
     setAttachmentPreviewTool(null);
-  }, [attachmentTextDraft]);
+  }, [attachmentTextDraft, nextAttachmentMarkupId]);
 
   const attachmentMarkupPanResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => attachmentPreviewTool === "edit" || attachmentPreviewTool === "highlight" || attachmentPreviewTool === "erase",
@@ -2270,7 +2370,7 @@ const ChatScreen = ({ navigation, route }: any) => {
       setAttachmentMarkupStrokes((current) => [
         ...current,
         {
-          id: Date.now(),
+          id: nextAttachmentMarkupId(),
           points: [{ x: locationX, y: locationY }],
           color: attachmentPreviewTool === "highlight" ? "#FFE45C" : "#FF4D6D",
           width: attachmentPreviewTool === "highlight" ? 18 : 4,
@@ -2297,7 +2397,7 @@ const ChatScreen = ({ navigation, route }: any) => {
         ];
       });
     },
-  }), [attachmentPreviewTool]);
+  }), [attachmentPreviewTool, nextAttachmentMarkupId]);
 
   const sendImageAttachment = useCallback(async () => {
     try {
@@ -3094,6 +3194,9 @@ const ChatScreen = ({ navigation, route }: any) => {
             : null
       : null;
     const isMediaBubble = Boolean(mediaBubbleKind);
+    // Image/video bubbles show the raw media without any tinted padding or border;
+    // voice bubbles still use the tinted card since VoiceMessageBubble needs it.
+    const isPlainMediaBubble = mediaBubbleKind === "image" || mediaBubbleKind === "video";
     const attachmentLabel = getAttachmentDisplayName(item);
     const isRawSharedContentString = textValue.startsWith("[SHARED_CONTENT]");
     const shouldRenderMessageText =
@@ -3259,9 +3362,11 @@ const ChatScreen = ({ navigation, route }: any) => {
                     : isMediaBubble
                       ? [
                         styles.mediaMessageBubble,
-                        isMine
-                          ? [styles.mediaMessageBubbleMine, { backgroundColor: outgoingMediaBubbleColor, borderColor: outgoingMediaBubbleBorder }]
-                          : [styles.mediaMessageBubbleOther, { backgroundColor: incomingBubbleBg, borderColor: incomingBubbleBorder }],
+                        isPlainMediaBubble
+                          ? styles.mediaMessageBubbleBare
+                          : isMine
+                            ? [styles.mediaMessageBubbleMine, { backgroundColor: outgoingMediaBubbleColor, borderColor: outgoingMediaBubbleBorder }]
+                            : [styles.mediaMessageBubbleOther, { backgroundColor: incomingBubbleBg, borderColor: incomingBubbleBorder }],
                       ]
                       : isMine
                         ? [styles.myMessage, styles.myMessageBubbleTail, { backgroundColor: primaryThemeColor }]
@@ -3427,18 +3532,20 @@ const ChatScreen = ({ navigation, route }: any) => {
 
               {mediaBubbleKind === "image" ? (
                 <View style={[styles.mediaCard, isGifBubble ? styles.gifMediaCard : null, isStickerBubble ? styles.stickerMediaCard : null]}>
-                  <Image
-                    source={{ uri: normalizeMediaUrl(attachment?.url || "") }}
-                    style={[
-                      styles.messageImage,
-                      {
-                        width: mediaBubbleWidth,
-                        height: isStickerBubble ? 168 : Math.min(width * 0.5, 188),
-                      },
-                      isStickerBubble ? styles.stickerImage : null,
-                    ]}
-                    resizeMode={isStickerBubble ? "contain" : "contain"}
-                  />
+                  {isStickerBubble ? (
+                    <Image
+                      source={{ uri: normalizeMediaUrl(attachment?.url || "") }}
+                      style={[styles.messageImage, styles.stickerImage, { width: mediaBubbleWidth, height: 168 }]}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <ChatAutoSizedImage
+                      uri={normalizeMediaUrl(attachment?.url || "")}
+                      maxWidth={mediaBubbleWidth}
+                      maxHeight={Math.min(width * 0.9, 320)}
+                      style={styles.messageImage}
+                    />
+                  )}
                   {isGifBubble ? (
                     <View style={[styles.mediaTypeBadge, isMine ? styles.mediaTypeBadgeMine : null]}>
                       <Text style={styles.mediaTypeBadgeText}>GIF</Text>
@@ -3450,15 +3557,11 @@ const ChatScreen = ({ navigation, route }: any) => {
               {mediaBubbleKind === "video" ? (
                 <View style={styles.mediaCard}>
                   {attachment?.thumbnailUrl ? (
-                    <Image
-                      source={{ uri: normalizeMediaUrl(attachment.thumbnailUrl) }}
-                      style={[
-                        styles.messageImage,
-                        {
-                          width: mediaBubbleWidth,
-                          height: Math.min(width * 0.48, 176),
-                        },
-                      ]}
+                    <ChatAutoSizedImage
+                      uri={normalizeMediaUrl(attachment.thumbnailUrl)}
+                      maxWidth={mediaBubbleWidth}
+                      maxHeight={Math.min(width * 0.9, 320)}
+                      style={styles.messageImage}
                     />
                   ) : (
                     <SocialVideo
@@ -4249,51 +4352,68 @@ const ChatScreen = ({ navigation, route }: any) => {
               </View>
             ) : null}
 
-            <ViewShot
-              ref={attachmentStageRef}
-              style={styles.attachmentPreviewStage}
-              options={{ format: "png", quality: 0.92, result: "tmpfile" }}
-            >
-              {activeAttachmentPreview ? (
-                <Image source={{ uri: activeAttachmentPreview.uri }} style={styles.attachmentPreviewStageImage} resizeMode="contain" />
-              ) : (
-                <View style={styles.attachmentPreviewEmptyState}>
-                  <Icon name="image-outline" size={42} color="#9ca3af" />
-                  <Text style={styles.attachmentPreviewEmptyStateText}>No image selected</Text>
+            <View style={styles.attachmentPreviewStageWrapper}>
+              <ViewShot
+                ref={attachmentStageRef}
+                style={styles.attachmentPreviewStage}
+                options={{ format: "png", quality: 0.92, result: "tmpfile" }}
+              >
+                {activeAttachmentPreview ? (
+                  <Image source={{ uri: activeAttachmentPreview.uri }} style={styles.attachmentPreviewStageImage} resizeMode="contain" />
+                ) : (
+                  <View style={styles.attachmentPreviewEmptyState}>
+                    <Icon name="image-outline" size={42} color="#9ca3af" />
+                    <Text style={styles.attachmentPreviewEmptyStateText}>No image selected</Text>
+                  </View>
+                )}
+                <View style={styles.attachmentMarkupLayer} {...attachmentMarkupPanResponder.panHandlers}>
+                  <Svg width="100%" height="100%" style={styles.attachmentMarkupSvg}>
+                    {attachmentMarkupStrokes.map((stroke) => (
+                      <SvgPath
+                        key={stroke.id}
+                        d={pointsToSvgPath(stroke.points)}
+                        stroke={stroke.color}
+                        strokeWidth={stroke.width}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        opacity={stroke.color === "#FFE45C" ? 0.62 : 1}
+                        fill="none"
+                      />
+                    ))}
+                    {attachmentMarkupTexts.map((markupText) => (
+                      <SvgText
+                        key={markupText.id}
+                        x={markupText.x}
+                        y={markupText.y}
+                        fill="#fff"
+                        fontSize="24"
+                        fontWeight="700"
+                        stroke="#090D14"
+                        strokeWidth="3"
+                        strokeOpacity="0.72"
+                      >
+                        {markupText.text}
+                      </SvgText>
+                    ))}
+                  </Svg>
                 </View>
-              )}
-              <View style={styles.attachmentMarkupLayer} {...attachmentMarkupPanResponder.panHandlers}>
-                <Svg width="100%" height="100%" style={styles.attachmentMarkupSvg}>
-                  {attachmentMarkupStrokes.map((stroke) => (
-                    <SvgPath
-                      key={stroke.id}
-                      d={pointsToSvgPath(stroke.points)}
-                      stroke={stroke.color}
-                      strokeWidth={stroke.width}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      opacity={stroke.color === "#FFE45C" ? 0.62 : 1}
-                      fill="none"
-                    />
-                  ))}
+              </ViewShot>
+
+              {/* Drag handles live outside the ViewShot so they're never baked into the saved image. */}
+              {attachmentMarkupTexts.length > 0 ? (
+                <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
                   {attachmentMarkupTexts.map((markupText) => (
-                    <SvgText
+                    <View
                       key={markupText.id}
-                      x={markupText.x}
-                      y={markupText.y}
-                      fill="#fff"
-                      fontSize="24"
-                      fontWeight="700"
-                      stroke="#090D14"
-                      strokeWidth="3"
-                      strokeOpacity="0.72"
+                      {...getAttachmentTextDragResponder(markupText.id).panHandlers}
+                      style={[styles.attachmentTextDragHandle, { left: markupText.x - 14, top: markupText.y - 34 }]}
                     >
-                      {markupText.text}
-                    </SvgText>
+                      <Icon name="move-outline" size={14} color="#fff" />
+                    </View>
                   ))}
-                </Svg>
-              </View>
-            </ViewShot>
+                </View>
+              ) : null}
+            </View>
 
             {attachmentPreviewTool === "text" ? (
               <View style={styles.attachmentTextComposer}>
@@ -5057,6 +5177,11 @@ const styles = StyleSheet.create({
     maxWidth: "62%",
     borderWidth: 1,
     overflow: "hidden",
+  },
+  mediaMessageBubbleBare: {
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
   },
   mediaMessageBubbleMine: {
     shadowOpacity: 0,
@@ -5872,13 +5997,27 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 17,
   },
-  attachmentPreviewStage: {
+  attachmentPreviewStageWrapper: {
     flex: 1,
     marginHorizontal: 16,
     marginTop: 8,
+  },
+  attachmentPreviewStage: {
+    flex: 1,
     borderRadius: 20,
     backgroundColor: "#0F172A",
     overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachmentTextDragHandle: {
+    position: "absolute",
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.6)",
     alignItems: "center",
     justifyContent: "center",
   },

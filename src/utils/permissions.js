@@ -88,6 +88,7 @@ export const resolveCameraCaptureMediaType = async (
       {
         cancelable: true,
         onDismiss: () => finish(null),
+        tallSheet: true,
       },
     );
   });
