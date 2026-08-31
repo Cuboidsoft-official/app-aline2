@@ -31,5 +31,10 @@ module.exports = {
         allowUndefined: true,
       },
     ],
+    // react-native-reanimated v4 moved its worklet transform into this
+    // separate package; without it, native Reanimated/Worklets modules fail
+    // to initialize ("Required value was null" from NativeWorklets). Must
+    // stay last in the plugins list per react-native-worklets docs.
+    "react-native-worklets/plugin",
   ],
 };
