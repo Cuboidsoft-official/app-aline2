@@ -4332,7 +4332,7 @@ const ChatScreen = ({ navigation, route }: any) => {
 
             {attachmentPreviewItems.length > 1 ? (
               <View style={styles.attachmentPreviewStrip}>
-                {attachmentPreviewMeta.visible.map((item: any, index: number) => (
+                {attachmentPreviewMeta.visible.map((item, index) => (
                   <TouchableOpacity
                     key={`${item.uri}-${index}`}
                     style={[
@@ -4591,7 +4591,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                 >
                   {pendingAttachments.length > 1 && pendingAttachment.kind === "image" ? (
                     <View style={styles.attachmentPreviewMultiThumb}>
-                      {getAttachmentPreviewThumbs(pendingAttachments, 3).visible.map((item: any, index: number) => (
+                      {getAttachmentPreviewThumbs(pendingAttachments, 3).visible.map((item, index) => (
                         <Image
                           key={`${item.uri}-${index}`}
                           source={{ uri: item.uri }}
@@ -5137,9 +5137,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: PRIMARY,
     marginLeft: 12,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.78)",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    elevation: 3,
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.22,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
   },
   swipeReplyActionMine: {
     marginLeft: 0,
@@ -5148,7 +5155,7 @@ const styles = StyleSheet.create({
   swipeReplyText: {
     marginLeft: 6,
     color: "#fff",
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: appFonts.semibold,
   },
   messageBubble: {

@@ -1151,13 +1151,6 @@ function SwipesScreen({ navigation, route }: any) {
               <Icon name="heart" size={92} color="rgba(255,255,255,0.92)" />
             </View>
           ) : null}
-          {isActive && isUserPaused && !isHoldingToPause ? (
-            <View pointerEvents="none" style={styles.pausedPlayOverlay}>
-              <View style={styles.pausedPlayCircle}>
-                <Icon name="play" size={42} color="#FFFFFF" style={{ marginLeft: 4 }} />
-              </View>
-            </View>
-          ) : null}
         </Pressable>
         <LinearGradient pointerEvents="none" colors={["rgba(0,0,0,0.74)", "rgba(0,0,0,0.12)", "transparent"]} style={styles.topGradient} />
         <LinearGradient pointerEvents="none" colors={["transparent", "rgba(0,0,0,0.42)", "rgba(0,0,0,0.88)"]} style={styles.bottomGradient} />
@@ -2207,22 +2200,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   reportButtonText: { color: "#fff", fontWeight: "700" },
-  pausedPlayOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 15,
-  },
-  pausedPlayCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "rgba(0, 0, 0, 0.55)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.35)",
-  },
   videoPlaybackButton: {
     position: "absolute",
     alignSelf: "center",
