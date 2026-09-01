@@ -33,6 +33,7 @@ import { downloadImageAsset } from "../../utils/mediaDownload";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
 import { useAppTheme } from "../../theme/AppThemeContext";
+import { getCarouselGestureIntent } from "../../utils/carouselGesture";
 
 let ColorMatrix: any = null;
 try {
@@ -103,6 +104,8 @@ function PostDetailScreen({ route, navigation }: any) {
     time: 0,
     timeout: null,
   });
+  const carouselGestureStartRef = useRef<{ x: number; y: number } | null>(null);
+  const carouselGestureIntentRef = useRef<"horizontal" | "vertical" | "unknown">("unknown");
 
   useFocusEffect(
     React.useCallback(() => {
@@ -480,6 +483,39 @@ function PostDetailScreen({ route, navigation }: any) {
                 horizontal
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}
+                nestedScrollEnabled
+                directionalLockEnabled
+                onTouchStart={(event) => {
+                  const { pageX, pageY, locationX, locationY } = event.nativeEvent;
+                  carouselGestureStartRef.current = {
+                    x: Number(pageX ?? locationX ?? 0),
+                    y: Number(pageY ?? locationY ?? 0),
+                  };
+                  carouselGestureIntentRef.current = "unknown";
+                }}
+                onMoveShouldSetResponderCapture={(event) => {
+                  const start = carouselGestureStartRef.current;
+                  if (!start) {
+                    return false;
+                  }
+
+                  const { pageX, pageY, locationX, locationY } = event.nativeEvent;
+                  const intent = getCarouselGestureIntent(
+                    start,
+                    { x: Number(pageX ?? locationX ?? 0), y: Number(pageY ?? locationY ?? 0) },
+                    carouselGestureIntentRef.current,
+                  );
+                  carouselGestureIntentRef.current = intent;
+                  return intent === "horizontal";
+                }}
+                onTouchEnd={() => {
+                  carouselGestureStartRef.current = null;
+                  carouselGestureIntentRef.current = "unknown";
+                }}
+                onTouchCancel={() => {
+                  carouselGestureStartRef.current = null;
+                  carouselGestureIntentRef.current = "unknown";
+                }}
                 onMomentumScrollEnd={(e) => {
                   const x = e.nativeEvent.contentOffset.x;
                   const idx = Math.max(0, Math.min(post.media.length - 1, Math.round(x / Math.max(1, width))));
