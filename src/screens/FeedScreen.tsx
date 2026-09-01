@@ -53,6 +53,7 @@ import { listLiveStreams } from "../utils/liveStreamApi";
 import { APP_RELEASE_DATE, APP_VERSION } from "../config/appMeta";
 import { FEED_VIDEO_SOUND_DEFAULT, isFeedVideoSoundOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../utils/feedMediaSound";
 import { shouldTriggerFeedPrefetch } from "../utils/feedPrefetch";
+import { getCarouselGestureIntent } from "../utils/carouselGesture";
 
 let ColorMatrix: any;
 try {
@@ -1924,6 +1925,38 @@ function FeedScreen({ navigation, route }: any) {
           nestedScrollEnabled
           scrollEventThrottle={16}
           decelerationRate="fast"
+          directionalLockEnabled
+          onTouchStart={(event) => {
+            const { pageX, pageY, locationX, locationY } = event.nativeEvent;
+            carouselGestureStartRef.current[post.id] = {
+              x: Number(pageX ?? locationX ?? 0),
+              y: Number(pageY ?? locationY ?? 0),
+            };
+            carouselGestureIntentRef.current[post.id] = "unknown";
+          }}
+          onMoveShouldSetResponderCapture={(event) => {
+            const start = carouselGestureStartRef.current[post.id];
+            if (!start) {
+              return false;
+            }
+
+            const { pageX, pageY, locationX, locationY } = event.nativeEvent;
+            const intent = getCarouselGestureIntent(
+              start,
+              { x: Number(pageX ?? locationX ?? 0), y: Number(pageY ?? locationY ?? 0) },
+              carouselGestureIntentRef.current[post.id],
+            );
+            carouselGestureIntentRef.current[post.id] = intent;
+            return intent === "horizontal";
+          }}
+          onTouchEnd={() => {
+            delete carouselGestureStartRef.current[post.id];
+            delete carouselGestureIntentRef.current[post.id];
+          }}
+          onTouchCancel={() => {
+            delete carouselGestureStartRef.current[post.id];
+            delete carouselGestureIntentRef.current[post.id];
+          }}
           onMomentumScrollEnd={(event) => {
             const nextIndex = Math.max(
               0,
