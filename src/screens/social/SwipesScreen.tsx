@@ -162,12 +162,15 @@ function SwipesScreen({ navigation, route }: any) {
   const [isUserPaused, setIsUserPaused] = useState(false);
   const [isHoldingToPause, setIsHoldingToPause] = useState(false);
   const holdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdPauseTriggeredRef = useRef(false);
 
   const handleSwipePressIn = useCallback(() => {
+    holdPauseTriggeredRef.current = false;
     if (holdTimeoutRef.current) {
       clearTimeout(holdTimeoutRef.current);
     }
     holdTimeoutRef.current = setTimeout(() => {
+      holdPauseTriggeredRef.current = true;
       setIsHoldingToPause(true);
     }, 220);
   }, []);
@@ -986,6 +989,11 @@ function SwipesScreen({ navigation, route }: any) {
   }, []);
 
   const handleSwipeMediaTap = (swipe: Swipe) => {
+    if (holdPauseTriggeredRef.current) {
+      holdPauseTriggeredRef.current = false;
+      return;
+    }
+
     const now = Date.now();
     const lastTap = swipeTapRef.current;
 
@@ -994,13 +1002,15 @@ function SwipesScreen({ navigation, route }: any) {
         clearTimeout(lastTap.timeout);
       }
       swipeTapRef.current = { id: "", time: 0, timeout: null };
+      setIsUserPaused(false);
       triggerSwipeLikeBurst(swipe.id);
       handleLike(swipe.id).catch(() => undefined);
       return;
     }
 
+    setIsUserPaused((current) => !current);
+
     const timeout = setTimeout(() => {
-      setIsUserPaused((current) => !current);
       swipeTapRef.current = { id: "", time: 0, timeout: null };
     }, 130);
 
@@ -1108,12 +1118,7 @@ function SwipesScreen({ navigation, route }: any) {
 
     return (
       <View style={[styles.swipeItem, { height: viewportHeight }]}>
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={() => handleSwipeMediaTap(item)}
-          onPressIn={handleSwipePressIn}
-          onPressOut={handleSwipePressOut}
-        >
+        <View style={StyleSheet.absoluteFill}>
           <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
             <SocialVideo
               uri={normalizeMediaUrl(item.media.url)}
@@ -1134,8 +1139,8 @@ function SwipesScreen({ navigation, route }: any) {
               showBufferingLoader={false}
               showProgressBar={isActive}
               progressBarBottomOffset={bottomDockPadding}
-              progressBarFillColor="#EF4444"
-              progressBarThumbColor="#EF4444"
+              progressBarFillColor="#FFFFFF"
+              progressBarThumbColor="#FFFFFF"
             />
           </View>
           {item.media.sensitiveContent?.isSensitive ? (
@@ -1151,21 +1156,16 @@ function SwipesScreen({ navigation, route }: any) {
               <Icon name="heart" size={92} color="rgba(255,255,255,0.92)" />
             </View>
           ) : null}
-        </Pressable>
+        </View>
         <LinearGradient pointerEvents="none" colors={["rgba(0,0,0,0.74)", "rgba(0,0,0,0.12)", "transparent"]} style={styles.topGradient} />
         <LinearGradient pointerEvents="none" colors={["transparent", "rgba(0,0,0,0.42)", "rgba(0,0,0,0.88)"]} style={styles.bottomGradient} />
+        <Pressable
+          style={[styles.swipeTapLayer, { bottom: bottomDockPadding + 18 }]}
+          onPress={() => handleSwipeMediaTap(item)}
+          onPressIn={handleSwipePressIn}
+          onPressOut={handleSwipePressOut}
+        />
         <View pointerEvents="box-none" style={[styles.overlay, { paddingBottom: bottomDockPadding + 12 }, isHoldingToPause && { opacity: 0 }]}>
-          {isActive ? (
-            <TouchableOpacity
-              accessibilityLabel={isUserPaused ? "Play video" : "Pause video"}
-              accessibilityRole="button"
-              activeOpacity={0.82}
-              style={styles.videoPlaybackButton}
-              onPress={() => setIsUserPaused((current) => !current)}
-            >
-              <Icon name={isUserPaused ? "play" : "pause"} size={28} color="#fff" style={isUserPaused ? { marginLeft: 3 } : undefined} />
-            </TouchableOpacity>
-          ) : null}
           <View pointerEvents="box-none" style={styles.topBar}>
             <Text style={styles.screenTitle}>Swipes</Text>
             <TouchableOpacity style={styles.createButton} onPress={openSwipeComposer}>
@@ -1327,6 +1327,19 @@ function SwipesScreen({ navigation, route }: any) {
             </TouchableOpacity>
           </View>
         </View>
+        {isActive && isUserPaused ? (
+          <View pointerEvents="box-none" style={styles.videoPlaybackOverlay}>
+            <TouchableOpacity
+              accessibilityLabel="Play video"
+              accessibilityRole="button"
+              activeOpacity={0.82}
+              style={styles.videoPlaybackButton}
+              onPress={() => setIsUserPaused(false)}
+            >
+              <Icon name="play" size={28} color="#fff" style={{ marginLeft: 3 }} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </View>
     );
   };
@@ -1764,6 +1777,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#000" },
   swipeItem: { justifyContent: "flex-end", backgroundColor: "#000", overflow: "hidden" },
+  swipeTapLayer: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    left: 0,
+  },
   swipeMedia: { ...StyleSheet.absoluteFillObject, backgroundColor: "#000" },
   swipeStickerLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -2200,10 +2219,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   reportButtonText: { color: "#fff", fontWeight: "700" },
-  videoPlaybackButton: {
+  videoPlaybackOverlay: {
     position: "absolute",
-    alignSelf: "center",
-    top: "42%",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 40,
+  },
+  videoPlaybackButton: {
     width: 52,
     height: 52,
     borderRadius: 26,
@@ -2212,7 +2238,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.52)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.35)",
-    zIndex: 20,
+    zIndex: 41,
+    elevation: 8,
   },
 });
 
