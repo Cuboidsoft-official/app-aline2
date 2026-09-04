@@ -53,7 +53,12 @@ import { listLiveStreams } from "../utils/liveStreamApi";
 import { APP_RELEASE_DATE, APP_VERSION } from "../config/appMeta";
 import { FEED_VIDEO_SOUND_DEFAULT, isFeedVideoSoundOn, shouldMountFeedVideo, shouldMuteFeedVideo } from "../utils/feedMediaSound";
 import { shouldTriggerFeedPrefetch } from "../utils/feedPrefetch";
-import { getCarouselGestureIntent } from "../utils/carouselGesture";
+import {
+  getCarouselGestureIntent,
+  getCarouselGestureThresholdPx,
+  getCarouselPageIndex,
+  isCarouselTapGesture,
+} from "../utils/carouselGesture";
 
 let ColorMatrix: any;
 try {
@@ -434,6 +439,17 @@ function FeedScreen({ navigation, route }: any) {
   const carouselScrollRefs = useRef<Record<string, ScrollView | null>>({});
   const carouselGestureStartRef = useRef<Record<string, { x: number; y: number }>>({});
   const carouselGestureIntentRef = useRef<Record<string, "horizontal" | "vertical" | "unknown">>({});
+  const feedListScrollEnabledRef = useRef(true);
+  const carouselGestureThresholdPx = getCarouselGestureThresholdPx();
+  const setFeedListScrollEnabled = (enabled: boolean) => {
+    if (feedListScrollEnabledRef.current === enabled) {
+      return;
+    }
+
+    feedListScrollEnabledRef.current = enabled;
+    feedListRef.current?.setNativeProps({ scrollEnabled: enabled });
+  };
+
   const homeReloadHandledRef = useRef("");
   const isTabletLayout = width >= 768;
   const focusedPostId = String(route?.params?.postId || "").trim();
@@ -463,7 +479,7 @@ function FeedScreen({ navigation, route }: any) {
   const postHeaderPadding = isTabletLayout ? 14 : isCompactPhone ? 10 : 11;
   const postBodyInset = postHeaderPadding + 2;
   const postActionButtonSize = isCompactPhone ? 32 : isMediumPhone ? 35 : 36;
-  const postMediaWidth = Math.max(width - feedHorizontalInset * 2, 0);
+  const postMediaWidth = Math.max(Math.round(width - feedHorizontalInset * 2), 0);
   const defaultPostMediaHeight = Math.round(
     Math.min(
       isTabletLayout ? 540 : 420,
@@ -1308,6 +1324,13 @@ function FeedScreen({ navigation, route }: any) {
     setActivePostId(post.id);
   }, [trackFeedInterest]);
 
+  const handleMediaSurfacePress = (post: Post) => {
+    handlePostMediaPress(post);
+    if (String(post.user?.id || "") === String(currentUser?.id || "")) {
+      openPostDetail(post);
+    }
+  };
+
   const openUserProfile = useCallback((userId: string) => {
     const normalizedUserId = String(userId || "");
     if (!normalizedUserId) {
@@ -1914,7 +1937,7 @@ function FeedScreen({ navigation, route }: any) {
     }));
 
     return (
-      <View style={styles.carouselWrap}>
+      <View collapsable={false} style={styles.carouselWrap}>
         <ScrollView
           ref={(node) => {
             carouselScrollRefs.current[post.id] = node;
@@ -1927,61 +1950,68 @@ function FeedScreen({ navigation, route }: any) {
           decelerationRate="fast"
           directionalLockEnabled
           onTouchStart={(event) => {
-            const { pageX, pageY, locationX, locationY } = event.nativeEvent;
+            const { pageX, pageY } = event.nativeEvent;
             carouselGestureStartRef.current[post.id] = {
-              x: Number(pageX ?? locationX ?? 0),
-              y: Number(pageY ?? locationY ?? 0),
+              x: Number(pageX || 0),
+              y: Number(pageY || 0),
             };
             carouselGestureIntentRef.current[post.id] = "unknown";
           }}
-          onMoveShouldSetResponderCapture={(event) => {
+          onTouchMove={(event) => {
             const start = carouselGestureStartRef.current[post.id];
             if (!start) {
-              return false;
+              return;
             }
 
-            const { pageX, pageY, locationX, locationY } = event.nativeEvent;
+            const { pageX, pageY } = event.nativeEvent;
             const intent = getCarouselGestureIntent(
               start,
-              { x: Number(pageX ?? locationX ?? 0), y: Number(pageY ?? locationY ?? 0) },
+              { x: Number(pageX || 0), y: Number(pageY || 0) },
               carouselGestureIntentRef.current[post.id],
+              carouselGestureThresholdPx,
             );
             carouselGestureIntentRef.current[post.id] = intent;
-            return intent === "horizontal";
+            if (intent === "horizontal") {
+              setFeedListScrollEnabled(false);
+            }
           }}
-          onTouchEnd={() => {
+          onTouchEnd={(event) => {
+            const start = carouselGestureStartRef.current[post.id];
+            const { pageX, pageY } = event.nativeEvent;
+            if (
+              start
+              && isCarouselTapGesture(
+                start,
+                { x: Number(pageX || 0), y: Number(pageY || 0) },
+                carouselGestureThresholdPx,
+              )
+            ) {
+              handleMediaSurfacePress(post);
+            }
+
             delete carouselGestureStartRef.current[post.id];
             delete carouselGestureIntentRef.current[post.id];
+            setFeedListScrollEnabled(true);
           }}
           onTouchCancel={() => {
             delete carouselGestureStartRef.current[post.id];
             delete carouselGestureIntentRef.current[post.id];
+            setFeedListScrollEnabled(true);
           }}
           onMomentumScrollEnd={(event) => {
-            const nextIndex = Math.max(
-              0,
-              Math.min(
-                post.media.length - 1,
-                Math.round(Number(event?.nativeEvent?.contentOffset?.x || 0) / Math.max(1, postMediaWidth)),
-              ),
+            const nextIndex = getCarouselPageIndex(
+              Number(event?.nativeEvent?.contentOffset?.x || 0),
+              postMediaWidth,
+              post.media.length,
             );
-            setCarouselIndexByPostId((prev) => ({ ...prev, [post.id]: nextIndex }));
-          }}
-          onScrollEndDrag={(event) => {
-            const nextIndex = Math.max(
-              0,
-              Math.min(
-                post.media.length - 1,
-                Math.round(Number(event?.nativeEvent?.contentOffset?.x || 0) / Math.max(1, postMediaWidth)),
-              ),
-            );
-            setCarouselIndexByPostId((prev) => ({ ...prev, [post.id]: nextIndex }));
+            setCarouselIndexByPostId((prev) => (
+              prev[post.id] === nextIndex ? prev : { ...prev, [post.id]: nextIndex }
+            ));
+            setFeedListScrollEnabled(true);
           }}
         >
           {carouselSlides.map(({ asset, sourceIndex, key }) => {
-            const directDistance = Math.abs(sourceIndex - currentCarouselIndex);
-            const circularDistance = Math.min(directDistance, post.media.length - directDistance);
-            const shouldRenderCarouselAsset = circularDistance <= 1;
+            const shouldRenderCarouselAsset = Math.abs(sourceIndex - currentCarouselIndex) <= 2;
             if (!shouldRenderCarouselAsset) {
               return (
                 <View
@@ -2054,13 +2084,13 @@ function FeedScreen({ navigation, route }: any) {
           })}
         </ScrollView>
         {post.media.length > 1 ? (
-          <View style={styles.carouselBadge}>
+          <View pointerEvents="none" style={styles.carouselBadge}>
             <Text style={styles.carouselBadgeText}>
               {currentCarouselIndex + 1}/{post.media.length}
             </Text>
           </View>
         ) : null}
-        <View style={styles.carouselIndicatorRow}>
+        <View pointerEvents="none" style={styles.carouselIndicatorRow}>
           {post.media.map((asset, index) => (
             <View
               key={`${post.id}-indicator-${asset.id}`}
@@ -2461,6 +2491,30 @@ function FeedScreen({ navigation, route }: any) {
     const metaLine = tokens.join(" • ");
     const isCaptionExpanded = !!expandedCaptionIds[item.id];
     const isCaptionTruncatable = String(item.caption || "").length > 110 || String(item.caption || "").includes("\n");
+    const isCarouselPost = media.length > 1;
+    const mediaSurface = (
+      <>
+        {renderPostMedia(item, index)}
+        {renderPostStickerOverlay(item)}
+        {likeBurstPostId === item.id ? (
+          <View pointerEvents="none" style={styles.likeBurstOverlay}>
+            <Icon name="heart" size={88} color="rgba(255,255,255,0.92)" />
+          </View>
+        ) : null}
+        {hasVideoMedia ? (
+          <View pointerEvents="none" style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
+            <Icon
+              name={isFeedVideoSoundOn({ isVideoSoundEnabled, isPostMuted: isMuted }) ? "volume-high-outline" : "volume-mute-outline"}
+              size={16}
+              color="#fff"
+            />
+            <Text style={[styles.mediaSoundHintText, { fontSize: mediaChipFontSize }]}>
+              {isFeedVideoSoundOn({ isVideoSoundEnabled, isPostMuted: isMuted }) ? "Sound on" : "Muted"}
+            </Text>
+          </View>
+        ) : null}
+      </>
+    );
 
     return (
       <View
@@ -2531,35 +2585,18 @@ function FeedScreen({ navigation, route }: any) {
           </View>
         </View>
 
-        <Pressable
-          style={styles.mediaPressSurface}
-          onPress={() => {
-            handlePostMediaPress(item);
-            if (String(user.id || "") === String(currentUser?.id || "")) {
-              openPostDetail(item);
-            }
-          }}
-        >
-          {renderPostMedia(item, index)}
-          {renderPostStickerOverlay(item)}
-          {likeBurstPostId === item.id ? (
-            <View pointerEvents="none" style={styles.likeBurstOverlay}>
-              <Icon name="heart" size={88} color="rgba(255,255,255,0.92)" />
-            </View>
-          ) : null}
-          {hasVideoMedia ? (
-            <View style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
-              <Icon
-                name={isFeedVideoSoundOn({ isVideoSoundEnabled, isPostMuted: isMuted }) ? "volume-high-outline" : "volume-mute-outline"}
-                size={16}
-                color="#fff"
-              />
-              <Text style={[styles.mediaSoundHintText, { fontSize: mediaChipFontSize }]}>
-                {isFeedVideoSoundOn({ isVideoSoundEnabled, isPostMuted: isMuted }) ? "Sound on" : "Muted"}
-              </Text>
-            </View>
-          ) : null}
-        </Pressable>
+        {isCarouselPost ? (
+          <View collapsable={false} style={styles.mediaPressSurface}>
+            {mediaSurface}
+          </View>
+        ) : (
+          <Pressable
+            style={styles.mediaPressSurface}
+            onPress={() => handleMediaSurfacePress(item)}
+          >
+            {mediaSurface}
+          </Pressable>
+        )}
 
         <View style={[styles.actionsRow, { paddingHorizontal: postHeaderPadding }]}>
           <TouchableOpacity
@@ -2781,13 +2818,14 @@ function FeedScreen({ navigation, route }: any) {
     handleDownload,
     handleLike,
     handlePostAudioToggle,
-    handlePostMediaPress,
+    handleMediaSurfacePress,
     likeBurstPostId,
     mediaChipFontSize,
     openPostCommentsSheet,
     openPostShareSheet,
     handleSave,
     isActionBusy,
+    isCompactPhone,
     isFeedVideoSoundOn,
     isScreenFocused,
     isVideoSoundEnabled,
