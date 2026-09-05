@@ -222,6 +222,8 @@ jobs:
 
           echo "envfile=.env.ci" >> "$GITHUB_OUTPUT"
 
+      
+
       - name: Validate production env values
         env:
           ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
@@ -233,6 +235,92 @@ jobs:
           grep -Eq '^GEMINI_API_KEY=.{10,}$' "$ENVFILE_VALUE"
           grep -Eq '^ZEGO_CLOUD_APP_ID=.{3,}$' "$ENVFILE_VALUE"
           grep -Eq '^ZEGO_CLOUD_APP_SIGN=.{10,}$' "$ENVFILE_VALUE"
+
+      - name: Authenticate to Google Cloud
+        if: steps.meta.outputs.build_aab == 'true'
+        id: google_auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: southern-splice-507708-d2
+          workload_identity_provider: projects/977838436427/locations/global/workloadIdentityPools/github-actions/providers/github-actions
+          service_account: aline2-play-deployment@southern-splice-507708-d2.iam.gserviceaccount.com
+
+      - name: Set up gcloud
+        if: steps.meta.outputs.build_aab == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Calculate Android version code
+        if: steps.meta.outputs.build_aab == 'true'
+        id: android_version
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.google_auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+
+          ACCESS_TOKEN="$(gcloud auth application-default print-access-token)"
+
+          echo "Reading current Google Play internal track version codes..."
+
+          VERSION_CODE="$(
+            curl -fsS \
+              -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.aline2/tracks/internal/releases" \
+            | jq -r '
+                [
+                  .releases[]?.activeArtifacts[]?.versionCode
+                ]
+                | map(tonumber)
+                | max // 0
+              '
+          )"
+
+          NEXT_VERSION_CODE=$((VERSION_CODE + 1))
+
+          echo "Google Play current versionCode: ${VERSION_CODE}"
+          echo "Next Android versionCode: ${NEXT_VERSION_CODE}"
+
+          if [ "${NEXT_VERSION_CODE}" -le "${VERSION_CODE}" ]; then
+            echo "Failed to calculate a valid next versionCode" >&2
+            exit 1
+          fi
+
+          echo "version_code=${NEXT_VERSION_CODE}" >> "$GITHUB_OUTPUT"
+
+      - name: Apply Android version code
+        if: steps.meta.outputs.build_aab == 'true'
+        env:
+          VERSION_CODE: ${{ steps.android_version.outputs.version_code }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("android/app/build.gradle")
+          text = path.read_text()
+
+          version_code = os.environ["VERSION_CODE"]
+
+          updated, count = re.subn(
+              r'(\bversionCode\s+)\d+',
+              rf'\g<1>{version_code}',
+              text,
+              count=1,
+          )
+
+          if count != 1:
+              raise SystemExit(
+                  "Could not find exactly one Android versionCode in android/app/build.gradle"
+              )
+
+          path.write_text(updated)
+
+          print(f"Android versionCode set to {version_code}")
+          PY
+
+          grep -n "versionCode" android/app/build.gradle
 
       - name: Patch React Native Gradle toolchain resolver for CI
         run: |
@@ -363,6 +451,16 @@ jobs:
               exit 1
             fi
           fi
+
+      - name: Upload AAB to Google Play
+        if: steps.meta.outputs.build_aab == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJson: ${{ steps.google_auth.outputs.credentials_file_path }}
+          packageName: com.aline2
+          releaseFiles: ${{ steps.collect.outputs.aab_path }}
+          tracks: internal
+          status: completed
 
       - name: Upload standard release artifacts
         if: steps.meta.outputs.build_aab == 'true'
