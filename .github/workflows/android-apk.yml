@@ -252,39 +252,22 @@ jobs:
       - name: Calculate Android version code
         if: steps.meta.outputs.build_aab == 'true'
         id: android_version
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.google_auth.outputs.credentials_file_path }}
         run: |
           set -euo pipefail
 
-          ACCESS_TOKEN="$(gcloud auth application-default print-access-token)"
+          # GitHub Actions workflow run number is monotonically increasing
+          # for this workflow. Start well above existing Play version codes.
+          VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))
 
-          echo "Reading current Google Play internal track version codes..."
+          echo "GitHub workflow run number: ${GITHUB_RUN_NUMBER}"
+          echo "Android versionCode: ${VERSION_CODE}"
 
-          VERSION_CODE="$(
-            curl -fsS \
-              -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-              "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.aline2/tracks/internal/releases" \
-            | jq -r '
-                [
-                  .releases[]?.activeArtifacts[]?.versionCode
-                ]
-                | map(tonumber)
-                | max // 0
-              '
-          )"
-
-          NEXT_VERSION_CODE=$((VERSION_CODE + 1))
-
-          echo "Google Play current versionCode: ${VERSION_CODE}"
-          echo "Next Android versionCode: ${NEXT_VERSION_CODE}"
-
-          if [ "${NEXT_VERSION_CODE}" -le "${VERSION_CODE}" ]; then
-            echo "Failed to calculate a valid next versionCode" >&2
+          if [ "${VERSION_CODE}" -le 31 ]; then
+            echo "Generated versionCode is invalid" >&2
             exit 1
           fi
 
-          echo "version_code=${NEXT_VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
 
       - name: Apply Android version code
         if: steps.meta.outputs.build_aab == 'true'
