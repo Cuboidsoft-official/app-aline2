@@ -364,14 +364,23 @@ jobs:
             fi
           fi
 
+      - name: Authenticate to Google Cloud
+        if: steps.meta.outputs.build_aab == 'true'
+        id: google_auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: southern-splice-507708-d2
+          workload_identity_provider: projects/977838436427/locations/global/workloadIdentityPools/github-actions/providers/github-actions
+          service_account: aline2-play-deployment@southern-splice-507708-d2.iam.gserviceaccount.com
+
       - name: Upload AAB to Google Play
         if: steps.meta.outputs.build_aab == 'true'
         uses: r0adkll/upload-google-play@v1
         with:
-          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          serviceAccountJson: ${{ steps.google_auth.outputs.credentials_file_path }}
           packageName: com.aline2
           releaseFiles: ${{ steps.collect.outputs.aab_path }}
-          track: internal
+          tracks: internal
           status: completed
 
       - name: Upload standard release artifacts
