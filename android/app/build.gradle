@@ -168,7 +168,7 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             manifestPlaceholders = [usesCleartextTraffic: "false"]
             ndk {
-                debugSymbolLevel "NONE"
+                debugSymbolLevel "FULL"
             }
         }
     }
