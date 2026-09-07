@@ -707,7 +707,7 @@ function FeedScreen({ navigation, route }: any) {
 
   const applyFeedSnapshot = useCallback((snapshot: any, options: { shufflePosts?: boolean; preserveActivePostId?: string } = {}) => {
     const { data, liveStories: nextLiveStories, seller, storedUser, unreadNotifications, walletBalance } = snapshot;
-    const responsePosts = Array.isArray(data?.posts) ? data.posts : [];
+    const responsePosts: Post[] = Array.isArray(data?.posts) ? data.posts : [];
     const nextPosts = responsePosts;
     const preserveActivePostId = String(options.preserveActivePostId || focusedPostId || "").trim();
 
