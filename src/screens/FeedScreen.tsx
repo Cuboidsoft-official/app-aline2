@@ -708,7 +708,7 @@ function FeedScreen({ navigation, route }: any) {
   const applyFeedSnapshot = useCallback((snapshot: any, options: { shufflePosts?: boolean; preserveActivePostId?: string } = {}) => {
     const { data, liveStories: nextLiveStories, seller, storedUser, unreadNotifications, walletBalance } = snapshot;
     const responsePosts = Array.isArray(data?.posts) ? data.posts : [];
-    const nextPosts = buildGroupedFeedPosts(responsePosts);
+    const nextPosts = responsePosts;
     const preserveActivePostId = String(options.preserveActivePostId || focusedPostId || "").trim();
 
     const orderedPosts = preserveActivePostId
@@ -1718,115 +1718,6 @@ function FeedScreen({ navigation, route }: any) {
           {item.user.name}
         </Text>
       </TouchableOpacity>
-    );
-  };
-
-  const buildGroupedFeedPosts = (items: Post[]): Post[] => {
-    if (!Array.isArray(items) || !items.length) {
-      return [];
-    }
-
-    const groups: Post[] = [];
-
-    // API is returning each image as a separate post.
-    // We therefore group consecutive media posts belonging
-    // to the same user.
-
-    for (const item of items) {
-      if (!item?.id) {
-        continue;
-      }
-
-      const media = Array.isArray(item.media)
-        ? item.media
-        : [];
-
-      // Nothing to group if this post has no media.
-      if (!media.length) {
-        groups.push(item);
-        continue;
-      }
-
-      const previous = groups[groups.length - 1];
-
-      const currentUserId = String(
-        item?.user?.id ||
-        (item?.user as any)?._id ||
-        item?.user?.username ||
-        ""
-      ).trim();
-
-      const previousUserId = String(
-        previous?.user?.id ||
-        (previous?.user as any)?._id ||
-        previous?.user?.username ||
-        ""
-      ).trim();
-
-      const previousMedia = Array.isArray(previous?.media)
-        ? previous.media
-        : [];
-
-      /*
-       * Group only when:
-       *
-       * 1. There is a previous post
-       * 2. Same user
-       * 3. Previous post has media
-       * 4. Current post has media
-       */
-      const shouldGroup =
-        !!previous &&
-        !!currentUserId &&
-        !!previousUserId &&
-        currentUserId === previousUserId &&
-        previousMedia.length > 0;
-
-      if (!shouldGroup) {
-        groups.push({
-          ...item,
-          media: [...media],
-        });
-
-        continue;
-      }
-
-      /*
-       * Prevent duplicate media IDs.
-       */
-      const existingMediaIds = new Set(
-        previousMedia.map((asset) => String(asset?.id))
-      );
-
-      const additionalMedia = media.filter(
-        (asset) =>
-          asset?.id &&
-          !existingMediaIds.has(String(asset.id))
-      );
-
-      groups[groups.length - 1] = {
-        ...previous,
-
-        media: [
-          ...previousMedia,
-          ...additionalMedia,
-        ],
-
-        /*
-         * Keep newest timestamp for ordering.
-         */
-        createdAt:
-          Number(item.createdAt || 0) >
-            Number(previous.createdAt || 0)
-            ? item.createdAt
-            : previous.createdAt,
-      };
-    }
-
-    return groups.sort(
-      (a, b) =>
-        Number(b?.createdAt || 0) -
-        Number(a?.createdAt || 0),
     );
   };
 
