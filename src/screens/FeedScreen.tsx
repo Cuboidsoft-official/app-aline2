@@ -301,9 +301,9 @@ const getMediaFrameTransformStyle = (
   if (!transform || (!transform.scale && !transform.translateX && !transform.translateY)) {
     return undefined;
   }
-  const scale = Math.max(1, Math.min(4, Number(transform?.scale || 1)));
-  const translateX = Math.max(-1, Math.min(1, Number(transform?.translateX || 0))) * width;
-  const translateY = Math.max(-1, Math.min(1, Number(transform?.translateY || 0))) * height;
+  const scale = Math.max(0.1, Math.min(4, Number(transform?.scale || 1)));
+  const translateX = Math.max(-1.5, Math.min(1.5, Number(transform?.translateX || 0))) * width;
+  const translateY = Math.max(-1.5, Math.min(1.5, Number(transform?.translateY || 0))) * height;
 
   if (scale === 1 && translateX === 0 && translateY === 0) {
     return undefined;

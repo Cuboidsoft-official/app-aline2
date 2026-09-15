@@ -2937,15 +2937,37 @@ function CreatePostScreen({ navigation, route }: any) {
     });
   }, []);
 
+  const toggleFitFullPhoto = useCallback(() => {
+    composerMediaPan.setValue({ x: 0, y: 0 });
+    setComposerMediaTransform((current) => {
+      const isAlreadyFitted = current.scale < 0.95;
+      const nextScale = isAlreadyFitted ? 1.0 : 0.82;
+      const nextTransform = {
+        scale: nextScale,
+        translateX: 0,
+        translateY: 0,
+      };
+
+      if (selectedAsset?.id) {
+        setComposerMediaTransformsByAssetId((prev) => ({
+          ...prev,
+          [selectedAsset.id]: nextTransform,
+        }));
+      }
+
+      return nextTransform;
+    });
+  }, [composerMediaPan, selectedAsset?.id]);
+
   const persistComposerMediaTransform = useCallback(() => {
     const rawX = Number((composerMediaPan.x as any)._value || 0);
     const rawY = Number((composerMediaPan.y as any)._value || 0);
 
     setComposerMediaTransform((current) => {
       const nextTransform = {
-        scale: clamp(current.scale, 1, 4),
-      translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -1, 1) : current.translateX,
-      translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -1, 1) : current.translateY,
+        scale: clamp(current.scale, 0.2, 4),
+        translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -1.5, 1.5) : current.translateX,
+        translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -1.5, 1.5) : current.translateY,
       };
 
       if (selectedAsset?.id) {
@@ -2962,8 +2984,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const composerMediaResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => !!selectedAsset && mode !== "story",
-        onMoveShouldSetPanResponder: () => !!selectedAsset && mode !== "story",
+        onStartShouldSetPanResponder: () => !!selectedAsset,
+        onMoveShouldSetPanResponder: () => !!selectedAsset,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (event) => {
           const touches = event.nativeEvent.touches || [];
@@ -2990,7 +3012,7 @@ function CreatePostScreen({ navigation, route }: any) {
             const startDistance = composerMediaGestureRef.current.startDistance || distance || 1;
             const nextScale = clamp(
               composerMediaGestureRef.current.startScale * (distance / Math.max(1, startDistance)),
-              1,
+              0.2,
               4,
             );
             setComposerMediaTransform((current) => ({ ...current, scale: nextScale }));
@@ -3008,7 +3030,6 @@ function CreatePostScreen({ navigation, route }: any) {
     [
       composerMediaPan,
       composerMediaTransform.scale,
-      mode,
       persistComposerMediaTransform,
       selectedAsset,
     ],
@@ -3260,12 +3281,12 @@ function CreatePostScreen({ navigation, route }: any) {
     const fullscreen = !!options?.fullscreen;
     const frameStyle = [
       styles.storyCanvasFrame,
-      compact ? styles.storyCanvasCompact : styles.storyCanvasExpanded,
+      compact ? styles.storyCanvasCompact : (fullscreen ? styles.storyCanvasFullscreen : styles.storyCanvasExpanded),
       fullscreen ? styles.storyCanvasFullscreen : null,
       {
         backgroundColor: isDarkMode ? "#020617" : "#DDE8E1",
         borderColor,
-        height: compact ? storyCompactCanvasHeight : storyExpandedCanvasHeight,
+        height: compact ? storyCompactCanvasHeight : (fullscreen ? ("100%" as const) : storyExpandedCanvasHeight),
       },
     ];
 
@@ -4135,9 +4156,25 @@ function CreatePostScreen({ navigation, route }: any) {
           <View pointerEvents="none" style={styles.cropFrameGuide} />
         ) : null}
         {interactive ? (
-          <View pointerEvents="none" style={styles.cropHintPill}>
-            <Icon name="move-outline" size={13} color="#fff" />
-            <Text style={styles.cropHintText}>Drag - pinch to zoom</Text>
+          <View pointerEvents="box-none" style={styles.cropControlRow}>
+            <TouchableOpacity
+              style={styles.fitTogglePill}
+              onPress={toggleFitFullPhoto}
+              activeOpacity={0.8}
+            >
+              <Icon
+                name={composerMediaTransform.scale < 0.95 ? "scan-outline" : "expand-outline"}
+                size={13}
+                color="#fff"
+              />
+              <Text style={styles.cropHintText}>
+                {composerMediaTransform.scale < 0.95 ? "Fill frame" : "Fit full photo"}
+              </Text>
+            </TouchableOpacity>
+            <View pointerEvents="none" style={styles.cropHintPill}>
+              <Icon name="move-outline" size={13} color="#fff" />
+              <Text style={styles.cropHintText}>Drag - pinch to zoom</Text>
+            </View>
           </View>
         ) : null}
         {renderComposerTextOverlay(interactive)}
@@ -6530,10 +6567,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: appFonts.semibold,
   },
-  cropHintPill: {
+  cropControlRow: {
     position: "absolute",
+    left: 12,
     right: 12,
     bottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  fitTogglePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(15, 23, 42, 0.72)",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  cropHintPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
