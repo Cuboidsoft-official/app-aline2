@@ -30,32 +30,32 @@ interface FraudOption {
 const FRAUD_OPTIONS: FraudOption[] = [
   {
     id: "different_person",
-    label: "Different person on call",
-    description: "The seller who answered is not the verified profile owner.",
+    label: "Different Person on Call",
+    description: "Seller identity mismatch — answered by another person.",
     icon: "person-remove-outline",
   },
   {
     id: "abusive_behaviour",
-    label: "Abusive behaviour",
-    description: "Inappropriate, abusive, or unprofessional language used.",
+    label: "Abusive Behaviour",
+    description: "Misconduct, rude language, or inappropriate conduct.",
     icon: "warning-outline",
   },
   {
     id: "no_response",
-    label: "Unresponsive seller",
-    description: "Seller answered the call but provided no response.",
+    label: "No Response",
+    description: "Call receive karke bolna nahi — seller remains silent.",
     icon: "mic-off-outline",
   },
   {
     id: "premature_disconnect",
-    label: "Premature disconnect",
-    description: "Call was disconnected early before the expected session time.",
+    label: "Premature Disconnect",
+    description: "Time se pehle call katna — disconnected early.",
     icon: "call-outline",
   },
   {
     id: "other",
-    label: "Other fraud issue",
-    description: "Report another issue requiring AI inspection.",
+    label: "Other Fraud",
+    description: "Custom detail input and timeline explanation.",
     icon: "alert-circle-outline",
   },
 ];
