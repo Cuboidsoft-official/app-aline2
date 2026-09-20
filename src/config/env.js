@@ -38,14 +38,24 @@ const buildCandidateUrls = (rawUrl, fallbackUrl) => {
 
   try {
     const parsed = new URL(baseUrl);
-    const extraCandidates =
-      isLoopbackHostname(parsed.hostname)
-        ? ANDROID_EMULATOR_HOSTS.map((host) => replaceUrlHostname(baseUrl, host))
-        : isPrivateHostname(parsed.hostname)
-          ? ANDROID_EMULATOR_HOSTS.map((host) => replaceUrlHostname(baseUrl, host))
-          : [];
+    const isExplicitLocalOverride = isLoopbackHostname(parsed.hostname) || isPrivateHostname(parsed.hostname);
+    const extraCandidates = isExplicitLocalOverride
+      ? ANDROID_EMULATOR_HOSTS.map((host) => replaceUrlHostname(baseUrl, host))
+      : [];
 
-    return dedupe([normalizedFallbackUrl, ...extraCandidates, baseUrl]);
+    // Phase 10H-1.5 (local full-stack demo environment): when
+    // BACKEND_ORIGIN/API_BASE_URL is explicitly set to a private/loopback
+    // host, that is a deliberate local-dev override -- try it FIRST instead
+    // of demoting it behind the hardcoded public fallback. No behavior
+    // change when no override is configured (the overwhelmingly common
+    // case: baseUrl then equals the fallback already, since neither env var
+    // is set). Root cause first found and reverted as a temporary test-only
+    // patch in Phase 10G; kept here because the local demo environment's
+    // whole purpose depends on the app reliably preferring a configured
+    // local backend over the always-reachable production one.
+    return isExplicitLocalOverride
+      ? dedupe([baseUrl, ...extraCandidates, normalizedFallbackUrl])
+      : dedupe([normalizedFallbackUrl, ...extraCandidates, baseUrl]);
   } catch {
     return dedupe([baseUrl, normalizedFallbackUrl]);
   }
