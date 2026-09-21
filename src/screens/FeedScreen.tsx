@@ -552,11 +552,11 @@ function FeedScreen({ navigation, route }: any) {
       {
         title: "Growth",
         data: [
-          { icon: "star-outline", label: "Feature Your Profile", screen: "HowToEarnScreen", params: { section: "searchProfile" } },
-          { icon: "newspaper-outline", label: "Listed Ads", screen: "HowToEarnScreen", params: { section: "listedAds" } },
-          { icon: "gift-outline", label: "Refer and Earn", screen: "HowToEarnScreen", params: { section: "howToEarn" } },
+          { icon: "star-outline", label: "Feature Your Profile", screen: "HowToEarnScreen", params: { section: "featureProfile" } },
+          { icon: "document-text-outline", label: "Brand Campaigns & Ads", screen: "HowToEarnScreen", params: { section: "listedAds" } },
+          { icon: "megaphone-outline", label: "Promotions", screen: "HowToEarnScreen", params: { section: "promotions" } },
           { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen", params: { section: "howToEarn" } },
-          { icon: "megaphone-outline", label: "Promotions", screen: "HowToEarnScreen" },
+          { icon: "gift-outline", label: "Refer and Earn", screen: "HowToEarnScreen", params: { section: "referral" } },
           hasSellerAccount
             ? { icon: "briefcase-outline", label: "Seller Workspace", screen: "SellerDashboardScreen" }
             : { icon: "storefront-outline", label: "Become a Seller", screen: "SellerRegistration" },
