@@ -119,7 +119,7 @@ export interface StoryQuestion {
   responseCount: number;
 }
 
-export type StoryStickerType = "text" | "emoji" | "image";
+export type StoryStickerType = "text" | "emoji" | "image" | "link" | "location";
 export type StoryStickerPlacement = "top_left" | "top_right" | "center" | "bottom_left" | "bottom_right";
 export type StoryStickerTextAlignment = "left" | "center" | "right";
 export type StoryTextStickerTheme = "dark" | "light" | "accent" | "outline";
@@ -130,6 +130,8 @@ export interface StorySticker {
   type: StoryStickerType;
   text: string;
   mediaUrl?: string;
+  linkUrl?: string;
+  locationName?: string;
   position: {
     x: number;
     y: number;
@@ -234,6 +236,7 @@ export interface Comment {
   canDelete?: boolean;
   replyCount?: number;
   mentions?: string[];
+  isPinned?: boolean;
 }
 
 export interface ReelComment {
@@ -249,6 +252,7 @@ export interface ReelComment {
   likesCount: number;
   canDelete?: boolean;
   replyCount?: number;
+  isPinned?: boolean;
 }
 
 export type SwipeComment = ReelComment;
@@ -344,6 +348,7 @@ export interface CreateStoryInput {
   visibleToUserIds?: string[];
   allowReplies?: boolean;
   allowSharing?: boolean;
+  stickers?: any[];
 }
 
 export interface CreateReelInput {
@@ -418,6 +423,7 @@ export interface SocialApi {
   getPostComments(postId: string): Promise<Comment[]>;
   togglePostCommentLike(postId: string, commentId: string): Promise<Comment>;
   deletePostComment(postId: string, commentId: string): Promise<DeleteCommentResult>;
+  togglePinComment(commentId: string): Promise<{ isPinned: boolean; commentId: string }>;
   updatePost(postId: string, input: UpdatePostInput): Promise<Post>;
   archivePost(postId: string): Promise<void>;
   restorePost(postId: string): Promise<void>;
