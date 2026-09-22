@@ -17,6 +17,9 @@ android/.gradle/
 *.keystore
 !android/app/debug.keystore
 
+# Server-side Firebase Admin credentials must never be shipped in the app.
+*-firebase-adminsdk-*.json
+
 .gradle/
 android/build/
 app/build/
