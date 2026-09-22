@@ -1,8 +1,21 @@
-import { CameraRoll } from "@react-native-camera-roll/camera-roll";
 import { PermissionsAndroid, Platform } from "react-native";
-import ReactNativeBlobUtil from "react-native-blob-util";
-
 import { normalizeMediaUrl } from "./mediaUrls";
+
+let CameraRoll: any = null;
+try {
+  const mod = require("@react-native-camera-roll/camera-roll");
+  CameraRoll = mod.CameraRoll || mod;
+} catch (_err) {
+  CameraRoll = null;
+}
+
+let ReactNativeBlobUtil: any = null;
+try {
+  const mod = require("react-native-blob-util");
+  ReactNativeBlobUtil = mod.default || mod;
+} catch (_err) {
+  ReactNativeBlobUtil = null;
+}
 
 export class GallerySaveError extends Error {
   code:
@@ -92,7 +105,7 @@ const hashString = (value: string) => {
 };
 
 const getVideoCacheFilePath = (url: string, extension: string) =>
-  `${ReactNativeBlobUtil.fs.dirs.CacheDir}/aline2_media_cache/${hashString(url)}.${extension}`;
+  `${ReactNativeBlobUtil?.fs?.dirs?.CacheDir || ""}/aline2_media_cache/${hashString(url)}.${extension}`;
 
 // Dev-only diagnostics. Never include headers, cookies, tokens, or full URLs
 // (query strings can carry signed-URL auth) — hostname/path only.
