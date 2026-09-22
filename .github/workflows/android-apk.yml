@@ -195,17 +195,6 @@ jobs:
           GEMINI_API_KEY_VALUE: ${{ vars.GEMINI_API_KEY != '' && vars.GEMINI_API_KEY || secrets.GEMINI_API_KEY }}
           ZEGO_CLOUD_APP_ID_VALUE: ${{ vars.ZEGO_CLOUD_APP_ID != '' && vars.ZEGO_CLOUD_APP_ID || secrets.ZEGO_CLOUD_APP_ID }}
           ZEGO_CLOUD_APP_SIGN_VALUE: ${{ vars.ZEGO_CLOUD_APP_SIGN != '' && vars.ZEGO_CLOUD_APP_SIGN || secrets.ZEGO_CLOUD_APP_SIGN }}
-          RAZORPAY_KEY_ID_VALUE: ${{ secrets.RAZORPAY_KEY_ID }}
-          RAZORPAY_KEY_SECRET_VALUE: ${{ secrets.RAZORPAY_KEY_SECRET }}
-          RAZORPAY_WEBHOOK_SECRET_VALUE: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
-          SPOTIFY_ENABLED_VALUE: ${{ vars.SPOTIFY_ENABLED }}
-          SPOTIFY_CLIENT_ID_VALUE: ${{ secrets.SPOTIFY_CLIENT_ID }}
-          SPOTIFY_CLIENT_SECRET_VALUE: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
-          SPOTIFY_MARKET_VALUE: ${{ vars.SPOTIFY_MARKET }}
-          JAMENDO_ENABLED_VALUE: ${{ vars.JAMENDO_ENABLED }}
-          JAMENDO_API_BASE_URL_VALUE: ${{ vars.JAMENDO_API_BASE_URL }}
-          JAMENDO_CLIENT_ID_VALUE: ${{ secrets.JAMENDO_CLIENT_ID }}
-          JAMENDO_CLIENT_SECRET_VALUE: ${{ secrets.JAMENDO_CLIENT_SECRET }}
         run: |
           fallback_example="${SELECTED_ENVFILE}.example"
 
@@ -240,17 +229,19 @@ jobs:
           upsert_env "GEMINI_API_KEY" "$GEMINI_API_KEY_VALUE"
           upsert_env "ZEGO_CLOUD_APP_ID" "$ZEGO_CLOUD_APP_ID_VALUE"
           upsert_env "ZEGO_CLOUD_APP_SIGN" "$ZEGO_CLOUD_APP_SIGN_VALUE"
-          upsert_env "RAZORPAY_KEY_ID" "$RAZORPAY_KEY_ID_VALUE"
-          upsert_env "RAZORPAY_KEY_SECRET" "$RAZORPAY_KEY_SECRET_VALUE"
-          upsert_env "RAZORPAY_WEBHOOK_SECRET" "$RAZORPAY_WEBHOOK_SECRET_VALUE"
-          upsert_env "SPOTIFY_ENABLED" "$SPOTIFY_ENABLED_VALUE"
-          upsert_env "SPOTIFY_CLIENT_ID" "$SPOTIFY_CLIENT_ID_VALUE"
-          upsert_env "SPOTIFY_CLIENT_SECRET" "$SPOTIFY_CLIENT_SECRET_VALUE"
-          upsert_env "SPOTIFY_MARKET" "$SPOTIFY_MARKET_VALUE"
-          upsert_env "JAMENDO_ENABLED" "$JAMENDO_ENABLED_VALUE"
-          upsert_env "JAMENDO_API_BASE_URL" "$JAMENDO_API_BASE_URL_VALUE"
-          upsert_env "JAMENDO_CLIENT_ID" "$JAMENDO_CLIENT_ID_VALUE"
-          upsert_env "JAMENDO_CLIENT_SECRET" "$JAMENDO_CLIENT_SECRET_VALUE"
+
+          forbidden_mobile_keys=(
+            RAZORPAY_KEY_SECRET
+            RAZORPAY_WEBHOOK_SECRET
+            SPOTIFY_CLIENT_SECRET
+            JAMENDO_CLIENT_SECRET
+          )
+          for key in "${forbidden_mobile_keys[@]}"; do
+            if grep -q "^${key}=" .env.ci; then
+              echo "Server-only credential must not be embedded in the Android app: ${key}" >&2
+              exit 1
+            fi
+          done
 
           echo "envfile=.env.ci" >> "$GITHUB_OUTPUT"
 
