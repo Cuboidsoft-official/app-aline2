@@ -198,9 +198,9 @@ jobs:
           GOOGLE_WEB_CLIENT_ID_VALUE: ${{ vars.GOOGLE_WEB_CLIENT_ID != '' && vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
           GOOGLE_IOS_CLIENT_ID_VALUE: ${{ vars.GOOGLE_IOS_CLIENT_ID != '' && vars.GOOGLE_IOS_CLIENT_ID || secrets.GOOGLE_IOS_CLIENT_ID }}
           YOUTUBE_DATA_API_KEY_VALUE: ${{ vars.YOUTUBE_DATA_API_KEY != '' && vars.YOUTUBE_DATA_API_KEY || secrets.YOUTUBE_DATA_API_KEY }}
-          GEMINI_API_KEY_VALUE: ${{ vars.GEMINI_API_KEY != '' && vars.GEMINI_API_KEY || secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_VALUE: ${{ secrets.GEMINI_API_KEY }}
           ZEGO_CLOUD_APP_ID_VALUE: ${{ vars.ZEGO_CLOUD_APP_ID != '' && vars.ZEGO_CLOUD_APP_ID || secrets.ZEGO_CLOUD_APP_ID }}
-          ZEGO_CLOUD_APP_SIGN_VALUE: ${{ vars.ZEGO_CLOUD_APP_SIGN != '' && vars.ZEGO_CLOUD_APP_SIGN || secrets.ZEGO_CLOUD_APP_SIGN }}
+          ZEGO_CLOUD_APP_SIGN_VALUE: ${{ secrets.ZEGO_CLOUD_APP_SIGN }}
         run: |
           fallback_example="${SELECTED_ENVFILE}.example"
 
@@ -351,9 +351,9 @@ jobs:
 
       - name: Validate Android signing configuration
         env:
-          ANDROID_UPLOAD_STORE_PASSWORD: ${{ vars.ANDROID_UPLOAD_STORE_PASSWORD != '' && vars.ANDROID_UPLOAD_STORE_PASSWORD || secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
-          ANDROID_UPLOAD_KEY_PASSWORD: ${{ vars.ANDROID_UPLOAD_KEY_PASSWORD != '' && vars.ANDROID_UPLOAD_KEY_PASSWORD || secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           required_signing_values=(
             ANDROID_UPLOAD_STORE_PASSWORD
@@ -371,9 +371,9 @@ jobs:
         env:
           ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
           ANDROID_UPLOAD_STORE_FILE: ${{ steps.keystore.outputs.keystore_path }}
-          ANDROID_UPLOAD_STORE_PASSWORD: ${{ vars.ANDROID_UPLOAD_STORE_PASSWORD != '' && vars.ANDROID_UPLOAD_STORE_PASSWORD || secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
-          ANDROID_UPLOAD_KEY_PASSWORD: ${{ vars.ANDROID_UPLOAD_KEY_PASSWORD != '' && vars.ANDROID_UPLOAD_KEY_PASSWORD || secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           echo "Building Android release APK with ${ENVFILE_VALUE} using mode ${{ steps.meta.outputs.apk_mode }}"
           ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh "${{ steps.meta.outputs.apk_mode }}"
@@ -383,9 +383,9 @@ jobs:
         env:
           ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
           ANDROID_UPLOAD_STORE_FILE: ${{ steps.keystore.outputs.keystore_path }}
-          ANDROID_UPLOAD_STORE_PASSWORD: ${{ vars.ANDROID_UPLOAD_STORE_PASSWORD != '' && vars.ANDROID_UPLOAD_STORE_PASSWORD || secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
-          ANDROID_UPLOAD_KEY_PASSWORD: ${{ vars.ANDROID_UPLOAD_KEY_PASSWORD != '' && vars.ANDROID_UPLOAD_KEY_PASSWORD || secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           echo "Building Android release AAB with ${ENVFILE_VALUE}"
           ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh aab
@@ -428,11 +428,12 @@ jobs:
         if: steps.meta.outputs.build_aab == 'true'
         run: |
           curl -fsSL -o /tmp/bundletool.jar https://github.com/google/bundletool/releases/download/1.18.2/bundletool-all-1.18.2.jar
+          echo "378b5434cd1378bef6b2bc527b8c7f0ff2584b273830335bce54d6d0813c8584  /tmp/bundletool.jar" | sha256sum --check --strict
 
       - name: Verify release artifacts
         env:
           ANDROID_UPLOAD_STORE_FILE: ${{ steps.keystore.outputs.keystore_path }}
-          ANDROID_UPLOAD_STORE_PASSWORD: ${{ vars.ANDROID_UPLOAD_STORE_PASSWORD != '' && vars.ANDROID_UPLOAD_STORE_PASSWORD || secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
         run: |
           build_tools_dir="${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}"
@@ -514,6 +515,8 @@ jobs:
           aws s3 cp "${{ steps.collect.outputs.aab_path }}" "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --only-show-errors
           apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --expires-in 604800)"
           download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --expires-in 604800)"
+          echo "::add-mask::${apk_download_url}"
+          echo "::add-mask::${download_url}"
           echo "apk_key=$apk_key" >> "$GITHUB_OUTPUT"
           echo "apk_download_url=$apk_download_url" >> "$GITHUB_OUTPUT"
           echo "s3_key=$s3_key" >> "$GITHUB_OUTPUT"
