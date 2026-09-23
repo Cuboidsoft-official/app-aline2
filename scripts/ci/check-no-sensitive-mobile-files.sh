@@ -11,6 +11,9 @@ while IFS= read -r path; do
     *.jks|*.keystore)
       [[ "$path" == "android/app/debug.keystore" ]] || bad_files+=("$path")
       ;;
+    android-signing-credentials.txt|release-secrets/*credential*)
+      bad_files+=("$path")
+      ;;
     *-firebase-adminsdk-*.json|*service-account*.json)
       bad_files+=("$path")
       ;;
