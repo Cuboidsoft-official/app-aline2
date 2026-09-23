@@ -35,6 +35,7 @@ import CommentAudioBubble from "../../features/social/components/CommentAudioBub
 import InteractiveText from "../../features/social/components/InteractiveText";
 import ShareTargetsList, { ShareTarget } from "../../features/social/components/ShareTargetsList";
 import SocialVideo from "../../features/social/components/SocialVideo";
+import { createSwipeViewTracker } from "../../features/telemetry/swipeTelemetry";
 import MentionSuggestionList from "../../components/MentionSuggestionList";
 import VoiceRecorderButton from "../../components/chat/VoiceRecorderButton";
 import { socialApi } from "../../features/social/socialApi";
@@ -232,6 +233,8 @@ function SwipesScreen({ navigation, route }: any) {
   });
   const swipeListRef = useRef<FlatList<Swipe> | null>(null);
   const activeSwipeIndexRef = useRef(0);
+  const swipeTelemetryRef = useRef<ReturnType<typeof createSwipeViewTracker> | null>(null);
+  const swipeTelemetryViewSeqRef = useRef(0);
   const swipeLoadMoreRequestRef = useRef(false);
   const swipeLastLoadMoreAtRef = useRef(0);
   const focusedSwipeId = String(route?.params?.swipeId || "").trim();
@@ -252,6 +255,34 @@ function SwipesScreen({ navigation, route }: any) {
   useEffect(() => {
     setActiveSwipePlaybackCycle((cycle) => cycle + 1);
   }, [activeSwipe?.id]);
+
+  // Phase 10C: invisible engagement telemetry for Swipes/Reels only (Feed is
+  // unaffected -- FeedScreen never imports or calls this). One tracker per
+  // active-item view; finalized (emitting `skip` if warranted) whenever the
+  // active item changes or the screen unmounts.
+  useEffect(() => {
+    if (!activeSwipe || !currentUserId) {
+      return undefined;
+    }
+    swipeTelemetryViewSeqRef.current += 1;
+    const tracker = createSwipeViewTracker({
+      userId: currentUserId,
+      postId: activeSwipe.id,
+      creatorId: activeSwipe.user?.id,
+      position: activeSwipeIndex,
+      viewSeq: swipeTelemetryViewSeqRef.current,
+    });
+    swipeTelemetryRef.current = tracker;
+    tracker.handleImpression();
+
+    return () => {
+      tracker.finalize();
+      if (swipeTelemetryRef.current === tracker) {
+        swipeTelemetryRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSwipe?.id, currentUserId]);
 
   useEffect(() => {
     if (sheetMentionQuery === null) {
@@ -1128,9 +1159,25 @@ function SwipesScreen({ navigation, route }: any) {
               muted={!isActive || !isSwipePlaybackEnabled}
               repeat
               restartKey={item.id}
+              onLoad={(event) => {
+                if (isActive) {
+                  const durationMs = Number(event?.duration || 0) * 1000;
+                  swipeTelemetryRef.current?.handleLoad(durationMs);
+                }
+              }}
+              onProgress={(data) => {
+                if (isActive) {
+                  const current = Number(data?.currentTime || 0);
+                  const total = Number(data?.seekableDuration || data?.playableDuration || 0);
+                  swipeTelemetryRef.current?.handleProgress(current, total);
+                }
+              }}
               onEnd={() => {
                 if (isActive && hasAttachedMusic) {
                   setActiveSwipePlaybackCycle((cycle) => cycle + 1);
+                }
+                if (isActive) {
+                  swipeTelemetryRef.current?.handleEnd();
                 }
               }}
               preload={isPreloadTarget}

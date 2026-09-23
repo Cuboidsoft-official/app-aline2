@@ -893,6 +893,7 @@ class RemoteSocialApi implements SocialApi {
       canDelete: this.getId(comment?.user) === currentUserId,
       replyCount: typeof comment?.replyCount === "number" ? comment.replyCount : 0,
       mentions: Array.isArray(comment?.mentions) ? comment.mentions.map((item: any) => item?.username).filter(Boolean) : [],
+      isPinned: Boolean(comment?.isPinned),
     };
   }
 
@@ -925,8 +926,19 @@ class RemoteSocialApi implements SocialApi {
       likesCount: typeof comment?.likes === "number" ? comment.likes : 0,
       canDelete: this.getId(comment?.user) === currentUserId,
       replyCount: typeof comment?.replyCount === "number" ? comment.replyCount : 0,
+      isPinned: Boolean(comment?.isPinned),
     };
   }
+
+  togglePinComment = async (commentId: string): Promise<{ isPinned: boolean; commentId: string }> => {
+    const res = await API.post(`/comments/${commentId}/pin`);
+    const isPinned = !!res?.data?.isPinned;
+    const cached = this.commentCache.get(commentId);
+    if (cached) {
+      this.commentCache.set(commentId, { ...cached, isPinned });
+    }
+    return { isPinned, commentId };
+  };
 
   private mapStoryViewerEntry(view: any): StoryViewerEntry {
     return {

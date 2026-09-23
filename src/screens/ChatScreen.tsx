@@ -1137,29 +1137,13 @@ const ChatScreen = ({ navigation, route }: any) => {
     const scroll = () => {
       if (!messageListRef.current) return;
       messageListRef.current.scrollToEnd?.({ animated });
-      if (messages.length > 0) {
-        try {
-          messageListRef.current.scrollToIndex?.({
-            index: messages.length - 1,
-            animated,
-            viewPosition: 1,
-          });
-        } catch (_err) {
-          // ignore scrollToIndex layout errors fallback
-        }
-      }
     };
 
     requestAnimationFrame(scroll);
     if (!animated) {
-      setTimeout(scroll, 10);
-      setTimeout(scroll, 50);
-      setTimeout(scroll, 150);
-      setTimeout(scroll, 300);
-      setTimeout(scroll, 500);
-      setTimeout(scroll, 800);
+      setTimeout(scroll, 30);
     }
-  }, [messages.length]);
+  }, []);
 
   useEffect(() => {
     initialLatestScrollDoneRef.current = false;
@@ -1955,10 +1939,16 @@ const ChatScreen = ({ navigation, route }: any) => {
       textSendLockRef.current = true;
       setSending(true);
       setText("");
+      requestAnimationFrame(() => {
+        messageInputRef.current?.focus();
+      });
       await submitMessage({
         text: trimmedText,
         replyToMessageId: replyingToMessageId,
         replyToMessage: replyingToMessage,
+      });
+      requestAnimationFrame(() => {
+        messageInputRef.current?.focus();
       });
     } catch (err: any) {
       setText(trimmedText);
@@ -4713,7 +4703,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   onFocus={() => {
                     setTimeout(() => scrollToLatestMessage(false), 80);
                   }}
-                  editable={!sending && !textSendLockRef.current && !uploading && canComposeGroupMessage}
+                  editable={!uploading && canComposeGroupMessage}
                 />
 
                 <View style={styles.inlineActions}>
