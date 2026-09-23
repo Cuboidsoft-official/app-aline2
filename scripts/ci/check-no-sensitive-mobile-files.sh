@@ -40,4 +40,10 @@ if [[ -n "$server_secret_files" ]]; then
   exit 1
 fi
 
+signing_secret_files="$(git grep -Il -E '^(ALINE2|ANDROID)_UPLOAD_(STORE_PASSWORD|KEY_PASSWORD)=[^[:space:]]+' -- . ':!*.example' ':!scripts/android-upload-keystore-credentials.example.txt' || true)"
+if [[ -n "$signing_secret_files" ]]; then
+  printf 'Android signing password detected in tracked files:\n%s\n' "$signing_secret_files" >&2
+  exit 1
+fi
+
 echo 'Mobile repository sensitive-file policy passed.'
