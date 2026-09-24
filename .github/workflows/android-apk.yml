@@ -1,6 +1,25 @@
 name: Android Release
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.env.production.example'
+      - 'android/**'
+      - 'src/**'
+      - 'App.tsx'
+      - 'app.json'
+      - 'babel.config.js'
+      - 'google-services.json'
+      - 'index.js'
+      - 'metro.config.js'
+      - 'package*.json'
+      - 'react-native.config.js'
+      - 'scripts/build-android-release.sh'
+      - 'scripts/ci/filter_android_autolinking.js'
+      - 'scripts/ci/list_android_codegen_prewarm_tasks.js'
+      - 'scripts/patch-*.js'
   workflow_dispatch:
     inputs:
       release_profile:
@@ -35,6 +54,7 @@ jobs:
       PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
       BACKEND_ORIGIN_EXPECTED: https://api.aline2.com
       SHARE_BASE_URL_EXPECTED: https://aline2.com
+      ANDROID_UPLOAD_CERT_SHA256_EXPECTED: "34553881d7a4065708f8c871b4d477919a046afdd73c06b5611adf0475132999"
       ANDROID_PLATFORM_VERSION: "36"
       ANDROID_BUILD_TOOLS_VERSION: "36.0.0"
 
@@ -62,29 +82,45 @@ jobs:
       - name: Derive release metadata
         id: meta
         run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "Production Android releases must run from main" >&2
+            exit 1
+          fi
+
           release_profile="standard"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_profile }}" ]; then
             release_profile="${{ github.event.inputs.release_profile }}"
           fi
 
+          deliver_release="false"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            deliver_release="true"
+          elif [ "${{ github.event.inputs.deliver }}" = "true" ]; then
+            deliver_release="true"
+          fi
+
           short_sha="$(git rev-parse --short=7 HEAD)"
           release_date="$(date -u +%Y%m%d)"
           app_version="$(node -p "require('./package.json').version")"
+          android_version_name="$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\([^"]*\)".*/\1/p' android/app/build.gradle | head -n 1)"
+          if [ -z "$android_version_name" ] || [ "$android_version_name" != "$app_version" ]; then
+            echo "package.json version and Android versionName must match" >&2
+            exit 1
+          fi
 
           case "$release_profile" in
             arm64)
-              release_name="Aline2-v${app_version}-${release_date}-${short_sha}-arm64"
+              release_name="Aline2-v${app_version}-${release_date}-${short_sha}-r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}-arm64"
               apk_name="app-arm64-v8a-release.apk"
               apk_mode="apk-arm64"
               build_aab="false"
               deliver_release="false"
               ;;
             *)
-              release_name="Aline2-v${app_version}-${release_date}-${short_sha}"
+              release_name="Aline2-v${app_version}-${release_date}-${short_sha}-r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
               apk_name="${release_name}.apk"
               apk_mode="apk"
               build_aab="true"
-              deliver_release="${{ inputs.deliver }}"
               ;;
           esac
 
@@ -451,6 +487,12 @@ jobs:
             exit 1
           fi
 
+          expected_sha="$(printf '%s' "$ANDROID_UPLOAD_CERT_SHA256_EXPECTED" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [ "$trusted_sha" != "$expected_sha" ]; then
+            echo "Configured keystore does not match the Google Play upload certificate" >&2
+            exit 1
+          fi
+
           if [ "$apk_sha" != "$trusted_sha" ]; then
             echo "APK signing certificate fingerprint mismatch" >&2
             exit 1
@@ -555,6 +597,8 @@ jobs:
             echo "## Android Release"
             echo ""
             echo "- Branch: \`main\`"
+            echo "- Trigger: \`${{ github.event_name }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
             echo "- Release profile: \`${{ steps.meta.outputs.release_profile }}\`"
             echo "- Release: \`${{ steps.meta.outputs.release_name }}\`"
             echo "- GitHub Actions artifacts: available in this run while signed in to GitHub"
