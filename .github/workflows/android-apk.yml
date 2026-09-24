@@ -1,6 +1,23 @@
 name: Android Release
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.env.production.example'
+      - 'android/**'
+      - 'src/**'
+      - 'App.tsx'
+      - 'app.json'
+      - 'babel.config.js'
+      - 'google-services.json'
+      - 'index.js'
+      - 'metro.config.js'
+      - 'package*.json'
+      - 'react-native.config.js'
+      - 'scripts/build-android-release.sh'
+      - 'scripts/patch-*.js'
   workflow_dispatch:
     inputs:
       release_profile:
@@ -62,9 +79,21 @@ jobs:
       - name: Derive release metadata
         id: meta
         run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "Production Android releases must run from main" >&2
+            exit 1
+          fi
+
           release_profile="standard"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_profile }}" ]; then
             release_profile="${{ github.event.inputs.release_profile }}"
+          fi
+
+          deliver_release="false"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            deliver_release="true"
+          elif [ "${{ github.event.inputs.deliver }}" = "true" ]; then
+            deliver_release="true"
           fi
 
           short_sha="$(git rev-parse --short=7 HEAD)"
@@ -84,7 +113,6 @@ jobs:
               apk_name="${release_name}.apk"
               apk_mode="apk"
               build_aab="true"
-              deliver_release="${{ inputs.deliver }}"
               ;;
           esac
 
@@ -555,6 +583,8 @@ jobs:
             echo "## Android Release"
             echo ""
             echo "- Branch: \`main\`"
+            echo "- Trigger: \`${{ github.event_name }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
             echo "- Release profile: \`${{ steps.meta.outputs.release_profile }}\`"
             echo "- Release: \`${{ steps.meta.outputs.release_name }}\`"
             echo "- GitHub Actions artifacts: available in this run while signed in to GitHub"
