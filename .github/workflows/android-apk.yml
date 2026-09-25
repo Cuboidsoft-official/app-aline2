@@ -555,8 +555,11 @@ jobs:
           s3_key="android/private/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.aab_name }}"
           aws s3 cp "${APK_PATH}" "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --only-show-errors
           aws s3 cp "${{ steps.collect.outputs.aab_path }}" "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --only-show-errors
-          apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --expires-in 604800)"
-          download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --expires-in 604800)"
+          # OIDC provides temporary AWS credentials. A presigned URL cannot
+          # remain valid after the signing session expires, so keep these links
+          # inside the default one-hour session lifetime.
+          apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --expires-in 2700)"
+          download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --expires-in 2700)"
           echo "::add-mask::${apk_download_url}"
           echo "::add-mask::${download_url}"
           echo "apk_key=$apk_key" >> "$GITHUB_OUTPUT"
@@ -578,8 +581,10 @@ jobs:
             The latest signed Aline2 Android production release is ready.
 
             Use the private AAB link for the manual Google Play Console upload.
-            Both secure APK and AAB download links expire after seven days.
+            The GitHub Actions artifact remains available for 30 days to signed-in repository collaborators.
+            The private S3 links are short-lived. If they expire, run the Redeliver Android Release workflow.
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
+          ARTIFACT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
           AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
           APK_ATTACHMENT_PATH: ${{ steps.collect.outputs.apk_path }}
@@ -606,7 +611,8 @@ jobs:
             cat "${APK_NAME}.sha256"
             if [ "${{ steps.meta.outputs.deliver_release }}" = "true" ]; then
               echo "- Private APK/AAB delivery email sent to \`cuboidsoft@gmail.com\`"
-              echo "- Secure links expire after seven days"
+              echo "- GitHub Actions artifact retained for 30 days"
+              echo "- Private S3 links are short-lived and can be regenerated without rebuilding"
               echo "- Google Play upload: manual"
               echo "- AAB checksum:"
               cat "${AAB_NAME}.sha256"

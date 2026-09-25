@@ -27,6 +27,7 @@ def main() -> int:
     subject = get_env("EMAIL_SUBJECT")
     body = get_env("EMAIL_BODY")
     release_name = get_env("RELEASE_NAME", required=False)
+    artifact_run_url = get_env("ARTIFACT_RUN_URL", required=False)
     artifact_urls = [
         ("APK", get_env("APK_DOWNLOAD_URL", required=False)),
         ("AAB", get_env("AAB_DOWNLOAD_URL", required=False)),
@@ -45,6 +46,12 @@ def main() -> int:
     if release_name:
         lines.append("")
         lines.append(f"Release: {release_name}")
+    if artifact_run_url:
+        lines.append("")
+        lines.append(
+            "GitHub Actions artifact (repository sign-in required): "
+            f"{artifact_run_url}"
+        )
     for artifact_type, download_url in artifact_urls:
         if download_url:
             lines.append("")
@@ -69,7 +76,8 @@ def main() -> int:
         else:
             lines.append("")
             lines.append(
-                f"The {artifact_type} was not attached because of email size limits; use its private download link."
+                f"The {artifact_type} was not attached because of email size limits; "
+                "use one of the download options above."
             )
 
     if attached_types:
