@@ -1,0 +1,87 @@
+name: Redeliver Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: Existing release name, for example Aline2-v2.3.0-20260924-42f9e29-r136-a1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: android-release-redelivery-${{ inputs.release_name }}
+  cancel-in-progress: false
+
+jobs:
+  redeliver:
+    name: redeliver existing signed artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
+
+    steps:
+      - name: Check out delivery tooling
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate release name
+        id: release
+        env:
+          RELEASE_NAME: ${{ inputs.release_name }}
+        run: |
+          if [[ ! "$RELEASE_NAME" =~ ^Aline2-v[0-9]+\.[0-9]+\.[0-9]+-([0-9]{8})-[0-9a-f]{7}-r[0-9]+-a[0-9]+$ ]]; then
+            echo "Release name does not match the production release format" >&2
+            exit 1
+          fi
+
+          release_date="${BASH_REMATCH[1]}"
+          echo "release_date=$release_date" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify artifacts and create fresh links
+        id: links
+        env:
+          RELEASE_NAME: ${{ inputs.release_name }}
+          RELEASE_DATE: ${{ steps.release.outputs.release_date }}
+        run: |
+          apk_key="android/private/${RELEASE_DATE}/${RELEASE_NAME}.apk"
+          aab_key="android/private/${RELEASE_DATE}/${RELEASE_NAME}.aab"
+
+          aws s3api head-object --bucket "$PRIVATE_RELEASES_BUCKET" --key "$apk_key" >/dev/null
+          aws s3api head-object --bucket "$PRIVATE_RELEASES_BUCKET" --key "$aab_key" >/dev/null
+
+          apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --expires-in 2700)"
+          aab_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${aab_key}" --expires-in 2700)"
+          echo "::add-mask::${apk_download_url}"
+          echo "::add-mask::${aab_download_url}"
+          echo "apk_download_url=$apk_download_url" >> "$GITHUB_OUTPUT"
+          echo "aab_download_url=$aab_download_url" >> "$GITHUB_OUTPUT"
+
+      - name: Email fresh private download links
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: cuboidsoft@gmail.com
+          EMAIL_SUBJECT: Aline2 Android release redelivery ${{ inputs.release_name }}
+          EMAIL_BODY: |
+            Fresh private download links were requested for an existing signed Aline2 release.
+
+            These links are valid for up to 45 minutes. Run this workflow again whenever fresh links are needed.
+          RELEASE_NAME: ${{ inputs.release_name }}
+          APK_DOWNLOAD_URL: ${{ steps.links.outputs.apk_download_url }}
+          AAB_DOWNLOAD_URL: ${{ steps.links.outputs.aab_download_url }}
+        run: python3 ./scripts/ci/send_release_email.py

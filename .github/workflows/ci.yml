@@ -25,6 +25,9 @@ jobs:
       - name: Reject sensitive mobile files
         run: bash scripts/ci/check-no-sensitive-mobile-files.sh
 
+      - name: Test release delivery email
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
