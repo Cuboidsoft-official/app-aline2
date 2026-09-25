@@ -1,0 +1,59 @@
+name: Feature request
+description: Propose a user-facing app change with measurable acceptance criteria
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private artifact links, personal data, or unredacted production logs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and user outcome
+      description: Describe the user problem and the result this work should produce.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope
+      description: Include the main user flow and boundaries. Link designs when available.
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: List nearby work intentionally deferred.
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and production impact
+      description: Note API, environment, Firebase, notification, permission, analytics, or migration changes.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] A user can…
+        - [ ] Failure states…
+        - [ ] Existing flow…
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: List automated tests, supported devices, and manual journeys to verify.
+    validations:
+      required: true
+  - type: textarea
+    id: rollout
+    attributes:
+      label: Rollout and rollback
+      description: Describe release monitoring, staged rollout needs, and the safe rollback path.
+    validations:
+      required: true
