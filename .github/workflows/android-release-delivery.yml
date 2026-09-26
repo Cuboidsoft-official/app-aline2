@@ -161,9 +161,11 @@ jobs:
           done
           [ "${status}" -eq 0 ] || exit 1
 
-          echo "apk_download_url=${apk_download_url}" >> "$GITHUB_OUTPUT"
-          echo "download_url=${download_url}" >> "$GITHUB_OUTPUT"
-          echo "link_expires_at=$(date -u -d "+${DAYS} days" '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
+          {
+            echo "apk_download_url=${apk_download_url}"
+            echo "download_url=${download_url}"
+            echo "link_expires_at=$(date -u -d "+${DAYS} days" '+%Y-%m-%d %H:%M UTC')"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Email the fresh delivery links
         env:

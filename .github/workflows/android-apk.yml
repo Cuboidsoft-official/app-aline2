@@ -75,7 +75,7 @@ jobs:
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo mkdir -p /usr/local/lib/android
-          sudo chown -R $USER:$USER /usr/local/lib/android
+          sudo chown -R "$USER:$USER" /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
@@ -127,17 +127,22 @@ jobs:
               ;;
           esac
 
-          echo "app_version=$app_version" >> "$GITHUB_OUTPUT"
-          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
-          echo "release_date=$release_date" >> "$GITHUB_OUTPUT"
-          echo "release_profile=$release_profile" >> "$GITHUB_OUTPUT"
-          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=android-release-${release_name}" >> "$GITHUB_OUTPUT"
-          echo "apk_name=$apk_name" >> "$GITHUB_OUTPUT"
-          echo "apk_mode=$apk_mode" >> "$GITHUB_OUTPUT"
-          echo "build_aab=$build_aab" >> "$GITHUB_OUTPUT"
-          echo "deliver_release=$deliver_release" >> "$GITHUB_OUTPUT"
-          echo "aab_name=${release_name}.aab" >> "$GITHUB_OUTPUT"
+          # One redirect rather than eleven: the runner truncates
+          # GITHUB_OUTPUT once per step, and re-opening it per line is both
+          # slower and a shellcheck error. Semantics are identical.
+          {
+            echo "app_version=$app_version"
+            echo "short_sha=$short_sha"
+            echo "release_date=$release_date"
+            echo "release_profile=$release_profile"
+            echo "release_name=$release_name"
+            echo "artifact_name=android-release-${release_name}"
+            echo "apk_name=$apk_name"
+            echo "apk_mode=$apk_mode"
+            echo "build_aab=$build_aab"
+            echo "deliver_release=$deliver_release"
+            echo "aab_name=${release_name}.aab"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -603,7 +608,7 @@ jobs:
           # Stated as a real timestamp rather than "seven days", so a recipient
           # reading it later can tell whether the link is still live instead of
           # having to trust a duration they were not there to see start.
-          echo "link_expires_at=$(date -u -d '+7 days' '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
+          link_expires_at="$(date -u -d '+7 days' '+%Y-%m-%d %H:%M UTC')"
 
           # A record of what was actually uploaded, so the redelivery workflow
           # can re-sign the same artifacts from a single folder name. Without
@@ -633,10 +638,14 @@ jobs:
           printf '{"checked":"%s"}\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > /tmp/healthcheck.json
           aws s3 cp /tmp/healthcheck.json "s3://${PRIVATE_RELEASES_BUCKET}/android/private/.delivery-healthcheck.json" --only-show-errors
           rm -f /tmp/healthcheck.json
-          echo "apk_key=$apk_key" >> "$GITHUB_OUTPUT"
-          echo "apk_download_url=$apk_download_url" >> "$GITHUB_OUTPUT"
-          echo "s3_key=$s3_key" >> "$GITHUB_OUTPUT"
-          echo "download_url=$download_url" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "link_expires_at=${link_expires_at}"
+            echo "apk_key=$apk_key"
+            echo "apk_download_url=$apk_download_url"
+            echo "s3_key=$s3_key"
+            echo "download_url=$download_url"
+          } >> "$GITHUB_OUTPUT"
 
       # A green step that emits a broken link is worse than a red one, because
       # the email still goes out. Prove each link resolves before it is allowed
