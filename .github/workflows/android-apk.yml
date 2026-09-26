@@ -38,7 +38,10 @@ on:
 
 permissions:
   contents: read
-  id-token: write
+  # No id-token: write. The release delivery step is the only thing that ever
+  # needed an AWS OIDC token, and it now signs with a resource-scoped IAM
+  # credential instead, so the workflow no longer requests the ability to
+  # mint itself a cloud identity.
 
 concurrency:
   group: android-production
@@ -169,7 +172,8 @@ jobs:
       - name: Validate deployment configuration
         if: steps.meta.outputs.deliver_release == 'true'
         env:
-          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          RELEASE_AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_AWS_ACCESS_KEY_ID }}
+          RELEASE_AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_AWS_SECRET_ACCESS_KEY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
@@ -187,8 +191,11 @@ jobs:
             fi
           done
 
+          # Checked here, before a 25-minute build, so a missing delivery
+          # credential fails in seconds instead of after the APK is already built.
           required_secrets=(
-            AWS_ROLE_TO_ASSUME
+            RELEASE_AWS_ACCESS_KEY_ID
+            RELEASE_AWS_SECRET_ACCESS_KEY
             SMTP_HOST
             SMTP_PORT
             SMTP_USERNAME
@@ -538,18 +545,44 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Configure AWS credentials
+      # Presigning is done with a long-lived, resource-scoped IAM credential
+      # rather than the OIDC role, because a SigV4 presigned URL can never
+      # outlive the session that signed it. The OIDC session lasts one hour, so
+      # every link this repository mailed between 2026-08-31 and 2026-09-26 was
+      # already dead by the time the recipient opened the email, while the email
+      # body promised seven days. The credential below may only PutObject and
+      # GetObject under android/private/ in the release bucket: it cannot list
+      # the bucket, delete anything, or touch any other prefix (verified).
+      # Regenerate with: aws iam create-access-key --user-name aline2-android-release-ci
+      - name: Configure AWS release credentials
         if: steps.meta.outputs.deliver_release == 'true'
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ env.AWS_REGION }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          # Fail with a diagnosable message rather than letting the AWS CLI fail
+          # later with a generic credentials error, which would look like an
+          # S3 problem instead of a missing environment secret.
+          if [ -z "${AWS_ACCESS_KEY_ID}" ] || [ -z "${AWS_SECRET_ACCESS_KEY}" ]; then
+            echo "::error::RELEASE_AWS_ACCESS_KEY_ID and RELEASE_AWS_SECRET_ACCESS_KEY must be set as secrets on the production environment." >&2
+            exit 1
+          fi
+          identity="$(aws sts get-caller-identity --query Arn --output text)"
+          echo "Release delivery identity: ${identity}"
+          case "${identity}" in
+            *:user/aline2-android-release-ci) ;;
+            *) echo "::error::Running as ${identity}, not the scoped aline2-android-release-ci user. Either the secret is wrong or the IAM policy was widened." >&2; exit 1 ;;
+          esac
 
       - name: Upload private APK and AAB and generate secure links
         if: steps.meta.outputs.deliver_release == 'true'
         id: private_aab
         env:
           APK_PATH: ${{ steps.collect.outputs.apk_path }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           apk_key="android/private/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.apk_name }}"
           s3_key="android/private/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.aab_name }}"
@@ -557,12 +590,82 @@ jobs:
           aws s3 cp "${{ steps.collect.outputs.aab_path }}" "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --only-show-errors
           apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --expires-in 604800)"
           download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --expires-in 604800)"
+          # A presigned URL that carries X-Amz-Security-Token is bound to a
+          # session, not to its own expiry. Refuse to emit one at all, because
+          # that is exactly the defect that shipped dead links to the client.
+          for url in "${apk_download_url}" "${download_url}"; do
+            case "${url}" in
+              *X-Amz-Security-Token*) echo "::error::Refusing a session-bound presigned URL; the link would die before its stated expiry." >&2; exit 1 ;;
+            esac
+          done
           echo "::add-mask::${apk_download_url}"
           echo "::add-mask::${download_url}"
+          # Stated as a real timestamp rather than "seven days", so a recipient
+          # reading it later can tell whether the link is still live instead of
+          # having to trust a duration they were not there to see start.
+          echo "link_expires_at=$(date -u -d '+7 days' '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
+
+          # A record of what was actually uploaded, so the redelivery workflow
+          # can re-sign the same artifacts from a single folder name. Without
+          # it, an expired link is a 25-minute rebuild rather than a one-click
+          # re-sign, which is what makes link expiry feel like an outage.
+          cat > /tmp/release.json <<JSON
+          {
+            "releaseName": "${{ steps.meta.outputs.release_name }}",
+            "releaseDate": "${{ steps.meta.outputs.release_date }}",
+            "commit": "${{ github.sha }}",
+            "runUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "versionName": "${{ steps.meta.outputs.app_version }}",
+            "apkKey": "${apk_key}",
+            "aabKey": "${s3_key}",
+            "apkSha256": "$(sha256sum "${APK_PATH}" | cut -d' ' -f1)",
+            "aabSha256": "$(sha256sum "${{ steps.collect.outputs.aab_path }}" | cut -d' ' -f1)"
+          }
+          JSON
+          aws s3 cp /tmp/release.json "s3://${PRIVATE_RELEASES_BUCKET}/android/private/${{ steps.meta.outputs.release_date }}/release.json" --only-show-errors
+          rm -f /tmp/release.json
+
+          # A tiny object the scheduled health check performs a real signed
+          # round-trip against. It exists because checking that the credential
+          # authenticates would still pass if s3:GetObject had been dropped from
+          # the policy, which is precisely the change that would break delivery
+          # while leaving every other signal green.
+          printf '{"checked":"%s"}\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > /tmp/healthcheck.json
+          aws s3 cp /tmp/healthcheck.json "s3://${PRIVATE_RELEASES_BUCKET}/android/private/.delivery-healthcheck.json" --only-show-errors
+          rm -f /tmp/healthcheck.json
           echo "apk_key=$apk_key" >> "$GITHUB_OUTPUT"
           echo "apk_download_url=$apk_download_url" >> "$GITHUB_OUTPUT"
           echo "s3_key=$s3_key" >> "$GITHUB_OUTPUT"
           echo "download_url=$download_url" >> "$GITHUB_OUTPUT"
+
+      # A green step that emits a broken link is worse than a red one, because
+      # the email still goes out. Prove each link resolves before it is allowed
+      # anywhere near the recipient.
+      - name: Verify delivery links resolve before emailing
+        if: steps.meta.outputs.deliver_release == 'true'
+        env:
+          APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
+          AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
+        run: |
+          status=0
+          for entry in "apk:${APK_DOWNLOAD_URL}" "aab:${AAB_DOWNLOAD_URL}"; do
+            label="${entry%%:*}"
+            url="${entry#*:}"
+            if [ -z "${url}" ]; then
+              echo "::error::No ${label} delivery link was generated." >&2
+              status=1
+              continue
+            fi
+            # One ranged byte is enough to prove the signature, the credential
+            # and the object all work, without moving 160 MiB through the runner.
+            code="$(curl --silent --show-error --location --max-time 60 \
+              --range 0-0 --output /dev/null --write-out '%{http_code}' "${url}" || echo 000)"
+            case "${code}" in
+              200|206) echo "${label} delivery link resolves (HTTP ${code})." ;;
+              *) echo "::error::${label} delivery link did not resolve (HTTP ${code}). Not emailing a link that does not work." >&2; status=1 ;;
+            esac
+          done
+          exit "${status}"
 
       - name: Email private APK and AAB delivery notice
         if: steps.meta.outputs.deliver_release == 'true'
@@ -578,7 +681,8 @@ jobs:
             The latest signed Aline2 Android production release is ready.
 
             Use the private AAB link for the manual Google Play Console upload.
-            Both secure APK and AAB download links expire after seven days.
+            The APK and AAB links below expire at ${{ steps.private_aab.outputs.link_expires_at }} UTC.
+            If a link has expired, ask for a fresh one and a new signed build can be delivered without a rebuild.
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
           APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
           AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
@@ -606,7 +710,8 @@ jobs:
             cat "${APK_NAME}.sha256"
             if [ "${{ steps.meta.outputs.deliver_release }}" = "true" ]; then
               echo "- Private APK/AAB delivery email sent to \`cuboidsoft@gmail.com\`"
-              echo "- Secure links expire after seven days"
+              echo "- Delivery links verified reachable before sending; expire ${{ steps.private_aab.outputs.link_expires_at }}"
+              echo "- Signed with the resource-scoped \`aline2-android-release-ci\` credential, not a cloud session"
               echo "- Google Play upload: manual"
               echo "- AAB checksum:"
               cat "${AAB_NAME}.sha256"
