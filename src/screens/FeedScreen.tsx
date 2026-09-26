@@ -364,6 +364,7 @@ type CurrentUserSummary = {
   name: string;
   email?: string;
   followingIds: string[];
+  category?: string;
 };
 
 type FeedRelationshipKind = "self" | "follow" | "follow_back" | "following" | "message";
@@ -538,41 +539,57 @@ function FeedScreen({ navigation, route }: any) {
     }
   }, []);
 
+  const isAdmin = String(currentUser?.category || "").toLowerCase() === "admin";
+
   const menuSections = useMemo(
-    () => [
-      {
-        title: "Account",
-        data: [
-          { icon: "person-outline", label: "My Profile", screen: "ProfileView" },
-          { icon: "wallet-outline", label: "User Wallet", screen: "WalletScreen" },
-          { icon: "notifications-outline", label: "Notifications", screen: "NotificationScreen" },
-          { icon: "trophy-outline", label: "Leaderboard", screen: "LeaderboardScreen" },
-        ],
-      },
-      {
-        title: "Growth",
-        data: [
-          { icon: "star-outline", label: "Feature Your Profile", screen: "HowToEarnScreen", params: { section: "featureProfile" } },
-          { icon: "document-text-outline", label: "Brand Campaigns & Ads", screen: "HowToEarnScreen", params: { section: "listedAds" } },
-          { icon: "megaphone-outline", label: "Promotions", screen: "HowToEarnScreen", params: { section: "promotions" } },
-          { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen", params: { section: "howToEarn" } },
-          { icon: "gift-outline", label: "Refer and Earn", screen: "HowToEarnScreen", params: { section: "referral" } },
-          hasSellerAccount
-            ? { icon: "briefcase-outline", label: "Seller Workspace", screen: "SellerDashboardScreen" }
-            : { icon: "storefront-outline", label: "Become a Seller", screen: "SellerRegistration" },
-        ],
-      },
-      {
-        title: "Support",
-        data: [
-          { icon: "settings-outline", label: "Settings", screen: "SettingsScreen" },
-          { icon: "chatbox-ellipses-outline", label: "Suggestion / Feedback", screen: "FeedbackScreen" },
-          { icon: "shield-alert-outline", label: "Customer Support (Report Fraud)", screen: "CustomerSupportScreen" },
-          { icon: "help-circle-outline", label: "Help & Support", screen: "HelpSupportScreen" },
-        ],
-      },
-    ],
-    [hasSellerAccount],
+    () => {
+      // Menu entries come from main; the feature adds an admin-only section.
+      const sections: Array<{ title: string; data: any[] }> = [
+        {
+          title: "Account",
+          data: [
+            { icon: "person-outline", label: "My Profile", screen: "ProfileView" },
+            { icon: "wallet-outline", label: "User Wallet", screen: "WalletScreen" },
+            { icon: "notifications-outline", label: "Notifications", screen: "NotificationScreen" },
+            { icon: "trophy-outline", label: "Leaderboard", screen: "LeaderboardScreen" },
+          ],
+        },
+        {
+          title: "Growth",
+          data: [
+            { icon: "star-outline", label: "Feature Your Profile", screen: "HowToEarnScreen", params: { section: "featureProfile" } },
+            { icon: "document-text-outline", label: "Brand Campaigns & Ads", screen: "HowToEarnScreen", params: { section: "listedAds" } },
+            { icon: "megaphone-outline", label: "Promotions", screen: "HowToEarnScreen", params: { section: "promotions" } },
+            { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen", params: { section: "howToEarn" } },
+            { icon: "gift-outline", label: "Refer and Earn", screen: "HowToEarnScreen", params: { section: "referral" } },
+            hasSellerAccount
+              ? { icon: "briefcase-outline", label: "Seller Workspace", screen: "SellerDashboardScreen" }
+              : { icon: "storefront-outline", label: "Become a Seller", screen: "SellerRegistration" },
+          ],
+        },
+        {
+          title: "Support",
+          data: [
+            { icon: "settings-outline", label: "Settings", screen: "SettingsScreen" },
+            { icon: "chatbox-ellipses-outline", label: "Suggestion / Feedback", screen: "FeedbackScreen" },
+            { icon: "shield-alert-outline", label: "Customer Support (Report Fraud)", screen: "CustomerSupportScreen" },
+            { icon: "help-circle-outline", label: "Help & Support", screen: "HelpSupportScreen" },
+          ],
+        },
+      ];
+
+      if (isAdmin) {
+        sections.push({
+          title: "Admin",
+          data: [
+            { icon: "diamond-outline", label: "Premium Feature", screen: "PremiumSettingsScreen" },
+          ],
+        });
+      }
+
+      return sections;
+    },
+    [hasSellerAccount, isAdmin],
   );
 
   const readWalletBalance = useCallback(async (): Promise<number> => {
@@ -735,6 +752,7 @@ function FeedScreen({ navigation, route }: any) {
           username: String(storedUser.username || ""),
           name: String(storedUser.name || ""),
           email: String(storedUser.email || ""),
+          category: String(storedUser.category || ""),
           followingIds: Array.isArray(storedUser.following)
             ? storedUser.following.map((entry: any) => String(entry?._id || entry?.id || entry || "")).filter(Boolean)
             : [],
