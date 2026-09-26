@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -12,14 +14,12 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Ionicons";
-import { CountryPicker } from "react-native-country-codes-picker";
-import type { CountryItem } from "react-native-country-codes-picker";
 import { Alert } from "../utils/appAlert";
 import { API } from "../api/api";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
 import { alpha, appFonts, appShadows } from "../theme/designSystem";
 import { useAppTheme } from "../theme/AppThemeContext";
-import { currencyForCountry } from "../utils/countryCurrency";
+import { COUNTRY_OPTIONS, currencyForCountry, type CountryOption } from "../utils/countryCurrency";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,6 +92,23 @@ const PremiumSettingsScreen = ({ navigation }: any) => {
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   // When replacing an existing entry: its index; -1 = adding new
   const [pickerTargetIndex, setPickerTargetIndex] = useState<number>(-1);
+  const [countryQuery, setCountryQuery] = useState("");
+
+  const filteredCountries = useMemo(() => {
+    const q = countryQuery.trim().toLowerCase();
+    if (!q) return COUNTRY_OPTIONS;
+    return COUNTRY_OPTIONS.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.code.toLowerCase().includes(q) ||
+        c.currency.toLowerCase().includes(q),
+    );
+  }, [countryQuery]);
+
+  const closeCountryPicker = useCallback(() => {
+    setShowCountryPicker(false);
+    setCountryQuery("");
+  }, []);
 
   // ─── Load ────────────────────────────────────────────────────────────────
 
@@ -233,16 +250,17 @@ const PremiumSettingsScreen = ({ navigation }: any) => {
 
   const openPickerForNew = () => {
     setPickerTargetIndex(-1);
+    setCountryQuery("");
     setShowCountryPicker(true);
   };
 
-  const onCountrySelected = (item: CountryItem) => {
-    setShowCountryPicker(false);
+  const onCountrySelected = (item: CountryOption) => {
+    closeCountryPicker();
 
     const code = item.code.toUpperCase();
-    const name = item.name?.en || code;
-    const flag = item.flag || flagFromCode(code);
-    const currency = currencyForCountry(code);
+    const name = item.name || code;
+    const flag = flagFromCode(code);
+    const currency = currencyForCountry(code) || item.currency;
 
     if (pickerTargetIndex === -1) {
       // Check for duplicate before adding
@@ -717,34 +735,90 @@ const PremiumSettingsScreen = ({ navigation }: any) => {
         </ScrollView>
 
         {/* Country picker modal — renders outside the ScrollView to avoid clipping */}
-        <CountryPicker
-          show={showCountryPicker}
-          lang="en"
-          pickerButtonOnPress={onCountrySelected}
-          onBackdropPress={() => setShowCountryPicker(false)}
-          onRequestClose={() => setShowCountryPicker(false)}
-          inputPlaceholder="Search country…"
-          searchMessage="No country found"
-          style={{
-            modal: {
-              height: "70%",
-              backgroundColor: colors.card,
-            },
-            textInput: {
-              color: colors.text,
-              backgroundColor: alpha(colors.background, "EE"),
-              borderRadius: 10,
-              borderColor: alpha(colors.border, "88"),
-              borderWidth: 1,
-            },
-            countryButtonStyles: {
-              backgroundColor: "transparent",
-            },
-            flag: { fontSize: 22 },
-            countryName: { color: colors.text, fontSize: 15 },
-            dialCode: { color: colors.mutedText, fontSize: 13 },
-          }}
-        />
+        <Modal
+          visible={showCountryPicker}
+          transparent
+          animationType="fade"
+          onRequestClose={closeCountryPicker}
+        >
+          <Pressable style={styles.pickerBackdrop} onPress={closeCountryPicker}>
+            {/* Stop taps inside the sheet from dismissing it. */}
+            <Pressable
+              style={[
+                styles.pickerSheet,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: alpha(colors.border, isDarkMode ? "77" : "BB"),
+                },
+              ]}
+              onPress={() => undefined}
+            >
+              <View style={styles.pickerHeaderRow}>
+                <Text style={[styles.pickerTitle, { color: colors.text }]}>Select Country</Text>
+                <TouchableOpacity
+                  activeOpacity={0.82}
+                  onPress={closeCountryPicker}
+                  style={[
+                    styles.pickerCloseButton,
+                    {
+                      backgroundColor: alpha(colors.card, isDarkMode ? "D8" : "F2"),
+                      borderColor: alpha(colors.border, isDarkMode ? "72" : "B6"),
+                    },
+                  ]}
+                >
+                  <Icon name="close" size={18} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={[
+                  styles.pickerSearch,
+                  {
+                    color: colors.text,
+                    backgroundColor: alpha(colors.background, "EE"),
+                    borderColor: alpha(colors.border, "88"),
+                  },
+                ]}
+                placeholder="Search country…"
+                placeholderTextColor={colors.mutedText}
+                value={countryQuery}
+                onChangeText={setCountryQuery}
+                autoCorrect={false}
+                autoCapitalize="none"
+                clearButtonMode="while-editing"
+              />
+              <FlatList
+                data={filteredCountries}
+                keyExtractor={(item) => item.code}
+                keyboardShouldPersistTaps="handled"
+                style={styles.pickerList}
+                contentContainerStyle={styles.pickerListContent}
+                ListEmptyComponent={
+                  <Text style={[styles.pickerEmpty, { color: colors.mutedText }]}>
+                    No country found
+                  </Text>
+                }
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    style={[
+                      styles.pickerRow,
+                      { borderBottomColor: alpha(colors.border, isDarkMode ? "44" : "88") },
+                    ]}
+                    onPress={() => onCountrySelected(item)}
+                  >
+                    <Text style={styles.pickerFlag}>{flagFromCode(item.code)}</Text>
+                    <Text style={[styles.pickerRowName, { color: colors.text }]}>
+                      {item.name}
+                    </Text>
+                    <Text style={[styles.pickerRowMeta, { color: colors.mutedText }]}>
+                      {item.code} · {item.currency}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         <AppBottomDock navigation={navigation} />
       </SafeAreaView>
@@ -926,6 +1000,58 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   addCountryText: { fontSize: 14, fontWeight: "600" },
+
+  // Country picker modal
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  pickerSheet: {
+    height: "70%",
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: "hidden",
+    paddingTop: 14,
+  },
+  pickerHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  pickerTitle: { fontSize: 16, fontWeight: "700", fontFamily: appFonts.bold },
+  pickerCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pickerSearch: {
+    height: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    fontSize: 15,
+    marginHorizontal: 16,
+  },
+  pickerList: { flex: 1, marginTop: 10 },
+  pickerListContent: { paddingBottom: 12 },
+  pickerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  pickerFlag: { fontSize: 22, marginRight: 10 },
+  pickerRowName: { flex: 1, fontSize: 15 },
+  pickerRowMeta: { fontSize: 12 },
+  pickerEmpty: { fontSize: 14, textAlign: "center", paddingVertical: 24 },
 
   tierRow: { flexDirection: "row", gap: 8 },
   tierButton: {
