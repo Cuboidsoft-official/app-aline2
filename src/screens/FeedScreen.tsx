@@ -2791,6 +2791,12 @@ function FeedScreen({ navigation, route }: any) {
         onEndReachedThreshold={0.45}
         onViewableItemsChanged={handleFeedViewableChange}
         viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 200 }}
+        onScrollToIndexFailed={({ index, averageItemLength }) => {
+          feedListRef.current?.scrollToOffset({
+            offset: Math.max(0, averageItemLength * index),
+            animated: false,
+          });
+        }}
         ListHeaderComponent={isFocusedPostFeed ? <View style={styles.feedHeaderSpacer} /> : renderHeader}
         ListFooterComponent={
           loadingMore ? (
