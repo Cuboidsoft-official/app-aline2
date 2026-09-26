@@ -34,6 +34,7 @@ import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
 import { buildSharedStoryMessage } from "../../utils/chatPresentation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
+import { performPremiumPurchase } from "../../utils/premiumPurchase";
 
 const DEFAULT_STORY_MS = 5000;
 const TEXT_STORY_MS = 7000;
@@ -126,6 +127,8 @@ function StoryViewerScreen({ route, navigation }: any) {
   const [isMusicEnabled, setIsMusicEnabled] = useState(true);
   const [showLikeBurst, setShowLikeBurst] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const [storyPurchaseVerified, setStoryPurchaseVerified] = useState(false);
   const replyInputRef = useRef<TextInput | null>(null);
   const storyTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     time: 0,
@@ -264,6 +267,32 @@ function StoryViewerScreen({ route, navigation }: any) {
     setReplyText("");
     isAdvancingRef.current = false;
   }, [activeIndex]);
+
+  useEffect(() => {
+    setPurchaseLoading(false);
+    setStoryPurchaseVerified(false);
+  }, [currentStory?.id]);
+
+  const handleUnlockStory = useCallback(async () => {
+    if (purchaseLoading || storyPurchaseVerified || !currentStory) return;
+    setPurchaseLoading(true);
+    const result = await performPremiumPurchase({ contentType: "story", contentId: currentStory.id });
+    if (result.outcome === "verified" || result.outcome === "already_purchased") {
+      // Phase 2E: re-fetch so entitlement-gated media is included in the response
+      try {
+        const refreshedStory = await socialApi.getStory(currentStory.id);
+        if (refreshedStory?.premiumUnlocked) {
+          setStories((prev) => prev.map((s) => (s.id === currentStory.id ? refreshedStory : s)));
+          setPurchaseLoading(false);
+          return;
+        }
+      } catch {
+        // Re-fetch failed — fall back to verified state
+      }
+      setStoryPurchaseVerified(true);
+    }
+    setPurchaseLoading(false);
+  }, [purchaseLoading, storyPurchaseVerified, currentStory]);
 
   useEffect(() => {
     if (!currentStory) {
@@ -835,6 +864,9 @@ function StoryViewerScreen({ route, navigation }: any) {
         premiumPrice={currentStory?.premiumPrice}
         premiumCurrency={currentStory?.premiumCurrency}
         isOwner={currentStory?.isOwner}
+        loading={purchaseLoading}
+        purchaseVerified={storyPurchaseVerified}
+        onUnlockPress={handleUnlockStory}
         style={{ ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" }}
       >
         {renderStoryBody()}

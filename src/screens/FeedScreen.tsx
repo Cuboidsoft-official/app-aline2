@@ -60,6 +60,7 @@ import {
   getCarouselPageIndex,
   isCarouselTapGesture,
 } from "../utils/carouselGesture";
+import { performPremiumPurchase } from "../utils/premiumPurchase";
 
 let ColorMatrix: any;
 try {
@@ -411,6 +412,7 @@ function FeedScreen({ navigation, route }: any) {
   const [isVideoSoundEnabled, setIsVideoSoundEnabled] = useState(FEED_VIDEO_SOUND_DEFAULT);
   const [menuOpen, setMenuOpen] = useState(false);
   const [publishTasks, setPublishTasks] = useState<PublishQueueTask[]>(() => getPublishQueueSnapshot());
+  const [premiumStates, setPremiumStates] = useState<Record<string, "loading" | "verified">>({});
   const slideAnim = useRef(new Animated.Value(0)).current;
   const feedListRef = useRef<FlatList<any> | null>(null);
   const hasFeedContentRef = useRef(false);
@@ -2360,6 +2362,43 @@ function FeedScreen({ navigation, route }: any) {
     }
   }, [feed?.posts?.length, loadMoreFeed]);
 
+  const handleUnlockPost = useCallback(async (postId: string) => {
+    if (premiumStates[postId]) return;
+    setPremiumStates((prev) => ({ ...prev, [postId]: "loading" }));
+    const result = await performPremiumPurchase({ contentType: "post", contentId: postId });
+    if (result.outcome === "verified" || result.outcome === "already_purchased") {
+      // Phase 2E: re-fetch from server so the entitlement-gated media is included
+      try {
+        const refreshedPost = await socialApi.getPost(postId);
+        if (refreshedPost?.premiumUnlocked) {
+          setFeed((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              posts: prev.posts.map((p) => (p.id === postId ? refreshedPost : p)),
+            };
+          });
+          // Clear premium state so overlay is fully removed
+          setPremiumStates((prev) => {
+            const next = { ...prev };
+            delete next[postId];
+            return next;
+          });
+          return;
+        }
+      } catch {
+        // Re-fetch failed — fall back to verified state (overlay shows success message)
+      }
+      setPremiumStates((prev) => ({ ...prev, [postId]: "verified" }));
+    } else {
+      setPremiumStates((prev) => {
+        const next = { ...prev };
+        delete next[postId];
+        return next;
+      });
+    }
+  }, [premiumStates]);
+
   const renderPost = useCallback(({ item, index }: { item: any; index: number }) => {
     if (!item) {
       return null;
@@ -2438,6 +2477,9 @@ function FeedScreen({ navigation, route }: any) {
         premiumPrice={item.premiumPrice}
         premiumCurrency={item.premiumCurrency}
         isOwner={isPostOwner}
+        loading={premiumStates[item.id] === "loading"}
+        purchaseVerified={premiumStates[item.id] === "verified"}
+        onUnlockPress={() => handleUnlockPost(item.id)}
       >
         {rawMediaSurface}
       </PremiumContentOverlay>

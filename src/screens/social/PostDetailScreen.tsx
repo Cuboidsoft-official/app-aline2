@@ -35,6 +35,7 @@ import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
 import { useAppTheme } from "../../theme/AppThemeContext";
 import { getCarouselGestureIntent } from "../../utils/carouselGesture";
+import { performPremiumPurchase } from "../../utils/premiumPurchase";
 
 let ColorMatrix: any = null;
 try {
@@ -101,6 +102,8 @@ function PostDetailScreen({ route, navigation }: any) {
   const [caption, setCaption] = useState("");
   const [hideLikeCount, setHideLikeCount] = useState(false);
   const [disableComments, setDisableComments] = useState(false);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const [purchaseVerified, setPurchaseVerified] = useState(false);
   const postTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     time: 0,
     timeout: null,
@@ -256,6 +259,27 @@ function PostDetailScreen({ route, navigation }: any) {
     } finally {
       setBusySave(false);
     }
+  };
+
+  const handleUnlockPost = async () => {
+    if (purchaseLoading || purchaseVerified || !post) return;
+    setPurchaseLoading(true);
+    const result = await performPremiumPurchase({ contentType: "post", contentId: post.id });
+    if (result.outcome === "verified" || result.outcome === "already_purchased") {
+      // Phase 2E: re-fetch so entitlement-gated media is included in the response
+      try {
+        const refreshedPost = await socialApi.getPost(post.id);
+        if (refreshedPost?.premiumUnlocked) {
+          setPost(refreshedPost);
+          setPurchaseLoading(false);
+          return;
+        }
+      } catch {
+        // Re-fetch failed — fall back to verified state
+      }
+      setPurchaseVerified(true);
+    }
+    setPurchaseLoading(false);
   };
 
   const handleDownload = async () => {
@@ -483,6 +507,9 @@ function PostDetailScreen({ route, navigation }: any) {
             premiumPrice={post.premiumPrice}
             premiumCurrency={post.premiumCurrency}
             isOwner={!!currentUserId && post.user.id === currentUserId}
+            loading={purchaseLoading}
+            purchaseVerified={purchaseVerified}
+            onUnlockPress={handleUnlockPost}
           >
           <Pressable style={[styles.mediaSurface, { backgroundColor: colors.card }]} onPress={handleMediaPress}>
             {post.type === "carousel" ? (

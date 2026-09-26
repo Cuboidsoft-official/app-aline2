@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { currencySymbol } from "../../../utils/countryCurrency";
 
@@ -9,8 +9,12 @@ interface PremiumContentOverlayProps {
   premiumCurrency?: string;
   /** True when the viewing user is the content creator — skips paywall. */
   isOwner?: boolean;
-  /** Called when the viewer taps "Unlock". Phase 2D will wire the payment. */
+  /** Called when the viewer taps "Unlock". Wired to the Razorpay payment flow in Phase 2D. */
   onUnlockPress?: () => void;
+  /** True while the payment flow is in progress — shows a spinner. */
+  loading?: boolean;
+  /** True after payment is server-verified — shows purchase-success state. Media is NOT unlocked. */
+  purchaseVerified?: boolean;
   children: React.ReactNode;
   /** Optional extra style applied to the wrapping container. */
   style?: object;
@@ -36,6 +40,8 @@ export default function PremiumContentOverlay({
   premiumCurrency,
   isOwner,
   onUnlockPress,
+  loading = false,
+  purchaseVerified = false,
   children,
   style,
 }: PremiumContentOverlayProps) {
@@ -51,6 +57,42 @@ export default function PremiumContentOverlay({
       ? `${sym}${premiumPrice}`
       : null;
   const ctaLabel = priceLabel ? `Unlock for ${priceLabel}` : "Unlock";
+
+  // Payment verified state — content remains locked, media access is Phase 2E
+  if (purchaseVerified) {
+    return (
+      <View style={[styles.container, style]}>
+        <View style={styles.hiddenMedia} pointerEvents="none">
+          {children}
+        </View>
+        <View style={styles.overlay} pointerEvents="none">
+          <View style={[styles.lockBadge, styles.verifiedBadge]}>
+            <Icon name="checkmark-circle" size={13} color="#fff" />
+            <Text style={styles.lockBadgeText}>PAYMENT VERIFIED</Text>
+          </View>
+          <View style={styles.priceBlock}>
+            <Text style={styles.premiumLabel}>Payment Received</Text>
+            <Text style={styles.verifiedSubtext}>Content access is coming soon</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // Loading state — payment in progress
+  if (loading) {
+    return (
+      <View style={[styles.container, style]}>
+        <View style={styles.hiddenMedia} pointerEvents="none">
+          {children}
+        </View>
+        <View style={styles.overlay} pointerEvents="none">
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={[styles.premiumLabel, styles.loadingText]}>Processing payment…</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, style]}>
@@ -148,5 +190,18 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 15,
     fontWeight: "700",
+  },
+  verifiedBadge: {
+    backgroundColor: "#22c55e",
+  },
+  verifiedSubtext: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 12,
+    fontWeight: "400",
+    marginTop: 2,
+    textAlign: "center",
+  },
+  loadingText: {
+    marginTop: 12,
   },
 });
