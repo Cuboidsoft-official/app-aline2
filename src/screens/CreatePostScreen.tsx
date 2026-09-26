@@ -41,6 +41,8 @@ import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBot
 import DraggableBottomSheet from "../components/DraggableBottomSheet";
 import MentionSuggestionList from "../components/MentionSuggestionList";
 import { Alert } from "../utils/appAlert";
+import { getStoredUser } from "../utils/authSession";
+import { countryFlag, currencySymbol } from "../utils/countryCurrency";
 import {
   captureComposerAssets,
   ComposerAsset,
@@ -1018,14 +1020,21 @@ function CreatePostScreen({ navigation, route }: any) {
   // Premium content state
   const [premiumSettings, setPremiumSettings] = useState<{
     premiumContentEnabled: boolean;
+    countryPricing: Array<{ countryCode: string; currency: string; amount: number }>;
     minPriceINR: number;
     maxPriceINR: number;
     defaultTier: string;
   } | null>(null);
+  // Resolved pricing for the logged-in creator's country. null = country not configured.
+  const [creatorPricing, setCreatorPricing] = useState<{
+    countryCode: string;
+    currency: string;
+    amount: number;
+    currencySymbol: string;
+    flag: string;
+  } | null>(null);
   const [isPremiumPost, setIsPremiumPost] = useState(false);
-  const [postPremiumPrice, setPostPremiumPrice] = useState("");
   const [isPremiumStory, setIsPremiumStory] = useState(false);
-  const [storyPremiumPrice, setStoryPremiumPrice] = useState("");
   const [storyVisibility, setStoryVisibility] = useState<Visibility>("public");
   const [storyAllowReplies, setStoryAllowReplies] = useState(true);
   const [storyAllowSharing, setStoryAllowSharing] = useState(true);
@@ -1185,23 +1194,43 @@ function CreatePostScreen({ navigation, route }: any) {
     }).catch(() => undefined);
   }, [resetSelectedMusicPreview, selectedMusic]);
 
-  // Fetch premium settings once on mount so the UI knows whether to show premium options.
+  // Fetch premium settings once on mount; resolve the creator's applicable country pricing.
   useEffect(() => {
     API.get("/premium-settings")
-      .then((res: any) => {
+      .then(async (res: any) => {
         const s = res?.data?.settings;
-        if (s) {
-          setPremiumSettings({
-            premiumContentEnabled: Boolean(s.premiumContentEnabled),
-            minPriceINR: Number(s.minPriceINR) || 1,
-            maxPriceINR: Number(s.maxPriceINR) || 9999,
-            defaultTier: String(s.defaultTier || "one_time"),
+        if (!s) return;
+        const enabledPricing = (s.countryPricing || []).filter((e: any) => e.enabled !== false);
+        setPremiumSettings({
+          premiumContentEnabled: Boolean(s.premiumContentEnabled),
+          countryPricing: enabledPricing.map((e: any) => ({
+            countryCode: String(e.countryCode || "").toUpperCase(),
+            currency: String(e.currency || "").toUpperCase(),
+            amount: Number(e.amount) || 0,
+          })),
+          minPriceINR: Number(s.minPriceINR) || 1,
+          maxPriceINR: Number(s.maxPriceINR) || 9999,
+          defaultTier: String(s.defaultTier || "one_time"),
+        });
+        if (!s.premiumContentEnabled) return;
+        // Match the logged-in user's country to an enabled countryPricing entry.
+        const storedUser = await getStoredUser();
+        const userCountry = String((storedUser as any)?.country || "").trim().toUpperCase();
+        if (!userCountry) return;
+        const match = enabledPricing.find(
+          (e: any) => String(e.countryCode || "").toUpperCase() === userCountry
+        );
+        if (match) {
+          setCreatorPricing({
+            countryCode: String(match.countryCode).toUpperCase(),
+            currency: String(match.currency).toUpperCase(),
+            amount: Number(match.amount),
+            currencySymbol: currencySymbol(String(match.currency).toUpperCase()),
+            flag: countryFlag(String(match.countryCode).toUpperCase()),
           });
         }
       })
-      .catch(() => {
-        // Silently fall back — premium options remain hidden when settings cannot be loaded
-      });
+      .catch(() => {});
   }, []);
   const storyTextThemeStyle =
     STORY_TEXT_THEMES.find((item) => item.id === storyTextTheme) || STORY_TEXT_THEMES[0];
@@ -2194,9 +2223,7 @@ function CreatePostScreen({ navigation, route }: any) {
     setDisableComments(false);
     setHideLikeCount(false);
     setIsPremiumPost(false);
-    setPostPremiumPrice("");
     setIsPremiumStory(false);
-    setStoryPremiumPrice("");
     setPublishError("");
     setSelectedMusic(null);
     setPendingMusicSelection(null);
@@ -2766,9 +2793,11 @@ function CreatePostScreen({ navigation, route }: any) {
       stickers: buildComposerTextStickers(),
       hasOriginalAudio: hasVideoMedia,
       isPremium: isPremiumPost,
-      premiumPrice: isPremiumPost ? parseFloat(postPremiumPrice) || 0 : undefined,
+      premiumPrice: isPremiumPost ? creatorPricing?.amount : undefined,
+      premiumCountryCode: isPremiumPost ? creatorPricing?.countryCode : undefined,
+      premiumCurrency: isPremiumPost ? creatorPricing?.currency : undefined,
     };
-  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, disableComments, hideLikeCount, isPremiumPost, location, postPremiumPrice, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedTagPeople]);
+  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, creatorPricing, disableComments, hideLikeCount, isPremiumPost, location, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedTagPeople]);
 
   const prepareStoryPayload = useCallback(async (
     uploadOptions?: UploadComposerAssetsOptions,
@@ -2806,7 +2835,9 @@ function CreatePostScreen({ navigation, route }: any) {
         allowReplies: storyAllowReplies,
         allowSharing: storyAllowSharing,
         isPremium: isPremiumStory,
-        premiumPrice: isPremiumStory ? parseFloat(storyPremiumPrice) || 0 : undefined,
+        premiumPrice: isPremiumStory ? creatorPricing?.amount : undefined,
+        premiumCountryCode: isPremiumStory ? creatorPricing?.countryCode : undefined,
+        premiumCurrency: isPremiumStory ? creatorPricing?.currency : undefined,
       };
     }
 
@@ -2840,10 +2871,13 @@ function CreatePostScreen({ navigation, route }: any) {
       allowReplies: storyAllowReplies,
       allowSharing: storyAllowSharing,
       isPremium: isPremiumStory,
-      premiumPrice: isPremiumStory ? parseFloat(storyPremiumPrice) || 0 : undefined,
+      premiumPrice: isPremiumStory ? creatorPricing?.amount : undefined,
+      premiumCountryCode: isPremiumStory ? creatorPricing?.countryCode : undefined,
+      premiumCurrency: isPremiumStory ? creatorPricing?.currency : undefined,
     };
   }, [
     caption,
+    creatorPricing,
     isPremiumStory,
     location,
     selectedAsset,
@@ -2862,7 +2896,6 @@ function CreatePostScreen({ navigation, route }: any) {
     storyImageSticker,
     storyFilterIntensity,
     storyFilterPreset,
-    storyPremiumPrice,
     storyText,
     storyTextAlignment,
     storyTextPosition,
@@ -4946,14 +4979,14 @@ function CreatePostScreen({ navigation, route }: any) {
               <View style={styles.storyDetailsTags}>{renderMentionChips()}</View>
             </View>
 
-            {premiumSettings?.premiumContentEnabled ? (
+            {premiumSettings?.premiumContentEnabled && creatorPricing ? (
               <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
                 <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Monetise</Text>
                 <Text style={[styles.sectionTitle, { color: textColor }]}>Story type</Text>
                 <View style={styles.switchRow}>
                   <TouchableOpacity
                     style={[styles.premiumTypeOption, !isPremiumStory && { borderColor: accentColor }]}
-                    onPress={() => { setIsPremiumStory(false); setStoryPremiumPrice(""); }}
+                    onPress={() => setIsPremiumStory(false)}
                     activeOpacity={0.7}
                   >
                     <View style={[styles.premiumTypeRadio, !isPremiumStory && { backgroundColor: accentColor, borderColor: accentColor }]} />
@@ -4978,16 +5011,12 @@ function CreatePostScreen({ navigation, route }: any) {
                 </View>
                 {isPremiumStory ? (
                   <View style={[styles.premiumPriceRow, { borderTopColor: hairlineColor }]}>
-                    <Text style={[styles.switchTitle, { color: textColor }]}>Price (₹)</Text>
-                    <TextInput
-                      style={[styles.premiumPriceInput, { color: textColor, backgroundColor: inputBackground, borderColor }]}
-                      value={storyPremiumPrice}
-                      onChangeText={setStoryPremiumPrice}
-                      placeholder={`${premiumSettings.minPriceINR}–${premiumSettings.maxPriceINR}`}
-                      placeholderTextColor={mutedColor}
-                      keyboardType="numeric"
-                      maxLength={8}
-                    />
+                    <Text style={[styles.switchTitle, { color: textColor }]}>
+                      {creatorPricing.flag} {creatorPricing.currency}
+                    </Text>
+                    <Text style={[styles.premiumPriceDisplay, { color: accentColor }]}>
+                      {creatorPricing.currencySymbol}{creatorPricing.amount}
+                    </Text>
                   </View>
                 ) : null}
               </View>
@@ -5140,14 +5169,14 @@ function CreatePostScreen({ navigation, route }: any) {
             {renderMentionChips()}
           </View>
 
-          {mode === "post" && premiumSettings?.premiumContentEnabled ? (
+          {mode === "post" && premiumSettings?.premiumContentEnabled && creatorPricing ? (
             <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
               <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Monetise</Text>
               <Text style={[styles.sectionTitle, { color: textColor }]}>Post type</Text>
               <View style={styles.switchRow}>
                 <TouchableOpacity
                   style={[styles.premiumTypeOption, !isPremiumPost && { borderColor: accentColor }]}
-                  onPress={() => { setIsPremiumPost(false); setPostPremiumPrice(""); }}
+                  onPress={() => setIsPremiumPost(false)}
                   activeOpacity={0.7}
                 >
                   <View style={[styles.premiumTypeRadio, !isPremiumPost && { backgroundColor: accentColor, borderColor: accentColor }]} />
@@ -5172,16 +5201,12 @@ function CreatePostScreen({ navigation, route }: any) {
               </View>
               {isPremiumPost ? (
                 <View style={[styles.premiumPriceRow, { borderTopColor: hairlineColor }]}>
-                  <Text style={[styles.switchTitle, { color: textColor }]}>Price (₹)</Text>
-                  <TextInput
-                    style={[styles.premiumPriceInput, { color: textColor, backgroundColor: inputBackground, borderColor }]}
-                    value={postPremiumPrice}
-                    onChangeText={setPostPremiumPrice}
-                    placeholder={`${premiumSettings.minPriceINR}–${premiumSettings.maxPriceINR}`}
-                    placeholderTextColor={mutedColor}
-                    keyboardType="numeric"
-                    maxLength={8}
-                  />
+                  <Text style={[styles.switchTitle, { color: textColor }]}>
+                    {creatorPricing.flag} {creatorPricing.currency}
+                  </Text>
+                  <Text style={[styles.premiumPriceDisplay, { color: accentColor }]}>
+                    {creatorPricing.currencySymbol}{creatorPricing.amount}
+                  </Text>
                 </View>
               ) : null}
             </View>
@@ -7000,16 +7025,9 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 12,
   },
-  premiumPriceInput: {
-    flex: 1,
-    maxWidth: 140,
-    height: 40,
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    fontFamily: appFonts.regular,
-    textAlign: "right",
+  premiumPriceDisplay: {
+    fontSize: 18,
+    fontFamily: appFonts.semibold,
   },
   originalAudioPanel: {
     marginTop: 12,

@@ -2025,6 +2025,8 @@ class RemoteSocialApi implements SocialApi {
       taggedUsers: mapTaggedUsersForRequest(payload.taggedUsers),
       isPremium: payload.isPremium || false,
       premiumPrice: payload.isPremium ? (payload.premiumPrice || 0) : undefined,
+      premiumCountryCode: payload.isPremium ? payload.premiumCountryCode : undefined,
+      premiumCurrency: payload.isPremium ? payload.premiumCurrency : undefined,
     }, {
       timeout: 120000,
     });
@@ -2218,6 +2220,8 @@ class RemoteSocialApi implements SocialApi {
       allowSharing: payload.allowSharing,
       isPremium: payload.isPremium || false,
       premiumPrice: payload.isPremium ? (payload.premiumPrice || 0) : undefined,
+      premiumCountryCode: payload.isPremium ? payload.premiumCountryCode : undefined,
+      premiumCurrency: payload.isPremium ? payload.premiumCurrency : undefined,
     }, {
       timeout: 120000,
     });

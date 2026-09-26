@@ -50,3 +50,48 @@ export const COUNTRY_CURRENCY: Record<string, string> = {
 export function currencyForCountry(countryCode: string): string {
   return COUNTRY_CURRENCY[countryCode.toUpperCase()] ?? "";
 }
+
+/** ISO 4217 currency code → display symbol. Falls back to the code itself if not listed. */
+export const CURRENCY_SYMBOL: Record<string, string> = {
+  AED: "د.إ", AFN: "؋", ALL: "L", AMD: "֏", ANG: "ƒ", AOA: "Kz",
+  ARS: "$", AUD: "A$", AWG: "ƒ", AZN: "₼", BAM: "KM", BBD: "Bds$",
+  BDT: "৳", BGN: "лв", BHD: ".د.ب", BIF: "Fr", BMD: "$", BND: "B$",
+  BOB: "Bs.", BRL: "R$", BSD: "$", BTN: "Nu", BWP: "P", BYN: "Br",
+  BZD: "BZ$", CAD: "C$", CDF: "Fr", CHF: "Fr", CLP: "$", CNY: "¥",
+  COP: "$", CRC: "₡", CUP: "₱", CVE: "$", DJF: "Fr", DKK: "kr",
+  DOP: "RD$", DZD: "دج", EGP: "£", ETB: "Br", EUR: "€", FJD: "FJ$",
+  FKP: "£", GBP: "£", GEL: "₾", GHS: "₵", GIP: "£", GMD: "D",
+  GNF: "Fr", GTQ: "Q", GYD: "$", HKD: "HK$", HNL: "L", HTG: "G",
+  HUF: "Ft", IDR: "Rp", ILS: "₪", INR: "₹", IQD: "ع.د", IRR: "﷼",
+  ISK: "kr", JMD: "J$", JOD: "JD", JPY: "¥", KES: "KSh", KGS: "лв",
+  KHR: "៛", KMF: "Fr", KPW: "₩", KRW: "₩", KWD: "KD", KYD: "$",
+  KZT: "₸", LAK: "₭", LBP: "£", LRD: "$", LSL: "M", LYD: "LD",
+  MAD: "MAD", MDL: "L", MGA: "Ar", MKD: "ден", MMK: "K", MNT: "₮",
+  MOP: "P", MRU: "UM", MUR: "₨", MVR: "Rf", MWK: "MK", MXN: "$",
+  MYR: "RM", MZN: "MT", NAD: "$", NGN: "₦", NIO: "C$", NOK: "kr",
+  NPR: "₨", NZD: "NZ$", OMR: "﷼", PAB: "B/.", PEN: "S/.", PGK: "K",
+  PHP: "₱", PKR: "₨", PLN: "zł", PYG: "Gs", QAR: "﷼", RON: "lei",
+  RSD: "din", RUB: "₽", RWF: "Fr", SAR: "﷼", SBD: "$", SCR: "₨",
+  SDG: "ج.س.", SEK: "kr", SGD: "S$", SHP: "£", SLL: "Le", SOS: "So",
+  SRD: "$", SSP: "£", STN: "Db", SYP: "£", SZL: "L", THB: "฿",
+  TJS: "SM", TMT: "T", TND: "DT", TOP: "T$", TRY: "₺", TTD: "TT$",
+  TWD: "NT$", TZS: "TSh", UAH: "₴", UGX: "USh", USD: "$", UYU: "$U",
+  UZS: "лв", VES: "Bs.S", VND: "₫", VUV: "VT", WST: "T", XAF: "Fr",
+  XCD: "$", XOF: "Fr", XPF: "Fr", YER: "﷼", ZAR: "R", ZMW: "ZK",
+  ZWL: "$",
+};
+
+/** Returns the display symbol for an ISO 4217 currency code. Falls back to the code. */
+export function currencySymbol(code: string): string {
+  return CURRENCY_SYMBOL[code.toUpperCase()] ?? code;
+}
+
+/** Returns the regional flag emoji for an ISO 3166-1 alpha-2 country code. */
+export function countryFlag(code: string): string {
+  const upper = code.toUpperCase();
+  if (upper.length !== 2) return "";
+  return String.fromCodePoint(
+    0x1F1E6 + upper.charCodeAt(0) - 65,
+    0x1F1E6 + upper.charCodeAt(1) - 65,
+  );
+}

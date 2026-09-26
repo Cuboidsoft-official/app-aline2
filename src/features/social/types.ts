@@ -304,6 +304,8 @@ export interface CreatePostInput {
   hasOriginalAudio?: boolean;
   isPremium?: boolean;
   premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
 }
 
 export interface CreateStoryInput {
@@ -348,6 +350,8 @@ export interface CreateStoryInput {
   allowSharing?: boolean;
   isPremium?: boolean;
   premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
 }
 
 export interface CreateReelInput {
