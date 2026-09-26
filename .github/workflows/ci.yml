@@ -14,6 +14,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A malformed or unsafe workflow does not fail loudly: GitHub simply does not
+  # run it, so a broken release pipeline looks exactly like a quiet week. That
+  # is the same failure mode as the dead delivery links, and it gets its own
+  # job so it costs seconds instead of sharing the Android build's runtime.
+  #
+  # actionlint is fetched as a pinned release binary and its checksum verified
+  # against the upstream signed sums file, rather than added as a third-party
+  # action, so the only new supply-chain surface is one versioned tarball.
+  workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Lint GitHub Actions workflows
+        env:
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          set -euo pipefail
+          # The upstream asset is named linux_amd64, not linux_x86_64; verified
+          # against the v1.7.7 release rather than assumed.
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          curl --silent --show-error --location --fail --proto '=https' --tlsv1.2 \
+            --output "$archive" "${base}/${archive}"
+          curl --silent --show-error --location --fail --proto '=https' --tlsv1.2 \
+            --output checksums.txt "${base}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          # Verified before unpacking, so a tampered archive never reaches tar.
+          grep " ${archive}\$" checksums.txt | sha256sum --check --strict
+          tar -xzf "$archive" actionlint
+          ./actionlint -version
+          ./actionlint .github/workflows/*.yml
+
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -24,6 +58,18 @@ jobs:
 
       - name: Reject sensitive mobile files
         run: bash scripts/ci/check-no-sensitive-mobile-files.sh
+
+      # Release delivery is what actually reaches the client, and it is entirely
+      # workflow-driven, so the workflows are code under test. This runs before
+      # the expensive Android setup so a broken delivery contract fails in
+      # seconds rather than after a 30-minute Gradle build.
+      - name: Assert release delivery contract
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+
+      - name: Check release helper scripts parse
+        run: |
+          bash -n scripts/ci/rotate-android-release-credential.sh
+          python3 -m py_compile scripts/ci/send_release_email.py
 
       - name: Free runner disk space
         run: |

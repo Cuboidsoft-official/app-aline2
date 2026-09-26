@@ -1,0 +1,290 @@
+name: Android Release Delivery
+
+# Link expiry and credential health are handled here rather than in the build
+# workflow, so that neither needs a rebuild and neither can be silently skipped.
+#
+# The release workflow already proved that a green pipeline will happily mail a
+# dead link: every step succeeded on 2026-08-31 through 2026-09-26 while the
+# links it produced stopped resolving after one hour. These two jobs exist so
+# that the two ways a delivery can fail after a successful build are both
+# detected and repaired automatically.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: What to do
+        required: true
+        default: redeliver
+        type: choice
+        options:
+          - redeliver
+          - check
+      release_prefix:
+        description: 'Release folder to redeliver, e.g. 20260924 (mode: redeliver)'
+        required: false
+        type: string
+      expires_in_days:
+        description: Link lifetime for the redelivered links
+        required: false
+        default: '7'
+        type: choice
+        options:
+          - '1'
+          - '7'
+          - '30'
+      reason:
+        description: Why a fresh link is needed (included in the email)
+        required: false
+        type: string
+  schedule:
+    # Mondays 04:17 UTC. Deliberately not on the hour: a scheduled job at a
+    # popular minute competes with every other workflow on the platform for
+    # runners, and this one only needs to run once a week.
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+  # No id-token: write. Nothing here needs a cloud session; the whole point is
+  # that delivery links are signed by a credential that outlives them.
+
+concurrency:
+  group: android-release-delivery
+  cancel-in-progress: false
+
+jobs:
+  # Re-signs and re-mails the links for a release that has already been built.
+  # This is what makes the seven-day window a non-event: an expired link costs
+  # one workflow run, not a 25-minute rebuild and a new versionCode.
+  redeliver:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'redeliver'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Without this, the production environment secrets below resolve to the empty
+    # string: RELEASE_AWS_* are environment secrets, and an environment secret is
+    # not in scope for a job that does not declare the environment. The build
+    # workflow declares `environment: production` for the same reason.
+    environment: production
+    env:
+      # Job level, not step level. Step-level `env:` does not persist to later
+      # steps, so the record read and the presign below would run with no bucket
+      # and no region. The build workflow binds these the same way.
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
+    steps:
+      - name: Resolve the requested release
+        id: target
+        env:
+          RELEASE_PREFIX: ${{ inputs.release_prefix }}
+        run: |
+          if [ -z "${RELEASE_PREFIX}" ]; then
+            echo "::error::release_prefix is required. It is the date folder under android/private/, for example 20260924. Find it in the build summary of the original release run." >&2
+            exit 1
+          fi
+          # Reject anything that could escape the delivery prefix before it is
+          # interpolated into an S3 URI. The credential is already scoped, but a
+          # traversal in a workflow input is still worth refusing outright
+          # rather than relying on a single layer of defence.
+          case "${RELEASE_PREFIX}" in
+            *[!0-9]*|'')
+              echo "::error::release_prefix must be digits only (it is a YYYYMMDD folder), got '${RELEASE_PREFIX}'." >&2
+              exit 1
+              ;;
+          esac
+          echo "folder=android/private/${RELEASE_PREFIX}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS release credentials
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          if [ -z "${AWS_ACCESS_KEY_ID}" ] || [ -z "${AWS_SECRET_ACCESS_KEY}" ]; then
+            echo "::error::RELEASE_AWS_ACCESS_KEY_ID and RELEASE_AWS_SECRET_ACCESS_KEY must be set as secrets on the production environment." >&2
+            exit 1
+          fi
+          identity="$(aws sts get-caller-identity --query Arn --output text)"
+          echo "Release delivery identity: ${identity}"
+          case "${identity}" in
+            *:user/aline2-android-release-ci) ;;
+            *) echo "::error::Running as ${identity}, not the scoped aline2-android-release-ci user. Either the secret is wrong or the IAM policy was widened." >&2; exit 1 ;;
+          esac
+
+      # The release workflow records what it uploaded. Reading that record is
+      # what lets redelivery be a single input instead of a request for the
+      # recipient to look up two S3 keys by hand.
+      - name: Read the release record
+        id: record
+        env:
+          FOLDER: ${{ steps.target.outputs.folder }}
+        run: |
+          set -euo pipefail
+          record="s3://${PRIVATE_RELEASES_BUCKET}/${FOLDER}/release.json"
+          echo "Reading ${record}"
+          if ! aws s3 cp "${record}" /tmp/release.json --only-show-errors; then
+            echo "::error::No release.json under ${FOLDER}. That release predates the record, so the artifact names cannot be resolved automatically. Redeliver the APK and AAB keys explicitly, or rebuild." >&2
+            exit 1
+          fi
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, sys
+          record = json.load(open("/tmp/release.json"))
+          for field in ("releaseName", "apkKey", "aabKey"):
+              if not record.get(field):
+                  sys.exit(f"::error::release.json is missing {field}")
+          for field in ("releaseName", "apkKey", "aabKey"):
+              print(f"{field}={record[field]}")
+          PY
+
+      - name: Re-sign and verify the delivery links
+        id: links
+        env:
+          APK_KEY: ${{ steps.record.outputs.apkKey }}
+          AAB_KEY: ${{ steps.record.outputs.aabKey }}
+          DAYS: ${{ inputs.expires_in_days }}
+        run: |
+          set -euo pipefail
+          expires_in=$(( DAYS * 86400 ))
+          apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${APK_KEY}" --expires-in "${expires_in}")"
+          download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${AAB_KEY}" --expires-in "${expires_in}")"
+          # Same refusal as the build workflow: a URL carrying a session token
+          # would die before the expiry printed in the email.
+          for url in "${apk_download_url}" "${download_url}"; do
+            case "${url}" in
+              *X-Amz-Security-Token*) echo "::error::Refusing a session-bound presigned URL; it would die before the stated expiry." >&2; exit 1 ;;
+            esac
+          done
+          echo "::add-mask::${apk_download_url}"
+          echo "::add-mask::${download_url}"
+
+          # Prove the re-signed links work before anything is emailed, for the
+          # same reason the build workflow does: an unverified link is an
+          # undelivered release that reports success.
+          status=0
+          for entry in "apk:${apk_download_url}" "aab:${download_url}"; do
+            label="${entry%%:*}"
+            url="${entry#*:}"
+            code="$(curl --silent --show-error --location --max-time 60 \
+              --range 0-0 --output /dev/null --write-out '%{http_code}' "${url}" || echo 000)"
+            case "${code}" in
+              200|206) echo "${label} link resolves (HTTP ${code})." ;;
+              *) echo "::error::${label} link did not resolve (HTTP ${code}). Not emailing it." >&2; status=1 ;;
+            esac
+          done
+          [ "${status}" -eq 0 ] || exit 1
+
+          {
+            echo "apk_download_url=${apk_download_url}"
+            echo "download_url=${download_url}"
+            echo "link_expires_at=$(date -u -d "+${DAYS} days" '+%Y-%m-%d %H:%M UTC')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Email the fresh delivery links
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: cuboidsoft@gmail.com
+          EMAIL_SUBJECT: Aline2 Android release ${{ steps.record.outputs.releaseName }} (links refreshed)
+          EMAIL_BODY: |
+            Fresh download links for the Aline2 Android release below.
+
+            These replace any earlier links for this release, which have expired.
+            The APK and AAB links below expire at ${{ steps.links.outputs.link_expires_at }} UTC.
+            Use the private AAB link for the manual Google Play Console upload.
+            The build is unchanged: this is the same signed artifact, only the links are new.
+            ${{ inputs.reason }}
+          APK_DOWNLOAD_URL: ${{ steps.links.outputs.apk_download_url }}
+          AAB_DOWNLOAD_URL: ${{ steps.links.outputs.download_url }}
+        run: |
+          python3 ./scripts/ci/send_release_email.py
+
+  # Proves the delivery credential still works, before a release needs it.
+  # A revoked or half-rotated key is discovered here on a Monday rather than
+  # during the one release of the month that has to go out.
+  health:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'check')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
+    steps:
+      - name: Configure AWS release credentials
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          if [ -z "${AWS_ACCESS_KEY_ID}" ] || [ -z "${AWS_SECRET_ACCESS_KEY}" ]; then
+            echo "::error::RELEASE_AWS_ACCESS_KEY_ID and RELEASE_AWS_SECRET_ACCESS_KEY must be set as secrets on the production environment." >&2
+            exit 1
+          fi
+          identity="$(aws sts get-caller-identity --query Arn --output text)"
+          echo "Release delivery identity: ${identity}"
+          case "${identity}" in
+            *:user/aline2-android-release-ci) ;;
+            *) echo "::error::Running as ${identity}, not the scoped aline2-android-release-ci user. Either the secret is wrong or the IAM policy was widened." >&2; exit 1 ;;
+          esac
+
+      # A real signed round-trip against a real object. Checking only that the
+      # credentials authenticate would pass even if GetObject had been removed
+      # from the policy, which is exactly the failure that would break delivery
+      # while every other check stayed green.
+      # A missing sentinel is a hard failure, not a warning. This job exists to
+      # answer one question -- can the credential still fetch a release artifact
+      # -- and "there is nothing to fetch" cannot answer it. Treating that as
+      # informational left the job green and silent in exactly the state where it
+      # proved nothing.
+      - name: Prove a signed download still works end to end
+        id: probe
+        run: |
+          set -euo pipefail
+          sentinel="s3://${PRIVATE_RELEASES_BUCKET}/android/private/.delivery-healthcheck.json"
+          if ! aws s3 cp "${sentinel}" /tmp/sentinel.json --only-show-errors; then
+            echo "::error::Could not read the health-check sentinel at ${sentinel}, so the delivery credential is unverified. If the credential is healthy, the cause is that no release has run since this check was added: the next successful Android Release writes the sentinel." >&2
+            echo "probed=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          url="$(aws s3 presign "${sentinel}" --expires-in 300)"
+          case "${url}" in
+            *X-Amz-Security-Token*) echo "::error::The sentinel presign is session-bound; delivery links would expire with the session." >&2; exit 1 ;;
+          esac
+          code="$(curl --silent --show-error --location --max-time 60 \
+            --output /tmp/probe.out --write-out '%{http_code}' "${url}" || echo 000)"
+          case "${code}" in
+            200|206) echo "Delivery credential is healthy: signed fetch returned HTTP ${code}." ;;
+            *) echo "::error::Delivery credential is not usable: signed fetch returned HTTP ${code}." >&2; exit 1 ;;
+          esac
+          cmp -s /tmp/sentinel.json /tmp/probe.out || {
+            echo "::error::The signed fetch did not return the stored object." >&2; exit 1; }
+          echo "probed=true" >> "$GITHUB_OUTPUT"
+
+      # A silent green check is how this whole failure started, so a failure
+      # here is escalated by email rather than left in a run log nobody reads.
+      - name: Warn Cuboidsoft if the delivery credential is unusable
+        if: failure()
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: cuboidsoft@gmail.com
+          EMAIL_SUBJECT: 'Action needed: Aline2 Android delivery links are currently broken'
+          EMAIL_BODY: |
+            The scheduled check of the Android release delivery credential failed.
+
+            Any existing download links for Aline2 Android releases are probably no
+            longer working, and the next release will not be able to deliver.
+
+            This is an internal tooling problem, not an app problem: no user-facing
+            behaviour has changed. A maintainer needs to restore the delivery
+            credential, after which previously issued links stay valid until their
+            own expiry.
+
+            Check: Actions -> Android Release Delivery -> the most recent run.
+        run: |
+          python3 ./scripts/ci/send_release_email.py
