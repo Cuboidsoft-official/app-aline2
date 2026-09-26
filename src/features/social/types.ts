@@ -302,6 +302,8 @@ export interface CreatePostInput {
   filterPreset?: string;
   stickers?: StorySticker[];
   hasOriginalAudio?: boolean;
+  isPremium?: boolean;
+  premiumPrice?: number;
 }
 
 export interface CreateStoryInput {
@@ -344,6 +346,8 @@ export interface CreateStoryInput {
   visibleToUserIds?: string[];
   allowReplies?: boolean;
   allowSharing?: boolean;
+  isPremium?: boolean;
+  premiumPrice?: number;
 }
 
 export interface CreateReelInput {

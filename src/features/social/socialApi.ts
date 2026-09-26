@@ -2023,6 +2023,8 @@ class RemoteSocialApi implements SocialApi {
       hashtags: payload.hashtags,
       mentions: payload.mentions,
       taggedUsers: mapTaggedUsersForRequest(payload.taggedUsers),
+      isPremium: payload.isPremium || false,
+      premiumPrice: payload.isPremium ? (payload.premiumPrice || 0) : undefined,
     }, {
       timeout: 120000,
     });
@@ -2214,6 +2216,8 @@ class RemoteSocialApi implements SocialApi {
       isCloseFriends: payload.visibility === "close_friends",
       allowReplies: payload.allowReplies,
       allowSharing: payload.allowSharing,
+      isPremium: payload.isPremium || false,
+      premiumPrice: payload.isPremium ? (payload.premiumPrice || 0) : undefined,
     }, {
       timeout: 120000,
     });
