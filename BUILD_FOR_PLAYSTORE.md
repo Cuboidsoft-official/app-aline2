@@ -29,10 +29,65 @@ Repository administrators maintain these names in GitHub Actions. Contributors s
 | Upload keystore | `ANDROID_UPLOAD_KEYSTORE_BASE64` secret |
 | Signing credentials | `ANDROID_UPLOAD_STORE_PASSWORD`, `ANDROID_UPLOAD_KEY_PASSWORD` secrets and `ANDROID_UPLOAD_KEY_ALIAS` variable/secret |
 | Production mobile configuration | `BACKEND_ORIGIN`, `API_BASE_URL`, `SOCKET_URL`, `SHARE_BASE_URL`, `GOOGLE_WEB_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID`, `YOUTUBE_DATA_API_KEY`, `GEMINI_API_KEY`, `ZEGO_CLOUD_APP_ID`, `ZEGO_CLOUD_APP_SIGN` variables/secrets as referenced by the workflow |
-| Private delivery | `AWS_ROLE_TO_ASSUME` secret plus `AWS_REGION` and `PRIVATE_RELEASES_BUCKET` variables |
+| Private delivery | `RELEASE_AWS_ACCESS_KEY_ID` and `RELEASE_AWS_SECRET_ACCESS_KEY` secrets on the `production` environment, plus `AWS_REGION` and `PRIVATE_RELEASES_BUCKET` variables |
 | Delivery email | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` secrets |
 
+`AWS_ROLE_TO_ASSUME` is no longer used for delivery. It belongs to the backend
+deploy role, which can push images and run commands on the production instance,
+and delivery does not need that much authority. See
+[Delivery credential](#delivery-credential) below.
+
 The production GitHub environment is restricted to `main`. The repository must never contain the release keystore, signing passwords, `.env.production`, Firebase Admin/service-account JSON, or server-only payment and webhook secrets. The client Firebase configuration file may be tracked only for the Android client package; administrative Firebase credentials are server-side secrets.
+
+## Delivery credential
+
+Download links are signed with a dedicated IAM user, `aline2-android-release-ci`,
+whose only permissions are `s3:PutObject` and `s3:GetObject` under
+`android/private/` in the release bucket. It cannot list the bucket, delete
+anything, or touch any other prefix or bucket. Both delivery workflows assert
+the running principal with `aws sts get-caller-identity` and abort on anything
+else, so a wrong or widened credential fails at delivery time rather than
+silently.
+
+**Why not a cloud session.** A SigV4 presigned URL cannot outlive the session
+that signed it. GitHub's OIDC session lasts one hour by default, so every
+delivery link produced between 2026-08-31 and 2026-09-26 expired roughly an hour
+after it was emailed while the email promised seven days. Nothing in the
+pipeline objected, because every step succeeded. The permanent user is what
+makes the stated window true.
+
+**Lifetime and rotation.** IAM user access keys do not expire on their own, so
+this credential needs no scheduled rotation. Rotate it only on a policy change
+or a suspected leak:
+
+```bash
+scripts/ci/rotate-android-release-credential.sh plan
+scripts/ci/rotate-android-release-credential.sh create
+scripts/ci/rotate-android-release-credential.sh install <new-access-key-id>
+# then run the Android Release Delivery workflow with mode "check" and confirm
+# it reports a healthy credential, and only then:
+scripts/ci/rotate-android-release-credential.sh revoke <old-access-key-id>
+```
+
+The script creates the replacement, proves it can sign and fetch, and refuses to
+revoke the old key until the replacement has been verified. The final step is
+manual because GitHub Actions cannot write repository secrets, and the
+alternatives would grant either key-creation rights to a deploy role or an
+administrator token to this repository.
+
+## When a link expires
+
+Link expiry is not a rebuild. Run **Android Release Delivery**, choose
+`redeliver`, and enter the release folder from the original run's date (for
+example `20260924`). It re-signs the same artifacts, verifies both links resolve,
+and emails fresh ones. Releases built before the `release.json` record was
+introduced cannot be redelivered this way and need a rebuild.
+
+**Android Release Delivery** also runs a weekly check that performs a real signed
+download against a stored object. Identity checks alone would still pass if
+`s3:GetObject` had been removed from the policy, which is the failure that would
+break delivery while leaving every other signal green. A failed check emails
+Cuboidsoft rather than only turning a run red.
 
 ## Retrieve and verify the release
 
