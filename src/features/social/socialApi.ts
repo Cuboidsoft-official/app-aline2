@@ -695,6 +695,8 @@ class RemoteSocialApi implements SocialApi {
       premiumPrice: typeof post?.premiumPrice === "number" ? post.premiumPrice : undefined,
       premiumCountryCode: typeof post?.premiumCountryCode === "string" ? post.premiumCountryCode : undefined,
       premiumCurrency: typeof post?.premiumCurrency === "string" ? post.premiumCurrency : undefined,
+      premiumUnlocked: post?.premiumUnlocked === true,
+      premiumLocked: post?.premiumLocked === true,
       ...overrides,
     };
   }
@@ -866,6 +868,8 @@ class RemoteSocialApi implements SocialApi {
       premiumPrice: typeof story?.premiumPrice === "number" ? story.premiumPrice : undefined,
       premiumCountryCode: typeof story?.premiumCountryCode === "string" ? story.premiumCountryCode : undefined,
       premiumCurrency: typeof story?.premiumCurrency === "string" ? story.premiumCurrency : undefined,
+      premiumUnlocked: story?.premiumUnlocked === true,
+      premiumLocked: story?.premiumLocked === true,
       ...overrides,
     };
   }
@@ -2035,6 +2039,9 @@ class RemoteSocialApi implements SocialApi {
       premiumPrice: payload.isPremium ? (payload.premiumPrice || 0) : undefined,
       premiumCountryCode: payload.isPremium ? payload.premiumCountryCode : undefined,
       premiumCurrency: payload.isPremium ? payload.premiumCurrency : undefined,
+      premiumOriginalMedia: payload.premiumOriginalMedia && payload.premiumOriginalMedia.length > 0
+        ? payload.premiumOriginalMedia
+        : undefined,
     }, {
       timeout: 120000,
     });
@@ -2197,7 +2204,9 @@ class RemoteSocialApi implements SocialApi {
       });
     });
 
-    if (payload.type === "media" && !payload.media) {
+    // For premium media stories, the original is in the private bucket (premiumOriginalMedia).
+    // media may be undefined — that is intentional.
+    if (payload.type === "media" && !payload.media && !(payload.premiumOriginalMedia?.length)) {
       throw new Error("Media stories require an image or video.");
     }
 
@@ -2230,6 +2239,9 @@ class RemoteSocialApi implements SocialApi {
       premiumPrice: payload.isPremium ? (payload.premiumPrice || 0) : undefined,
       premiumCountryCode: payload.isPremium ? payload.premiumCountryCode : undefined,
       premiumCurrency: payload.isPremium ? payload.premiumCurrency : undefined,
+      premiumOriginalMedia: payload.premiumOriginalMedia && payload.premiumOriginalMedia.length > 0
+        ? payload.premiumOriginalMedia
+        : undefined,
     }, {
       timeout: 120000,
     });

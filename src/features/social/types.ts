@@ -107,6 +107,8 @@ export interface Post {
   premiumPrice?: number;
   premiumCountryCode?: string;
   premiumCurrency?: string;
+  premiumUnlocked?: boolean;
+  premiumLocked?: boolean;
 }
 
 export type StoryType = "media" | "text" | "poll" | "question";
@@ -190,6 +192,8 @@ export interface Story {
   premiumPrice?: number;
   premiumCountryCode?: string;
   premiumCurrency?: string;
+  premiumUnlocked?: boolean;
+  premiumLocked?: boolean;
 }
 
 export interface Reel {
@@ -297,6 +301,16 @@ export interface TaggedUserInput {
   username?: string;
 }
 
+export interface PremiumOriginalMediaItem {
+  storageKey: string;
+  type: "image" | "video";
+  mimeType: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+  order?: number;
+}
+
 export interface CreatePostInput {
   type: PostType;
   caption: string;
@@ -314,6 +328,7 @@ export interface CreatePostInput {
   premiumPrice?: number;
   premiumCountryCode?: string;
   premiumCurrency?: string;
+  premiumOriginalMedia?: PremiumOriginalMediaItem[];
 }
 
 export interface CreateStoryInput {
@@ -360,6 +375,7 @@ export interface CreateStoryInput {
   premiumPrice?: number;
   premiumCountryCode?: string;
   premiumCurrency?: string;
+  premiumOriginalMedia?: PremiumOriginalMediaItem[];
 }
 
 export interface CreateReelInput {

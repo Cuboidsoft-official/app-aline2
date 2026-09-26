@@ -15,6 +15,8 @@ interface PremiumContentOverlayProps {
   loading?: boolean;
   /** True after payment is server-verified — shows purchase-success state. Media is NOT unlocked. */
   purchaseVerified?: boolean;
+  /** True when the server has confirmed this viewer holds an active entitlement (Phase 2E). */
+  premiumUnlocked?: boolean;
   children: React.ReactNode;
   /** Optional extra style applied to the wrapping container. */
   style?: object;
@@ -42,10 +44,12 @@ export default function PremiumContentOverlay({
   onUnlockPress,
   loading = false,
   purchaseVerified = false,
+  premiumUnlocked = false,
   children,
   style,
 }: PremiumContentOverlayProps) {
-  const isLocked = !!isPremium && !isOwner;
+  // Server-confirmed entitlement (premiumUnlocked) always unlocks regardless of purchaseVerified state
+  const isLocked = !!isPremium && !isOwner && !premiumUnlocked;
 
   if (!isLocked) {
     return <>{children}</>;

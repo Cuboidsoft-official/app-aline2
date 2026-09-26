@@ -509,6 +509,7 @@ function PostDetailScreen({ route, navigation }: any) {
             isOwner={!!currentUserId && post.user.id === currentUserId}
             loading={purchaseLoading}
             purchaseVerified={purchaseVerified}
+            premiumUnlocked={post.premiumUnlocked === true}
             onUnlockPress={handleUnlockPost}
           >
           <Pressable style={[styles.mediaSurface, { backgroundColor: colors.card }]} onPress={handleMediaPress}>

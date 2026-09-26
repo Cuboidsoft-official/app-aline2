@@ -866,6 +866,7 @@ function StoryViewerScreen({ route, navigation }: any) {
         isOwner={currentStory?.isOwner}
         loading={purchaseLoading}
         purchaseVerified={storyPurchaseVerified}
+        premiumUnlocked={currentStory?.premiumUnlocked === true}
         onUnlockPress={handleUnlockStory}
         style={{ ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" }}
       >

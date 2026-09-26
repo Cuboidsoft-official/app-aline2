@@ -50,6 +50,7 @@ import {
   pickComposerAssets,
   UploadComposerAssetsOptions,
   uploadComposerAssets,
+  uploadPremiumMedia,
 } from "../features/social/mediaUpload";
 import { socialApi } from "../features/social/socialApi";
 import {
@@ -2759,24 +2760,46 @@ function CreatePostScreen({ navigation, route }: any) {
     const captionEntities = parseCaptionEntities(caption);
     const hashtags = Array.from(new Set(captionEntities.hashtags));
     const mentions = Array.from(new Set([...selectedMentions, ...captionEntities.mentions]));
-    const uploadedMedia = await uploadComposerAssets(postAssets, uploadOptions);
-    const framedMedia = uploadedMedia.map((media, index) => {
-      const sourceAsset = postAssets[index] || postAssets[0];
-      return buildAspectMetadata(
-        media,
-        sourceAsset,
-        activeAspect.ratio,
-        sourceAsset?.id
-          ? composerMediaTransformsByAssetId[sourceAsset.id]
-            || (sourceAsset.id === selectedAsset?.id ? composerMediaTransform : DEFAULT_COMPOSER_MEDIA_TRANSFORM)
-          : DEFAULT_COMPOSER_MEDIA_TRANSFORM,
-      );
-    });
+    // Phase 2E: for premium posts, upload originals to private R2 first.
+    // The public uploadComposerAssets call is skipped for premium — originals must not go to the public bucket.
+    let framedMedia: ReturnType<typeof buildAspectMetadata>[] = [];
+    let premiumOriginalMedia: import("../features/social/types").PremiumOriginalMediaItem[] | undefined;
+
+    if (isPremiumPost) {
+      const localAssets = postAssets.filter((a) => a.source === "local");
+      if (localAssets.length > 0) {
+        premiumOriginalMedia = await Promise.all(
+          localAssets.map((asset, i) =>
+            uploadPremiumMedia(asset, "post", (p) => uploadOptions?.onProgress?.(p * 0.9))
+              .then((result) => ({ ...result, order: i }))
+          )
+        );
+      }
+      // media[] intentionally empty: originals are in private bucket, signed URLs served by getPost
+    } else {
+      const uploadedMedia = await uploadComposerAssets(postAssets, uploadOptions);
+      framedMedia = uploadedMedia.map((media, index) => {
+        const sourceAsset = postAssets[index] || postAssets[0];
+        return buildAspectMetadata(
+          media,
+          sourceAsset,
+          activeAspect.ratio,
+          sourceAsset?.id
+            ? composerMediaTransformsByAssetId[sourceAsset.id]
+              || (sourceAsset.id === selectedAsset?.id ? composerMediaTransform : DEFAULT_COMPOSER_MEDIA_TRANSFORM)
+            : DEFAULT_COMPOSER_MEDIA_TRANSFORM,
+        );
+      });
+    }
+
     const firstMedia = framedMedia[0];
-    const hasVideoMedia = framedMedia.some((media) => media.mediaType === "video");
+    const hasVideoMedia = framedMedia.some((media) => media.mediaType === "video") ||
+      (isPremiumPost && (premiumOriginalMedia ?? []).some((m) => m.type === "video"));
 
     return {
-      type: framedMedia.length > 1 ? "carousel" : firstMedia?.mediaType === "video" ? "video" : "photo",
+      type: isPremiumPost
+        ? ((premiumOriginalMedia ?? []).some((m) => m.type === "video") ? "video" : "photo")
+        : (framedMedia.length > 1 ? "carousel" : firstMedia?.mediaType === "video" ? "video" : "photo"),
       caption: caption.trim(),
       media: framedMedia,
       location: location.trim() || undefined,
@@ -2796,6 +2819,7 @@ function CreatePostScreen({ navigation, route }: any) {
       premiumPrice: isPremiumPost ? creatorPricing?.amount : undefined,
       premiumCountryCode: isPremiumPost ? creatorPricing?.countryCode : undefined,
       premiumCurrency: isPremiumPost ? creatorPricing?.currency : undefined,
+      premiumOriginalMedia,
     };
   }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, creatorPricing, disableComments, hideLikeCount, isPremiumPost, location, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedTagPeople]);
 
@@ -2841,7 +2865,18 @@ function CreatePostScreen({ navigation, route }: any) {
       };
     }
 
-    const [uploadedMedia] = await uploadComposerAssets([selectedAsset!], uploadOptions);
+    // Phase 2E: for premium stories, upload original to private R2; skip public bucket.
+    let uploadedMedia: import("../features/social/types").MediaAsset | undefined;
+    let storyPremiumOriginalMedia: import("../features/social/types").PremiumOriginalMediaItem[] | undefined;
+
+    if (isPremiumStory && selectedAsset?.source === "local") {
+      const premiumItem = await uploadPremiumMedia(selectedAsset, "story", (p) => uploadOptions?.onProgress?.(p * 0.9));
+      storyPremiumOriginalMedia = [premiumItem];
+      // No public upload — media field left undefined for premium stories
+    } else {
+      const [uploaded] = await uploadComposerAssets([selectedAsset!], uploadOptions);
+      uploadedMedia = uploaded;
+    }
 
     return {
       type: "media",
@@ -2874,6 +2909,7 @@ function CreatePostScreen({ navigation, route }: any) {
       premiumPrice: isPremiumStory ? creatorPricing?.amount : undefined,
       premiumCountryCode: isPremiumStory ? creatorPricing?.countryCode : undefined,
       premiumCurrency: isPremiumStory ? creatorPricing?.currency : undefined,
+      premiumOriginalMedia: storyPremiumOriginalMedia,
     };
   }, [
     caption,

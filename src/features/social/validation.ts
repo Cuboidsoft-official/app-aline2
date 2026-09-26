@@ -255,7 +255,8 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
 
   const media = (input.media || []).map(normalizeMedia);
 
-  if (!media.length) {
+  // Premium posts use premiumOriginalMedia[] instead of media[]; media is intentionally empty.
+  if (!media.length && !input.premiumOriginalMedia?.length) {
     throw new SocialValidationError("validation_error", "At least one media item is required.");
   }
 
@@ -356,7 +357,8 @@ export const normalizeStoryInput = (input: CreateStoryInput): CreateStoryInput =
     throw new SocialValidationError("validation_error", "Invalid story filter intensity.");
   }
 
-  if (type === "media" && !media) {
+  // Premium media stories have no public media; originals are in premiumOriginalMedia.
+  if (type === "media" && !media && !input.premiumOriginalMedia?.length) {
     throw new SocialValidationError("validation_error", "Media story requires a media asset.");
   }
 

@@ -61,6 +61,7 @@ import {
   isCarouselTapGesture,
 } from "../utils/carouselGesture";
 import { performPremiumPurchase } from "../utils/premiumPurchase";
+import { openPostDetail as navigateToPostDetail } from "../utils/socialNavigation";
 
 let ColorMatrix: any;
 try {
@@ -1751,6 +1752,19 @@ function FeedScreen({ navigation, route }: any) {
   const renderPostMedia = (post: Post, postIndex?: number) => {
     const mediaHeight = getPostMediaHeight(post);
     if (!Array.isArray(post.media) || !post.media.length) {
+      // Premium post already unlocked but signed URLs are only injected in getPost (detail view).
+      // Show a tap-to-view prompt so the user can navigate to the detail screen to see the content.
+      if (post.isPremium && post.premiumUnlocked === true) {
+        return (
+          <Pressable
+            style={[styles.postImage, styles.premiumUnlockedPlaceholder, { width: postMediaWidth, height: mediaHeight }]}
+            onPress={() => navigateToPostDetail(navigation, { postId: post.id })}
+          >
+            <Icon name="lock-open-outline" size={28} color="#fff" />
+            <Text style={styles.premiumUnlockedPlaceholderText}>Tap to view</Text>
+          </Pressable>
+        );
+      }
       return <View style={[styles.postImage, styles.mediaFallback, { width: postMediaWidth, height: mediaHeight }]} />;
     }
 
@@ -2479,6 +2493,7 @@ function FeedScreen({ navigation, route }: any) {
         isOwner={isPostOwner}
         loading={premiumStates[item.id] === "loading"}
         purchaseVerified={premiumStates[item.id] === "verified"}
+        premiumUnlocked={item.premiumUnlocked === true}
         onUnlockPress={() => handleUnlockPost(item.id)}
       >
         {rawMediaSurface}
@@ -3140,6 +3155,18 @@ const styles: any = {
   },
   postImage: { overflow: "hidden" },
   mediaFallback: { backgroundColor: "#ececec" },
+  premiumUnlockedPlaceholder: {
+    backgroundColor: "#1a1a2e",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+  },
+  premiumUnlockedPlaceholderText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600" as const,
+    letterSpacing: 0.3,
+  },
   carouselWrap: { position: "relative" },
   carouselBadge: {
     position: "absolute",
