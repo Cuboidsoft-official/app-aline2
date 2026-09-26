@@ -60,6 +60,17 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'redeliver'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Without this, the production environment secrets below resolve to the empty
+    # string: RELEASE_AWS_* are environment secrets, and an environment secret is
+    # not in scope for a job that does not declare the environment. The build
+    # workflow declares `environment: production` for the same reason.
+    environment: production
+    env:
+      # Job level, not step level. Step-level `env:` does not persist to later
+      # steps, so the record read and the presign below would run with no bucket
+      # and no region. The build workflow binds these the same way.
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
     steps:
       - name: Resolve the requested release
         id: target
@@ -86,7 +97,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           if [ -z "${AWS_ACCESS_KEY_ID}" ] || [ -z "${AWS_SECRET_ACCESS_KEY}" ]; then
             echo "::error::RELEASE_AWS_ACCESS_KEY_ID and RELEASE_AWS_SECRET_ACCESS_KEY must be set as secrets on the production environment." >&2
@@ -196,12 +207,16 @@ jobs:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'check')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
     steps:
       - name: Configure AWS release credentials
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           if [ -z "${AWS_ACCESS_KEY_ID}" ] || [ -z "${AWS_SECRET_ACCESS_KEY}" ]; then
             echo "::error::RELEASE_AWS_ACCESS_KEY_ID and RELEASE_AWS_SECRET_ACCESS_KEY must be set as secrets on the production environment." >&2
@@ -218,15 +233,20 @@ jobs:
       # credentials authenticate would pass even if GetObject had been removed
       # from the policy, which is exactly the failure that would break delivery
       # while every other check stayed green.
+      # A missing sentinel is a hard failure, not a warning. This job exists to
+      # answer one question -- can the credential still fetch a release artifact
+      # -- and "there is nothing to fetch" cannot answer it. Treating that as
+      # informational left the job green and silent in exactly the state where it
+      # proved nothing.
       - name: Prove a signed download still works end to end
         id: probe
         run: |
           set -euo pipefail
           sentinel="s3://${PRIVATE_RELEASES_BUCKET}/android/private/.delivery-healthcheck.json"
-          if ! aws s3 cp "${sentinel}" /tmp/sentinel.json --only-show-errors 2>/dev/null; then
-            echo "::warning::No health-check sentinel yet. It is written by the next Android Release run; treating this as informational rather than a failure." >&2
+          if ! aws s3 cp "${sentinel}" /tmp/sentinel.json --only-show-errors; then
+            echo "::error::Could not read the health-check sentinel at ${sentinel}, so the delivery credential is unverified. If the credential is healthy, the cause is that no release has run since this check was added: the next successful Android Release writes the sentinel." >&2
             echo "probed=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            exit 1
           fi
           url="$(aws s3 presign "${sentinel}" --expires-in 300)"
           case "${url}" in
@@ -245,7 +265,7 @@ jobs:
       # A silent green check is how this whole failure started, so a failure
       # here is escalated by email rather than left in a run log nobody reads.
       - name: Warn Cuboidsoft if the delivery credential is unusable
-        if: failure() && steps.probe.outcome == 'failure'
+        if: failure()
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}

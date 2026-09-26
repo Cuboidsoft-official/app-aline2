@@ -338,23 +338,50 @@ class CredentialFailureIsDetectedBeforeItIsNeeded(unittest.TestCase):
             r"\bfalse\b",
             f"the alert condition is dead code: {condition!r}",
         )
-        self.assertIn(
+        # The alert must fire for a failure in ANY step of this job. A revoked or
+        # half-rotated key fails the credential check, so the probe step is
+        # skipped and its outcome is 'skipped', not 'failure' -- a condition
+        # naming `steps.probe.outcome == 'failure'` would therefore stay silent
+        # for the most likely cause of the failure it exists to report.
+        self.assertNotIn(
             "steps.probe.outcome",
             condition,
-            "it must be tied to the probe specifically, not to any failure in the job",
+            "naming the probe step's outcome suppresses the alert whenever an "
+            "earlier step fails first, because the probe is then skipped, not "
+            f"failed; condition is {condition!r}",
         )
         self.assertIn(RECIPIENT, warn)
         self.assertIn("send_release_email.py", warn)
 
-    def test_a_missing_sentinel_is_informational_not_a_failure(self):
-        """The sentinel only exists after the first release on this path.
+    def test_a_missing_sentinel_fails_loudly(self):
+        """A check that cannot fetch anything has not verified the credential.
 
-        Treating its absence as a failure would make the check permanently red
-        and train everyone to ignore it, which is worse than having no check.
+        This originally treated a missing sentinel as a warning and exited 0. In
+        that state the job is green and silent while proving nothing -- the same
+        shape of failure as the incident this workflow exists to prevent, and it
+        would have been the first thing the scheduled run reported.
         """
         probe = step_named(self.text, "Prove a signed download still works end to end")
-        self.assertIn("informational", probe)
-        self.assertIn("probed=false", probe)
+        self.assertIn("probed=false", probe, "the unreadable case must still be recorded")
+        self.assertNotIn(
+            "informational",
+            probe,
+            "a missing sentinel cannot be treated as informational: the whole "
+            "point of the job is to prove the credential can fetch an artifact",
+        )
+        # The unreadable branch has to exit non-zero. Asserted on the branch
+        # itself, not on the step as a whole, so that an unrelated `exit 1`
+        # elsewhere in the probe cannot satisfy this.
+        branch = re.search(
+            r"if\s*!.*?\n(?:.*?\n)*?\s*fi\b", probe
+        )
+        self.assertIsNotNone(branch, "the sentinel read must be guarded")
+        self.assertRegex(
+            branch.group(0),
+            r"exit\s+1\b",
+            "a sentinel that cannot be read must fail the step, not warn and "
+            f"continue; branch was:\n{branch.group(0)}",
+        )
 
     def test_the_release_workflow_writes_the_sentinel(self):
         producer = step_named(
@@ -554,6 +581,74 @@ class BothWorkflowsShareOneDeliveryContract(unittest.TestCase):
             "the credential check must be one shared body, not several copies: "
             + " | ".join(sorted(bodies)),
         )
+
+    def test_every_job_that_uses_aws_declares_the_production_environment(self):
+        """A job that does not declare `environment` cannot see the credential.
+
+        RELEASE_AWS_ACCESS_KEY_ID and RELEASE_AWS_SECRET_ACCESS_KEY are
+        environment secrets, and an environment secret is not in scope for a job
+        that does not declare that environment. A job missing the declaration
+        therefore sees them as the empty string, fails its own first-step guard,
+        and never runs -- while looking entirely correct in review, because the
+        reference syntax is valid.
+
+        Both jobs in the delivery workflow were missing it. This test failed on
+        arrival, which is the only reason it is worth having.
+        """
+        for path in (RELEASE_WORKFLOW, DELIVERY_WORKFLOW):
+            text = path.read_text(encoding="utf-8")
+            jobs = re.findall(r"^  (\w[\w-]*):\s*$", text, re.M)
+            self.assertTrue(jobs, f"{path.name}: no jobs found to check")
+            for name in jobs:
+                body = self._job_block(text, name)
+                if not re.search(r"secrets\.RELEASE_AWS_|aws s3 |aws sts ", body):
+                    continue
+                # Read the declaration from this job's own block, not from a
+                # file-wide list, so a job that declares nothing cannot be
+                # excused by another job's declaration. re.M because the job
+                # block starts at its own key, so `^` must mean line-start.
+                self.assertIsNotNone(
+                    re.search(r"^    environment:\s*\S+", body, re.M),
+                    f"{path.name}: job {name!r} uses AWS but does not declare "
+                    "`environment: production`, so RELEASE_AWS_* resolve to an "
+                    "empty string and every step in the job fails",
+                )
+
+    def test_the_bucket_and_region_are_bound_at_job_level(self):
+        """Step-level `env:` does not persist to the next step.
+
+        PRIVATE_RELEASES_BUCKET and AWS_REGION were bound only on the credential
+        step, so the S3 read and the presign ran with no bucket and no region.
+        Both belong at job level, where every step inherits them, which is how
+        the release workflow already does it.
+        """
+        for path in (RELEASE_WORKFLOW, DELIVERY_WORKFLOW):
+            text = path.read_text(encoding="utf-8")
+            for name in re.findall(r"^  (\w[\w-]*):\s*$", text, re.M):
+                body = self._job_block(text, name)
+                if "PRIVATE_RELEASES_BUCKET" not in body:
+                    continue
+                job_env = re.search(r"^    env:\n((?: {6,}.*\n)+)", body, re.M)
+                self.assertIsNotNone(
+                    job_env, f"{path.name}: job {name!r} uses PRIVATE_RELEASES_BUCKET"
+                )
+                for required in ("AWS_REGION", "vars.PRIVATE_RELEASES_BUCKET"):
+                    self.assertIn(
+                        required,
+                        job_env.group(1),
+                        f"{path.name}: job {name!r} must bind {required} at job "
+                        "level; step-level env does not survive to later steps",
+                    )
+
+    @staticmethod
+    def _job_block(text: str, name: str) -> str:
+        """Return the YAML text of one job, from its key up to the next job key.
+
+        Anchored at exactly two spaces of indentation so that trigger keys
+        (`on:`, `push:`) and job keys are not confused for one another.
+        """
+        match = re.search(rf"^  {re.escape(name)}:\s*$.*?(?=^  \w|\Z)", text, re.M | re.S)
+        return match.group(0) if match else ""
 
     def test_only_the_credential_block_uses_the_identity_message(self):
         """The refusal message is unique to the identity check.
