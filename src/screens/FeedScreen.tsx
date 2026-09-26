@@ -28,6 +28,7 @@ import ContentActionSheet from "../features/social/components/ContentActionSheet
 import InteractiveText from "../features/social/components/InteractiveText";
 import PostCommentsSheet from "../features/social/components/PostCommentsSheet";
 import PostShareSheet from "../features/social/components/PostShareSheet";
+import PremiumContentOverlay from "../features/social/components/PremiumContentOverlay";
 import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import SocialVideo from "../features/social/components/SocialVideo";
 import { socialApi } from "../features/social/socialApi";
@@ -1702,35 +1703,42 @@ function FeedScreen({ navigation, route }: any) {
         style={[styles.storyItem, { width: storyItemWidth }]}
         onPress={() => navigation.navigate("StoryViewer", { storyId: item.id, storyUserId: item.user.id })}
       >
-        {item.viewed ? (
-          <View
-            style={[
-              styles.storyRing,
-              styles.storyRingSeen,
-              closeFriends && styles.storyRingCloseFriendsSeen,
-              ringSizeStyle,
-            ]}
-          >
-            <Image
-              source={{ uri: storyAvatar }}
-              style={[styles.storyAvatar, avatarStyle]}
-            />
-          </View>
-        ) : (
-          <LinearGradient
-            colors={storyRingColors}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.storyRingGradient, ringSizeStyle]}
-          >
-            <View style={[styles.storyRingInner, ringInnerStyle, { backgroundColor: colors.card }]}>
+        <View style={styles.storyRingWrap}>
+          {item.viewed ? (
+            <View
+              style={[
+                styles.storyRing,
+                styles.storyRingSeen,
+                closeFriends && styles.storyRingCloseFriendsSeen,
+                ringSizeStyle,
+              ]}
+            >
               <Image
                 source={{ uri: storyAvatar }}
                 style={[styles.storyAvatar, avatarStyle]}
               />
             </View>
-          </LinearGradient>
-        )}
+          ) : (
+            <LinearGradient
+              colors={storyRingColors}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.storyRingGradient, ringSizeStyle]}
+            >
+              <View style={[styles.storyRingInner, ringInnerStyle, { backgroundColor: colors.card }]}>
+                <Image
+                  source={{ uri: storyAvatar }}
+                  style={[styles.storyAvatar, avatarStyle]}
+                />
+              </View>
+            </LinearGradient>
+          )}
+          {item.isPremium ? (
+            <View style={styles.storyPremiumBadge}>
+              <Icon name="lock-closed" size={9} color="#fff" />
+            </View>
+          ) : null}
+        </View>
         <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
           {item.user.name}
         </Text>
@@ -2400,7 +2408,8 @@ function FeedScreen({ navigation, route }: any) {
     const isCaptionExpanded = !!expandedCaptionIds[item.id];
     const isCaptionTruncatable = String(item.caption || "").length > 110 || String(item.caption || "").includes("\n");
     const isCarouselPost = media.length > 1;
-    const mediaSurface = (
+    const isPostOwner = !!currentUser?.id && String(currentUser.id) === String(user.id || "");
+    const rawMediaSurface = (
       <>
         {renderPostMedia(item, index)}
         {renderPostStickerOverlay(item)}
@@ -2409,7 +2418,7 @@ function FeedScreen({ navigation, route }: any) {
             <Icon name="heart" size={88} color="rgba(255,255,255,0.92)" />
           </View>
         ) : null}
-        {hasVideoMedia ? (
+        {hasVideoMedia && !item.isPremium ? (
           <View pointerEvents="none" style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
             <Icon
               name={isFeedVideoSoundOn({ isVideoSoundEnabled, isPostMuted: isMuted }) ? "volume-high-outline" : "volume-mute-outline"}
@@ -2423,6 +2432,16 @@ function FeedScreen({ navigation, route }: any) {
         ) : null}
       </>
     );
+    const mediaSurface = item.isPremium ? (
+      <PremiumContentOverlay
+        isPremium={item.isPremium}
+        premiumPrice={item.premiumPrice}
+        premiumCurrency={item.premiumCurrency}
+        isOwner={isPostOwner}
+      >
+        {rawMediaSurface}
+      </PremiumContentOverlay>
+    ) : rawMediaSurface;
 
     return (
       <View
@@ -3056,6 +3075,7 @@ const styles: any = {
     borderRadius: 11,
   },
   storyItem: { alignItems: "center", justifyContent: "center" },
+  storyRingWrap: { position: "relative" },
   storyRing: { alignItems: "center", justifyContent: "center" },
   storyRingSeen: { borderWidth: 1, borderColor: "transparent" },
   storyRingCloseFriendsSeen: {},
@@ -3063,6 +3083,19 @@ const styles: any = {
   storyRingInner: { alignItems: "center", justifyContent: "center" },
   storyAvatar: { resizeMode: "cover" },
   storyName: { marginTop: 6, fontSize: 11, textAlign: "center" },
+  storyPremiumBadge: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#9b4dff",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#fff",
+  },
   postImage: { overflow: "hidden" },
   mediaFallback: { backgroundColor: "#ececec" },
   carouselWrap: { position: "relative" },

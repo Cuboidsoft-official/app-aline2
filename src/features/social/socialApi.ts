@@ -691,6 +691,10 @@ class RemoteSocialApi implements SocialApi {
       likePreviewUsers: Array.isArray(post?.recentLikes)
         ? post.recentLikes.map((user: any) => this.mapUser(user)).filter((user: SocialUser) => !!user.id)
         : [],
+      isPremium: post?.isPremium === true,
+      premiumPrice: typeof post?.premiumPrice === "number" ? post.premiumPrice : undefined,
+      premiumCountryCode: typeof post?.premiumCountryCode === "string" ? post.premiumCountryCode : undefined,
+      premiumCurrency: typeof post?.premiumCurrency === "string" ? post.premiumCurrency : undefined,
       ...overrides,
     };
   }
@@ -858,6 +862,10 @@ class RemoteSocialApi implements SocialApi {
       allowReplies: story?.allowReplies !== false,
       allowSharing: story?.allowSharing !== false,
       music: mapStoryMusicDetails(story?.music, story?.musicConfig),
+      isPremium: story?.isPremium === true,
+      premiumPrice: typeof story?.premiumPrice === "number" ? story.premiumPrice : undefined,
+      premiumCountryCode: typeof story?.premiumCountryCode === "string" ? story.premiumCountryCode : undefined,
+      premiumCurrency: typeof story?.premiumCurrency === "string" ? story.premiumCurrency : undefined,
       ...overrides,
     };
   }

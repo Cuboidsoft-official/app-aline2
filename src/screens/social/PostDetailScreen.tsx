@@ -20,6 +20,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
 import InteractiveText from "../../features/social/components/InteractiveText";
 import PostCommentsSheet from "../../features/social/components/PostCommentsSheet";
+import PremiumContentOverlay from "../../features/social/components/PremiumContentOverlay";
 import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import PostShareSheet from "../../features/social/components/PostShareSheet";
 import SocialVideo from "../../features/social/components/SocialVideo";
@@ -477,6 +478,12 @@ function PostDetailScreen({ route, navigation }: any) {
         </View>
 
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+          <PremiumContentOverlay
+            isPremium={post.isPremium}
+            premiumPrice={post.premiumPrice}
+            premiumCurrency={post.premiumCurrency}
+            isOwner={!!currentUserId && post.user.id === currentUserId}
+          >
           <Pressable style={[styles.mediaSurface, { backgroundColor: colors.card }]} onPress={handleMediaPress}>
             {post.type === "carousel" ? (
               <ScrollView
@@ -549,6 +556,7 @@ function PostDetailScreen({ route, navigation }: any) {
               </View>
             ) : null}
           </Pressable>
+          </PremiumContentOverlay>
 
           <View style={[styles.body, { backgroundColor: colors.card }]}>
             <View style={styles.userRow}>

@@ -21,6 +21,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { useKeyboardHandler } from "react-native-keyboard-controller";
 import { runOnJS } from "react-native-reanimated";
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
+import PremiumContentOverlay from "../../features/social/components/PremiumContentOverlay";
 import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import StoryActivitySheet from "../../features/social/components/StoryActivitySheet";
@@ -829,7 +830,15 @@ function StoryViewerScreen({ route, navigation }: any) {
 
   return (
     <SafeAreaView style={styles.container}>
-      {renderStoryBody()}
+      <PremiumContentOverlay
+        isPremium={currentStory?.isPremium}
+        premiumPrice={currentStory?.premiumPrice}
+        premiumCurrency={currentStory?.premiumCurrency}
+        isOwner={currentStory?.isOwner}
+        style={{ ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" }}
+      >
+        {renderStoryBody()}
+      </PremiumContentOverlay>
       {renderStoryFilterOverlay()}
       {renderFloatingStickers()}
       <LinearGradient colors={["rgba(0,0,0,0.72)", "rgba(0,0,0,0.15)", "transparent"]} style={styles.topFade} />

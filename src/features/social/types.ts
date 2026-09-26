@@ -103,6 +103,10 @@ export interface Post {
   liked: boolean;
   saved: boolean;
   hasOriginalAudio?: boolean;
+  isPremium?: boolean;
+  premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
 }
 
 export type StoryType = "media" | "text" | "poll" | "question";
@@ -182,6 +186,10 @@ export interface Story {
   allowSharing?: boolean;
   isOwner?: boolean;
   music?: StoryMusic;
+  isPremium?: boolean;
+  premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
 }
 
 export interface Reel {
