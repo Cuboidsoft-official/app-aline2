@@ -34,6 +34,7 @@ import { ensureCameraPermission, ensureMicrophonePermission } from "../utils/per
 import { createManagedSound, type ManagedNitroSound } from "../utils/nitroSound";
 import { openRazorpayCheckout } from "../utils/razorpayCheckout";
 import { getStoredRefreshToken, getStoredSessionMeta, getStoredToken, getStoredUser, setStoredSession } from "../utils/authSession";
+import { DiditVerificationModal } from "../components/chat/DiditVerificationModal";
 
 const DEFAULT_COVER = DEFAULT_COVER_URL;
 const DEFAULT_AVATAR = DEFAULT_AVATAR_URL;
@@ -311,6 +312,9 @@ const SellerRegistration = ({ navigation, route }: any) => {
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
   const managedSoundRef = React.useRef<ManagedNitroSound | null>(null);
   const [kycChecked, setKycChecked] = useState(false);
+  const [diditModalVisible, setDiditModalVisible] = useState(false);
+  const [diditVerified, setDiditVerified] = useState(false);
+  const [diditSessionId, setDiditSessionId] = useState("");
 
   const [faceCheckPreview, setFaceCheckPreview] = useState<string | null>(null);
   const [faceCheckDoc, setFaceCheckDoc] = useState<ImageFile | null>(null);
@@ -1629,8 +1633,48 @@ const SellerRegistration = ({ navigation, route }: any) => {
         <>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Identity details</Text>
           <Text style={[styles.sectionBody, { color: colors.mutedText }]}>
-            Select your identity document and upload clear photos of both Front and Back sides.
+            Select your identity document and upload clear photos of both Front and Back sides, or verify with Didit.
           </Text>
+
+          {/* Didit Identity Verification Card */}
+          <View style={[styles.stepIntroCard, { backgroundColor: diditVerified ? "#10B98115" : colors.card, borderColor: diditVerified ? "#10B981" : colors.border, marginBottom: 16 }]}>
+            <View style={styles.stepIntroHeader}>
+              <View style={[styles.stepIntroIcon, { backgroundColor: diditVerified ? "#10B98125" : `${colors.primary}18` }]}>
+                <Icon name={diditVerified ? "shield-checkmark" : "shield-checkmark-outline"} size={22} color={diditVerified ? "#10B981" : colors.primary} />
+              </View>
+              <View style={styles.stepIntroCopy}>
+                <Text style={[styles.stepIntroTitle, { color: colors.text }]}>
+                  {diditVerified ? "Didit Verification Approved ✓" : "Didit Identity Verification"}
+                </Text>
+                <Text style={[styles.stepIntroBody, { color: colors.mutedText }]}>
+                  {diditVerified
+                    ? "Your identity documents, liveness, selfie match, and IP check have been verified via Didit Protocol."
+                    : "Strict 4-step verification: ID Document scan, Liveness check, Selfie match, and IP address validation."}
+                </Text>
+              </View>
+            </View>
+
+            {!diditVerified ? (
+              <TouchableOpacity
+                style={{
+                  backgroundColor: colors.primary,
+                  paddingVertical: 11,
+                  paddingHorizontal: 16,
+                  borderRadius: 10,
+                  alignItems: "center",
+                  flexDirection: "row",
+                  justifyContent: "center",
+                  marginTop: 12,
+                  gap: 8,
+                }}
+                onPress={() => setDiditModalVisible(true)}
+                activeOpacity={0.85}
+              >
+                <Icon name="shield-checkmark" size={18} color="#fff" />
+                <Text style={{ color: "#fff", fontWeight: "800", fontSize: 14 }}>Start Didit Verification</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
 
           <Text style={[styles.label, { color: colors.text }]}>Select document type</Text>
           <View style={styles.docTypeRow}>
@@ -2289,6 +2333,19 @@ const SellerRegistration = ({ navigation, route }: any) => {
             </View>
           </View>
         </Modal>
+
+        <DiditVerificationModal
+          visible={diditModalVisible}
+          onClose={() => setDiditModalVisible(false)}
+          onVerificationComplete={(result) => {
+            if (result.success) {
+              setDiditVerified(true);
+              setDiditSessionId(result.sessionId);
+              setKycChecked(true);
+              setFaceChecked(true);
+            }
+          }}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

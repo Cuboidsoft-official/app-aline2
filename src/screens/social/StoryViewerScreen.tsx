@@ -721,7 +721,7 @@ function StoryViewerScreen({ route, navigation }: any) {
     }
 
     return (
-      <View pointerEvents="none" style={styles.floatingStickerLayer}>
+      <View pointerEvents="box-none" style={styles.floatingStickerLayer}>
         {currentStory.stickers.map((sticker) => {
           const baseStyle = {
             left: `${Math.max(0, Math.min(1, sticker.position.x)) * 100}%`,
@@ -733,6 +733,57 @@ function StoryViewerScreen({ route, navigation }: any) {
               { scale: sticker.position.scale || 1 },
             ],
           } as const;
+
+          if (sticker.type === "link" || sticker.linkUrl || (sticker as any).type === "link") {
+            const rawUrl = sticker.linkUrl || sticker.text || currentStory.linkUrl || "";
+            const cleanUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
+            const displayUrl = rawUrl.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+
+            return (
+              <TouchableOpacity
+                key={sticker.id}
+                style={[
+                  styles.floatingTextSticker,
+                  baseStyle,
+                  { backgroundColor: "#ffffff", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, flexDirection: "row", alignItems: "center", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 }
+                ]}
+                onPress={() => {
+                  if (cleanUrl) {
+                    Linking.openURL(cleanUrl).catch(() => undefined);
+                  }
+                }}
+              >
+                <Icon name="link-outline" size={16} color="#2563eb" style={{ marginRight: 4 }} />
+                <Text style={{ fontSize: 13, fontWeight: "700", color: "#2563eb" }} numberOfLines={1}>
+                  {displayUrl || "Visit Link"}
+                </Text>
+              </TouchableOpacity>
+            );
+          }
+
+          if (sticker.type === "location" || sticker.locationName) {
+            const locName = sticker.locationName || sticker.text || (typeof currentStory.location === "string" ? currentStory.location : (currentStory.location as any)?.name) || "Location";
+
+            return (
+              <TouchableOpacity
+                key={sticker.id}
+                style={[
+                  styles.floatingTextSticker,
+                  baseStyle,
+                  { backgroundColor: "#ffffff", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, flexDirection: "row", alignItems: "center", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 }
+                ]}
+                onPress={() => {
+                  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locName)}`;
+                  Linking.openURL(mapsUrl).catch(() => undefined);
+                }}
+              >
+                <Icon name="location-sharp" size={16} color="#ef4444" style={{ marginRight: 4 }} />
+                <Text style={{ fontSize: 13, fontWeight: "700", color: "#1e293b" }} numberOfLines={1}>
+                  {locName}
+                </Text>
+              </TouchableOpacity>
+            );
+          }
 
           if (sticker.type === "emoji") {
             return (

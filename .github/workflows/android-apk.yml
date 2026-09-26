@@ -1,6 +1,25 @@
 name: Android Release
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.env.production.example'
+      - 'android/**'
+      - 'src/**'
+      - 'App.tsx'
+      - 'app.json'
+      - 'babel.config.js'
+      - 'google-services.json'
+      - 'index.js'
+      - 'metro.config.js'
+      - 'package*.json'
+      - 'react-native.config.js'
+      - 'scripts/build-android-release.sh'
+      - 'scripts/ci/filter_android_autolinking.js'
+      - 'scripts/ci/list_android_codegen_prewarm_tasks.js'
+      - 'scripts/patch-*.js'
   workflow_dispatch:
     inputs:
       release_profile:
@@ -11,9 +30,11 @@ on:
         options:
           - standard
           - arm64
-  push:
-    branches:
-      - main
+      deliver:
+        description: Email secure APK/AAB delivery links to Cuboidsoft
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -30,17 +51,19 @@ jobs:
     environment: production
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
-      PROD_INSTANCE_ID: ${{ vars.PROD_INSTANCE_ID }}
-      PROD_RELEASES_DIR: ${{ vars.PROD_RELEASES_DIR != '' && vars.PROD_RELEASES_DIR || '/opt/aline2/releases/android' }}
       PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
       BACKEND_ORIGIN_EXPECTED: https://api.aline2.com
       SHARE_BASE_URL_EXPECTED: https://aline2.com
+      ANDROID_UPLOAD_CERT_SHA256_EXPECTED: "34553881d7a4065708f8c871b4d477919a046afdd73c06b5611adf0475132999"
       ANDROID_PLATFORM_VERSION: "36"
       ANDROID_BUILD_TOOLS_VERSION: "36.0.0"
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Reject sensitive mobile files
+        run: bash scripts/ci/check-no-sensitive-mobile-files.sh
 
       - name: Free disk space on runner
         run: |
@@ -59,29 +82,45 @@ jobs:
       - name: Derive release metadata
         id: meta
         run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "Production Android releases must run from main" >&2
+            exit 1
+          fi
+
           release_profile="standard"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_profile }}" ]; then
             release_profile="${{ github.event.inputs.release_profile }}"
           fi
 
+          deliver_release="false"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            deliver_release="true"
+          elif [ "${{ github.event.inputs.deliver }}" = "true" ]; then
+            deliver_release="true"
+          fi
+
           short_sha="$(git rev-parse --short=7 HEAD)"
           release_date="$(date -u +%Y%m%d)"
           app_version="$(node -p "require('./package.json').version")"
+          android_version_name="$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\([^"]*\)".*/\1/p' android/app/build.gradle | head -n 1)"
+          if [ -z "$android_version_name" ] || [ "$android_version_name" != "$app_version" ]; then
+            echo "package.json version and Android versionName must match" >&2
+            exit 1
+          fi
 
           case "$release_profile" in
             arm64)
-              release_name="Aline2-v${app_version}-${release_date}-${short_sha}-arm64"
+              release_name="Aline2-v${app_version}-${release_date}-${short_sha}-r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}-arm64"
               apk_name="app-arm64-v8a-release.apk"
               apk_mode="apk-arm64"
               build_aab="false"
-              publish_public="false"
+              deliver_release="false"
               ;;
             *)
-              release_name="Aline2-v${app_version}-${release_date}-${short_sha}"
+              release_name="Aline2-v${app_version}-${release_date}-${short_sha}-r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
               apk_name="${release_name}.apk"
               apk_mode="apk"
               build_aab="true"
-              publish_public="true"
               ;;
           esac
 
@@ -94,24 +133,26 @@ jobs:
           echo "apk_name=$apk_name" >> "$GITHUB_OUTPUT"
           echo "apk_mode=$apk_mode" >> "$GITHUB_OUTPUT"
           echo "build_aab=$build_aab" >> "$GITHUB_OUTPUT"
-          echo "publish_public=$publish_public" >> "$GITHUB_OUTPUT"
+          echo "deliver_release=$deliver_release" >> "$GITHUB_OUTPUT"
           echo "aab_name=${release_name}.aab" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: 'platform-tools'
 
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-${ANDROID_PLATFORM_VERSION}" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}"
@@ -126,6 +167,7 @@ jobs:
         run: npm ci
 
       - name: Validate deployment configuration
+        if: steps.meta.outputs.deliver_release == 'true'
         env:
           AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
@@ -136,7 +178,6 @@ jobs:
         run: |
           required_vars=(
             AWS_REGION
-            PROD_INSTANCE_ID
             PRIVATE_RELEASES_BUCKET
           )
           for key in "${required_vars[@]}"; do
@@ -165,11 +206,22 @@ jobs:
         run: npm run typecheck
 
       - name: Run lint baseline
+        id: lint
         continue-on-error: true
         run: npm run lint
 
+      - name: Record existing lint debt
+        if: always() && steps.lint.outcome == 'failure'
+        run: |
+          {
+            echo "## Lint debt"
+            echo
+            echo "Lint remains advisory until the existing application errors are resolved."
+            echo "Type checking, tests, signing validation, and artifact verification remain blocking."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run tests
-        run: npm test -- --runInBand --passWithNoTests
+        run: npm test -- --runInBand
 
       - name: Prepare CI env file
         id: prepare_env
@@ -182,9 +234,9 @@ jobs:
           GOOGLE_WEB_CLIENT_ID_VALUE: ${{ vars.GOOGLE_WEB_CLIENT_ID != '' && vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
           GOOGLE_IOS_CLIENT_ID_VALUE: ${{ vars.GOOGLE_IOS_CLIENT_ID != '' && vars.GOOGLE_IOS_CLIENT_ID || secrets.GOOGLE_IOS_CLIENT_ID }}
           YOUTUBE_DATA_API_KEY_VALUE: ${{ vars.YOUTUBE_DATA_API_KEY != '' && vars.YOUTUBE_DATA_API_KEY || secrets.YOUTUBE_DATA_API_KEY }}
-          GEMINI_API_KEY_VALUE: ${{ vars.GEMINI_API_KEY != '' && vars.GEMINI_API_KEY || secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_VALUE: ${{ secrets.GEMINI_API_KEY }}
           ZEGO_CLOUD_APP_ID_VALUE: ${{ vars.ZEGO_CLOUD_APP_ID != '' && vars.ZEGO_CLOUD_APP_ID || secrets.ZEGO_CLOUD_APP_ID }}
-          ZEGO_CLOUD_APP_SIGN_VALUE: ${{ vars.ZEGO_CLOUD_APP_SIGN != '' && vars.ZEGO_CLOUD_APP_SIGN || secrets.ZEGO_CLOUD_APP_SIGN }}
+          ZEGO_CLOUD_APP_SIGN_VALUE: ${{ secrets.ZEGO_CLOUD_APP_SIGN }}
         run: |
           fallback_example="${SELECTED_ENVFILE}.example"
 
@@ -220,6 +272,19 @@ jobs:
           upsert_env "ZEGO_CLOUD_APP_ID" "$ZEGO_CLOUD_APP_ID_VALUE"
           upsert_env "ZEGO_CLOUD_APP_SIGN" "$ZEGO_CLOUD_APP_SIGN_VALUE"
 
+          forbidden_mobile_keys=(
+            RAZORPAY_KEY_SECRET
+            RAZORPAY_WEBHOOK_SECRET
+            SPOTIFY_CLIENT_SECRET
+            JAMENDO_CLIENT_SECRET
+          )
+          for key in "${forbidden_mobile_keys[@]}"; do
+            if grep -q "^${key}=" .env.ci; then
+              echo "Server-only credential must not be embedded in the Android app: ${key}" >&2
+              exit 1
+            fi
+          done
+
           echo "envfile=.env.ci" >> "$GITHUB_OUTPUT"
 
       
@@ -235,19 +300,6 @@ jobs:
           grep -Eq '^GEMINI_API_KEY=.{10,}$' "$ENVFILE_VALUE"
           grep -Eq '^ZEGO_CLOUD_APP_ID=.{3,}$' "$ENVFILE_VALUE"
           grep -Eq '^ZEGO_CLOUD_APP_SIGN=.{10,}$' "$ENVFILE_VALUE"
-
-      - name: Authenticate to Google Cloud
-        if: steps.meta.outputs.build_aab == 'true'
-        id: google_auth
-        uses: google-github-actions/auth@v3
-        with:
-          project_id: southern-splice-507708-d2
-          workload_identity_provider: projects/977838436427/locations/global/workloadIdentityPools/github-actions/providers/github-actions
-          service_account: aline2-play-deployment@southern-splice-507708-d2.iam.gserviceaccount.com
-
-      - name: Set up gcloud
-        if: steps.meta.outputs.build_aab == 'true'
-        uses: google-github-actions/setup-gcloud@v2
 
       - name: Calculate Android version code
         if: steps.meta.outputs.build_aab == 'true'
@@ -333,13 +385,31 @@ jobs:
           printf '%s' "$ANDROID_UPLOAD_KEYSTORE_BASE64" | tr -d '\r\n\t ' | base64 -d > "$KEYSTORE_PATH"
           echo "keystore_path=$KEYSTORE_PATH" >> "$GITHUB_OUTPUT"
 
+      - name: Validate Android signing configuration
+        env:
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          required_signing_values=(
+            ANDROID_UPLOAD_STORE_PASSWORD
+            ANDROID_UPLOAD_KEY_ALIAS
+            ANDROID_UPLOAD_KEY_PASSWORD
+          )
+          for key in "${required_signing_values[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "Missing Android signing configuration: ${key}" >&2
+              exit 1
+            fi
+          done
+
       - name: Build release APK
         env:
           ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
           ANDROID_UPLOAD_STORE_FILE: ${{ steps.keystore.outputs.keystore_path }}
-          ANDROID_UPLOAD_STORE_PASSWORD: ${{ vars.ANDROID_UPLOAD_STORE_PASSWORD != '' && vars.ANDROID_UPLOAD_STORE_PASSWORD || secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
-          ANDROID_UPLOAD_KEY_PASSWORD: ${{ vars.ANDROID_UPLOAD_KEY_PASSWORD != '' && vars.ANDROID_UPLOAD_KEY_PASSWORD || secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           echo "Building Android release APK with ${ENVFILE_VALUE} using mode ${{ steps.meta.outputs.apk_mode }}"
           ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh "${{ steps.meta.outputs.apk_mode }}"
@@ -349,9 +419,9 @@ jobs:
         env:
           ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
           ANDROID_UPLOAD_STORE_FILE: ${{ steps.keystore.outputs.keystore_path }}
-          ANDROID_UPLOAD_STORE_PASSWORD: ${{ vars.ANDROID_UPLOAD_STORE_PASSWORD != '' && vars.ANDROID_UPLOAD_STORE_PASSWORD || secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
-          ANDROID_UPLOAD_KEY_PASSWORD: ${{ vars.ANDROID_UPLOAD_KEY_PASSWORD != '' && vars.ANDROID_UPLOAD_KEY_PASSWORD || secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           echo "Building Android release AAB with ${ENVFILE_VALUE}"
           ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh aab
@@ -394,11 +464,12 @@ jobs:
         if: steps.meta.outputs.build_aab == 'true'
         run: |
           curl -fsSL -o /tmp/bundletool.jar https://github.com/google/bundletool/releases/download/1.18.2/bundletool-all-1.18.2.jar
+          echo "378b5434cd1378bef6b2bc527b8c7f0ff2584b273830335bce54d6d0813c8584  /tmp/bundletool.jar" | sha256sum --check --strict
 
       - name: Verify release artifacts
         env:
           ANDROID_UPLOAD_STORE_FILE: ${{ steps.keystore.outputs.keystore_path }}
-          ANDROID_UPLOAD_STORE_PASSWORD: ${{ vars.ANDROID_UPLOAD_STORE_PASSWORD != '' && vars.ANDROID_UPLOAD_STORE_PASSWORD || secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
         run: |
           build_tools_dir="${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}"
@@ -413,6 +484,12 @@ jobs:
           apk_sha="$(awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print $2; exit}' /tmp/apk-verify.txt | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           if [ -z "$trusted_sha" ] || [ -z "$apk_sha" ]; then
             echo "Failed to extract signing certificate fingerprints" >&2
+            exit 1
+          fi
+
+          expected_sha="$(printf '%s' "$ANDROID_UPLOAD_CERT_SHA256_EXPECTED" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [ "$trusted_sha" != "$expected_sha" ]; then
+            echo "Configured keystore does not match the Google Play upload certificate" >&2
             exit 1
           fi
 
@@ -435,21 +512,10 @@ jobs:
             fi
           fi
 
-      - name: Upload AAB to Google Play
-        if: steps.meta.outputs.build_aab == 'true'
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJson: ${{ steps.google_auth.outputs.credentials_file_path }}
-          packageName: com.aline2
-          releaseFiles: ${{ steps.collect.outputs.aab_path }}
-          tracks: internal
-          status: completed
-
       - name: Upload standard release artifacts
         if: steps.meta.outputs.build_aab == 'true'
         id: upload_release
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: |
@@ -463,8 +529,7 @@ jobs:
       - name: Upload arm64 release artifact
         if: steps.meta.outputs.build_aab != 'true'
         id: upload_release_arm64
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: |
@@ -474,160 +539,33 @@ jobs:
           retention-days: 30
 
       - name: Configure AWS credentials
-        if: steps.meta.outputs.publish_public == 'true'
-        uses: aws-actions/configure-aws-credentials@v4
+        if: steps.meta.outputs.deliver_release == 'true'
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Upload private AAB and generate secure link
-        if: steps.meta.outputs.publish_public == 'true'
+      - name: Upload private APK and AAB and generate secure links
+        if: steps.meta.outputs.deliver_release == 'true'
         id: private_aab
         env:
           APK_PATH: ${{ steps.collect.outputs.apk_path }}
         run: |
-          apk_key="android/public/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.apk_name }}"
+          apk_key="android/private/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.apk_name }}"
           s3_key="android/private/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.aab_name }}"
           aws s3 cp "${APK_PATH}" "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --only-show-errors
           aws s3 cp "${{ steps.collect.outputs.aab_path }}" "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --only-show-errors
           apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --expires-in 604800)"
           download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --expires-in 604800)"
+          echo "::add-mask::${apk_download_url}"
+          echo "::add-mask::${download_url}"
           echo "apk_key=$apk_key" >> "$GITHUB_OUTPUT"
           echo "apk_download_url=$apk_download_url" >> "$GITHUB_OUTPUT"
           echo "s3_key=$s3_key" >> "$GITHUB_OUTPUT"
           echo "download_url=$download_url" >> "$GITHUB_OUTPUT"
 
-      - name: Publish production APK to welcome host
-        if: steps.meta.outputs.publish_public == 'true'
-        id: publish_apk
-        env:
-          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
-          APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
-          AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
-          AAB_NAME: ${{ steps.meta.outputs.aab_name }}
-        run: |
-          cat > /tmp/publish-apk.sh <<'EOF'
-          set -euo pipefail
-          release_dir="__PROD_RELEASES_DIR__"
-          release_name="__RELEASE_NAME__"
-          aab_name="__AAB_NAME__"
-          backup_dir="${release_dir}/backups/${release_name}"
-
-          prune_old_release_files() {
-            local search_dir="$1"
-            local pattern="$2"
-            local keep_count="$3"
-            local -a files=()
-
-            mapfile -t files < <(find "${search_dir}" -maxdepth 1 -type f -name "${pattern}" -printf '%T@ %p\n' | sort -n | sed 's/^[^ ]* //')
-            if [ "${#files[@]}" -le "${keep_count}" ]; then
-              return
-            fi
-
-            local prune_count=$(( ${#files[@]} - keep_count ))
-            local index
-            for (( index=0; index<prune_count; index++ )); do
-              rm -f "${files[$index]}" "${files[$index]}.sha256"
-            done
-          }
-
-          prune_old_backup_dirs() {
-            local backup_root="$1"
-            local keep_count="$2"
-            local -a dirs=()
-
-            if [ ! -d "${backup_root}" ]; then
-              return
-            fi
-
-            mapfile -t dirs < <(find "${backup_root}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -n | sed 's/^[^ ]* //')
-            if [ "${#dirs[@]}" -le "${keep_count}" ]; then
-              return
-            fi
-
-            local prune_count=$(( ${#dirs[@]} - keep_count ))
-            local index
-            for (( index=0; index<prune_count; index++ )); do
-              rm -rf "${dirs[$index]}"
-            done
-          }
-
-          mkdir -p "${release_dir}"
-          chmod 755 "${release_dir}"
-          mkdir -p "${backup_dir}"
-          if [ -f "${release_dir}/latest.apk" ]; then
-            cp "${release_dir}/latest.apk" "${backup_dir}/latest.apk"
-          fi
-          if [ -f "${release_dir}/Aline2-latest.apk" ]; then
-            cp "${release_dir}/Aline2-latest.apk" "${backup_dir}/Aline2-latest.apk"
-          fi
-          if [ -f "${release_dir}/latest.apk.sha256" ]; then
-            cp "${release_dir}/latest.apk.sha256" "${backup_dir}/latest.apk.sha256"
-          fi
-          if [ -f "${release_dir}/Aline2-latest.apk.sha256" ]; then
-            cp "${release_dir}/Aline2-latest.apk.sha256" "${backup_dir}/Aline2-latest.apk.sha256"
-          fi
-          target_path="${release_dir}/${release_name}.apk"
-          target_aab="${release_dir}/${aab_name}"
-          curl -fsSL "__APK_DOWNLOAD_URL__" -o "${target_path}"
-          curl -fsSL "__AAB_DOWNLOAD_URL__" -o "${target_aab}"
-          cp "${target_path}" "${release_dir}/latest.apk"
-          cp "${target_path}" "${release_dir}/Aline2-latest.apk"
-          sha256sum "${target_path}" > "${target_path}.sha256"
-          sha256sum "${target_aab}" > "${target_aab}.sha256"
-          sha256sum "${release_dir}/latest.apk" > "${release_dir}/latest.apk.sha256"
-          sha256sum "${release_dir}/Aline2-latest.apk" > "${release_dir}/Aline2-latest.apk.sha256"
-          prune_old_release_files "${release_dir}" 'Aline2-v*.apk' 5
-          prune_old_release_files "${release_dir}" 'Aline2-v*.aab' 5
-          prune_old_release_files "${release_dir}" 'aline2-*-release-*.apk' 5
-          prune_old_release_files "${release_dir}" 'aline2-*-release-*.aab' 5
-          prune_old_backup_dirs "${release_dir}/backups" 5
-          EOF
-
-          command_json="$(python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          path = Path("/tmp/publish-apk.sh")
-          content = path.read_text()
-          for key, value in {
-              "__PROD_RELEASES_DIR__": os.environ["PROD_RELEASES_DIR"],
-              "__RELEASE_NAME__": os.environ["RELEASE_NAME"],
-              "__APK_DOWNLOAD_URL__": os.environ["APK_DOWNLOAD_URL"],
-              "__AAB_DOWNLOAD_URL__": os.environ["AAB_DOWNLOAD_URL"],
-              "__AAB_NAME__": os.environ["AAB_NAME"],
-          }.items():
-              content = content.replace(key, value)
-          path.write_text(content)
-          print(json.dumps({"commands": [content]}))
-          PY
-          )"
-
-          command_id="$(aws ssm send-command \
-            --instance-ids "${PROD_INSTANCE_ID}" \
-            --document-name AWS-RunShellScript \
-            --comment "aline2-android-release-${RELEASE_NAME}" \
-            --parameters "${command_json}" \
-            --query 'Command.CommandId' \
-            --output text)"
-
-          aws ssm wait command-executed --command-id "${command_id}" --instance-id "${PROD_INSTANCE_ID}"
-          aws ssm get-command-invocation \
-            --command-id "${command_id}" \
-            --instance-id "${PROD_INSTANCE_ID}" \
-            --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
-            --output json
-
-      - name: Verify public APK download
-        if: steps.meta.outputs.publish_public == 'true'
-        run: |
-          curl -IfsS https://welcome.aline2.com/downloads/android/Aline2-latest.apk >/dev/null
-          curl -IfsS https://welcome.aline2.com/downloads/android/latest.apk >/dev/null
-          curl -IfsS "https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}" >/dev/null
-
-      - name: Email private AAB delivery notice
-        if: steps.meta.outputs.publish_public == 'true'
+      - name: Email private APK and AAB delivery notice
+        if: steps.meta.outputs.deliver_release == 'true'
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -639,70 +577,15 @@ jobs:
           EMAIL_BODY: |
             The latest signed Aline2 Android production release is ready.
 
-            The public APK has been published to welcome.aline2.com.
-            This email carries the versioned AAB delivery path for Play Console usage.
-            The AAB is not linked from the public landing page.
+            Use the private AAB link for the manual Google Play Console upload.
+            Both secure APK and AAB download links expire after seven days.
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
-          AAB_DOWNLOAD_URL: https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}
+          APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
+          AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
+          APK_ATTACHMENT_PATH: ${{ steps.collect.outputs.apk_path }}
           AAB_ATTACHMENT_PATH: ${{ steps.collect.outputs.aab_path }}
         run: |
           python3 ./scripts/ci/send_release_email.py
-
-      - name: Roll back public APK on failure
-        if: failure() && steps.meta.outputs.publish_public == 'true' && steps.publish_apk.outcome == 'success'
-        env:
-          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
-        run: |
-          cat > /tmp/rollback-apk.sh <<'EOF'
-          set -euo pipefail
-          release_dir="__PROD_RELEASES_DIR__"
-          release_name="__RELEASE_NAME__"
-          backup_dir="${release_dir}/backups/${release_name}"
-          if [ -f "${backup_dir}/latest.apk" ]; then
-            cp "${backup_dir}/latest.apk" "${release_dir}/latest.apk"
-            if [ -f "${backup_dir}/latest.apk.sha256" ]; then
-              cp "${backup_dir}/latest.apk.sha256" "${release_dir}/latest.apk.sha256"
-            else
-              sha256sum "${release_dir}/latest.apk" > "${release_dir}/latest.apk.sha256"
-            fi
-            cp "${release_dir}/latest.apk" "${release_dir}/Aline2-latest.apk"
-            sha256sum "${release_dir}/Aline2-latest.apk" > "${release_dir}/Aline2-latest.apk.sha256"
-          else
-            rm -f "${release_dir}/latest.apk" "${release_dir}/latest.apk.sha256" "${release_dir}/Aline2-latest.apk" "${release_dir}/Aline2-latest.apk.sha256"
-          fi
-          EOF
-
-          command_json="$(python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          path = Path("/tmp/rollback-apk.sh")
-          content = path.read_text()
-          for key, value in {
-              "__PROD_RELEASES_DIR__": os.environ["PROD_RELEASES_DIR"],
-              "__RELEASE_NAME__": os.environ["RELEASE_NAME"],
-          }.items():
-              content = content.replace(key, value)
-          path.write_text(content)
-          print(json.dumps({"commands": [content]}))
-          PY
-          )"
-
-          command_id="$(aws ssm send-command \
-            --instance-ids "${PROD_INSTANCE_ID}" \
-            --document-name AWS-RunShellScript \
-            --comment "aline2-android-release-rollback-${RELEASE_NAME}" \
-            --parameters "${command_json}" \
-            --query 'Command.CommandId' \
-            --output text)"
-
-          aws ssm wait command-executed --command-id "${command_id}" --instance-id "${PROD_INSTANCE_ID}"
-          aws ssm get-command-invocation \
-            --command-id "${command_id}" \
-            --instance-id "${PROD_INSTANCE_ID}" \
-            --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
-            --output json
 
       - name: Add build summary
         if: success()
@@ -714,20 +597,26 @@ jobs:
             echo "## Android Release"
             echo ""
             echo "- Branch: \`main\`"
+            echo "- Trigger: \`${{ github.event_name }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
             echo "- Release profile: \`${{ steps.meta.outputs.release_profile }}\`"
             echo "- Release: \`${{ steps.meta.outputs.release_name }}\`"
             echo "- GitHub Actions artifacts: available in this run while signed in to GitHub"
             echo "- APK checksum:"
             cat "${APK_NAME}.sha256"
-            if [ "${{ steps.meta.outputs.publish_public }}" = "true" ]; then
-              echo "- Public APK URL: \`https://welcome.aline2.com/downloads/android/Aline2-latest.apk\`"
-              echo "- Compatibility APK URL: \`https://welcome.aline2.com/downloads/android/latest.apk\`"
-              echo "- Versioned AAB URL: \`https://welcome.aline2.com/downloads/android/${{ steps.meta.outputs.aab_name }}\`"
-              echo "- AAB delivery email sent to \`cuboidsoft@gmail.com\`"
+            if [ "${{ steps.meta.outputs.deliver_release }}" = "true" ]; then
+              echo "- Private APK/AAB delivery email sent to \`cuboidsoft@gmail.com\`"
+              echo "- Secure links expire after seven days"
+              echo "- Google Play upload: manual"
               echo "- AAB checksum:"
               cat "${AAB_NAME}.sha256"
             else
+              echo "- Build-only validation completed; Play and production downloads were not changed."
               echo "- Private artifact APK: \`${{ steps.meta.outputs.apk_name }}\`"
-              echo "- Public APK was not updated in this run."
+              if [ "${{ steps.meta.outputs.build_aab }}" = "true" ]; then
+                echo "- Private artifact AAB: \`${{ steps.meta.outputs.aab_name }}\`"
+                echo "- AAB checksum:"
+                cat "${AAB_NAME}.sha256"
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"

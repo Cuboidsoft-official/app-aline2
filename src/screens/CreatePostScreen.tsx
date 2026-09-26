@@ -1069,6 +1069,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const [storyStickerError, setStoryStickerError] = useState("");
   const [storyEmojiOptions, setStoryEmojiOptions] = useState<ChatSticker[]>([]);
   const [storyImageOptions, setStoryImageOptions] = useState<ChatSticker[]>([]);
+  const [storyLinkUrl, setStoryLinkUrl] = useState("");
+  const [storyLocation, setStoryLocation] = useState("");
   const [storyEmojiSticker, setStoryEmojiSticker] = useState<string>("");
   const [storyEmojiScale, setStoryEmojiScale] = useState(1);
   const [storyEmojiRotation, setStoryEmojiRotation] = useState(0);
@@ -1746,7 +1748,7 @@ function CreatePostScreen({ navigation, route }: any) {
       const pickerMediaType = mode === "swipe" ? "video" : "mixed";
       const pickedAssets = await pickComposerAssets({
         mediaType: pickerMediaType,
-        selectionLimit: mode === "post" ? 10 : 1,
+        selectionLimit: mode === "post" ? 40 : 1,
         quality: PHOTO_PICKER_QUALITY,
         maxWidth: PHOTO_PICKER_MAX_DIMENSION,
         maxHeight: PHOTO_PICKER_MAX_DIMENSION,
@@ -2747,13 +2749,35 @@ function CreatePostScreen({ navigation, route }: any) {
     const normalizedStoryEmoji = storyEmojiSticker.trim();
     const normalizedStoryImageUrl = String(storyImageSticker?.imageUrl || "").trim();
     const normalizedStoryImageLabel = String(storyImageSticker?.name || "Sticker").trim();
+    const normalizedLinkUrl = storyLinkUrl.trim();
+    const normalizedStoryLocation = storyLocation.trim();
+
+    const extraStickers: any[] = [];
+    if (normalizedLinkUrl) {
+      extraStickers.push({
+        type: "link",
+        text: normalizedLinkUrl,
+        linkUrl: normalizedLinkUrl,
+        position: { x: 0.5, y: 0.65, width: 0.45, height: 0.08 }
+      });
+    }
+    if (normalizedStoryLocation) {
+      extraStickers.push({
+        type: "location",
+        text: normalizedStoryLocation,
+        locationName: normalizedStoryLocation,
+        position: { x: 0.5, y: 0.25, width: 0.45, height: 0.08 }
+      });
+    }
 
     if (storyCreationMode === "text") {
       return {
         type: "text",
         text: normalizedStoryText || caption.trim() || undefined,
         backgroundColor: storyBackgroundColor,
-        location: location.trim() || undefined,
+        location: normalizedStoryLocation || location.trim() || undefined,
+        linkUrl: normalizedLinkUrl || undefined,
+        stickers: extraStickers.length ? extraStickers : undefined,
         customEmojiSticker: normalizedStoryEmoji || undefined,
         customEmojiStickerPosition: normalizedStoryEmoji ? storyEmojiPosition : undefined,
         customEmojiStickerScale: normalizedStoryEmoji ? storyEmojiScale : undefined,
@@ -2777,7 +2801,9 @@ function CreatePostScreen({ navigation, route }: any) {
       type: "media",
       media: uploadedMedia,
       text: caption.trim() || undefined,
-      location: location.trim() || undefined,
+      location: normalizedStoryLocation || location.trim() || undefined,
+      linkUrl: normalizedLinkUrl || undefined,
+      stickers: extraStickers.length ? extraStickers : undefined,
       filterPreset: storyFilterPreset,
       filterIntensity: storyFilterPreset === "none" ? undefined : storyFilterIntensity,
       customTextSticker: normalizedStoryText || undefined,
@@ -2937,15 +2963,37 @@ function CreatePostScreen({ navigation, route }: any) {
     });
   }, []);
 
+  const toggleFitFullPhoto = useCallback(() => {
+    composerMediaPan.setValue({ x: 0, y: 0 });
+    setComposerMediaTransform((current) => {
+      const isAlreadyFitted = current.scale < 0.95;
+      const nextScale = isAlreadyFitted ? 1.0 : 0.82;
+      const nextTransform = {
+        scale: nextScale,
+        translateX: 0,
+        translateY: 0,
+      };
+
+      if (selectedAsset?.id) {
+        setComposerMediaTransformsByAssetId((prev) => ({
+          ...prev,
+          [selectedAsset.id]: nextTransform,
+        }));
+      }
+
+      return nextTransform;
+    });
+  }, [composerMediaPan, selectedAsset?.id]);
+
   const persistComposerMediaTransform = useCallback(() => {
     const rawX = Number((composerMediaPan.x as any)._value || 0);
     const rawY = Number((composerMediaPan.y as any)._value || 0);
 
     setComposerMediaTransform((current) => {
       const nextTransform = {
-        scale: clamp(current.scale, 1, 4),
-      translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -1, 1) : current.translateX,
-      translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -1, 1) : current.translateY,
+        scale: clamp(current.scale, 0.2, 4),
+        translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -1.5, 1.5) : current.translateX,
+        translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -1.5, 1.5) : current.translateY,
       };
 
       if (selectedAsset?.id) {
@@ -2962,8 +3010,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const composerMediaResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => !!selectedAsset && mode !== "story",
-        onMoveShouldSetPanResponder: () => !!selectedAsset && mode !== "story",
+        onStartShouldSetPanResponder: () => !!selectedAsset,
+        onMoveShouldSetPanResponder: () => !!selectedAsset,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (event) => {
           const touches = event.nativeEvent.touches || [];
@@ -2990,7 +3038,7 @@ function CreatePostScreen({ navigation, route }: any) {
             const startDistance = composerMediaGestureRef.current.startDistance || distance || 1;
             const nextScale = clamp(
               composerMediaGestureRef.current.startScale * (distance / Math.max(1, startDistance)),
-              1,
+              0.2,
               4,
             );
             setComposerMediaTransform((current) => ({ ...current, scale: nextScale }));
@@ -3008,7 +3056,6 @@ function CreatePostScreen({ navigation, route }: any) {
     [
       composerMediaPan,
       composerMediaTransform.scale,
-      mode,
       persistComposerMediaTransform,
       selectedAsset,
     ],
@@ -3260,12 +3307,12 @@ function CreatePostScreen({ navigation, route }: any) {
     const fullscreen = !!options?.fullscreen;
     const frameStyle = [
       styles.storyCanvasFrame,
-      compact ? styles.storyCanvasCompact : styles.storyCanvasExpanded,
+      compact ? styles.storyCanvasCompact : (fullscreen ? styles.storyCanvasFullscreen : styles.storyCanvasExpanded),
       fullscreen ? styles.storyCanvasFullscreen : null,
       {
         backgroundColor: isDarkMode ? "#020617" : "#DDE8E1",
         borderColor,
-        height: compact ? storyCompactCanvasHeight : storyExpandedCanvasHeight,
+        height: compact ? storyCompactCanvasHeight : (fullscreen ? ("100%" as const) : storyExpandedCanvasHeight),
       },
     ];
 
@@ -3734,16 +3781,23 @@ function CreatePostScreen({ navigation, route }: any) {
             ) : null}
           </View>
 
+          <Text style={[styles.storyPanelLabel, styles.storyStickerSectionTitle, { color: textColor }]}>🔗 Link sticker</Text>
           <TextInput
-            value={storyStickerQuery}
-            onChangeText={setStoryStickerQuery}
-            placeholder="Search emoji or overlay"
+            value={storyLinkUrl}
+            onChangeText={setStoryLinkUrl}
+            placeholder="Add URL (e.g. https://website.com)"
             placeholderTextColor={mutedColor}
-            style={[styles.storyTextInput, styles.storyStickerSearchInput, { color: textColor, backgroundColor: inputBackground, borderColor }]}
+            style={[styles.storyTextInput, styles.storyStickerSearchInput, { color: textColor, backgroundColor: inputBackground, borderColor, marginBottom: 8 }]}
           />
 
-          {storyStickerLoading ? <ActivityIndicator size="small" color={accentColor} style={styles.storyStickerLoader} /> : null}
-          {storyStickerError ? <Text style={[styles.helperText, { color: isDarkMode ? "#FCA5A5" : "#B91C1C" }]}>{storyStickerError}</Text> : null}
+          <Text style={[styles.storyPanelLabel, styles.storyStickerSectionTitle, { color: textColor }]}>📍 Location sticker</Text>
+          <TextInput
+            value={storyLocation}
+            onChangeText={setStoryLocation}
+            placeholder="Add location (e.g. Raipur, Goa, Mumbai)"
+            placeholderTextColor={mutedColor}
+            style={[styles.storyTextInput, styles.storyStickerSearchInput, { color: textColor, backgroundColor: inputBackground, borderColor, marginBottom: 8 }]}
+          />
 
           <Text style={[styles.storyPanelLabel, styles.storyStickerSectionTitle, { color: textColor }]}>Quick emoji</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyChipRow}>
@@ -4135,9 +4189,25 @@ function CreatePostScreen({ navigation, route }: any) {
           <View pointerEvents="none" style={styles.cropFrameGuide} />
         ) : null}
         {interactive ? (
-          <View pointerEvents="none" style={styles.cropHintPill}>
-            <Icon name="move-outline" size={13} color="#fff" />
-            <Text style={styles.cropHintText}>Drag - pinch to zoom</Text>
+          <View pointerEvents="box-none" style={styles.cropControlRow}>
+            <TouchableOpacity
+              style={styles.fitTogglePill}
+              onPress={toggleFitFullPhoto}
+              activeOpacity={0.8}
+            >
+              <Icon
+                name={composerMediaTransform.scale < 0.95 ? "scan-outline" : "expand-outline"}
+                size={13}
+                color="#fff"
+              />
+              <Text style={styles.cropHintText}>
+                {composerMediaTransform.scale < 0.95 ? "Fill frame" : "Fit full photo"}
+              </Text>
+            </TouchableOpacity>
+            <View pointerEvents="none" style={styles.cropHintPill}>
+              <Icon name="move-outline" size={13} color="#fff" />
+              <Text style={styles.cropHintText}>Drag - pinch to zoom</Text>
+            </View>
           </View>
         ) : null}
         {renderComposerTextOverlay(interactive)}
@@ -6530,10 +6600,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: appFonts.semibold,
   },
-  cropHintPill: {
+  cropControlRow: {
     position: "absolute",
+    left: 12,
     right: 12,
     bottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  fitTogglePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(15, 23, 42, 0.72)",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  cropHintPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,

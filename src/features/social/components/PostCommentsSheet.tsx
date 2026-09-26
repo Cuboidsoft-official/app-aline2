@@ -221,6 +221,29 @@ function PostCommentsSheet({
     ]);
   };
 
+  const [expandedCommentIds, setExpandedCommentIds] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (commentId: string) => {
+    setExpandedCommentIds((prev) => ({ ...prev, [commentId]: !prev[commentId] }));
+  };
+
+  const onTogglePin = async (commentId: string) => {
+    try {
+      setBusyIds((prev) => ({ ...prev, [commentId]: true }));
+      const res = await socialApi.togglePinComment(commentId);
+      const isPinned = res.isPinned;
+      setComments((prev) =>
+        prev
+          .map((item) => (item.id === commentId ? { ...item, isPinned } : item))
+          .sort((a, b) => Number(b.isPinned || false) - Number(a.isPinned || false))
+      );
+    } catch (error) {
+      Alert.alert("Could not pin comment", toUserSafeMessage(error));
+    } finally {
+      setBusyIds((prev) => ({ ...prev, [commentId]: false }));
+    }
+  };
+
   return (
     <DraggableBottomSheet visible={visible} onClose={onClose} snapPoints={[0.42, 0.66, 0.88]}>
       <View style={styles.sheetContent}>
@@ -255,54 +278,80 @@ function PostCommentsSheet({
             keyExtractor={(item) => item.id}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={styles.listContent}
-            renderItem={({ item }) => (
-              <View style={styles.commentRow}>
-                <Image source={{ uri: normalizeMediaUrl(item.user.avatarUrl) }} style={styles.avatar} />
-                <View style={styles.commentBody}>
-                  <View style={styles.commentTop}>
-                    <Text style={[styles.username, { color: colors.text }]}>@{item.user.username}</Text>
-                    <Text style={[styles.time, { color: colors.mutedText }]}>{formatAgo(item.createdAt)}</Text>
-                  </View>
-                  {item.text ? (
-                    <InteractiveText
-                      style={[styles.commentText, { color: colors.text }]}
-                      mentionStyle={{ color: colors.primary, fontWeight: "800" }}
-                      onPressMention={(mention) => {
-                        openMentionProfile(mention).catch(() => undefined);
-                      }}
-                      text={item.text}
-                    />
-                  ) : null}
-                  {item.audioUrl ? (
-                    <CommentAudioBubble audioUrl={item.audioUrl} audioDuration={item.audioDuration} />
-                  ) : null}
-                  <View style={styles.actionRow}>
-                    <TouchableOpacity onPress={() => onToggleLike(item.id)}>
-                      <Text style={[styles.actionText, { color: colors.mutedText }]}>
-                        {item.liked ? "Unlike" : "Like"}
-                        {item.likesCount ? ` (${item.likesCount})` : ""}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setThreadComment(item)}>
-                      <Text style={[styles.actionText, { color: colors.mutedText }]}>Reply</Text>
-                    </TouchableOpacity>
-                    {(item.replyCount || 0) > 0 ? (
+            renderItem={({ item }) => {
+              const isLong = item.text.length > 200;
+              const isExpanded = !!expandedCommentIds[item.id];
+              const displayText = isLong && !isExpanded ? `${item.text.slice(0, 200)}...` : item.text;
+
+              return (
+                <View style={styles.commentRow}>
+                  <Image source={{ uri: normalizeMediaUrl(item.user.avatarUrl) }} style={styles.avatar} />
+                  <View style={styles.commentBody}>
+                    <View style={styles.commentTop}>
+                      <Text style={[styles.username, { color: colors.text }]}>@{item.user.username}</Text>
+                      {item.isPinned ? (
+                        <View style={styles.pinnedBadge}>
+                          <Icon name="pin" size={12} color={colors.primary} />
+                          <Text style={[styles.pinnedBadgeText, { color: colors.primary }]}>Pinned</Text>
+                        </View>
+                      ) : null}
+                      <Text style={[styles.time, { color: colors.mutedText }]}>{formatAgo(item.createdAt)}</Text>
+                    </View>
+                    {item.text ? (
+                      <View>
+                        <InteractiveText
+                          style={[styles.commentText, { color: colors.text }]}
+                          mentionStyle={{ color: colors.primary, fontWeight: "800" }}
+                          onPressMention={(mention) => {
+                            openMentionProfile(mention).catch(() => undefined);
+                          }}
+                          text={displayText}
+                        />
+                        {isLong ? (
+                          <TouchableOpacity onPress={() => toggleExpand(item.id)} style={{ marginTop: 2 }}>
+                            <Text style={[styles.readMoreText, { color: colors.primary }]}>
+                              {isExpanded ? "Show Less" : "Read More"}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {item.audioUrl ? (
+                      <CommentAudioBubble audioUrl={item.audioUrl} audioDuration={item.audioDuration} />
+                    ) : null}
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity onPress={() => onToggleLike(item.id)}>
+                        <Text style={[styles.actionText, { color: colors.mutedText }]}>
+                          {item.liked ? "Unlike" : "Like"}
+                          {item.likesCount ? ` (${item.likesCount})` : ""}
+                        </Text>
+                      </TouchableOpacity>
                       <TouchableOpacity onPress={() => setThreadComment(item)}>
-                        <Text style={[styles.actionText, { color: colors.mutedText }]}>View replies ({item.replyCount})</Text>
+                        <Text style={[styles.actionText, { color: colors.mutedText }]}>Reply</Text>
                       </TouchableOpacity>
-                    ) : null}
-                    {item.canDelete ? (
-                      <TouchableOpacity onPress={() => onDelete(item)}>
-                        <Text style={[styles.actionText, styles.deleteText]}>Delete</Text>
+                      {(item.replyCount || 0) > 0 ? (
+                        <TouchableOpacity onPress={() => setThreadComment(item)}>
+                          <Text style={[styles.actionText, { color: colors.mutedText }]}>View replies ({item.replyCount})</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      <TouchableOpacity onPress={() => onTogglePin(item.id)}>
+                        <Text style={[styles.actionText, { color: item.isPinned ? colors.primary : colors.mutedText }]}>
+                          {item.isPinned ? "Unpin" : "Pin"}
+                        </Text>
                       </TouchableOpacity>
-                    ) : null}
-                    {(item.likesCount || 0) > 0 ? (
-                      <Text style={[styles.metaText, { color: colors.mutedText }]}>{item.likesCount} likes</Text>
-                    ) : null}
+                      {item.canDelete ? (
+                        <TouchableOpacity onPress={() => onDelete(item)}>
+                          <Text style={[styles.actionText, styles.deleteText]}>Delete</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {(item.likesCount || 0) > 0 ? (
+                        <Text style={[styles.metaText, { color: colors.mutedText }]}>{item.likesCount} likes</Text>
+                      ) : null}
+                    </View>
                   </View>
                 </View>
-              </View>
-            )}
+              );
+            }}
             ListEmptyComponent={<Text style={[styles.emptyText, { color: colors.mutedText }]}>No comments yet.</Text>}
           />
         )}
@@ -401,8 +450,11 @@ const styles = StyleSheet.create({
   commentBody: { flex: 1, marginLeft: 9 },
   commentTop: { flexDirection: "row", alignItems: "center" },
   username: { fontWeight: "700", fontSize: 12.8 },
+  pinnedBadge: { flexDirection: "row", alignItems: "center", gap: 2, marginLeft: 6 },
+  pinnedBadgeText: { fontSize: 10.5, fontWeight: "800" },
   time: { marginLeft: 8, fontSize: 10.8 },
   commentText: { marginTop: 2, lineHeight: 18, fontSize: 13 },
+  readMoreText: { fontSize: 12, fontWeight: "800" },
   actionRow: { flexDirection: "row", alignItems: "center", marginTop: 6, flexWrap: "wrap" },
   actionText: { fontWeight: "600", marginRight: 12, fontSize: 11.8, marginBottom: 4 },
   metaText: { fontSize: 11.8, marginBottom: 4 },

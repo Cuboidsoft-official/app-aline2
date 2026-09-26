@@ -259,8 +259,8 @@ export const normalizePostInput = (input: CreatePostInput): CreatePostInput => {
     throw new SocialValidationError("validation_error", "At least one media item is required.");
   }
 
-  if (media.length > 10) {
-    throw new SocialValidationError("validation_error", "Maximum 10 media items are allowed.");
+  if (media.length > 40) {
+    throw new SocialValidationError("validation_error", "Maximum 40 media items are allowed.");
   }
 
   if (filterPreset !== undefined && !ALLOWED_POST_FILTER_PRESETS.has(filterPreset)) {
