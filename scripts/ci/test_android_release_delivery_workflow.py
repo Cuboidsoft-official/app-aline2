@@ -640,6 +640,24 @@ class BothWorkflowsShareOneDeliveryContract(unittest.TestCase):
                         "level; step-level env does not survive to later steps",
                     )
 
+    def test_delivery_jobs_keep_credentials_and_checkout_for_later_steps(self):
+        """Identity checks cannot lend their step env to S3 or email steps."""
+        jobs = yaml.safe_load(DELIVERY_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        for name in ("redeliver", "health"):
+            job = jobs[name]
+            self.assertEqual(
+                job["env"]["AWS_ACCESS_KEY_ID"],
+                "${{ secrets.RELEASE_AWS_ACCESS_KEY_ID }}",
+            )
+            self.assertEqual(
+                job["env"]["AWS_SECRET_ACCESS_KEY"],
+                "${{ secrets.RELEASE_AWS_SECRET_ACCESS_KEY }}",
+            )
+            self.assertTrue(
+                job["steps"][0]["uses"].startswith("actions/checkout@"),
+                f"{name} must check out send_release_email.py before it can email",
+            )
+
     @staticmethod
     def _job_block(text: str, name: str) -> str:
         """Return the YAML text of one job, from its key up to the next job key.
