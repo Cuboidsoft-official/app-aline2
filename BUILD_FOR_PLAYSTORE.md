@@ -1,167 +1,124 @@
-# 🚀 Google Play Store ke liye Build Guide
+# Android production build and Google Play release
 
-## 📋 Pre-requisites (Zaroori Cheezein)
+The canonical production build runs in GitHub Actions. Do not build Play artifacts from a developer laptop and do not place signing values in scripts or repository files.
 
-1. ✅ Java JDK 17 or higher installed
-2. ✅ Android SDK installed
-3. ✅ Gradle installed (React Native ke saath aata hai)
-4. ✅ Keystore file ready (`aline2-release.keystore`)
-5. ✅ Keystore credentials (password, alias, key password)
+## Release path
 
-## 🔑 Step 1: Keystore Credentials Setup
+1. Merge a reviewed, CI-passing app change into protected `main`.
+2. The **Android Release** workflow builds the exact `main` commit on a GitHub-hosted runner. App-relevant changes trigger a standard release automatically. A release operator can also use **Run workflow** on `main` to retry a reviewed commit.
+3. The workflow runs the sensitive-file policy, type checking, tests, the production configuration checks, signed APK/AAB builds, signature comparison, `bundletool` validation, and SHA-256 checksum generation. Lint currently reports known debt without blocking the release.
+4. The verified APK, AAB, and checksum files remain in the workflow run for 30 days. A delivered standard release is also copied to private object storage and Cuboidsoft receives seven-day download links by email.
+5. A release operator manually uploads the verified AAB to Google Play Console. The workflow never publishes to Google Play.
 
-Aapko apne keystore ki details chaiye hongi:
+Automatic production delivery applies only to reviewed app changes merged to `main`; documentation-only and workflow-only changes do not create a new app release. The `arm64` manual profile is a diagnostic APK build and does not produce or deliver a Play bundle.
 
-### Agar aapke paas keystore nahi hai, to naya banao:
-```cmd
-cd android\app
-keytool -genkeypair -v -storetype PKCS12 -keystore aline2-release.keystore -alias aline2-key -keyalg RSA -keysize 2048 -validity 10000
+## Before merge
+
+- Update `package.json` `version` and Android `versionName` together when the public version changes. They must match.
+- Do not manually reuse a Play version code. The release workflow assigns a monotonically increasing `versionCode` to standard bundles.
+- Confirm the pull request describes user impact, release notes, manual test evidence, Firebase/notification impact, and rollback.
+- Confirm **Android CI / validate** passes on the exact commit approved by the reviewer.
+- For changes that affect backend contracts or remote configuration, verify the production dependency is compatible before merging the app.
+
+## Required GitHub production configuration
+
+Repository administrators maintain these names in GitHub Actions. Contributors should verify presence and workflow success, never copy values into an issue or pull request.
+
+| Purpose | GitHub configuration |
+| --- | --- |
+| Upload keystore | `ANDROID_UPLOAD_KEYSTORE_BASE64` secret |
+| Signing credentials | `ANDROID_UPLOAD_STORE_PASSWORD`, `ANDROID_UPLOAD_KEY_PASSWORD` secrets and `ANDROID_UPLOAD_KEY_ALIAS` variable/secret |
+| Production mobile configuration | `BACKEND_ORIGIN`, `API_BASE_URL`, `SOCKET_URL`, `SHARE_BASE_URL`, `GOOGLE_WEB_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID`, `YOUTUBE_DATA_API_KEY`, `GEMINI_API_KEY`, `ZEGO_CLOUD_APP_ID`, `ZEGO_CLOUD_APP_SIGN` variables/secrets as referenced by the workflow |
+| Private delivery | `RELEASE_AWS_ACCESS_KEY_ID` and `RELEASE_AWS_SECRET_ACCESS_KEY` secrets on the `production` environment, plus `AWS_REGION` and `PRIVATE_RELEASES_BUCKET` variables |
+| Delivery email | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` secrets |
+
+`AWS_ROLE_TO_ASSUME` is no longer used for delivery. It belongs to the backend
+deploy role, which can push images and run commands on the production instance,
+and delivery does not need that much authority. See
+[Delivery credential](#delivery-credential) below.
+
+The production GitHub environment is restricted to `main`. The repository must never contain the release keystore, signing passwords, `.env.production`, Firebase Admin/service-account JSON, or server-only payment and webhook secrets. The client Firebase configuration file may be tracked only for the Android client package; administrative Firebase credentials are server-side secrets.
+
+## Delivery credential
+
+Download links are signed with a dedicated IAM user, `aline2-android-release-ci`,
+whose only permissions are `s3:PutObject` and `s3:GetObject` under
+`android/private/` in the release bucket. It cannot list the bucket, delete
+anything, or touch any other prefix or bucket. Both delivery workflows assert
+the running principal with `aws sts get-caller-identity` and abort on anything
+else, so a wrong or widened credential fails at delivery time rather than
+silently.
+
+**Why not a cloud session.** A SigV4 presigned URL cannot outlive the session
+that signed it. GitHub's OIDC session lasts one hour by default, so every
+delivery link produced between 2026-08-31 and 2026-09-26 expired roughly an hour
+after it was emailed while the email promised seven days. Nothing in the
+pipeline objected, because every step succeeded. The permanent user is what
+makes the stated window true.
+
+**Lifetime and rotation.** IAM user access keys do not expire on their own, so
+this credential needs no scheduled rotation. Rotate it only on a policy change
+or a suspected leak:
+
+```bash
+scripts/ci/rotate-android-release-credential.sh plan
+scripts/ci/rotate-android-release-credential.sh create
+scripts/ci/rotate-android-release-credential.sh install <new-access-key-id>
+# then run the Android Release Delivery workflow with mode "check" and confirm
+# it reports a healthy credential, and only then:
+scripts/ci/rotate-android-release-credential.sh revoke <old-access-key-id>
 ```
 
-**Important:** Password aur alias yaad rakhna! Ye baad mein chahiye.
+The script creates the replacement, proves it can sign and fetch, and refuses to
+revoke the old key until the replacement has been verified. The final step is
+manual because GitHub Actions cannot write repository secrets, and the
+alternatives would grant either key-creation rights to a deploy role or an
+administrator token to this repository.
 
-### Agar keystore already hai:
-Keystore details check karne ke liye:
-```cmd
-keytool -list -v -keystore android\app\aline2-release.keystore
-```
+## When a link expires
 
-## 🛠️ Step 2: Build Script Configure Karo
+Link expiry is not a rebuild. Run **Android Release Delivery**, choose
+`redeliver`, and enter the release folder from the original run's date (for
+example `20260924`). It re-signs the same artifacts, verifies both links resolve,
+and emails fresh ones. Releases built before the `release.json` record was
+introduced cannot be redelivered this way and need a rebuild.
 
-### Option A: BAT File Use Karo (Simplest - Recommended)
+**Android Release Delivery** also runs a weekly check that performs a real signed
+download against a stored object. Identity checks alone would still pass if
+`s3:GetObject` had been removed from the policy, which is the failure that would
+break delivery while leaving every other signal green. A failed check emails
+Cuboidsoft rather than only turning a run red.
 
-1. `build-playstore.bat` file kholo
-2. Apne keystore credentials fill karo:
-   ```bat
-   set ANDROID_UPLOAD_STORE_PASSWORD=your_actual_password
-   set ANDROID_UPLOAD_KEY_ALIAS=your_actual_alias
-   set ANDROID_UPLOAD_KEY_PASSWORD=your_actual_key_password
-   ```
+## Retrieve and verify the release
 
-3. File save karo
+Open the successful **Android Release** workflow run for the target `main` commit.
 
-### Option B: PowerShell Script Use Karo
+1. Record the full commit SHA, workflow run URL, version name, generated version code, artifact name, and run conclusion.
+2. Download the standard release artifact while signed in to GitHub, or use the private Cuboidsoft email links before they expire.
+3. Run `sha256sum -c <file>.sha256` for both APK and AAB from the same workflow run.
+4. Confirm the run's **Verify release artifacts** step passed. It checks that APK and AAB use the same configured upload certificate and validates the AAB with `bundletool`.
+5. Compare the AAB upload certificate SHA-256 with Google Play Console's registered **Upload key certificate** under app integrity. Stop if it differs. Never replace or rotate an upload key during a routine release.
+6. Confirm the AAB package is `com.aline2`, its version name is intended for the release, and its version code is higher than every code already uploaded to Play.
 
-1. `build-aab-windows.ps1` file kholo
-2. Credentials update karo
-3. PowerShell mein run karo: `.\build-aab-windows.ps1`
+Use the AAB for Google Play. The APK is for controlled installation and smoke testing only.
 
-### Option C: Manual Environment Variables
+## Manual Google Play Console checklist
 
-Command Prompt mein directly set karo:
-```cmd
-set ANDROID_UPLOAD_STORE_FILE=android\app\aline2-release.keystore
-set ANDROID_UPLOAD_STORE_PASSWORD=your_password
-set ANDROID_UPLOAD_KEY_ALIAS=your_alias
-set ANDROID_UPLOAD_KEY_PASSWORD=your_key_password
-set ENVFILE=.env.production
-```
+1. Open the Aline2 app in Google Play Console and select the intended track. Use an internal or closed testing track first for changes with material user risk.
+2. Upload the verified AAB from the successful workflow run.
+3. Confirm Play accepts the package, upload certificate, target API level, and version code without warnings that block release.
+4. Add reviewed release notes that match the merged scope. Do not claim unfinished work.
+5. Review the generated device support and app bundle details. Resolve unexpected permission, device exclusion, native library, or size changes before rollout.
+6. Install the Play-delivered build through the selected testing track and smoke test login, API access, realtime connectivity, media, payments where applicable, and push notifications on a registered production-like test device.
+7. In Firebase, confirm Android package `com.aline2` and the required SHA fingerprints remain registered. Send a controlled test notification and verify foreground, background, and tap behavior when notification code or configuration changed.
+8. Start with a staged production rollout when risk warrants it. Record the rollout percentage, owner, start time, crash/ANR signals, and critical journey results in the linked issue or release record.
+9. Increase the rollout only when the agreed observation window is healthy. Halt the rollout on a material crash, ANR, login, payment, notification, or backend-compatibility regression.
 
-## 🏗️ Step 3: Build Banao
+## Recovery
 
-### Simple Method (BAT file):
-```cmd
-build-playstore.bat
-```
+- Build failure: keep the failed run as evidence, fix through a pull request, or retry the same reviewed `main` commit with the manual workflow when the cause was transient.
+- Delivery failure after artifact verification: retrieve the GitHub artifact and rerun delivery from the reviewed commit after the delivery dependency is healthy. Do not rebuild on an unreviewed branch.
+- Play rejection: do not alter signing material. Record the exact Play error, correct the metadata or code through a pull request, and create a new verified bundle.
+- Bad rollout: halt the rollout in Play Console. Revert or hotfix from current `main` through the standard PR and CI path, then publish the newly verified AAB with a higher version code. An older AAB cannot replace a higher Play version code.
 
-### Manual Method:
-```cmd
-cd android
-gradlew clean
-gradlew bundleRelease -Paline2DisableAbiSplits=true -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
-```
-
-## 📦 Step 4: AAB File Dhundo
-
-Build successful hone ke baad, AAB file yahan milegi:
-```
-android\app\build\outputs\bundle\release\app-release.aab
-```
-
-## 📱 Step 5: Play Store pe Upload Karo
-
-1. **Google Play Console kholo:** https://play.google.com/console
-2. **Apna app select karo**
-3. Left sidebar se **"Release" > "Production"** (ya "Testing" for beta)
-4. **"Create new release"** button click karo
-5. **AAB file upload karo** (drag & drop ya browse)
-6. **Release notes likho** (What's new in this version)
-7. **Review and rollout** karo
-
-## 🎯 Current App Details
-
-- **App ID:** com.aline2
-- **Version Code:** 7
-- **Version Name:** 2.0.0
-- **Build Type:** AAB (Android App Bundle)
-- **Supported ABIs:** armeabi-v7a, arm64-v8a
-
-## ⚠️ Common Issues & Solutions
-
-### Issue 1: "Keystore not found"
-**Solution:** Ensure keystore path sahi hai. Check karo:
-```cmd
-dir android\app\aline2-release.keystore
-```
-
-### Issue 2: "Wrong password"
-**Solution:** Keystore password verify karo:
-```cmd
-keytool -list -v -keystore android\app\aline2-release.keystore
-```
-
-### Issue 3: Build fails with memory error
-**Solution:** `android\gradle.properties` mein memory badhao:
-```properties
-org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m
-```
-
-### Issue 4: "ANDROID_NDK is not set"
-**Solution:** NDK path set karo ya `local.properties` file mein add karo
-
-### Issue 5: Build bahut slow hai
-**Solution:** Gradle daemon enable karo:
-```cmd
-echo org.gradle.daemon=true >> android\gradle.properties
-```
-
-## 🔍 Build Verification
-
-AAB file verify karne ke liye bundletool use karo:
-```cmd
-java -jar bundletool.jar validate --bundle=android\app\build\outputs\bundle\release\app-release.aab
-```
-
-## 📊 APK vs AAB
-
-| Feature | APK | AAB |
-|---------|-----|-----|
-| File Size | Bada | Chota |
-| Play Store Required | ❌ No | ✅ Yes (2021+) |
-| Dynamic Delivery | ❌ No | ✅ Yes |
-| Recommended | Old way | ✅ **Current Standard** |
-
-**Play Store ab sirf AAB accept karta hai for new apps!**
-
-## 🎉 Success Checklist
-
-- [ ] Keystore credentials sahi set kiye
-- [ ] `.env.production` file configured hai
-- [ ] Build script successfully run hui
-- [ ] AAB file generated hui
-- [ ] AAB file size reasonable hai (usually 30-80 MB)
-- [ ] Play Console pe upload kiya
-- [ ] Release notes add kiye
-- [ ] Testing track pe test kiya (optional but recommended)
-
-## 📞 Help & Support
-
-Agar koi problem aaye to:
-1. Error message carefully padho
-2. Stack trace check karo
-3. Gradle cache clean karo: `cd android && gradlew clean --no-daemon`
-4. Node modules reinstall karo: `rm -rf node_modules && npm install`
-
----
-
-**Good Luck! 🚀 App Play Store pe jald hi live hoga!**
+Release completion evidence consists of the linked issue and PR, exact merge SHA, successful workflow run, checksum verification, upload-certificate match, Play track and version code, release notes, smoke-test result, rollout owner, and rollback decision.

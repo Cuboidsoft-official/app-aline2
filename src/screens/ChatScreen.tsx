@@ -1135,16 +1135,13 @@ const ChatScreen = ({ navigation, route }: any) => {
   const latestAutoScrollMessageIdRef = useRef("");
   const scrollToLatestMessage = useCallback((animated = true) => {
     const scroll = () => {
-      messageListRef.current?.scrollToEnd?.({ animated });
+      if (!messageListRef.current) return;
+      messageListRef.current.scrollToEnd?.({ animated });
     };
 
     requestAnimationFrame(scroll);
     if (!animated) {
-      setTimeout(scroll, 50);
-      setTimeout(scroll, 150);
-      setTimeout(scroll, 300);
-      setTimeout(scroll, 500);
-      setTimeout(scroll, 800);
+      setTimeout(scroll, 30);
     }
   }, []);
 
@@ -1942,10 +1939,16 @@ const ChatScreen = ({ navigation, route }: any) => {
       textSendLockRef.current = true;
       setSending(true);
       setText("");
+      requestAnimationFrame(() => {
+        messageInputRef.current?.focus();
+      });
       await submitMessage({
         text: trimmedText,
         replyToMessageId: replyingToMessageId,
         replyToMessage: replyingToMessage,
+      });
+      requestAnimationFrame(() => {
+        messageInputRef.current?.focus();
       });
     } catch (err: any) {
       setText(trimmedText);
@@ -3939,13 +3942,19 @@ const ChatScreen = ({ navigation, route }: any) => {
             contentContainerStyle={[styles.listContent, { paddingHorizontal: Math.max(8, chatMetrics.listPadding - 3), paddingTop: chatMetrics.listPadding, paddingBottom: listBottomPadding }]}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={Platform.OS === "android"}
-            initialNumToRender={10}
-            maxToRenderPerBatch={8}
+            initialNumToRender={30}
+            maxToRenderPerBatch={20}
             onScroll={handleMessagesScroll}
             scrollEventThrottle={100}
             updateCellsBatchingPeriod={50}
-            windowSize={5}
+            windowSize={7}
             keyboardShouldPersistTaps="handled"
+            onLayout={() => {
+              if (messages.length > 0 && !initialLatestScrollDoneRef.current) {
+                initialLatestScrollDoneRef.current = true;
+                scrollToLatestMessage(false);
+              }
+            }}
             onContentSizeChange={() => {
               if (!initialLatestScrollDoneRef.current && messages.length) {
                 initialLatestScrollDoneRef.current = true;
@@ -4694,7 +4703,7 @@ const ChatScreen = ({ navigation, route }: any) => {
                   onFocus={() => {
                     setTimeout(() => scrollToLatestMessage(false), 80);
                   }}
-                  editable={!sending && !textSendLockRef.current && !uploading && canComposeGroupMessage}
+                  editable={!uploading && canComposeGroupMessage}
                 />
 
                 <View style={styles.inlineActions}>

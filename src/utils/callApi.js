@@ -46,3 +46,25 @@ export const endCallSession = async (callSessionId, reason = "") => {
   const response = await API.post(`/chat/calls/${callSessionId}/end`, { reason });
   return response.data || {};
 };
+
+export const submitCallFraudReport = async ({
+  callId,
+  fraudType,
+  sellerId,
+  explanation,
+  reportTimestamp,
+}) => {
+  const response = await API.post(`/chat/calls/${callId}/report-fraud`, {
+    callId,
+    fraudType,
+    sellerId,
+    explanation,
+    reportTimestamp: reportTimestamp || new Date().toISOString(),
+  });
+  return response.data || {};
+};
+
+export const fetchCallReportStatus = async (reportId) => {
+  const response = await API.get(`/chat/calls/reports/${reportId}`);
+  return response.data || {};
+};

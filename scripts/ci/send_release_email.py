@@ -27,8 +27,14 @@ def main() -> int:
     subject = get_env("EMAIL_SUBJECT")
     body = get_env("EMAIL_BODY")
     release_name = get_env("RELEASE_NAME", required=False)
-    download_url = get_env("AAB_DOWNLOAD_URL", required=False)
-    attachment_path = os.getenv("AAB_ATTACHMENT_PATH", "").strip()
+    artifact_urls = [
+        ("APK", get_env("APK_DOWNLOAD_URL", required=False)),
+        ("AAB", get_env("AAB_DOWNLOAD_URL", required=False)),
+    ]
+    attachment_paths = [
+        ("APK", os.getenv("APK_ATTACHMENT_PATH", "").strip()),
+        ("AAB", os.getenv("AAB_ATTACHMENT_PATH", "").strip()),
+    ]
 
     message = EmailMessage()
     message["Subject"] = subject
@@ -39,33 +45,46 @@ def main() -> int:
     if release_name:
         lines.append("")
         lines.append(f"Release: {release_name}")
-    if download_url:
-        lines.append("")
-        lines.append(f"Private AAB download: {download_url}")
+    for artifact_type, download_url in artifact_urls:
+        if download_url:
+            lines.append("")
+            lines.append(f"Private {artifact_type} download: {download_url}")
 
-    attached = False
-    if attachment_path:
+    attached_types: list[str] = []
+    attachments_to_add: list[Path] = []
+    total_attachment_bytes = 0
+    for artifact_type, attachment_path in attachment_paths:
+        if not attachment_path:
+            continue
+
         attachment = Path(attachment_path)
-        if attachment.exists() and attachment.stat().st_size <= MAX_ATTACHMENT_BYTES:
-            with attachment.open("rb") as file_handle:
-                message.add_attachment(
-                    file_handle.read(),
-                    maintype="application",
-                    subtype="octet-stream",
-                    filename=attachment.name,
-                )
-            attached = True
-        elif attachment.exists():
+        if not attachment.exists():
+            continue
+
+        attachment_bytes = attachment.stat().st_size
+        if total_attachment_bytes + attachment_bytes <= MAX_ATTACHMENT_BYTES:
+            total_attachment_bytes += attachment_bytes
+            attached_types.append(artifact_type)
+            attachments_to_add.append(attachment)
+        else:
             lines.append("")
             lines.append(
-                "The AAB is larger than standard email attachment limits, so this email includes a private download link instead."
+                f"The {artifact_type} was not attached because of email size limits; use its private download link."
             )
 
-    if attached:
+    if attached_types:
         lines.append("")
-        lines.append("The AAB is attached to this email.")
+        lines.append(f"Attached artifacts: {', '.join(attached_types)}.")
 
     message.set_content("\n".join(lines))
+    for attachment in attachments_to_add:
+        with attachment.open("rb") as file_handle:
+            message.add_attachment(
+                file_handle.read(),
+                maintype="application",
+                subtype="octet-stream",
+                filename=attachment.name,
+            )
 
     context = ssl.create_default_context()
     if smtp_port == 465:

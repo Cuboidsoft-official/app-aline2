@@ -46,6 +46,7 @@ import {
 } from "../utils/arFilters";
 import { ensureCameraPermission, ensureMicrophonePermission } from "../utils/permissions";
 import { safeDecodeURIComponent } from "../utils/safeDecode";
+import CallReportModal from "../components/chat/CallReportModal";
 
 const TERMINAL_STATUSES = new Set(["rejected", "ended", "cancelled", "missed", "failed"]);
 const DEFAULT_ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
@@ -205,6 +206,7 @@ const CallScreen = ({ navigation, route }: any) => {
   const [arFilterPreset, setArFilterPreset] = useState<ArFilterPreset>("none");
   const [arFiltersSupported, setArFiltersSupported] = useState(false);
   const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
+  const [showReportModal, setShowReportModal] = useState(false);
 
   const callSessionRef = useRef<any>(initialCallSession);
   const closingRef = useRef(false);
@@ -1291,6 +1293,13 @@ const CallScreen = ({ navigation, route }: any) => {
     .filter(Boolean)
     .join(" ");
 
+  const rawCallId = String(
+    callSessionId || callSession?._id || callSession?.id || route.params?.callSessionId || ""
+  ).trim();
+  const displayUniqueCallId = rawCallId
+    ? (rawCallId.startsWith("CALL-") ? rawCallId : `CALL-${rawCallId.slice(-8).toUpperCase()}`)
+    : "CALL-LIVE";
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? "#050816" : "#0f172a" }]}>
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
@@ -1298,6 +1307,16 @@ const CallScreen = ({ navigation, route }: any) => {
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 18) }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Icon name="chevron-back" size={22} color="#fff" />
+        </TouchableOpacity>
+
+        <View style={styles.callHeaderBadge}>
+          <Icon name="shield-checkmark-outline" size={13} color="#A78BFA" />
+          <Text style={styles.callHeaderBadgeText}>{displayUniqueCallId}</Text>
+        </View>
+
+        <TouchableOpacity style={styles.reportHeaderBtn} onPress={() => setShowReportModal(true)}>
+          <Icon name="flag-outline" size={15} color="#FCA5A5" />
+          <Text style={styles.reportHeaderBtnText}>Report</Text>
         </TouchableOpacity>
       </View>
 
@@ -1482,6 +1501,13 @@ const CallScreen = ({ navigation, route }: any) => {
           </View>
         </>
       )}
+      <CallReportModal
+        visible={showReportModal}
+        callId={rawCallId}
+        sellerId={String(otherParticipant?.id || otherParticipant?._id || "")}
+        sellerName={displayName}
+        onClose={() => setShowReportModal(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -1513,7 +1539,43 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 5,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  callHeaderBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(123, 77, 255, 0.22)",
+    borderWidth: 1,
+    borderColor: "rgba(123, 77, 255, 0.44)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+  },
+  callHeaderBadgeText: {
+    color: "#DDD6FE",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  reportHeaderBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(239, 68, 68, 0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.36)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+  },
+  reportHeaderBtnText: {
+    color: "#FCA5A5",
+    fontSize: 11.5,
+    fontWeight: "700",
   },
   backButton: {
     width: 40,
