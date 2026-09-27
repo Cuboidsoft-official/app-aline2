@@ -283,17 +283,16 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: cuboidsoft@gmail.com
-          EMAIL_SUBJECT: 'Action needed: Aline2 Android delivery links are currently broken'
+          EMAIL_SUBJECT: 'Action needed: Aline2 Android release delivery health check failed'
           EMAIL_BODY: |
-            The scheduled check of the Android release delivery credential failed.
+            The Android release delivery health check failed.
 
-            Any existing download links for Aline2 Android releases are probably no
-            longer working, and the next release will not be able to deliver.
+            This can be caused by credentials, the sentinel object, network access,
+            or the workflow itself. Do not assume existing download links are broken.
 
-            This is an internal tooling problem, not an app problem: no user-facing
-            behaviour has changed. A maintainer needs to restore the delivery
-            credential, after which previously issued links stay valid until their
-            own expiry.
+            Check the failed step and verify an existing private link before
+            deciding whether release delivery is affected. This check does not
+            change the app or any release artifact.
 
             Check: Actions -> Android Release Delivery -> the most recent run.
         run: |
