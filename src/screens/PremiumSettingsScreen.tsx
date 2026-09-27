@@ -99,7 +99,7 @@ const PremiumSettingsScreen = ({ navigation }: any) => {
     setLoading(true);
     setErrorMessage("");
     try {
-      const res = await API.get("/admin/premium-settings");
+      const res = await API.get("/premium-settings/mine");
       const s = res?.data?.settings;
       if (s) {
         setDraft({
@@ -118,7 +118,7 @@ const PremiumSettingsScreen = ({ navigation }: any) => {
       const status = err?.response?.status;
       const msg =
         status === 403
-          ? "Admin access required to view these settings."
+          ? "Access denied."
           : status === 401
           ? "Session expired. Please log in again."
           : err?.response?.data?.message || "Failed to load premium settings.";
@@ -197,7 +197,7 @@ const PremiumSettingsScreen = ({ navigation }: any) => {
           enabled: e.enabled,
         })),
       };
-      const res = await API.put("/admin/premium-settings", payload);
+      const res = await API.put("/premium-settings/mine", payload);
       const updated = res?.data?.settings;
       if (updated) {
         setDraft({
@@ -217,7 +217,7 @@ const PremiumSettingsScreen = ({ navigation }: any) => {
       const status = err?.response?.status;
       const msg =
         status === 403
-          ? "Admin access required."
+          ? "Access denied."
           : status === 400
           ? err?.response?.data?.message || "Validation failed."
           : status === 401

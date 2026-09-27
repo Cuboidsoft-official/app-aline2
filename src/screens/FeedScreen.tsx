@@ -543,8 +543,6 @@ function FeedScreen({ navigation, route }: any) {
     }
   }, []);
 
-  const isAdmin = String(currentUser?.category || "").toLowerCase() === "admin";
-
   const menuSections = useMemo(
     () => {
       const sections: Array<{ title: string; data: any[] }> = [
@@ -568,6 +566,7 @@ function FeedScreen({ navigation, route }: any) {
             hasSellerAccount
               ? { icon: "briefcase-outline", label: "Seller Workspace", screen: "SellerDashboardScreen" }
               : { icon: "storefront-outline", label: "Become a Seller", screen: "SellerRegistration" },
+            { icon: "diamond-outline", label: "Premium Feature Settings", screen: "PremiumSettingsScreen" },
           ],
         },
         {
@@ -581,18 +580,9 @@ function FeedScreen({ navigation, route }: any) {
         },
       ];
 
-      if (isAdmin) {
-        sections.push({
-          title: "Admin",
-          data: [
-            { icon: "diamond-outline", label: "Premium Feature", screen: "PremiumSettingsScreen" },
-          ],
-        });
-      }
-
       return sections;
     },
-    [hasSellerAccount, isAdmin],
+    [hasSellerAccount],
   );
 
   const readWalletBalance = useCallback(async (): Promise<number> => {
