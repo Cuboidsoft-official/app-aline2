@@ -1,10 +1,10 @@
 import { API } from "../../api/api";
+import uuid from "react-native-uuid";
 
 /**
  * Phase 10C -- invisible engagement telemetry for the Swipes/Reels player
- * only. Not used by Feed. Never forwarded to the recommendation service
- * (that is Phase 10D) -- this module only durably records what happened,
- * via the Aline2 backend's own POST /api/telemetry/swipe-events.
+ * only. Not used by Feed. Events go through the Aline2 backend's own
+ * POST /api/telemetry/swipe-events endpoint.
  *
  * Every call here is fire-and-forget: a network failure must never affect
  * video playback or any other UX. Failures are swallowed, not surfaced.
@@ -35,6 +35,38 @@ type EmitArgs = {
 // never grow unbounded across a long session.
 const emittedEventIds = new Set<string>();
 const MAX_TRACKED_EVENT_IDS = 500;
+const sessionId = `${Date.now().toString(36)}-${uuid.v4()}`;
+const CONFIG_TTL_MS = 60_000;
+let configEnabled = false;
+let configExpiresAt = 0;
+let configRequest: Promise<boolean> | null = null;
+
+// The backend controls this flag and also gates POSTs from older app builds.
+// Fail closed on unavailable or stale configuration; one GET is shared by
+// concurrent events and cached for at most a minute while Swipes is active.
+export function refreshSwipeTelemetryGate(force = false): Promise<boolean> {
+  if (!force && Date.now() < configExpiresAt) {
+    return Promise.resolve(configEnabled);
+  }
+  if (configRequest) {
+    return configRequest;
+  }
+  configEnabled = false;
+  configRequest = API.get("/telemetry/config", { timeout: 5000 })
+    .then((response) => {
+      configEnabled = response.data?.success === true && response.data?.enabled === true;
+      return configEnabled;
+    })
+    .catch(() => {
+      configEnabled = false;
+      return false;
+    })
+    .finally(() => {
+      configExpiresAt = Date.now() + CONFIG_TTL_MS;
+      configRequest = null;
+    });
+  return configRequest;
+}
 
 function rememberEventId(eventId: string): void {
   emittedEventIds.add(eventId);
@@ -50,25 +82,33 @@ function emitSwipeTelemetryEvent(args: EmitArgs): void {
   if (!args.userId || !args.postId || emittedEventIds.has(args.eventId)) {
     return;
   }
-  // Marked before the network call resolves so a slow/failed request can
-  // never be retried into a duplicate by a subsequent identical trigger.
-  rememberEventId(args.eventId);
+  const send = () => {
+    if (emittedEventIds.has(args.eventId)) return;
+    // Mark before the POST resolves so callback replays cannot duplicate it.
+    rememberEventId(args.eventId);
+    API.post("/telemetry/swipe-events", {
+      eventId: args.eventId,
+      eventType: args.eventType,
+      postId: args.postId,
+      creatorId: args.creatorId,
+      surface: "swipe",
+      position: args.position,
+      watchTimeMs: args.watchTimeMs,
+      videoDurationMs: args.videoDurationMs,
+      completionRate: args.completionRate,
+      timestamp: new Date().toISOString(),
+    }).catch(() => {
+      // Best-effort telemetry must never interrupt playback.
+    });
+  };
 
-  API.post("/telemetry/swipe-events", {
-    eventId: args.eventId,
-    eventType: args.eventType,
-    postId: args.postId,
-    creatorId: args.creatorId,
-    surface: "swipe",
-    position: args.position,
-    watchTimeMs: args.watchTimeMs,
-    videoDurationMs: args.videoDurationMs,
-    completionRate: args.completionRate,
-    timestamp: new Date().toISOString(),
-  }).catch(() => {
-    // Best-effort by design (Phase 10B, Part 9): telemetry must never
-    // interrupt playback or any other user-facing behavior.
-  });
+  if (Date.now() < configExpiresAt) {
+    if (configEnabled) send();
+  } else {
+    refreshSwipeTelemetryGate().then((enabled) => {
+      if (enabled) send();
+    });
+  }
 }
 
 const PROGRESS_THRESHOLDS = [0.25, 0.5, 0.75];
@@ -99,6 +139,7 @@ export function createSwipeViewTracker(params: {
   creatorId?: string;
   position?: number;
   viewSeq: number;
+  sessionId?: string;
 }): {
   handleImpression: () => void;
   handleLoad: (durationMs: number) => void;
@@ -119,7 +160,7 @@ export function createSwipeViewTracker(params: {
     maxCompletionRate: 0,
   };
 
-  const idPrefix = `swipe:${params.userId}:${params.postId}:${params.viewSeq}`;
+  const idPrefix = `swipe:${params.userId}:${params.postId}:${params.sessionId || sessionId}:${params.viewSeq}`;
 
   const handleImpression = () => {
     emitSwipeTelemetryEvent({
