@@ -1219,10 +1219,9 @@ function CreatePostScreen({ navigation, route }: any) {
         // Match the logged-in user's country to an enabled countryPricing entry.
         const storedUser = await getStoredUser();
         const userCountry = String((storedUser as any)?.country || "").trim().toUpperCase();
-        if (!userCountry) return;
         const match = enabledPricing.find(
           (e: any) => String(e.countryCode || "").toUpperCase() === userCountry
-        );
+        ) || enabledPricing[0];
         if (match) {
           setCreatorPricing({
             countryCode: String(match.countryCode).toUpperCase(),
@@ -5130,7 +5129,7 @@ function CreatePostScreen({ navigation, route }: any) {
               <View style={styles.storyDetailsTags}>{renderMentionChips()}</View>
             </View>
 
-            {premiumSettings?.premiumContentEnabled && creatorPricing ? (
+            {premiumSettings?.premiumContentEnabled ? (
               <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
                 <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Monetise</Text>
                 <Text style={[styles.sectionTitle, { color: textColor }]}>Story type</Text>
@@ -5160,7 +5159,7 @@ function CreatePostScreen({ navigation, route }: any) {
                     </View>
                   </TouchableOpacity>
                 </View>
-                {isPremiumStory ? (
+                {isPremiumStory && creatorPricing ? (
                   <View style={[styles.premiumPriceRow, { borderTopColor: hairlineColor }]}>
                     <Text style={[styles.switchTitle, { color: textColor }]}>
                       {creatorPricing.flag} {creatorPricing.currency}
@@ -5320,7 +5319,7 @@ function CreatePostScreen({ navigation, route }: any) {
             {renderMentionChips()}
           </View>
 
-          {mode === "post" && premiumSettings?.premiumContentEnabled && creatorPricing ? (
+          {mode === "post" && premiumSettings?.premiumContentEnabled ? (
             <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
               <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Monetise</Text>
               <Text style={[styles.sectionTitle, { color: textColor }]}>Post type</Text>
@@ -5350,7 +5349,7 @@ function CreatePostScreen({ navigation, route }: any) {
                   </View>
                 </TouchableOpacity>
               </View>
-              {isPremiumPost ? (
+              {isPremiumPost && creatorPricing ? (
                 <View style={[styles.premiumPriceRow, { borderTopColor: hairlineColor }]}>
                   <Text style={[styles.switchTitle, { color: textColor }]}>
                     {creatorPricing.flag} {creatorPricing.currency}
