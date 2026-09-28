@@ -53,7 +53,14 @@ const buildCandidateUrls = (rawUrl, fallbackUrl) => {
     // patch in Phase 10G; kept here because the local demo environment's
     // whole purpose depends on the app reliably preferring a configured
     // local backend over the always-reachable production one.
-    return isExplicitLocalOverride
+    //
+    // Extended: any explicitly configured URL that differs from the production
+    // fallback (including public test backends, e.g. api-test.aline2.com) is
+    // also treated as an intentional override and tried first. When no env var
+    // is set, baseUrl === normalizedFallbackUrl and existing behavior is unchanged.
+    const isExplicitOverride =
+      isExplicitLocalOverride || (baseUrl !== normalizedFallbackUrl);
+    return isExplicitOverride
       ? dedupe([baseUrl, ...extraCandidates, normalizedFallbackUrl])
       : dedupe([normalizedFallbackUrl, ...extraCandidates, baseUrl]);
   } catch {

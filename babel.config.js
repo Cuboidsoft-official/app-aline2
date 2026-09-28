@@ -10,13 +10,14 @@ const resolveEnvFile = () => {
   ].filter(Boolean);
 
   for (const candidate of candidates) {
-    const candidatePath = path.join(__dirname, candidate);
+    const candidatePath = path.resolve(__dirname, candidate);
+
     if (fs.existsSync(candidatePath)) {
-      return candidate;
+      return candidatePath;
     }
   }
 
-  return ".env";
+  return path.resolve(__dirname, ".env");
 };
 
 module.exports = {
@@ -35,6 +36,9 @@ module.exports = {
     // separate package; without it, native Reanimated/Worklets modules fail
     // to initialize ("Required value was null" from NativeWorklets). Must
     // stay last in the plugins list per react-native-worklets docs.
-    "react-native-worklets/plugin",
+    // bundleMode: true is required for standalone APK builds (debuggableVariants = []).
+    // Without it, _WORKLETS_BUNDLE_MODE_ENABLED stays false and the worklets runtime
+    // fails to initialize in a Hermes standalone build (no Metro dev server).
+    ["react-native-worklets/plugin", { bundleMode: true }],
   ],
 };

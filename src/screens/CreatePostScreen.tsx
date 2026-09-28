@@ -41,6 +41,8 @@ import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBot
 import DraggableBottomSheet from "../components/DraggableBottomSheet";
 import MentionSuggestionList from "../components/MentionSuggestionList";
 import { Alert } from "../utils/appAlert";
+import { getStoredUser } from "../utils/authSession";
+import { countryFlag, currencySymbol } from "../utils/countryCurrency";
 import {
   captureComposerAssets,
   ComposerAsset,
@@ -48,6 +50,7 @@ import {
   pickComposerAssets,
   UploadComposerAssetsOptions,
   uploadComposerAssets,
+  uploadPremiumMedia,
 } from "../features/social/mediaUpload";
 import { socialApi } from "../features/social/socialApi";
 import {
@@ -1014,6 +1017,25 @@ function CreatePostScreen({ navigation, route }: any) {
   const deferredTagQuery = useDeferredValue(tagQuery);
   const [disableComments, setDisableComments] = useState(false);
   const [hideLikeCount, setHideLikeCount] = useState(false);
+
+  // Premium content state
+  const [premiumSettings, setPremiumSettings] = useState<{
+    premiumContentEnabled: boolean;
+    countryPricing: Array<{ countryCode: string; currency: string; amount: number }>;
+    minPriceINR: number;
+    maxPriceINR: number;
+    defaultTier: string;
+  } | null>(null);
+  // Resolved pricing for the logged-in creator's country. null = country not configured.
+  const [creatorPricing, setCreatorPricing] = useState<{
+    countryCode: string;
+    currency: string;
+    amount: number;
+    currencySymbol: string;
+    flag: string;
+  } | null>(null);
+  const [isPremiumPost, setIsPremiumPost] = useState(false);
+  const [isPremiumStory, setIsPremiumStory] = useState(false);
   const [storyVisibility, setStoryVisibility] = useState<Visibility>("public");
   const [storyAllowReplies, setStoryAllowReplies] = useState(true);
   const [storyAllowSharing, setStoryAllowSharing] = useState(true);
@@ -1174,6 +1196,45 @@ function CreatePostScreen({ navigation, route }: any) {
       normalizedUrl: normalizeMediaUrl(rawUrl),
     }).catch(() => undefined);
   }, [resetSelectedMusicPreview, selectedMusic]);
+
+  // Fetch premium settings once on mount; resolve the creator's applicable country pricing.
+  useEffect(() => {
+    API.get("/premium-settings")
+      .then(async (res: any) => {
+        const s = res?.data?.settings;
+        if (!s) return;
+        const enabledPricing = (s.countryPricing || []).filter((e: any) => e.enabled !== false);
+        setPremiumSettings({
+          premiumContentEnabled: Boolean(s.premiumContentEnabled),
+          countryPricing: enabledPricing.map((e: any) => ({
+            countryCode: String(e.countryCode || "").toUpperCase(),
+            currency: String(e.currency || "").toUpperCase(),
+            amount: Number(e.amount) || 0,
+          })),
+          minPriceINR: Number(s.minPriceINR) || 1,
+          maxPriceINR: Number(s.maxPriceINR) || 9999,
+          defaultTier: String(s.defaultTier || "one_time"),
+        });
+        if (!s.premiumContentEnabled) return;
+        // Match the logged-in user's country to an enabled countryPricing entry.
+        const storedUser = await getStoredUser();
+        const userCountry = String((storedUser as any)?.country || "").trim().toUpperCase();
+        if (!userCountry) return;
+        const match = enabledPricing.find(
+          (e: any) => String(e.countryCode || "").toUpperCase() === userCountry
+        );
+        if (match) {
+          setCreatorPricing({
+            countryCode: String(match.countryCode).toUpperCase(),
+            currency: String(match.currency).toUpperCase(),
+            amount: Number(match.amount),
+            currencySymbol: currencySymbol(String(match.currency).toUpperCase()),
+            flag: countryFlag(String(match.countryCode).toUpperCase()),
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
   const storyTextThemeStyle =
     STORY_TEXT_THEMES.find((item) => item.id === storyTextTheme) || STORY_TEXT_THEMES[0];
   const storyTextFontStyle =
@@ -2164,6 +2225,8 @@ function CreatePostScreen({ navigation, route }: any) {
     setSelectedTagPeople([]);
     setDisableComments(false);
     setHideLikeCount(false);
+    setIsPremiumPost(false);
+    setIsPremiumStory(false);
     setPublishError("");
     setSelectedMusic(null);
     setPendingMusicSelection(null);
@@ -2699,24 +2762,46 @@ function CreatePostScreen({ navigation, route }: any) {
     const captionEntities = parseCaptionEntities(caption);
     const hashtags = Array.from(new Set(captionEntities.hashtags));
     const mentions = Array.from(new Set([...selectedMentions, ...captionEntities.mentions]));
-    const uploadedMedia = await uploadComposerAssets(postAssets, uploadOptions);
-    const framedMedia = uploadedMedia.map((media, index) => {
-      const sourceAsset = postAssets[index] || postAssets[0];
-      return buildAspectMetadata(
-        media,
-        sourceAsset,
-        activeAspect.ratio,
-        sourceAsset?.id
-          ? composerMediaTransformsByAssetId[sourceAsset.id]
-            || (sourceAsset.id === selectedAsset?.id ? composerMediaTransform : DEFAULT_COMPOSER_MEDIA_TRANSFORM)
-          : DEFAULT_COMPOSER_MEDIA_TRANSFORM,
-      );
-    });
+    // Phase 2E: for premium posts, upload originals to private R2 first.
+    // The public uploadComposerAssets call is skipped for premium — originals must not go to the public bucket.
+    let framedMedia: ReturnType<typeof buildAspectMetadata>[] = [];
+    let premiumOriginalMedia: import("../features/social/types").PremiumOriginalMediaItem[] | undefined;
+
+    if (isPremiumPost) {
+      const localAssets = postAssets.filter((a) => a.source === "local");
+      if (localAssets.length > 0) {
+        premiumOriginalMedia = await Promise.all(
+          localAssets.map((asset, i) =>
+            uploadPremiumMedia(asset, "post", (p) => uploadOptions?.onProgress?.(p * 0.9))
+              .then((result) => ({ ...result, order: i }))
+          )
+        );
+      }
+      // media[] intentionally empty: originals are in private bucket, signed URLs served by getPost
+    } else {
+      const uploadedMedia = await uploadComposerAssets(postAssets, uploadOptions);
+      framedMedia = uploadedMedia.map((media, index) => {
+        const sourceAsset = postAssets[index] || postAssets[0];
+        return buildAspectMetadata(
+          media,
+          sourceAsset,
+          activeAspect.ratio,
+          sourceAsset?.id
+            ? composerMediaTransformsByAssetId[sourceAsset.id]
+              || (sourceAsset.id === selectedAsset?.id ? composerMediaTransform : DEFAULT_COMPOSER_MEDIA_TRANSFORM)
+            : DEFAULT_COMPOSER_MEDIA_TRANSFORM,
+        );
+      });
+    }
+
     const firstMedia = framedMedia[0];
-    const hasVideoMedia = framedMedia.some((media) => media.mediaType === "video");
+    const hasVideoMedia = framedMedia.some((media) => media.mediaType === "video") ||
+      (isPremiumPost && (premiumOriginalMedia ?? []).some((m) => m.type === "video"));
 
     return {
-      type: framedMedia.length > 1 ? "carousel" : firstMedia?.mediaType === "video" ? "video" : "photo",
+      type: isPremiumPost
+        ? ((premiumOriginalMedia ?? []).some((m) => m.type === "video") ? "video" : "photo")
+        : (framedMedia.length > 1 ? "carousel" : firstMedia?.mediaType === "video" ? "video" : "photo"),
       caption: caption.trim(),
       media: framedMedia,
       location: location.trim() || undefined,
@@ -2732,8 +2817,13 @@ function CreatePostScreen({ navigation, route }: any) {
       filterPreset: framedMedia.every((media) => media.mediaType === "image") && selectedFilterId !== "none" ? selectedFilterId : undefined,
       stickers: buildComposerTextStickers(),
       hasOriginalAudio: hasVideoMedia,
+      isPremium: isPremiumPost,
+      premiumPrice: isPremiumPost ? creatorPricing?.amount : undefined,
+      premiumCountryCode: isPremiumPost ? creatorPricing?.countryCode : undefined,
+      premiumCurrency: isPremiumPost ? creatorPricing?.currency : undefined,
+      premiumOriginalMedia,
     };
-  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, disableComments, hideLikeCount, location, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedTagPeople]);
+  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, creatorPricing, disableComments, hideLikeCount, isPremiumPost, location, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedTagPeople]);
 
   const prepareStoryPayload = useCallback(async (
     uploadOptions?: UploadComposerAssetsOptions,
@@ -2792,10 +2882,25 @@ function CreatePostScreen({ navigation, route }: any) {
         visibility: storyVisibility,
         allowReplies: storyAllowReplies,
         allowSharing: storyAllowSharing,
+        isPremium: isPremiumStory,
+        premiumPrice: isPremiumStory ? creatorPricing?.amount : undefined,
+        premiumCountryCode: isPremiumStory ? creatorPricing?.countryCode : undefined,
+        premiumCurrency: isPremiumStory ? creatorPricing?.currency : undefined,
       };
     }
 
-    const [uploadedMedia] = await uploadComposerAssets([selectedAsset!], uploadOptions);
+    // Phase 2E: for premium stories, upload original to private R2; skip public bucket.
+    let uploadedMedia: import("../features/social/types").MediaAsset | undefined;
+    let storyPremiumOriginalMedia: import("../features/social/types").PremiumOriginalMediaItem[] | undefined;
+
+    if (isPremiumStory && selectedAsset?.source === "local") {
+      const premiumItem = await uploadPremiumMedia(selectedAsset, "story", (p) => uploadOptions?.onProgress?.(p * 0.9));
+      storyPremiumOriginalMedia = [premiumItem];
+      // No public upload — media field left undefined for premium stories
+    } else {
+      const [uploaded] = await uploadComposerAssets([selectedAsset!], uploadOptions);
+      uploadedMedia = uploaded;
+    }
 
     return {
       type: "media",
@@ -2826,9 +2931,16 @@ function CreatePostScreen({ navigation, route }: any) {
       visibility: storyVisibility,
       allowReplies: storyAllowReplies,
       allowSharing: storyAllowSharing,
+      isPremium: isPremiumStory,
+      premiumPrice: isPremiumStory ? creatorPricing?.amount : undefined,
+      premiumCountryCode: isPremiumStory ? creatorPricing?.countryCode : undefined,
+      premiumCurrency: isPremiumStory ? creatorPricing?.currency : undefined,
+      premiumOriginalMedia: storyPremiumOriginalMedia,
     };
   }, [
     caption,
+    creatorPricing,
+    isPremiumStory,
     location,
     selectedAsset,
     selectedMentions,
@@ -4973,6 +5085,49 @@ function CreatePostScreen({ navigation, route }: any) {
               <View style={styles.storyDetailsTags}>{renderMentionChips()}</View>
             </View>
 
+            {premiumSettings?.premiumContentEnabled && creatorPricing ? (
+              <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
+                <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Monetise</Text>
+                <Text style={[styles.sectionTitle, { color: textColor }]}>Story type</Text>
+                <View style={styles.switchRow}>
+                  <TouchableOpacity
+                    style={[styles.premiumTypeOption, !isPremiumStory && { borderColor: accentColor }]}
+                    onPress={() => setIsPremiumStory(false)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.premiumTypeRadio, !isPremiumStory && { backgroundColor: accentColor, borderColor: accentColor }]} />
+                    <View style={styles.switchCopy}>
+                      <Text style={[styles.switchTitle, { color: textColor }]}>Normal story</Text>
+                      <Text style={[styles.switchMeta, { color: mutedColor }]}>Free for everyone to view.</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+                <View style={[styles.switchRow, styles.switchRowBorder, { borderTopColor: hairlineColor }]}>
+                  <TouchableOpacity
+                    style={[styles.premiumTypeOption, isPremiumStory && { borderColor: accentColor }]}
+                    onPress={() => setIsPremiumStory(true)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.premiumTypeRadio, isPremiumStory && { backgroundColor: accentColor, borderColor: accentColor }]} />
+                    <View style={styles.switchCopy}>
+                      <Text style={[styles.switchTitle, { color: textColor }]}>Premium story</Text>
+                      <Text style={[styles.switchMeta, { color: mutedColor }]}>Viewers pay to unlock this story.</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+                {isPremiumStory ? (
+                  <View style={[styles.premiumPriceRow, { borderTopColor: hairlineColor }]}>
+                    <Text style={[styles.switchTitle, { color: textColor }]}>
+                      {creatorPricing.flag} {creatorPricing.currency}
+                    </Text>
+                    <Text style={[styles.premiumPriceDisplay, { color: accentColor }]}>
+                      {creatorPricing.currencySymbol}{creatorPricing.amount}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
             <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
               <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Replies</Text>
               <Text style={[styles.sectionTitle, { color: textColor }]}>Comments and replies</Text>
@@ -5119,6 +5274,49 @@ function CreatePostScreen({ navigation, route }: any) {
             </View>
             {renderMentionChips()}
           </View>
+
+          {mode === "post" && premiumSettings?.premiumContentEnabled && creatorPricing ? (
+            <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
+              <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Monetise</Text>
+              <Text style={[styles.sectionTitle, { color: textColor }]}>Post type</Text>
+              <View style={styles.switchRow}>
+                <TouchableOpacity
+                  style={[styles.premiumTypeOption, !isPremiumPost && { borderColor: accentColor }]}
+                  onPress={() => setIsPremiumPost(false)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.premiumTypeRadio, !isPremiumPost && { backgroundColor: accentColor, borderColor: accentColor }]} />
+                  <View style={styles.switchCopy}>
+                    <Text style={[styles.switchTitle, { color: textColor }]}>Normal post</Text>
+                    <Text style={[styles.switchMeta, { color: mutedColor }]}>Free for everyone to view.</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+              <View style={[styles.switchRow, styles.switchRowBorder, { borderTopColor: hairlineColor }]}>
+                <TouchableOpacity
+                  style={[styles.premiumTypeOption, isPremiumPost && { borderColor: accentColor }]}
+                  onPress={() => setIsPremiumPost(true)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.premiumTypeRadio, isPremiumPost && { backgroundColor: accentColor, borderColor: accentColor }]} />
+                  <View style={styles.switchCopy}>
+                    <Text style={[styles.switchTitle, { color: textColor }]}>Premium post</Text>
+                    <Text style={[styles.switchMeta, { color: mutedColor }]}>Viewers pay to unlock this post.</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+              {isPremiumPost ? (
+                <View style={[styles.premiumPriceRow, { borderTopColor: hairlineColor }]}>
+                  <Text style={[styles.switchTitle, { color: textColor }]}>
+                    {creatorPricing.flag} {creatorPricing.currency}
+                  </Text>
+                  <Text style={[styles.premiumPriceDisplay, { color: accentColor }]}>
+                    {creatorPricing.currencySymbol}{creatorPricing.amount}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
 
           {mode === "post" ? (
             <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
@@ -6920,6 +7118,37 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     fontFamily: appFonts.regular,
+  },
+  premiumTypeOption: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "transparent",
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+  },
+  premiumTypeRadio: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: "#9ca3af",
+  },
+  premiumPriceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 14,
+    marginTop: 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+  },
+  premiumPriceDisplay: {
+    fontSize: 18,
+    fontFamily: appFonts.semibold,
   },
   originalAudioPanel: {
     marginTop: 12,
