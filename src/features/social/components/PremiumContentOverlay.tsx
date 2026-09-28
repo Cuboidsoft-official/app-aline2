@@ -76,7 +76,7 @@ export default function PremiumContentOverlay({
           </View>
           <View style={styles.priceBlock}>
             <Text style={styles.premiumLabel}>Payment Received</Text>
-            <Text style={styles.verifiedSubtext}>Content access is coming soon</Text>
+            <Text style={styles.verifiedSubtext}>Loading your content…</Text>
           </View>
         </View>
       </View>

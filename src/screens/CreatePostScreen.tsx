@@ -2767,15 +2767,39 @@ function CreatePostScreen({ navigation, route }: any) {
     let framedMedia: ReturnType<typeof buildAspectMetadata>[] = [];
     let premiumOriginalMedia: import("../features/social/types").PremiumOriginalMediaItem[] | undefined;
 
+    let postPreviewMedia: import("../features/social/types").PostPreviewMediaItem[] | undefined;
+
     if (isPremiumPost) {
       const localAssets = postAssets.filter((a) => a.source === "local");
       if (localAssets.length > 0) {
+        // Upload originals to private R2 (first half of progress budget)
         premiumOriginalMedia = await Promise.all(
           localAssets.map((asset, i) =>
-            uploadPremiumMedia(asset, "post", (p) => uploadOptions?.onProgress?.(p * 0.9))
+            uploadPremiumMedia(asset, "post", (p) => uploadOptions?.onProgress?.(p * 0.45))
               .then((result) => ({ ...result, order: i }))
           )
         );
+        // Upload the first asset to public CDN for the teaser preview (second half of progress)
+        const firstLocalAsset = localAssets[0];
+        try {
+          const [previewUpload] = await uploadComposerAssets([firstLocalAsset], {
+            onProgress: (p) => uploadOptions?.onProgress?.(0.45 + p * 0.45),
+          });
+          if (previewUpload) {
+            postPreviewMedia = [{
+              url: firstLocalAsset.mediaType === "video"
+                ? (previewUpload.thumbnailUrl ?? previewUpload.url)
+                : previewUpload.url,
+              type: "image" as const,
+              thumbnailUrl: previewUpload.thumbnailUrl,
+              width: previewUpload.width,
+              height: previewUpload.height,
+              order: 0,
+            }];
+          }
+        } catch {
+          // Preview upload failure is non-fatal; post creation continues without preview
+        }
       }
       // media[] intentionally empty: originals are in private bucket, signed URLs served by getPost
     } else {
@@ -2822,6 +2846,7 @@ function CreatePostScreen({ navigation, route }: any) {
       premiumCountryCode: isPremiumPost ? creatorPricing?.countryCode : undefined,
       premiumCurrency: isPremiumPost ? creatorPricing?.currency : undefined,
       premiumOriginalMedia,
+      previewMedia: postPreviewMedia,
     };
   }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, creatorPricing, disableComments, hideLikeCount, isPremiumPost, location, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedTagPeople]);
 
@@ -2892,11 +2917,30 @@ function CreatePostScreen({ navigation, route }: any) {
     // Phase 2E: for premium stories, upload original to private R2; skip public bucket.
     let uploadedMedia: import("../features/social/types").MediaAsset | undefined;
     let storyPremiumOriginalMedia: import("../features/social/types").PremiumOriginalMediaItem[] | undefined;
+    let storyPreviewMedia: import("../features/social/types").StoryPreviewMediaInput | undefined;
 
     if (isPremiumStory && selectedAsset?.source === "local") {
-      const premiumItem = await uploadPremiumMedia(selectedAsset, "story", (p) => uploadOptions?.onProgress?.(p * 0.9));
+      // Upload original to private R2 (half of progress budget)
+      const premiumItem = await uploadPremiumMedia(selectedAsset, "story", (p) => uploadOptions?.onProgress?.(p * 0.45));
       storyPremiumOriginalMedia = [premiumItem];
-      // No public upload — media field left undefined for premium stories
+      // Upload a public version for the locked teaser shown to non-entitled viewers
+      try {
+        const [previewUpload] = await uploadComposerAssets([selectedAsset], {
+          onProgress: (p) => uploadOptions?.onProgress?.(0.45 + p * 0.45),
+        });
+        if (previewUpload) {
+          storyPreviewMedia = {
+            mediaUrl: selectedAsset.mediaType === "video"
+              ? (previewUpload.thumbnailUrl ?? previewUpload.url)
+              : previewUpload.url,
+            mediaType: "image",
+            thumbnailUrl: previewUpload.thumbnailUrl,
+            duration: 0,
+          };
+        }
+      } catch {
+        // Preview upload failure is non-fatal; story creation continues without preview
+      }
     } else {
       const [uploaded] = await uploadComposerAssets([selectedAsset!], uploadOptions);
       uploadedMedia = uploaded;
@@ -2936,6 +2980,7 @@ function CreatePostScreen({ navigation, route }: any) {
       premiumCountryCode: isPremiumStory ? creatorPricing?.countryCode : undefined,
       premiumCurrency: isPremiumStory ? creatorPricing?.currency : undefined,
       premiumOriginalMedia: storyPremiumOriginalMedia,
+      previewMedia: storyPreviewMedia,
     };
   }, [
     caption,

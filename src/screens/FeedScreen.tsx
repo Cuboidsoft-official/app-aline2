@@ -1726,7 +1726,7 @@ function FeedScreen({ navigation, route }: any) {
               </View>
             </LinearGradient>
           )}
-          {item.isPremium ? (
+          {item.isPremium && !item.premiumUnlocked ? (
             <View style={styles.storyPremiumBadge}>
               <Icon name="lock-closed" size={9} color="#fff" />
             </View>
