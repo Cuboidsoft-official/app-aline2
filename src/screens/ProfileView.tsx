@@ -204,6 +204,10 @@ const ProfileScreen = ({navigation}: any) => {
   () => allPosts.filter((post) => !isReelPost(post)).length,
   [allPosts],
  );
+ const hasPremiumPosts = useMemo(
+  () => posts.some((post) => Boolean(post.isPremium)),
+  [posts],
+ );
   const profileName = user?.name || "User Name";
  const profileHandle = user?.username ? `@${user.username}` : "Complete your profile";
  const profileMeta = [user?.pronouns].filter(Boolean).join(" | ");
@@ -672,6 +676,19 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
       },
     ]}
     ListHeaderComponent={renderHeader}
+    ListFooterComponent={
+     hasPremiumPosts ? (
+      <View style={styles.premiumContentNotice}>
+       <Icon name="lock-closed-outline" size={18} color={colors.primary} />
+       <Text style={[styles.premiumContentNoticeTitle, { color: colors.text }]}>
+        Premium content
+       </Text>
+       <Text style={[styles.premiumContentNoticeText, { color: colors.mutedText }]}>
+        Access more exclusive content like this by unlocking this post.
+       </Text>
+      </View>
+     ) : null
+    }
     ListEmptyComponent={
      <View style={styles.emptyState}>
       <Text style={[styles.emptyTitle, { color: colors.text }]}>
@@ -1069,6 +1086,23 @@ bioSection: {
   fontWeight:"700"
  },
 
+ premiumContentNotice:{
+  alignItems:"center",
+  paddingHorizontal:24,
+  paddingVertical:20,
+  marginTop:8,
+  marginBottom:12
+ },
+ premiumContentNoticeTitle:{
+  fontSize:15,
+  fontWeight:"700",
+  marginBottom:5
+ },
+ premiumContentNoticeText:{
+  fontSize:13,
+  lineHeight:19,
+  textAlign:"center"
+ },
  center:{
   flex:1,
   justifyContent:"center",
