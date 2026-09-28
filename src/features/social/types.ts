@@ -103,9 +103,32 @@ export interface Post {
   liked: boolean;
   saved: boolean;
   hasOriginalAudio?: boolean;
+  isPremium?: boolean;
+  premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
+  premiumUnlocked?: boolean;
+  premiumLocked?: boolean;
 }
 
 export type StoryType = "media" | "text" | "poll" | "question";
+
+export interface StorySegment {
+  order: number;
+  mediaType: string;
+  mediaUrl: string | null;
+  thumbnailUrl?: string | null;
+  duration?: number;
+  width?: number;
+  height?: number;
+}
+
+export interface StoryPreviewMedia {
+  mediaUrl: string | null;
+  mediaType: string;
+  thumbnailUrl?: string | null;
+  duration?: number;
+}
 
 export interface StoryPoll {
   question: string;
@@ -119,7 +142,7 @@ export interface StoryQuestion {
   responseCount: number;
 }
 
-export type StoryStickerType = "text" | "emoji" | "image";
+export type StoryStickerType = "text" | "emoji" | "image" | "link" | "location";
 export type StoryStickerPlacement = "top_left" | "top_right" | "center" | "bottom_left" | "bottom_right";
 export type StoryStickerTextAlignment = "left" | "center" | "right";
 export type StoryTextStickerTheme = "dark" | "light" | "accent" | "outline";
@@ -130,6 +153,8 @@ export interface StorySticker {
   type: StoryStickerType;
   text: string;
   mediaUrl?: string;
+  linkUrl?: string;
+  locationName?: string;
   position: {
     x: number;
     y: number;
@@ -182,6 +207,14 @@ export interface Story {
   allowSharing?: boolean;
   isOwner?: boolean;
   music?: StoryMusic;
+  isPremium?: boolean;
+  premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
+  premiumUnlocked?: boolean;
+  premiumLocked?: boolean;
+  segments?: StorySegment[];
+  previewMedia?: StoryPreviewMedia;
 }
 
 export interface Reel {
@@ -234,6 +267,7 @@ export interface Comment {
   canDelete?: boolean;
   replyCount?: number;
   mentions?: string[];
+  isPinned?: boolean;
 }
 
 export interface ReelComment {
@@ -249,6 +283,7 @@ export interface ReelComment {
   likesCount: number;
   canDelete?: boolean;
   replyCount?: number;
+  isPinned?: boolean;
 }
 
 export type SwipeComment = ReelComment;
@@ -289,6 +324,33 @@ export interface TaggedUserInput {
   username?: string;
 }
 
+export interface PremiumOriginalMediaItem {
+  storageKey: string;
+  type: "image" | "video";
+  mimeType: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+  order?: number;
+}
+
+export interface StoryPreviewMediaInput {
+  mediaUrl: string;
+  mediaType: "image" | "video";
+  thumbnailUrl?: string;
+  duration?: number;
+}
+
+export interface PostPreviewMediaItem {
+  url: string;
+  type: "image" | "video";
+  thumbnailUrl?: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+  order?: number;
+}
+
 export interface CreatePostInput {
   type: PostType;
   caption: string;
@@ -302,6 +364,12 @@ export interface CreatePostInput {
   filterPreset?: string;
   stickers?: StorySticker[];
   hasOriginalAudio?: boolean;
+  isPremium?: boolean;
+  premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
+  premiumOriginalMedia?: PremiumOriginalMediaItem[];
+  previewMedia?: PostPreviewMediaItem[];
 }
 
 export interface CreateStoryInput {
@@ -344,6 +412,13 @@ export interface CreateStoryInput {
   visibleToUserIds?: string[];
   allowReplies?: boolean;
   allowSharing?: boolean;
+  stickers?: any[];
+  isPremium?: boolean;
+  premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
+  premiumOriginalMedia?: PremiumOriginalMediaItem[];
+  previewMedia?: StoryPreviewMediaInput;
 }
 
 export interface CreateReelInput {
@@ -397,6 +472,7 @@ export interface SocialApi {
   getStorySequence(storyId: string, options?: GetStorySequenceOptions): Promise<StorySequenceResponse>;
   getPost(postId: string): Promise<Post>;
   getStory(storyId: string): Promise<Story>;
+  invalidateStory(storyId: string): void;
   getStoryArchive(): Promise<Story[]>;
   getPostArchive(): Promise<Post[]>;
   getSavedPosts(): Promise<Post[]>;
@@ -418,6 +494,7 @@ export interface SocialApi {
   getPostComments(postId: string): Promise<Comment[]>;
   togglePostCommentLike(postId: string, commentId: string): Promise<Comment>;
   deletePostComment(postId: string, commentId: string): Promise<DeleteCommentResult>;
+  togglePinComment(commentId: string): Promise<{ isPinned: boolean; commentId: string }>;
   updatePost(postId: string, input: UpdatePostInput): Promise<Post>;
   archivePost(postId: string): Promise<void>;
   restorePost(postId: string): Promise<void>;

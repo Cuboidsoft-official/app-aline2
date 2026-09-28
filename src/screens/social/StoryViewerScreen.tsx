@@ -21,6 +21,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { useKeyboardHandler } from "react-native-keyboard-controller";
 import { runOnJS } from "react-native-reanimated";
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
+import PremiumContentOverlay from "../../features/social/components/PremiumContentOverlay";
 import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import SocialVideo from "../../features/social/components/SocialVideo";
 import StoryActivitySheet from "../../features/social/components/StoryActivitySheet";
@@ -33,6 +34,7 @@ import { createChatConversation, sendChatMessage } from "../../utils/chatApi";
 import { buildSharedStoryMessage } from "../../utils/chatPresentation";
 import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
+import { performPremiumPurchase } from "../../utils/premiumPurchase";
 
 const DEFAULT_STORY_MS = 5000;
 const TEXT_STORY_MS = 7000;
@@ -125,6 +127,9 @@ function StoryViewerScreen({ route, navigation }: any) {
   const [isMusicEnabled, setIsMusicEnabled] = useState(true);
   const [showLikeBurst, setShowLikeBurst] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const [storyPurchaseVerified, setStoryPurchaseVerified] = useState(false);
+  const [activeSegmentIndex, setActiveSegmentIndex] = useState(0);
   const replyInputRef = useRef<TextInput | null>(null);
   const storyTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     time: 0,
@@ -170,7 +175,23 @@ function StoryViewerScreen({ route, navigation }: any) {
 
   const currentStory = useMemo(() => stories[activeIndex], [stories, activeIndex]);
   const nextStory = useMemo(() => stories[activeIndex + 1] || null, [activeIndex, stories]);
-  const storyDuration = useMemo(() => getStoryDuration(currentStory), [currentStory]);
+  const activeSegment = useMemo(() => {
+    const segs = currentStory?.segments;
+    if (segs && segs.length > 0 && activeSegmentIndex < segs.length) {
+      return segs[activeSegmentIndex];
+    }
+    return null;
+  }, [currentStory, activeSegmentIndex]);
+  const storyDuration = useMemo(() => {
+    if (activeSegment) {
+      const segMs = typeof activeSegment.duration === "number" && activeSegment.duration > 0
+        ? Math.min(Math.max(activeSegment.duration * 1000, 1000), 60000)
+        : DEFAULT_STORY_MS;
+      return segMs;
+    }
+    return getStoryDuration(currentStory);
+  }, [currentStory, activeSegment]);
+  const isStoryLocked = !!currentStory?.isPremium && !currentStory?.isOwner && !currentStory?.premiumUnlocked;
   const canReplyToCurrentStory = !!currentStory && currentStory.allowReplies !== false;
   const canAccessOwnerTools = !!currentStory?.isOwner && isSyncedStoryId(currentStory?.id);
   const storyMusicRawUrl = useMemo(() => getMusicPlaybackUrl(currentStory?.music), [currentStory?.music]);
@@ -261,8 +282,36 @@ function StoryViewerScreen({ route, navigation }: any) {
   useEffect(() => {
     setProgress(0);
     setReplyText("");
+    setActiveSegmentIndex(0);
     isAdvancingRef.current = false;
   }, [activeIndex]);
+
+  useEffect(() => {
+    setPurchaseLoading(false);
+    setStoryPurchaseVerified(false);
+  }, [currentStory?.id]);
+
+  const handleUnlockStory = useCallback(async () => {
+    if (purchaseLoading || storyPurchaseVerified || !currentStory) return;
+    setPurchaseLoading(true);
+    const result = await performPremiumPurchase({ contentType: "story", contentId: currentStory.id });
+    if (result.outcome === "verified" || result.outcome === "already_purchased") {
+      // Phase 2E: re-fetch so entitlement-gated media is included in the response
+      try {
+        socialApi.invalidateStory(currentStory.id);
+        const refreshedStory = await socialApi.getStory(currentStory.id);
+        if (refreshedStory?.premiumUnlocked) {
+          setStories((prev) => prev.map((s) => (s.id === currentStory.id ? refreshedStory : s)));
+          setPurchaseLoading(false);
+          return;
+        }
+      } catch {
+        // Re-fetch failed — fall back to verified state
+      }
+      setStoryPurchaseVerified(true);
+    }
+    setPurchaseLoading(false);
+  }, [purchaseLoading, storyPurchaseVerified, currentStory]);
 
   useEffect(() => {
     if (!currentStory) {
@@ -327,13 +376,33 @@ function StoryViewerScreen({ route, navigation }: any) {
     });
   }, [navigation, stories.length]);
 
+  const advanceSegment = useCallback(() => {
+    if (isAdvancingRef.current) return;
+    const segCount = currentStory?.segments?.length ?? 0;
+    if (segCount > 0 && activeSegmentIndex < segCount - 1) {
+      isAdvancingRef.current = true;
+      setActiveSegmentIndex((prev) => prev + 1);
+    } else {
+      advanceToNextStory();
+    }
+  }, [activeSegmentIndex, currentStory?.segments?.length, advanceToNextStory]);
+
+  useEffect(() => {
+    setProgress(0);
+    isAdvancingRef.current = false;
+  }, [activeSegmentIndex]);
+
   useEffect(() => {
     if (!currentStory || isStoryPaused || progress < 1) {
       return;
     }
 
-    advanceToNextStory();
-  }, [advanceToNextStory, currentStory, isStoryPaused, progress]);
+    if (currentStory.segments?.length) {
+      advanceSegment();
+    } else {
+      advanceToNextStory();
+    }
+  }, [advanceSegment, advanceToNextStory, currentStory, isStoryPaused, progress]);
 
   useEffect(() => {
     if (isReplyInputFocused) {
@@ -628,6 +697,61 @@ function StoryViewerScreen({ route, navigation }: any) {
       );
     }
 
+    // Locked premium story: show public previewMedia instead of empty screen
+    if (isStoryLocked && currentStory.previewMedia?.mediaUrl) {
+      const previewUrl = normalizeMediaUrl(currentStory.previewMedia.mediaUrl);
+      const previewThumb = normalizeMediaUrl(currentStory.previewMedia.thumbnailUrl || currentStory.previewMedia.mediaUrl || "");
+      if (currentStory.previewMedia.mediaType === "video") {
+        return (
+          <View style={styles.storyImage}>
+            <SocialVideo
+              uri={previewUrl}
+              posterUri={previewThumb}
+              style={styles.storyImage}
+              paused={true}
+              muted={true}
+              onEnd={() => {}}
+            />
+          </View>
+        );
+      }
+      return previewUrl ? (
+        <View style={styles.storyImage}>
+          <ProgressiveImage uri={previewUrl} previewUri={previewThumb} style={styles.storyImage} />
+        </View>
+      ) : (
+        <View style={[styles.storyImage, styles.storyFallback]} />
+      );
+    }
+
+    // Unlocked premium story with segments (new multi-segment path)
+    if (currentStory.segments && currentStory.segments.length > 0 && activeSegment) {
+      const segUrl = normalizeMediaUrl(activeSegment.mediaUrl || "");
+      const segThumb = normalizeMediaUrl(activeSegment.thumbnailUrl || activeSegment.mediaUrl || "");
+      if (activeSegment.mediaType === "video") {
+        return (
+          <View style={styles.storyImage}>
+            <SocialVideo
+              uri={segUrl}
+              posterUri={segThumb}
+              style={styles.storyImage}
+              paused={isStoryPaused}
+              muted={!isScreenFocused || !isMusicEnabled || hasStoryAttachedMusic}
+              onEnd={advanceSegment}
+            />
+          </View>
+        );
+      }
+      return segUrl ? (
+        <View style={styles.storyImage}>
+          <ProgressiveImage uri={segUrl} previewUri={segThumb} style={styles.storyImage} />
+        </View>
+      ) : (
+        <View style={[styles.storyImage, styles.storyFallback]} />
+      );
+    }
+
+    // Legacy / single-media story (existing behavior unchanged)
     if (currentStory.media?.mediaType === "video") {
       if (!currentStory.media?.url) {
         return <View style={[styles.storyImage, styles.storyFallback]} />;
@@ -721,7 +845,7 @@ function StoryViewerScreen({ route, navigation }: any) {
     }
 
     return (
-      <View pointerEvents="none" style={styles.floatingStickerLayer}>
+      <View pointerEvents="box-none" style={styles.floatingStickerLayer}>
         {currentStory.stickers.map((sticker) => {
           const baseStyle = {
             left: `${Math.max(0, Math.min(1, sticker.position.x)) * 100}%`,
@@ -733,6 +857,57 @@ function StoryViewerScreen({ route, navigation }: any) {
               { scale: sticker.position.scale || 1 },
             ],
           } as const;
+
+          if (sticker.type === "link" || sticker.linkUrl || (sticker as any).type === "link") {
+            const rawUrl = sticker.linkUrl || sticker.text || currentStory.linkUrl || "";
+            const cleanUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
+            const displayUrl = rawUrl.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+
+            return (
+              <TouchableOpacity
+                key={sticker.id}
+                style={[
+                  styles.floatingTextSticker,
+                  baseStyle,
+                  { backgroundColor: "#ffffff", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, flexDirection: "row", alignItems: "center", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 }
+                ]}
+                onPress={() => {
+                  if (cleanUrl) {
+                    Linking.openURL(cleanUrl).catch(() => undefined);
+                  }
+                }}
+              >
+                <Icon name="link-outline" size={16} color="#2563eb" style={{ marginRight: 4 }} />
+                <Text style={{ fontSize: 13, fontWeight: "700", color: "#2563eb" }} numberOfLines={1}>
+                  {displayUrl || "Visit Link"}
+                </Text>
+              </TouchableOpacity>
+            );
+          }
+
+          if (sticker.type === "location" || sticker.locationName) {
+            const locName = sticker.locationName || sticker.text || (typeof currentStory.location === "string" ? currentStory.location : (currentStory.location as any)?.name) || "Location";
+
+            return (
+              <TouchableOpacity
+                key={sticker.id}
+                style={[
+                  styles.floatingTextSticker,
+                  baseStyle,
+                  { backgroundColor: "#ffffff", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, flexDirection: "row", alignItems: "center", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 }
+                ]}
+                onPress={() => {
+                  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locName)}`;
+                  Linking.openURL(mapsUrl).catch(() => undefined);
+                }}
+              >
+                <Icon name="location-sharp" size={16} color="#ef4444" style={{ marginRight: 4 }} />
+                <Text style={{ fontSize: 13, fontWeight: "700", color: "#1e293b" }} numberOfLines={1}>
+                  {locName}
+                </Text>
+              </TouchableOpacity>
+            );
+          }
 
           if (sticker.type === "emoji") {
             return (
@@ -829,22 +1004,49 @@ function StoryViewerScreen({ route, navigation }: any) {
 
   return (
     <SafeAreaView style={styles.container}>
-      {renderStoryBody()}
+      <PremiumContentOverlay
+        isPremium={currentStory?.isPremium}
+        premiumPrice={currentStory?.premiumPrice}
+        premiumCurrency={currentStory?.premiumCurrency}
+        isOwner={currentStory?.isOwner}
+        loading={purchaseLoading}
+        purchaseVerified={storyPurchaseVerified}
+        premiumUnlocked={currentStory?.premiumUnlocked === true}
+        onUnlockPress={handleUnlockStory}
+        style={{ ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" }}
+      >
+        {renderStoryBody()}
+      </PremiumContentOverlay>
       {renderStoryFilterOverlay()}
       {renderFloatingStickers()}
       <LinearGradient colors={["rgba(0,0,0,0.72)", "rgba(0,0,0,0.15)", "transparent"]} style={styles.topFade} />
       <LinearGradient colors={["transparent", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.82)"]} style={styles.bottomFade} />
 
       <View style={styles.progressRow}>
-        {stories.map((story, index) => {
-          const fill =
-            index < activeIndex ? 1 : index === activeIndex ? progress : 0;
+        {stories.flatMap((story, index) => {
+          const isActive = index === activeIndex;
+          const segs = isActive ? currentStory?.segments : undefined;
 
-          return (
+          if (segs && segs.length > 0) {
+            return segs.map((_, segIndex) => {
+              const fill =
+                segIndex < activeSegmentIndex ? 1
+                  : segIndex === activeSegmentIndex ? progress
+                  : 0;
+              return (
+                <View key={`${story.id}_seg_${segIndex}`} style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${fill * 100}%` }]} />
+                </View>
+              );
+            });
+          }
+
+          const fill = index < activeIndex ? 1 : isActive ? progress : 0;
+          return [(
             <View key={story.id} style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${fill * 100}%` }]} />
             </View>
-          );
+          )];
         })}
       </View>
 

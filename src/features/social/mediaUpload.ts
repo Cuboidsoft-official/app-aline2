@@ -7,7 +7,7 @@ import {
   ensureMicrophonePermission,
   resolveCameraCaptureMediaType,
 } from "../../utils/permissions";
-import { MediaAsset } from "./types";
+import { MediaAsset, PremiumOriginalMediaItem } from "./types";
 
 export type ComposerAsset = {
   id: string;
@@ -52,6 +52,7 @@ const mapSensitiveContent = (moderation: any) => {
 };
 
 const HTTP_URL_PATTERN = /^https?:\/\//i;
+const MAX_IMAGES_PER_UPLOAD_REQUEST = 10;
 
 const sanitizeFileName = (value: string | undefined, fallback: string): string => {
   const next = (value || "").trim();
@@ -213,35 +214,44 @@ const uploadMultipleImages = async (
   onProgress?: UploadComposerAssetsOptions["onProgress"],
 ): Promise<MediaAsset[]> => {
   try {
-    const body = new FormData();
-    assets.forEach((asset) => {
-      body.append("images", toFormDataFile(asset) as never);
-    });
+    const uploadedAssets: MediaAsset[] = [];
+    const batchCount = Math.ceil(assets.length / MAX_IMAGES_PER_UPLOAD_REQUEST);
 
-    const res = await postMultipart({
-      path: "/upload/images",
-      body,
-      timeoutMs: 180000,
-    });
-    onProgress?.(0.94);
+    for (let offset = 0; offset < assets.length; offset += MAX_IMAGES_PER_UPLOAD_REQUEST) {
+      const batch = assets.slice(offset, offset + MAX_IMAGES_PER_UPLOAD_REQUEST);
+      const body = new FormData();
+      batch.forEach((asset) => {
+        body.append("images", toFormDataFile(asset) as never);
+      });
 
-    const uploaded = Array.isArray(res?.urls) ? res.urls : [];
+      const res = await postMultipart({
+        path: "/upload/images",
+        body,
+        timeoutMs: 180000,
+      });
+      const uploaded = Array.isArray(res?.urls) ? res.urls : [];
 
-    if (
-      uploaded.length !== assets.length
-      || uploaded.some((item: { url?: string } | undefined) => !item?.url)
-    ) {
-      throw new Error("Carousel upload did not return all uploaded image URLs.");
+      if (
+        uploaded.length !== batch.length
+        || uploaded.some((item: { url?: string } | undefined) => !item?.url)
+      ) {
+        throw new Error("Carousel upload did not return all uploaded image URLs.");
+      }
+
+      uploadedAssets.push(...batch.map((asset, index) => ({
+        id: asset.id,
+        mediaType: "image" as const,
+        url: uploaded[index].url,
+        width: asset.width,
+        height: asset.height,
+        sensitiveContent: mapSensitiveContent(uploaded[index]?.moderation),
+      })));
+
+      const completedBatch = Math.floor(offset / MAX_IMAGES_PER_UPLOAD_REQUEST) + 1;
+      onProgress?.((completedBatch / batchCount) * 0.94);
     }
 
-    return assets.map((asset, index) => ({
-      id: asset.id,
-      mediaType: "image",
-      url: uploaded[index].url,
-      width: asset.width,
-      height: asset.height,
-      sensitiveContent: mapSensitiveContent(uploaded[index]?.moderation),
-    }));
+    return uploadedAssets;
   } catch (error) {
     if (isModerationBlockedError(error)) {
       throw error;
@@ -285,6 +295,47 @@ const uploadSingleVideo = async (
       throw error;
     }
     throw new Error(getReadableApiErrorMessage(error, "Video upload failed."));
+  }
+};
+
+/**
+ * Upload a premium original media file to the private R2 bucket.
+ * Returns storageKey metadata — NEVER a public CDN URL.
+ * Must be called BEFORE createPost/createStory for premium content.
+ */
+export const uploadPremiumMedia = async (
+  asset: ComposerAsset,
+  contentType: "post" | "story",
+  onProgress?: UploadComposerAssetsOptions["onProgress"],
+): Promise<PremiumOriginalMediaItem> => {
+  try {
+    const body = new FormData();
+    body.append("media", toFormDataFile(asset) as never);
+
+    const res = await postMultipart({
+      path: `/upload/premium-media?contentType=${contentType}`,
+      body,
+      timeoutMs: 600000,
+    });
+    onProgress?.(0.94);
+
+    if (!res?.storageKey) {
+      throw new Error("Premium upload did not return a storage key.");
+    }
+
+    return {
+      storageKey: res.storageKey,
+      type: res.type === "video" ? "video" : "image",
+      mimeType: res.mimeType || (asset.mediaType === "video" ? "video/mp4" : "image/jpeg"),
+      width: typeof res.width === "number" ? res.width : asset.width,
+      height: typeof res.height === "number" ? res.height : asset.height,
+      duration: typeof res.duration === "number" ? res.duration : (
+        typeof asset.durationMs === "number" ? Math.round(asset.durationMs / 1000) : undefined
+      ),
+      order: 0,
+    };
+  } catch (error) {
+    throw new Error(getReadableApiErrorMessage(error, "Premium media upload failed."));
   }
 };
 

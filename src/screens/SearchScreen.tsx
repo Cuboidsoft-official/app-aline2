@@ -24,6 +24,7 @@ import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBot
 import AppAvatar from "../components/AppAvatar";
 import DraggableBottomSheet from "../components/DraggableBottomSheet";
 import FeaturedProfilesCarousel, { type FeaturedProfileItem } from "../components/FeaturedProfilesCarousel";
+import { normalizeMediaUrl } from "../utils/mediaUrls";
 
 type UserItem = {
   _id: string;
@@ -84,6 +85,7 @@ const TAB_LABELS = {
   users: "users",
   sellers: "sellers",
   services: "services",
+  channels: "channels",
 } as const;
 
 const SearchScreen = ({ navigation, route }: any) => {
@@ -99,6 +101,7 @@ const SearchScreen = ({ navigation, route }: any) => {
   const [sellers, setSellers] = useState<SellerItem[]>([]);
   const [discoverServices, setDiscoverServices] = useState<ServiceItem[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
+  const [channels, setChannels] = useState<any[]>([]);
   const [trendingHashtags, setTrendingHashtags] = useState<TrendingHashtag[]>([]);
   const [featuredProfiles, setFeaturedProfiles] = useState<FeaturedProfileItem[]>([]);
   const [search, setSearch] = useState(String(route?.params?.initialQuery || "").trim());
@@ -326,6 +329,15 @@ const isVerifiedSellerOnly = (seller: any): boolean => {
           return;
         }
 
+        if (activeTab === "channels") {
+          const res = await API.get("/search/all", {
+            params: { query: trimmedQuery || "a", type: "channels" }
+          });
+          setChannels(res.data?.results?.channels || []);
+          setErrorMessage("");
+          return;
+        }
+
         const res = await API.get("/service/discover", {
           params: { query: trimmedQuery, location: trimmedLoc, limit: 20 }
         });
@@ -376,8 +388,12 @@ const isVerifiedSellerOnly = (seller: any): boolean => {
       return services;
     }
 
+    if (activeTab === "channels") {
+      return channels;
+    }
+
     return users;
-  }, [activeTab, sellers, services, users]);
+  }, [activeTab, channels, sellers, services, users]);
 
   const activeResultsCount = currentData.length;
   const featuredUserIds = useMemo(
@@ -508,6 +524,37 @@ const isVerifiedSellerOnly = (seller: any): boolean => {
     </TouchableOpacity>
   );
 
+  const renderChannel = ({ item }: { item: any }) => (
+    <TouchableOpacity
+      style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+      onPress={() =>
+        navigation.navigate("ChatScreen", {
+          conversationId: item._id,
+          conversationType: "group",
+          groupName: item.groupName || "Public Channel",
+        })
+      }
+    >
+      <Image
+        source={{ uri: normalizeMediaUrl(item.groupAvatar) || DEFAULT_AVATAR_URL }}
+        style={styles.avatar}
+      />
+      <View style={styles.cardContent}>
+        <View style={styles.inlineRow}>
+          <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>
+            {item.groupName || "Public Channel"}
+          </Text>
+          <View style={{ backgroundColor: accentSoft, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, marginLeft: 6 }}>
+            <Text style={{ fontSize: 10, color: accentColor, fontWeight: "700" }}>Channel</Text>
+          </View>
+        </View>
+        <Text style={[styles.name, { color: colors.mutedText }]} numberOfLines={1}>
+          {item.groupDescription || `${item.members?.length || 0} members`}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+
   const renderDiscoverHeader = () => {
     if (search.trim() || activeTab !== "users") {
       return null;
@@ -533,14 +580,15 @@ const isVerifiedSellerOnly = (seller: any): boolean => {
             <AppAvatar
               uri={item.profilePic || DEFAULT_AVATAR_URL}
               name={item.username || item.name || (item as any)?.email || "User"}
-              size={48}
-              style={styles.suggestionAvatar}
-              backgroundColor={colors.surface}
-              textColor={colors.primary}
+              size={38}
             />
             <View style={styles.cardContent}>
-              <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>{item.username || "user"}</Text>
-              <Text style={[styles.name, { color: colors.mutedText }]} numberOfLines={1}>{item.name || item.username || "Aline2 user"}</Text>
+              <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>
+                {item.name || item.username}
+              </Text>
+              <Text style={[styles.name, { color: colors.mutedText }]} numberOfLines={1}>
+                @{item.username}
+              </Text>
             </View>
           </TouchableOpacity>
         ))}
@@ -667,7 +715,9 @@ const isVerifiedSellerOnly = (seller: any): boolean => {
               ? renderUser
               : activeTab === "sellers"
                 ? renderSeller
-                : renderService
+                : activeTab === "channels"
+                  ? renderChannel
+                  : renderService
           }
           ListHeaderComponent={renderListHeader}
           ListEmptyComponent={
@@ -708,7 +758,7 @@ const isVerifiedSellerOnly = (seller: any): boolean => {
 
           <Text style={[styles.filterSectionLabel, { color: colors.mutedText }]}>Content type</Text>
           <View style={[styles.tabsShell, styles.tabsSheetShell, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            {(["users", "sellers", "services"] as Array<keyof typeof TAB_LABELS>).map((tabKey) => (
+            {(["users", "sellers", "services", "channels"] as Array<keyof typeof TAB_LABELS>).map((tabKey) => (
               <TouchableOpacity
                 key={tabKey}
                 style={[styles.tab, activeTab === tabKey ? { backgroundColor: accentColor } : null]}
@@ -724,7 +774,7 @@ const isVerifiedSellerOnly = (seller: any): boolean => {
                     activeTab === tabKey && styles.activeText,
                   ]}
                 >
-                  {tabKey === "users" ? "Users" : tabKey === "sellers" ? "Sellers" : "Services"}
+                  {tabKey === "users" ? "Users" : tabKey === "sellers" ? "Sellers" : tabKey === "channels" ? "Channels" : "Services"}
                 </Text>
               </TouchableOpacity>
             ))}

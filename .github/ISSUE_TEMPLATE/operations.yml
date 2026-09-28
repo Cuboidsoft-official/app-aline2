@@ -1,0 +1,69 @@
+name: Operations or release work
+description: Track CI/CD, signing, configuration, release, or repository operations
+title: "ops: "
+labels:
+  - operations
+body:
+  - type: markdown
+    attributes:
+      value: Do not paste secret values, keystores, private artifact links, tokens, personal data, or unredacted production logs.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CI validation
+        - Android build or signing
+        - Artifact delivery
+        - Google Play release
+        - Firebase or notifications
+        - Repository settings
+        - Dependency maintenance
+        - Other operations
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or desired outcome
+      description: Describe the current evidence and the operational result required.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Production and developer impact
+      description: State whether users, releases, or contributor work are blocked.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and dependencies
+      description: Name affected workflows, environments, services, permissions, or owners without exposing values.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] The exact reviewed commit…
+        - [ ] Required checks…
+        - [ ] Release evidence…
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation and evidence plan
+      description: Define the checks, dry runs, and evidence needed to close this issue.
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback and recovery
+      description: Describe how to restore the last known-good state.
+    validations:
+      required: true

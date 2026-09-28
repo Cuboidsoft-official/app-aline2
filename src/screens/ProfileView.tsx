@@ -25,7 +25,7 @@ import { useAppTheme } from "../theme/AppThemeContext";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
-import { openPostInFeed, openSwipeInSwipes } from "../utils/socialNavigation";
+import { openPostInFeed, openPostDetail, openSwipeInSwipes } from "../utils/socialNavigation";
 import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import ProfilePictureViewer from "../components/ProfilePictureViewer";
 
@@ -33,6 +33,11 @@ interface ProfilePost {
  _id: string;
  image?: string;
  postType?: string;
+ isPremium?: boolean;
+ premiumUnlocked?: boolean;
+ premiumPrice?: number;
+ premiumCurrency?: string;
+ previewMedia?: Array<{ url?: string; type?: string; thumbnailUrl?: string }>;
  media?: Array<{
   url?: string;
   mediaUrl?: string;
@@ -199,6 +204,10 @@ const ProfileScreen = ({navigation}: any) => {
   () => allPosts.filter((post) => !isReelPost(post)).length,
   [allPosts],
  );
+ const hasPremiumPosts = useMemo(
+  () => posts.some((post) => Boolean(post.isPremium)),
+  [posts],
+ );
   const profileName = user?.name || "User Name";
  const profileHandle = user?.username ? `@${user.username}` : "Complete your profile";
  const profileMeta = [user?.pronouns].filter(Boolean).join(" | ");
@@ -277,6 +286,8 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
    media?.location,
    media?.path,
    post.image,
+   post.previewMedia?.[0]?.thumbnailUrl,
+   post.previewMedia?.[0]?.url,
   ),
  );
 };
@@ -325,31 +336,45 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
   }
  };
 
- const renderPost = ({ item }: { item: ProfilePost }) => (
- <TouchableOpacity
-   activeOpacity={0.9}
-   style={styles.postCard}
-   onPress={() => {
-    if (isReelPost(item)) {
-     openSwipeInSwipes(navigation, { swipeId: item._id, userId: user?._id });
-     return;
-    }
-    openPostInFeed(navigation, { postId: item._id, userId: user?._id });
-   }}
-  >
-	   {getPostPreviewUrl(item) ? (
-	    <ProgressiveImage
-	     uri={getPostPreviewUrl(item)}
-	     previewUri={getPostPreviewUrl(item)}
-	     style={styles.postImage}
-	    />
-	   ) : (
-    <View style={[styles.postImage, styles.postFallback]}>
-      <Icon name="image-outline" size={22} color={colors.mutedText} />
+ const renderPost = ({ item }: { item: ProfilePost }) => {
+  const isLocked = !!item.isPremium && !item.premiumUnlocked;
+  return (
+   <TouchableOpacity
+    activeOpacity={0.9}
+    style={styles.postCard}
+    onPress={() => {
+     if (isReelPost(item)) {
+      openSwipeInSwipes(navigation, { swipeId: item._id, userId: user?._id });
+      return;
+     }
+     if (item.isPremium) {
+      openPostDetail(navigation, { postId: item._id });
+      return;
+     }
+     openPostInFeed(navigation, { postId: item._id, userId: user?._id });
+    }}
+   >
+    <View style={styles.postCardInner}>
+     {getPostPreviewUrl(item) ? (
+      <ProgressiveImage
+       uri={getPostPreviewUrl(item)}
+       previewUri={getPostPreviewUrl(item)}
+       style={styles.postImage}
+      />
+     ) : (
+      <View style={[styles.postImage, styles.postFallback]}>
+       <Icon name="image-outline" size={22} color={colors.mutedText} />
+      </View>
+     )}
+     {isLocked ? (
+      <View style={styles.premiumLockBadge} pointerEvents="none">
+       <Icon name="lock-closed" size={11} color="#fff" />
+      </View>
+     ) : null}
     </View>
-   )}
-  </TouchableOpacity>
- );
+   </TouchableOpacity>
+  );
+ };
 
  const renderHeader = () => (
   <>
@@ -651,6 +676,19 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
       },
     ]}
     ListHeaderComponent={renderHeader}
+    ListFooterComponent={
+     hasPremiumPosts ? (
+      <View style={styles.premiumContentNotice}>
+       <Icon name="lock-closed-outline" size={18} color={colors.primary} />
+       <Text style={[styles.premiumContentNoticeTitle, { color: colors.text }]}>
+        Premium content
+       </Text>
+       <Text style={[styles.premiumContentNoticeText, { color: colors.mutedText }]}>
+        Access more exclusive content like this by unlocking this post.
+       </Text>
+      </View>
+     ) : null
+    }
     ListEmptyComponent={
      <View style={styles.emptyState}>
       <Text style={[styles.emptyTitle, { color: colors.text }]}>
@@ -1048,10 +1086,43 @@ bioSection: {
   fontWeight:"700"
  },
 
+ premiumContentNotice:{
+  alignItems:"center",
+  paddingHorizontal:24,
+  paddingVertical:20,
+  marginTop:8,
+  marginBottom:12
+ },
+ premiumContentNoticeTitle:{
+  fontSize:15,
+  fontWeight:"700",
+  marginBottom:5
+ },
+ premiumContentNoticeText:{
+  fontSize:13,
+  lineHeight:19,
+  textAlign:"center"
+ },
  center:{
   flex:1,
   justifyContent:"center",
   alignItems:"center"
+ },
+
+ postCardInner:{
+  position:"relative"
+ },
+
+ premiumLockBadge:{
+  position:"absolute",
+  top:5,
+  right:5,
+  width:22,
+  height:22,
+  borderRadius:11,
+  backgroundColor:"rgba(155,77,255,0.92)",
+  alignItems:"center",
+  justifyContent:"center"
  }
 
 });

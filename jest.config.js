@@ -1,5 +1,6 @@
 module.exports = {
   preset: "react-native",
+  resolver: "react-native-worklets/jest/resolver.js",
   setupFiles: ["<rootDir>/jest.setup.js"],
   transformIgnorePatterns: [
     "node_modules/(?!(react-native|react-native-worklets|react-native-snackbar|@react-native|@react-native-community|@react-navigation|@react-native-documents|react-native-gesture-handler|react-native-reanimated|react-native-keyboard-controller|react-native-safe-area-context|react-native-vector-icons)/)",

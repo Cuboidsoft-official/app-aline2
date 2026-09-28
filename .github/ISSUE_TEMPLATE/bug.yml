@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a reproducible defect in the Aline2 app
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private artifact links, personal data, or unredacted production logs.
+  - type: textarea
+    id: impact
+    attributes:
+      label: User impact
+      description: Who is affected, what fails, and how serious is it?
+      placeholder: Users cannot…
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open…
+        2. Tap…
+        3. Observe…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version and build
+      description: Include the version name/code or release commit when known.
+      placeholder: 2.3.0 (versionCode …), commit …
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: Pixel 8, Android 16
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Add redacted screenshots, screen recordings, or logs that demonstrate the failure.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] The reported path works on…
+        - [ ] The regression test passes…
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: List automated and manual checks required before merge.
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback plan
+      description: State how to safely undo or disable the change if it causes a regression.
+    validations:
+      required: true

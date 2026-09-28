@@ -3,7 +3,13 @@
   "compilerOptions": {
     "types": ["jest"],
     "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": ".",
+    "paths": {
+      "react-native-country-codes-picker": [
+        "./src/types/react-native-country-codes-picker-types"
+      ]
+    }
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["**/node_modules", "**/Pods"]

@@ -691,6 +691,12 @@ class RemoteSocialApi implements SocialApi {
       likePreviewUsers: Array.isArray(post?.recentLikes)
         ? post.recentLikes.map((user: any) => this.mapUser(user)).filter((user: SocialUser) => !!user.id)
         : [],
+      isPremium: post?.isPremium === true,
+      premiumPrice: typeof post?.premiumPrice === "number" ? post.premiumPrice : undefined,
+      premiumCountryCode: typeof post?.premiumCountryCode === "string" ? post.premiumCountryCode : undefined,
+      premiumCurrency: typeof post?.premiumCurrency === "string" ? post.premiumCurrency : undefined,
+      premiumUnlocked: post?.premiumUnlocked === true,
+      premiumLocked: post?.premiumLocked === true,
       ...overrides,
     };
   }
@@ -858,6 +864,34 @@ class RemoteSocialApi implements SocialApi {
       allowReplies: story?.allowReplies !== false,
       allowSharing: story?.allowSharing !== false,
       music: mapStoryMusicDetails(story?.music, story?.musicConfig),
+      isPremium: story?.isPremium === true,
+      premiumPrice: typeof story?.premiumPrice === "number" ? story.premiumPrice : undefined,
+      premiumCountryCode: typeof story?.premiumCountryCode === "string" ? story.premiumCountryCode : undefined,
+      premiumCurrency: typeof story?.premiumCurrency === "string" ? story.premiumCurrency : undefined,
+      premiumUnlocked: story?.premiumUnlocked === true,
+      premiumLocked: story?.premiumLocked === true,
+      segments: Array.isArray(story?.segments) && story.segments.length > 0
+        ? story.segments
+            .filter((seg: any) => seg && typeof seg === "object")
+            .map((seg: any) => ({
+              order: typeof seg.order === "number" ? seg.order : 0,
+              mediaType: String(seg.mediaType || "image"),
+              mediaUrl: seg.mediaUrl ? String(seg.mediaUrl) : null,
+              thumbnailUrl: seg.thumbnailUrl ? String(seg.thumbnailUrl) : undefined,
+              duration: typeof seg.duration === "number" ? seg.duration : undefined,
+              width: typeof seg.width === "number" ? seg.width : undefined,
+              height: typeof seg.height === "number" ? seg.height : undefined,
+            }))
+            .sort((a: any, b: any) => a.order - b.order)
+        : undefined,
+      previewMedia: story?.previewMedia && typeof story.previewMedia === "object"
+        ? {
+            mediaUrl: story.previewMedia.mediaUrl ? String(story.previewMedia.mediaUrl) : null,
+            mediaType: String(story.previewMedia.mediaType || "image"),
+            thumbnailUrl: story.previewMedia.thumbnailUrl ? String(story.previewMedia.thumbnailUrl) : undefined,
+            duration: typeof story.previewMedia.duration === "number" ? story.previewMedia.duration : undefined,
+          }
+        : undefined,
       ...overrides,
     };
   }
@@ -893,6 +927,7 @@ class RemoteSocialApi implements SocialApi {
       canDelete: this.getId(comment?.user) === currentUserId,
       replyCount: typeof comment?.replyCount === "number" ? comment.replyCount : 0,
       mentions: Array.isArray(comment?.mentions) ? comment.mentions.map((item: any) => item?.username).filter(Boolean) : [],
+      isPinned: Boolean(comment?.isPinned),
     };
   }
 
@@ -925,8 +960,19 @@ class RemoteSocialApi implements SocialApi {
       likesCount: typeof comment?.likes === "number" ? comment.likes : 0,
       canDelete: this.getId(comment?.user) === currentUserId,
       replyCount: typeof comment?.replyCount === "number" ? comment.replyCount : 0,
+      isPinned: Boolean(comment?.isPinned),
     };
   }
+
+  togglePinComment = async (commentId: string): Promise<{ isPinned: boolean; commentId: string }> => {
+    const res = await API.post(`/comments/${commentId}/pin`);
+    const isPinned = !!res?.data?.isPinned;
+    const cached = this.commentCache.get(commentId);
+    if (cached) {
+      this.commentCache.set(commentId, { ...cached, isPinned });
+    }
+    return { isPinned, commentId };
+  };
 
   private mapStoryViewerEntry(view: any): StoryViewerEntry {
     return {
@@ -1288,6 +1334,10 @@ class RemoteSocialApi implements SocialApi {
     }
 
     return story;
+  }
+
+  invalidateStory(storyId: string): void {
+    this.storyCache.delete(storyId);
   }
 
   async getPost(postId: string): Promise<Post> {
@@ -2023,6 +2073,16 @@ class RemoteSocialApi implements SocialApi {
       hashtags: payload.hashtags,
       mentions: payload.mentions,
       taggedUsers: mapTaggedUsersForRequest(payload.taggedUsers),
+      isPremium: payload.isPremium || false,
+      premiumPrice: payload.isPremium ? (payload.premiumPrice || 0) : undefined,
+      premiumCountryCode: payload.isPremium ? payload.premiumCountryCode : undefined,
+      premiumCurrency: payload.isPremium ? payload.premiumCurrency : undefined,
+      premiumOriginalMedia: payload.premiumOriginalMedia && payload.premiumOriginalMedia.length > 0
+        ? payload.premiumOriginalMedia
+        : undefined,
+      previewMedia: payload.previewMedia && payload.previewMedia.length > 0
+        ? payload.previewMedia
+        : undefined,
     }, {
       timeout: 120000,
     });
@@ -2185,7 +2245,9 @@ class RemoteSocialApi implements SocialApi {
       });
     });
 
-    if (payload.type === "media" && !payload.media) {
+    // For premium media stories, the original is in the private bucket (premiumOriginalMedia).
+    // media may be undefined — that is intentional.
+    if (payload.type === "media" && !payload.media && !(payload.premiumOriginalMedia?.length)) {
       throw new Error("Media stories require an image or video.");
     }
 
@@ -2214,6 +2276,14 @@ class RemoteSocialApi implements SocialApi {
       isCloseFriends: payload.visibility === "close_friends",
       allowReplies: payload.allowReplies,
       allowSharing: payload.allowSharing,
+      isPremium: payload.isPremium || false,
+      premiumPrice: payload.isPremium ? (payload.premiumPrice || 0) : undefined,
+      premiumCountryCode: payload.isPremium ? payload.premiumCountryCode : undefined,
+      premiumCurrency: payload.isPremium ? payload.premiumCurrency : undefined,
+      premiumOriginalMedia: payload.premiumOriginalMedia && payload.premiumOriginalMedia.length > 0
+        ? payload.premiumOriginalMedia
+        : undefined,
+      previewMedia: payload.previewMedia || undefined,
     }, {
       timeout: 120000,
     });
