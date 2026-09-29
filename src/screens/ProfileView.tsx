@@ -123,6 +123,7 @@ const ProfileScreen = ({navigation}: any) => {
  const [isPrivate, setIsPrivate] = useState(false);
  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
  const [avatarViewerVisible, setAvatarViewerVisible] = useState(false);
+ const [premiumEnabled, setPremiumEnabled] = useState(false);
 
  const fetchProfile = useCallback(async (showRefreshing = false) => {
 
@@ -139,9 +140,10 @@ const ProfileScreen = ({navigation}: any) => {
    setIsPrivate(!!profileUser?.isPrivate);
 
    if (profileUser?._id) {
-    const [postsRes, taggedRes] = await Promise.allSettled([
+    const [postsRes, taggedRes, settingsRes] = await Promise.allSettled([
       API.get(`/posts/user/${profileUser._id}`),
       API.get(`/posts/tagged/${profileUser._id}`),
+      API.get("/premium-settings/mine"),
     ]);
 
     setAllPosts(
@@ -150,9 +152,16 @@ const ProfileScreen = ({navigation}: any) => {
     setTaggedPosts(
       taggedRes.status === "fulfilled" ? ((taggedRes.value.data.posts || []) as ProfilePost[]) : [],
     );
+    if (settingsRes.status === "fulfilled") {
+     const s = settingsRes.value?.data?.settings;
+     setPremiumEnabled(!!s?.premiumContentEnabled);
+    } else {
+     setPremiumEnabled(false);
+    }
    } else {
     setAllPosts([]);
     setTaggedPosts([]);
+    setPremiumEnabled(false);
    }
 
    setErrorMessage("");
@@ -162,6 +171,7 @@ const ProfileScreen = ({navigation}: any) => {
    setUser(null);
    setAllPosts([]);
    setTaggedPosts([]);
+   setPremiumEnabled(false);
    setErrorMessage(getReadableApiErrorMessage(error, "Could not load your profile right now."));
   } finally {
    setLoading(false);
@@ -177,6 +187,12 @@ const ProfileScreen = ({navigation}: any) => {
  useEffect(() => {
   setAvatarLoadFailed(false);
  }, [user?.profilePic]);
+
+ useEffect(() => {
+  if (!premiumEnabled && activeTab === "premium") {
+   setActiveTab("posts");
+  }
+ }, [premiumEnabled, activeTab]);
 
  useFocusEffect(
   useCallback(() => {
@@ -335,6 +351,7 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
 
  const renderPost = ({ item }: { item: ProfilePost }) => {
   const isLocked = !!item.isPremium && !item.premiumUnlocked;
+  const showPremiumOverlay = activeTab === "premium" && isLocked;
   return (
    <TouchableOpacity
     activeOpacity={0.9}
@@ -356,14 +373,18 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
       <ProgressiveImage
        uri={getPostPreviewUrl(item)}
        previewUri={getPostPreviewUrl(item)}
-       style={styles.postImage}
+       style={[styles.postImage, showPremiumOverlay && styles.postImageDimmed]}
       />
      ) : (
       <View style={[styles.postImage, styles.postFallback]}>
        <Icon name="image-outline" size={22} color={colors.mutedText} />
       </View>
      )}
-     {isLocked ? (
+     {showPremiumOverlay ? (
+      <View style={styles.premiumGridOverlay} pointerEvents="none">
+       <Icon name="lock-closed" size={20} color="#fff" />
+      </View>
+     ) : isLocked ? (
       <View style={styles.premiumLockBadge} pointerEvents="none">
        <Icon name="lock-closed" size={11} color="#fff" />
       </View>
@@ -595,35 +616,45 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
     </View>
    </View>
 
-   <View style={[styles.tabs, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-    {[
+   {(() => {
+    const tabItems = [
      { key: "posts", label: "Posts", icon: "grid-outline" },
-     { key: "premium", label: "Premium", icon: "lock-closed-outline" },
+     ...(premiumEnabled ? [{ key: "premium", label: "Premium", icon: "lock-closed-outline" }] : []),
      { key: "swipes", label: "Swipes", icon: "flame-outline" },
      { key: "tagged", label: "Tagged", icon: "pricetag-outline" },
-    ].map((tabItem) => {
-     const isActive = activeTab === tabItem.key;
-
-     return (
-      <TouchableOpacity
-       key={tabItem.key}
-       style={[
-        styles.tab,
-        {
-         backgroundColor: isActive ? (isDarkMode ? colors.surface : colors.card) : "transparent",
-         borderColor: isActive ? colors.border : "transparent",
-        },
-       ]}
-       onPress={() => setActiveTab(tabItem.key as ProfileTab)}
-      >
-       <Icon name={tabItem.icon} size={14} color={isActive ? colors.primary : colors.mutedText} />
-       <Text style={isActive ? [styles.activeTab, { color: colors.primary }] : [styles.tabText, { color: colors.mutedText }]}>
-        {tabItem.label}
-       </Text>
-      </TouchableOpacity>
-     );
-    })}
-   </View>
+    ];
+    const compact = tabItems.length > 3;
+    return (
+     <View style={[styles.tabs, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      {tabItems.map((tabItem) => {
+       const isActive = activeTab === tabItem.key;
+       return (
+        <TouchableOpacity
+         key={tabItem.key}
+         style={[
+          styles.tab,
+          compact && styles.tabCompact,
+          {
+           backgroundColor: isActive ? (isDarkMode ? colors.surface : colors.card) : "transparent",
+           borderColor: isActive ? colors.border : "transparent",
+          },
+         ]}
+         onPress={() => setActiveTab(tabItem.key as ProfileTab)}
+        >
+         <Icon name={tabItem.icon} size={compact ? 14 : 16} color={isActive ? colors.primary : colors.mutedText} />
+         <Text style={[
+          isActive ? styles.activeTab : styles.tabText,
+          { color: isActive ? colors.primary : colors.mutedText },
+          compact && styles.tabTextCompact,
+         ]}>
+          {tabItem.label}
+         </Text>
+        </TouchableOpacity>
+       );
+      })}
+     </View>
+    );
+   })()}
   </>
  );
 
@@ -674,7 +705,17 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
       },
     ]}
     ListHeaderComponent={renderHeader}
-    ListFooterComponent={null}
+    ListFooterComponent={
+     activeTab === "premium" && posts.length > 0 ? (
+      <View style={styles.premiumFooter}>
+       <Icon name="lock-closed-outline" size={22} color={colors.primary} style={{ marginBottom: 10, opacity: 0.75 }} />
+       <Text style={[styles.premiumFooterTitle, { color: colors.text }]}>Premium only</Text>
+       <Text style={[styles.premiumFooterText, { color: colors.mutedText }]}>
+        Access more exclusive content like this by purchasing this post.
+       </Text>
+      </View>
+     ) : null
+    }
     ListEmptyComponent={
      <View style={styles.emptyState}>
       {activeTab === "premium" && !errorMessage ? (
@@ -1030,23 +1071,28 @@ bioSection: {
   flexDirection:"row",
   alignItems:"center",
   justifyContent:"center",
-  paddingVertical:8,
+  paddingVertical:10,
   borderRadius:12,
   borderWidth:1
+ },
+ tabCompact:{
+  paddingVertical:8,
  },
 
  tabText:{
   color:"#888",
-  marginLeft:4,
+  marginLeft:6,
   fontWeight:"600",
-  fontSize:10
+ },
+ tabTextCompact:{
+  marginLeft:4,
+  fontSize:10,
  },
 
  activeTab:{
   color:"#000",
-  marginLeft:4,
+  marginLeft:6,
   fontWeight:"700",
-  fontSize:10
  },
 
  postImage:{
@@ -1108,6 +1154,35 @@ bioSection: {
   backgroundColor:"rgba(155,77,255,0.92)",
   alignItems:"center",
   justifyContent:"center"
- }
+ },
+
+ postImageDimmed:{
+  opacity:0.22,
+ },
+
+ premiumGridOverlay:{
+  ...StyleSheet.absoluteFillObject,
+  backgroundColor:"rgba(10,4,20,0.72)",
+  alignItems:"center",
+  justifyContent:"center",
+  borderRadius:6,
+ },
+
+ premiumFooter:{
+  alignItems:"center",
+  paddingHorizontal:28,
+  paddingVertical:28,
+  marginTop:4,
+ },
+ premiumFooterTitle:{
+  fontSize:17,
+  fontWeight:"700",
+  marginBottom:8,
+ },
+ premiumFooterText:{
+  fontSize:13,
+  lineHeight:20,
+  textAlign:"center",
+ },
 
 });
