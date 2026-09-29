@@ -75,7 +75,7 @@ interface ProfileUser {
  category?: string;
 }
 
-type ProfileTab = "posts" | "swipes" | "tagged";
+type ProfileTab = "posts" | "premium" | "swipes" | "tagged";
 
 const isReelPost = (post: ProfilePost) => post.postType === "reel";
 const MAIN_TAB_ROUTES = ["Feed", "Swipes", "Create", "Chats", "ProfileView"];
@@ -192,21 +192,18 @@ const ProfileScreen = ({navigation}: any) => {
   if (activeTab === "swipes") {
    return allPosts.filter((post) => isReelPost(post));
   }
-
   if (activeTab === "tagged") {
    return taggedPosts;
   }
-
-  return allPosts.filter((post) => !isReelPost(post));
+  if (activeTab === "premium") {
+   return allPosts.filter((post) => !isReelPost(post) && !!post.isPremium);
+  }
+  return allPosts.filter((post) => !isReelPost(post) && !post.isPremium);
  }, [activeTab, allPosts, taggedPosts]);
 
  const totalPostCount = useMemo(
   () => allPosts.filter((post) => !isReelPost(post)).length,
   [allPosts],
- );
- const hasPremiumPosts = useMemo(
-  () => posts.some((post) => Boolean(post.isPremium)),
-  [posts],
  );
   const profileName = user?.name || "User Name";
  const profileHandle = user?.username ? `@${user.username}` : "Complete your profile";
@@ -601,7 +598,8 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
    <View style={[styles.tabs, { backgroundColor: colors.surface, borderColor: colors.border }]}>
     {[
      { key: "posts", label: "Posts", icon: "grid-outline" },
-    { key: "swipes", label: "Swipes", icon: "flame-outline" },
+     { key: "premium", label: "Premium", icon: "lock-closed-outline" },
+     { key: "swipes", label: "Swipes", icon: "flame-outline" },
      { key: "tagged", label: "Tagged", icon: "pricetag-outline" },
     ].map((tabItem) => {
      const isActive = activeTab === tabItem.key;
@@ -618,7 +616,7 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
        ]}
        onPress={() => setActiveTab(tabItem.key as ProfileTab)}
       >
-       <Icon name={tabItem.icon} size={16} color={isActive ? colors.primary : colors.mutedText} />
+       <Icon name={tabItem.icon} size={14} color={isActive ? colors.primary : colors.mutedText} />
        <Text style={isActive ? [styles.activeTab, { color: colors.primary }] : [styles.tabText, { color: colors.mutedText }]}>
         {tabItem.label}
        </Text>
@@ -676,38 +674,40 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
       },
     ]}
     ListHeaderComponent={renderHeader}
-    ListFooterComponent={
-     hasPremiumPosts ? (
-      <View style={styles.premiumContentNotice}>
-       <Icon name="lock-closed-outline" size={18} color={colors.primary} />
-       <Text style={[styles.premiumContentNoticeTitle, { color: colors.text }]}>
-        Premium content
-       </Text>
-       <Text style={[styles.premiumContentNoticeText, { color: colors.mutedText }]}>
-        Access more exclusive content like this by unlocking this post.
-       </Text>
-      </View>
-     ) : null
-    }
+    ListFooterComponent={null}
     ListEmptyComponent={
      <View style={styles.emptyState}>
-      <Text style={[styles.emptyTitle, { color: colors.text }]}>
-       {activeTab === "tagged" ? "No tagged posts yet" : activeTab === "swipes" ? "No swipes yet" : "No posts yet"}
-      </Text>
-      <Text style={[styles.emptyText, { color: colors.mutedText }]}>
-       {errorMessage
-        ? errorMessage
-        : activeTab === "tagged"
-        ? "Posts where you are tagged will show up here."
-        : activeTab === "swipes"
-         ? "Your short video posts will appear here."
-         : "Share photos and videos to build your profile."}
-      </Text>
-      {errorMessage ? (
-        <TouchableOpacity style={[styles.retryButton, { backgroundColor: colors.primary }]} onPress={() => fetchProfile()}>
-         <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
-      ) : null}
+      {activeTab === "premium" && !errorMessage ? (
+       <>
+        <Icon name="lock-closed-outline" size={38} color={colors.primary} style={{ marginBottom: 12, opacity: 0.55 }} />
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>Premium Content</Text>
+        <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+         Exclusive premium content will appear here.
+        </Text>
+       </>
+      ) : (
+       <>
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>
+         {activeTab === "tagged" ? "No tagged posts yet" : activeTab === "swipes" ? "No swipes yet" : activeTab === "premium" ? "Premium Content" : "No posts yet"}
+        </Text>
+        <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+         {errorMessage
+          ? errorMessage
+          : activeTab === "tagged"
+          ? "Posts where you are tagged will show up here."
+          : activeTab === "swipes"
+           ? "Your short video posts will appear here."
+           : activeTab === "premium"
+           ? "Exclusive premium content will appear here."
+           : "Share photos and videos to build your profile."}
+        </Text>
+        {errorMessage ? (
+         <TouchableOpacity style={[styles.retryButton, { backgroundColor: colors.primary }]} onPress={() => fetchProfile()}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+         </TouchableOpacity>
+        ) : null}
+       </>
+      )}
      </View>
     }
     showsVerticalScrollIndicator={false}
@@ -1030,21 +1030,23 @@ bioSection: {
   flexDirection:"row",
   alignItems:"center",
   justifyContent:"center",
-  paddingVertical:10,
+  paddingVertical:8,
   borderRadius:12,
   borderWidth:1
  },
 
  tabText:{
   color:"#888",
-  marginLeft:6,
-  fontWeight:"600"
+  marginLeft:4,
+  fontWeight:"600",
+  fontSize:10
  },
 
  activeTab:{
   color:"#000",
-  marginLeft:6,
-  fontWeight:"700"
+  marginLeft:4,
+  fontWeight:"700",
+  fontSize:10
  },
 
  postImage:{
@@ -1086,23 +1088,6 @@ bioSection: {
   fontWeight:"700"
  },
 
- premiumContentNotice:{
-  alignItems:"center",
-  paddingHorizontal:24,
-  paddingVertical:20,
-  marginTop:8,
-  marginBottom:12
- },
- premiumContentNoticeTitle:{
-  fontSize:15,
-  fontWeight:"700",
-  marginBottom:5
- },
- premiumContentNoticeText:{
-  fontSize:13,
-  lineHeight:19,
-  textAlign:"center"
- },
  center:{
   flex:1,
   justifyContent:"center",
