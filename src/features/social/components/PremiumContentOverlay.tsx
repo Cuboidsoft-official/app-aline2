@@ -20,6 +20,13 @@ interface PremiumContentOverlayProps {
   children: React.ReactNode;
   /** Optional extra style applied to the wrapping container. */
   style?: object;
+  /**
+   * When true, renders children at full opacity with a ~50% dark overlay instead of
+   * the default near-hidden (8% opacity) treatment. Use for stories where the viewer
+   * should be able to recognise the preview image beneath the paywall.
+   * Has no effect once the content is unlocked.
+   */
+  previewMode?: boolean;
 }
 
 /**
@@ -47,6 +54,7 @@ export default function PremiumContentOverlay({
   premiumUnlocked = false,
   children,
   style,
+  previewMode = false,
 }: PremiumContentOverlayProps) {
   // Server-confirmed entitlement (premiumUnlocked) always unlocks regardless of purchaseVerified state
   const isLocked = !!isPremium && !isOwner && !premiumUnlocked;
@@ -100,13 +108,13 @@ export default function PremiumContentOverlay({
 
   return (
     <View style={[styles.container, style]}>
-      {/* Media rendered at very low opacity — layout anchor only */}
-      <View style={styles.hiddenMedia} pointerEvents="none">
+      {/* Media: full opacity in previewMode (story preview), near-hidden otherwise (post). */}
+      <View style={previewMode ? styles.visibleMedia : styles.hiddenMedia} pointerEvents="none">
         {children}
       </View>
 
-      {/* Paywall overlay */}
-      <View style={styles.overlay} pointerEvents="box-none">
+      {/* Paywall overlay: semi-transparent in previewMode so story media stays visible. */}
+      <View style={[styles.overlay, previewMode && styles.overlayPreview]} pointerEvents="box-none">
         <View style={styles.lockBadge}>
           <Icon name="lock-closed" size={13} color="#fff" />
           <Text style={styles.lockBadgeText}>PREMIUM</Text>
@@ -141,12 +149,18 @@ const styles = StyleSheet.create({
   hiddenMedia: {
     opacity: 0.08,
   },
+  visibleMedia: {
+    opacity: 1,
+  },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(10,4,20,0.88)",
     alignItems: "center",
     justifyContent: "center",
     gap: 14,
+  },
+  overlayPreview: {
+    backgroundColor: "rgba(10,4,20,0.52)",
   },
   lockBadge: {
     flexDirection: "row",

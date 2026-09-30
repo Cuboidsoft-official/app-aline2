@@ -294,21 +294,25 @@ function StoryViewerScreen({ route, navigation }: any) {
   const handleUnlockStory = useCallback(async () => {
     if (purchaseLoading || storyPurchaseVerified || !currentStory) return;
     setPurchaseLoading(true);
-    const result = await performPremiumPurchase({ contentType: "story", contentId: currentStory.id });
-    if (result.outcome === "verified" || result.outcome === "already_purchased") {
-      // Phase 2E: re-fetch so entitlement-gated media is included in the response
-      try {
-        socialApi.invalidateStory(currentStory.id);
-        const refreshedStory = await socialApi.getStory(currentStory.id);
-        if (refreshedStory?.premiumUnlocked) {
-          setStories((prev) => prev.map((s) => (s.id === currentStory.id ? refreshedStory : s)));
-          setPurchaseLoading(false);
-          return;
+    try {
+      const result = await performPremiumPurchase({ contentType: "story", contentId: currentStory.id });
+      if (result.outcome === "verified" || result.outcome === "already_purchased") {
+        // Phase 2E: re-fetch so entitlement-gated media is included in the response
+        try {
+          socialApi.invalidateStory(currentStory.id);
+          const refreshedStory = await socialApi.getStory(currentStory.id);
+          if (refreshedStory?.premiumUnlocked) {
+            setStories((prev) => prev.map((s) => (s.id === currentStory.id ? refreshedStory : s)));
+            setPurchaseLoading(false);
+            return;
+          }
+        } catch {
+          // Re-fetch failed — fall back to verified state
         }
-      } catch {
-        // Re-fetch failed — fall back to verified state
+        setStoryPurchaseVerified(true);
       }
-      setStoryPurchaseVerified(true);
+    } catch {
+      // performPremiumPurchase threw unexpectedly — release loading so button recovers
     }
     setPurchaseLoading(false);
   }, [purchaseLoading, storyPurchaseVerified, currentStory]);
@@ -1013,6 +1017,7 @@ function StoryViewerScreen({ route, navigation }: any) {
         purchaseVerified={storyPurchaseVerified}
         premiumUnlocked={currentStory?.premiumUnlocked === true}
         onUnlockPress={handleUnlockStory}
+        previewMode={isStoryLocked}
         style={{ ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" }}
       >
         {renderStoryBody()}
@@ -1157,24 +1162,28 @@ function StoryViewerScreen({ route, navigation }: any) {
         </View>
       ) : null}
 
-      <Pressable
-        style={styles.leftTouch}
-        onPress={prev}
-        onPressIn={() => setPaused(true)}
-        onPressOut={() => setPaused(false)}
-      />
-      <Pressable
-        style={styles.rightTouch}
-        onPress={next}
-        onPressIn={() => setPaused(true)}
-        onPressOut={() => setPaused(false)}
-      />
-      <Pressable
-        style={styles.centerTouch}
-        onPress={handleStoryCenterTap}
-        onPressIn={() => setPaused(true)}
-        onPressOut={() => setPaused(false)}
-      />
+      {!isStoryLocked && (
+        <>
+          <Pressable
+            style={styles.leftTouch}
+            onPress={prev}
+            onPressIn={() => setPaused(true)}
+            onPressOut={() => setPaused(false)}
+          />
+          <Pressable
+            style={styles.rightTouch}
+            onPress={next}
+            onPressIn={() => setPaused(true)}
+            onPressOut={() => setPaused(false)}
+          />
+          <Pressable
+            style={styles.centerTouch}
+            onPress={handleStoryCenterTap}
+            onPressIn={() => setPaused(true)}
+            onPressOut={() => setPaused(false)}
+          />
+        </>
+      )}
 
       <View style={[styles.bottomSheet, { paddingBottom: keyboardHeight > 0 ? 8 : Math.max(insets.bottom + 34, 58), marginBottom: storyKeyboardInset }]}>
         {renderStoryOverlay()}

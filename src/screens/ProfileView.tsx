@@ -212,7 +212,7 @@ const ProfileScreen = ({navigation}: any) => {
    return taggedPosts;
   }
   if (activeTab === "premium") {
-   return allPosts.filter((post) => !isReelPost(post) && !!post.isPremium);
+   return allPosts.filter((post) => !isReelPost(post) && post.postType !== "story" && !!post.isPremium);
   }
   return allPosts.filter((post) => !isReelPost(post) && !post.isPremium);
  }, [activeTab, allPosts, taggedPosts]);
@@ -619,7 +619,7 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
    {(() => {
     const tabItems = [
      { key: "posts", label: "Posts", icon: "grid-outline" },
-     ...(premiumEnabled ? [{ key: "premium", label: "Premium", icon: "lock-closed-outline" }] : []),
+     ...(premiumEnabled ? [{ key: "premium", label: "Premium", icon: "diamond" }] : []),
      { key: "swipes", label: "Swipes", icon: "flame-outline" },
      { key: "tagged", label: "Tagged", icon: "pricetag-outline" },
     ];
@@ -641,7 +641,7 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
          ]}
          onPress={() => setActiveTab(tabItem.key as ProfileTab)}
         >
-         <Icon name={tabItem.icon} size={compact ? 14 : 16} color={isActive ? colors.primary : colors.mutedText} />
+         <Icon name={tabItem.icon} size={compact ? 14 : 16} color={tabItem.key === "premium" ? "#5bc8f5" : (isActive ? colors.primary : colors.mutedText)} />
          <Text style={[
           isActive ? styles.activeTab : styles.tabText,
           { color: isActive ? colors.primary : colors.mutedText },
@@ -708,7 +708,7 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
     ListFooterComponent={
      activeTab === "premium" && posts.length > 0 ? (
       <View style={styles.premiumFooter}>
-       <Icon name="lock-closed-outline" size={22} color={colors.primary} style={{ marginBottom: 10, opacity: 0.75 }} />
+       <Icon name="diamond" size={22} color="#5bc8f5" style={{ marginBottom: 10 }} />
        <Text style={[styles.premiumFooterTitle, { color: colors.text }]}>Premium only</Text>
        <Text style={[styles.premiumFooterText, { color: colors.mutedText }]}>
         Access more exclusive content like this by purchasing this post.
@@ -720,7 +720,7 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
      <View style={styles.emptyState}>
       {activeTab === "premium" && !errorMessage ? (
        <>
-        <Icon name="lock-closed-outline" size={38} color={colors.primary} style={{ marginBottom: 12, opacity: 0.55 }} />
+        <Icon name="diamond" size={38} color="#5bc8f5" style={{ marginBottom: 12 }} />
         <Text style={[styles.emptyTitle, { color: colors.text }]}>Premium Content</Text>
         <Text style={[styles.emptyText, { color: colors.mutedText }]}>
          Exclusive premium content will appear here.

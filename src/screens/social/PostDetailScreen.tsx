@@ -511,6 +511,7 @@ function PostDetailScreen({ route, navigation }: any) {
             purchaseVerified={purchaseVerified}
             premiumUnlocked={post.premiumUnlocked === true}
             onUnlockPress={handleUnlockPost}
+            previewMode
           >
           <Pressable style={[styles.mediaSurface, { backgroundColor: colors.card }]} onPress={handleMediaPress}>
             {post.type === "carousel" ? (
