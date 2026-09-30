@@ -2485,6 +2485,7 @@ function FeedScreen({ navigation, route }: any) {
         purchaseVerified={premiumStates[item.id] === "verified"}
         premiumUnlocked={item.premiumUnlocked === true}
         onUnlockPress={() => handleUnlockPost(item.id)}
+        previewMode
       >
         {rawMediaSurface}
       </PremiumContentOverlay>

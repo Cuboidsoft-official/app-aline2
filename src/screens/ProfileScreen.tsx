@@ -375,11 +375,27 @@ const ProfileScreen = ({ navigation }: any) => {
     <CountryPicker
       show={showCountryPicker}
       lang="en"
+      inputPlaceholder="Search country..."
+      searchMessage="No country found"
       onBackdropPress={() => setShowCountryPicker(false)}
       onRequestClose={() => setShowCountryPicker(false)}
       pickerButtonOnPress={(item: CountryItem) => {
         setCountry(item.code.toUpperCase());
         setShowCountryPicker(false);
+      }}
+      style={{
+        textInput: {
+          height: 48,
+          borderWidth: 1,
+          borderColor: '#ddd',
+          borderRadius: 10,
+          paddingHorizontal: 14,
+          fontSize: 15,
+          backgroundColor: '#fafafa',
+          marginHorizontal: 12,
+          marginTop: 8,
+          marginBottom: 4,
+        },
       }}
     />
     </View>
