@@ -1199,7 +1199,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
   // Fetch premium settings once on mount; resolve the creator's applicable country pricing.
   useEffect(() => {
-    API.get("/premium-settings")
+    API.get("/premium-settings/mine")
       .then(async (res: any) => {
         const s = res?.data?.settings;
         if (!s) return;
