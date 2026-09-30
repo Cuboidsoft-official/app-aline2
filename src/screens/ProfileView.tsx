@@ -57,11 +57,6 @@ interface ProfilePost {
   poster?: string;
   coverImage?: string;
  }>;
- // Story-specific fields (only present when _itemType === "story")
- _itemType?: "post" | "story";
- mediaUrl?: string;
- thumbnailUrl?: string;
- segments?: Array<{ mediaUrl?: string; thumbnailUrl?: string }>;
 }
 
 interface ProfileUser {
@@ -129,7 +124,6 @@ const ProfileScreen = ({navigation}: any) => {
  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
  const [avatarViewerVisible, setAvatarViewerVisible] = useState(false);
  const [premiumEnabled, setPremiumEnabled] = useState(false);
- const [allStories, setAllStories] = useState<ProfilePost[]>([]);
 
  const fetchProfile = useCallback(async (showRefreshing = false) => {
 
@@ -146,11 +140,10 @@ const ProfileScreen = ({navigation}: any) => {
    setIsPrivate(!!profileUser?.isPrivate);
 
    if (profileUser?._id) {
-    const [postsRes, taggedRes, settingsRes, storiesRes] = await Promise.allSettled([
+    const [postsRes, taggedRes, settingsRes] = await Promise.allSettled([
       API.get(`/posts/user/${profileUser._id}`),
       API.get(`/posts/tagged/${profileUser._id}`),
       API.get("/premium-settings/mine"),
-      API.get(`/story/user/${profileUser._id}`),
     ]);
 
     setAllPosts(
@@ -165,12 +158,9 @@ const ProfileScreen = ({navigation}: any) => {
     } else {
      setPremiumEnabled(false);
     }
-    const rawStories: any[] = storiesRes.status === "fulfilled" ? (storiesRes.value.data.stories || []) : [];
-    setAllStories(rawStories.map((s) => ({ ...s, _itemType: "story" as const })));
    } else {
     setAllPosts([]);
     setTaggedPosts([]);
-    setAllStories([]);
     setPremiumEnabled(false);
    }
 
@@ -181,7 +171,6 @@ const ProfileScreen = ({navigation}: any) => {
    setUser(null);
    setAllPosts([]);
    setTaggedPosts([]);
-   setAllStories([]);
    setPremiumEnabled(false);
    setErrorMessage(getReadableApiErrorMessage(error, "Could not load your profile right now."));
   } finally {
@@ -223,14 +212,10 @@ const ProfileScreen = ({navigation}: any) => {
    return taggedPosts;
   }
   if (activeTab === "premium") {
-   const premiumPosts = allPosts
-    .filter((post) => !isReelPost(post) && !!post.isPremium)
-    .map((p) => ({ ...p, _itemType: "post" as const }));
-   const premiumStories = allStories.filter((s) => !!s.isPremium);
-   return [...premiumPosts, ...premiumStories];
+   return allPosts.filter((post) => !isReelPost(post) && !!post.isPremium);
   }
   return allPosts.filter((post) => !isReelPost(post) && !post.isPremium);
- }, [activeTab, allPosts, taggedPosts, allStories]);
+ }, [activeTab, allPosts, taggedPosts]);
 
  const totalPostCount = useMemo(
   () => allPosts.filter((post) => !isReelPost(post)).length,
@@ -294,13 +279,8 @@ const firstPresentString = (...values: any[]): string => {
 
 const getPostPreviewUrl = (post: ProfilePost): string => {
  const media = post.media?.[0];
- const seg0 = post.segments?.[0];
  return normalizeMediaUrl(
   firstPresentString(
-   post.thumbnailUrl,
-   seg0?.thumbnailUrl,
-   seg0?.mediaUrl,
-   post.mediaUrl,
    media?.thumbnailUrl,
    media?.thumbnail,
    media?.posterUrl,
@@ -372,16 +352,11 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
  const renderPost = ({ item }: { item: ProfilePost }) => {
   const isLocked = !!item.isPremium && !item.premiumUnlocked;
   const showPremiumOverlay = activeTab === "premium" && isLocked;
-  const isStory = item._itemType === "story";
   return (
    <TouchableOpacity
     activeOpacity={0.9}
     style={styles.postCard}
     onPress={() => {
-     if (isStory) {
-      navigation.navigate("StoryViewerScreen", { storyId: item._id, storyUserId: user?._id });
-      return;
-     }
      if (isReelPost(item)) {
       openSwipeInSwipes(navigation, { swipeId: item._id, userId: user?._id });
       return;
@@ -412,11 +387,6 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
      ) : isLocked ? (
       <View style={styles.premiumLockBadge} pointerEvents="none">
        <Icon name="lock-closed" size={11} color="#fff" />
-      </View>
-     ) : null}
-     {isStory ? (
-      <View style={styles.storyBadge} pointerEvents="none">
-       <Icon name="camera" size={10} color="#fff" />
       </View>
      ) : null}
     </View>
@@ -722,7 +692,7 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
    <FlatList
     data={posts}
     renderItem={renderPost}
-    keyExtractor={(item) => `${item._itemType ?? "post"}_${item._id}`}
+    keyExtractor={(item) => item._id}
     numColumns={3}
     extraData={activeTab}
     style={styles.container}
@@ -741,7 +711,7 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
        <Icon name="lock-closed-outline" size={22} color={colors.primary} style={{ marginBottom: 10, opacity: 0.75 }} />
        <Text style={[styles.premiumFooterTitle, { color: colors.text }]}>Premium only</Text>
        <Text style={[styles.premiumFooterText, { color: colors.mutedText }]}>
-        Access more exclusive content like this by purchasing this content.
+        Access more exclusive content like this by purchasing this post.
        </Text>
       </View>
      ) : null
@@ -1181,18 +1151,6 @@ bioSection: {
   width:22,
   height:22,
   borderRadius:11,
-  backgroundColor:"rgba(155,77,255,0.92)",
-  alignItems:"center",
-  justifyContent:"center"
- },
-
- storyBadge:{
-  position:"absolute",
-  top:5,
-  left:5,
-  width:20,
-  height:20,
-  borderRadius:10,
   backgroundColor:"rgba(155,77,255,0.92)",
   alignItems:"center",
   justifyContent:"center"
