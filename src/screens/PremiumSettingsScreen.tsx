@@ -599,9 +599,9 @@ const PremiumSettingsScreen = ({ navigation }: any) => {
                     </TouchableOpacity>
                   </View>
 
-                  {/* 2. Currency + Amount */}
+                  {/* Amount setup */}
                   <Text style={[styles.subSectionLabel, { color: colors.mutedText }]}>
-                    2. SETUP YOUR SUBSCRIPTION AMOUNT
+                    Setup your monthly subscription amount
                   </Text>
                   <View style={styles.countryFields}>
                     <View style={styles.fieldBlock}>
@@ -645,7 +645,7 @@ const PremiumSettingsScreen = ({ navigation }: any) => {
                     </View>
                   </View>
                   <Text style={[styles.boundsHint, { color: colors.mutedText }]}>
-                    Allowed range: {globalBounds.minPriceINR}–{globalBounds.maxPriceINR}
+                    Allowed range: {globalBounds.minPriceINR}–{globalBounds.maxPriceINR} / month
                   </Text>
 
                   {/* Enabled */}
