@@ -65,6 +65,7 @@ import CommentThreadScreen from './src/screens/social/CommentThreadScreen';
 import SearchScreen from './src/screens/SearchScreen';
 import HashtagResultsScreen from './src/screens/HashtagResultsScreen';
 import PremiumSettingsScreen from './src/screens/PremiumSettingsScreen';
+import CreatorSubscriptionSetupScreen from './src/screens/CreatorSubscriptionSetupScreen';
 import CloseFriendsScreen from './src/screens/CloseFriendsScreen';
 import GroupDetailsScreen from './src/screens/GroupDetailsScreen';
 import CallScreen from './src/screens/CallScreen';
@@ -457,6 +458,7 @@ function AppNavigator() {
         <Stack.Screen name="Search" component={SearchScreen} />
         <Stack.Screen name="HashtagResultsScreen" component={HashtagResultsScreen} />
         <Stack.Screen name="PremiumSettingsScreen" component={PremiumSettingsScreen} />
+        <Stack.Screen name="CreatorSubscriptionSetupScreen" component={CreatorSubscriptionSetupScreen} />
         <Stack.Screen name="SellerRegistration" component={SellerRegistration} />
         <Stack.Screen name="SellerDashboardScreen" component={SellerDashboardScreen} />
         <Stack.Screen name="AddServiceScreen" component={AddServiceScreen} />
