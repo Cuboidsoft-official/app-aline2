@@ -36,11 +36,11 @@ interface PremiumContentOverlayProps {
  *   - isPremium is falsy (normal content)
  *   - isOwner is true (creator viewing their own content)
  *
- * When locked: renders children at ~8% opacity (visually hidden without
+ * When locked: renders children with a ~5px blur (visually obscured without
  * removing them from layout) and places a full-cover dark overlay on top
  * showing a lock badge, price, and an Unlock CTA.
  *
- * NOTE: client-side opacity is NOT a security measure — it is display-only
+ * NOTE: client-side blur is NOT a security measure — it is display-only
  * gating. Secure media delivery (signed URLs, entitlement) is Phase 2E.
  */
 export default function PremiumContentOverlay({
@@ -147,14 +147,15 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   hiddenMedia: {
-    opacity: 0.08,
+    // ~5px blur makes content recognisable but unreadable; display-only, not a security boundary.
+    filter: [{ blur: 5 }],
   },
   visibleMedia: {
     opacity: 1,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(10,4,20,0.88)",
+    backgroundColor: "rgba(10,4,20,0.78)",
     alignItems: "center",
     justifyContent: "center",
     gap: 14,
