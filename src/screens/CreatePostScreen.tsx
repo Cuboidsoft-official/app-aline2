@@ -4519,18 +4519,15 @@ function CreatePostScreen({ navigation, route }: any) {
     );
   };
 
-  // 3×3 rule-of-thirds grid overlay for the crop frame.
-  // pointerEvents="none" ensures it never intercepts gestures.
+  // 3×3 rule-of-thirds grid overlay. Lines are absolutely positioned
+  // at exact 1/3 and 2/3 positions. pointerEvents="none" prevents
+  // any gesture interception.
   const renderCropGrid = () => (
     <View pointerEvents="none" style={styles.cropFrameGuide}>
-      <View pointerEvents="none" style={styles.cropGridInner}>
-        <View pointerEvents="none" style={styles.cropGridRow}>
-          <View pointerEvents="none" style={styles.cropGridLineV} />
-          <View pointerEvents="none" style={styles.cropGridLineV} />
-        </View>
-        <View pointerEvents="none" style={styles.cropGridLineH} />
-        <View pointerEvents="none" style={styles.cropGridLineH} />
-      </View>
+      <View pointerEvents="none" style={[styles.cropGridLineV, { left: "33.33%" }]} />
+      <View pointerEvents="none" style={[styles.cropGridLineV, { left: "66.67%" }]} />
+      <View pointerEvents="none" style={[styles.cropGridLineH, { top: "33.33%" }]} />
+      <View pointerEvents="none" style={[styles.cropGridLineH, { top: "66.67%" }]} />
     </View>
   );
 
@@ -6769,23 +6766,19 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     overflow: "hidden",
   },
-  cropGridInner: {
-    flex: 1,
-  },
-  cropGridRow: {
-    flex: 1,
-    flexDirection: "row",
-    justifyContent: "space-evenly",
-  },
   cropGridLineV: {
-    width: StyleSheet.hairlineWidth,
-    height: "100%",
-    backgroundColor: "rgba(255,255,255,0.35)",
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 1,
+    backgroundColor: "rgba(255,255,255,0.55)",
   },
   cropGridLineH: {
-    height: StyleSheet.hairlineWidth,
-    width: "100%",
-    backgroundColor: "rgba(255,255,255,0.35)",
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.55)",
   },
   emptyPreview: {
     width: "100%",
