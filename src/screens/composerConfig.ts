@@ -148,5 +148,3 @@ export const computePinchScale = (
  * - If currently fitted (scale < 0.95), restore to fill (1.0).
  * - If currently filling, switch to fitted (0.82).
  */
-export const toggleFitScale = (currentScale: number): number =>
-  currentScale < 0.95 ? 1.0 : 0.82;

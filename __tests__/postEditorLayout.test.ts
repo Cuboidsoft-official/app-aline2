@@ -14,7 +14,6 @@ import {
   sanitizeFrameTransform,
   normalizeTranslate,
   computePinchScale,
-  toggleFitScale,
 } from "../src/screens/composerConfig";
 
 // ─── POST_ASPECTS ─────────────────────────────────────────────────────────────
@@ -280,22 +279,3 @@ describe("computePinchScale", () => {
   });
 });
 
-// ─── toggleFitScale ───────────────────────────────────────────────────────────
-
-describe("toggleFitScale", () => {
-  it("restores to fill (1.0) when currently fitted (scale < 0.95)", () => {
-    expect(toggleFitScale(0.82)).toBe(1.0);
-  });
-
-  it("switches to fitted (0.82) when currently filling (scale >= 0.95)", () => {
-    expect(toggleFitScale(1.0)).toBe(0.82);
-  });
-
-  it("treats scale exactly at 0.95 as filling → returns 0.82", () => {
-    expect(toggleFitScale(0.95)).toBe(0.82);
-  });
-
-  it("treats scale just below 0.95 as fitted → returns 1.0", () => {
-    expect(toggleFitScale(0.94)).toBe(1.0);
-  });
-});

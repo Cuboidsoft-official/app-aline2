@@ -3098,26 +3098,16 @@ function CreatePostScreen({ navigation, route }: any) {
     });
   }, []);
 
-  const toggleFitFullPhoto = useCallback(() => {
+  const resetCropPosition = useCallback(() => {
     composerMediaPan.setValue({ x: 0, y: 0 });
-    setComposerMediaTransform((current) => {
-      const isAlreadyFitted = current.scale < 0.95;
-      const nextScale = isAlreadyFitted ? 1.0 : 0.82;
-      const nextTransform = {
-        scale: nextScale,
-        translateX: 0,
-        translateY: 0,
-      };
-
-      if (selectedAsset?.id) {
-        setComposerMediaTransformsByAssetId((prev) => ({
-          ...prev,
-          [selectedAsset.id]: nextTransform,
-        }));
-      }
-
-      return nextTransform;
-    });
+    const nextTransform = { scale: 1.0, translateX: 0, translateY: 0 };
+    setComposerMediaTransform(nextTransform);
+    if (selectedAsset?.id) {
+      setComposerMediaTransformsByAssetId((prev) => ({
+        ...prev,
+        [selectedAsset.id]: nextTransform,
+      }));
+    }
   }, [composerMediaPan, selectedAsset?.id]);
 
   const persistComposerMediaTransform = useCallback(() => {
@@ -3125,10 +3115,13 @@ function CreatePostScreen({ navigation, route }: any) {
     const rawY = Number((composerMediaPan.y as any)._value || 0);
 
     setComposerMediaTransform((current) => {
+      const nextScale = clamp(current.scale, 1.0, 4);
+      // Max normalized translate = (scale-1)/2 ensures image always fills frame
+      const maxT = (nextScale - 1) / 2;
       const nextTransform = {
-        scale: clamp(current.scale, 0.2, 4),
-        translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -1.5, 1.5) : current.translateX,
-        translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -1.5, 1.5) : current.translateY,
+        scale: nextScale,
+        translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -maxT, maxT) : current.translateX,
+        translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -maxT, maxT) : current.translateY,
       };
 
       if (selectedAsset?.id) {
@@ -3173,22 +3166,36 @@ function CreatePostScreen({ navigation, route }: any) {
             const startDistance = composerMediaGestureRef.current.startDistance || distance || 1;
             const nextScale = clamp(
               composerMediaGestureRef.current.startScale * (distance / Math.max(1, startDistance)),
-              0.2,
+              1.0,
               4,
             );
+            // Re-clamp pan to keep image filling frame at new scale
+            const maxPanX = Math.max(0, (nextScale - 1) * composerCanvasSize.width / 2);
+            const maxPanY = Math.max(0, (nextScale - 1) * composerCanvasSize.height / 2);
+            const curPanX = Number((composerMediaPan.x as any)._value || 0);
+            const curPanY = Number((composerMediaPan.y as any)._value || 0);
+            composerMediaPan.setValue({
+              x: clamp(curPanX, -maxPanX, maxPanX),
+              y: clamp(curPanY, -maxPanY, maxPanY),
+            });
             setComposerMediaTransform((current) => ({ ...current, scale: nextScale }));
             return;
           }
 
+          // Pan bounded by current scale so image always fills frame
+          const maxPanX = Math.max(0, (composerMediaTransform.scale - 1) * composerCanvasSize.width / 2);
+          const maxPanY = Math.max(0, (composerMediaTransform.scale - 1) * composerCanvasSize.height / 2);
           composerMediaPan.setValue({
-            x: composerMediaGestureRef.current.startX + gestureState.dx,
-            y: composerMediaGestureRef.current.startY + gestureState.dy,
+            x: clamp(composerMediaGestureRef.current.startX + gestureState.dx, -maxPanX, maxPanX),
+            y: clamp(composerMediaGestureRef.current.startY + gestureState.dy, -maxPanY, maxPanY),
           });
         },
         onPanResponderRelease: persistComposerMediaTransform,
         onPanResponderTerminate: persistComposerMediaTransform,
       }),
     [
+      composerCanvasSize.height,
+      composerCanvasSize.width,
       composerMediaPan,
       composerMediaTransform.scale,
       persistComposerMediaTransform,
@@ -4323,17 +4330,11 @@ function CreatePostScreen({ navigation, route }: any) {
           <View pointerEvents="box-none" style={styles.cropControlRow}>
             <TouchableOpacity
               style={styles.fitTogglePill}
-              onPress={toggleFitFullPhoto}
+              onPress={resetCropPosition}
               activeOpacity={0.8}
             >
-              <Icon
-                name={composerMediaTransform.scale < 0.95 ? "scan-outline" : "expand-outline"}
-                size={13}
-                color="#fff"
-              />
-              <Text style={styles.cropHintText}>
-                {composerMediaTransform.scale < 0.95 ? "Fill frame" : "Fit full photo"}
-              </Text>
+              <Icon name="return-up-back-outline" size={13} color="#fff" />
+              <Text style={styles.cropHintText}>Reset</Text>
             </TouchableOpacity>
             <View pointerEvents="none" style={styles.cropHintPill}>
               <Icon name="move-outline" size={13} color="#fff" />
