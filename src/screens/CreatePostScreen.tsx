@@ -91,15 +91,23 @@ try {
   ColorMatrix = null;
 }
 
-type ComposerMode = "post" | "story" | "swipe";
-type ComposerStage = "launcher" | "edit" | "details";
+import {
+  type ComposerMode,
+  type AspectOption,
+  type ComposerMediaTransform,
+  type ComposerEditToolPanel,
+  POST_ASPECTS,
+  SWIPE_ASPECTS,
+  STORY_ASPECTS,
+  ASPECTS_BY_MODE,
+  DEFAULT_ASPECT_BY_MODE,
+  DEFAULT_COMPOSER_MEDIA_TRANSFORM,
+  INITIAL_TOOL_PANEL,
+  findAspectOption,
+  sanitizeFrameTransform,
+} from "./composerConfig";
 
-type AspectOption = {
-  id: string;
-  label: string;
-  detail: string;
-  ratio: number;
-};
+type ComposerStage = "launcher" | "edit" | "details";
 
 type AudienceCandidate = {
   id: string;
@@ -118,30 +126,10 @@ type MusicResultItem = SelectedMusicClip & {
 };
 
 type StoryToolPanel = "text" | "color" | "font" | "size" | "filters" | "sticker" | null;
-type ComposerEditToolPanel = "layout" | "filters" | "tag" | "trim" | "text" | "color" | "font" | "size" | null;
 type StoryTextFontVariant = "bold" | "italic" | "clean" | "soft";
 type MusicPreviewMode = "audio";
-type ComposerMediaTransform = { scale: number; translateX: number; translateY: number };
 
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
-const POST_ASPECTS: AspectOption[] = [
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
-];
-const STORY_ASPECTS: AspectOption[] = [
-  { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-];
-const ASPECTS_BY_MODE: Record<ComposerMode, AspectOption[]> = {
-  post: POST_ASPECTS,
-  story: STORY_ASPECTS,
-  swipe: POST_ASPECTS,
-};
-const DEFAULT_ASPECT_BY_MODE: Record<ComposerMode, string> = {
-  post: "portrait",
-  story: "vertical",
-  swipe: "portrait",
-};
 const CREATE_DOCK_OFFSET = APP_BOTTOM_DOCK_BASE_HEIGHT + 4;
 const MODE_COPY: Record<
   ComposerMode,
@@ -188,7 +176,6 @@ const MUSIC_CLIP_MAX_SECONDS = 30;
 const MUSIC_DISCOVERY_FALLBACK_QUERIES = ["love", "party", "happy", "summer"];
 const PHOTO_PICKER_MAX_DIMENSION = 2160;
 const PHOTO_PICKER_QUALITY = 0.8;
-const DEFAULT_COMPOSER_MEDIA_TRANSFORM: ComposerMediaTransform = { scale: 1, translateX: 0, translateY: 0 };
 const STORY_TEXT_THEMES: Array<{
   id: StoryTextStickerTheme;
   label: string;
@@ -361,8 +348,6 @@ const defaultClipDuration = (mode: ComposerMode, trackDuration: number): number 
   return Math.min(MUSIC_CLIP_MAX_SECONDS, safe);
 };
 
-const findAspectOption = (mode: ComposerMode, aspectId: string | undefined) =>
-  ASPECTS_BY_MODE[mode].find((item) => item.id === aspectId) || ASPECTS_BY_MODE[mode][0];
 
 const buildMusicLabel = (music: SelectedMusicClip | null | undefined) =>
   [music?.title, music?.artist].filter(Boolean).join(" • ");
@@ -433,13 +418,7 @@ const buildAspectMetadata = (
   const safeRatio = Math.max(0.5, Math.min(2, Number(ratio) || 1));
   const sourceWidth = Math.max(720, Math.round(Number(sourceAsset?.width || uploadedMedia.width || 0) || 0));
   const sourceHeight = Math.max(720, Math.round(Number(sourceAsset?.height || uploadedMedia.height || 0) || 0));
-  const safeFrameTransform = frameTransform
-    ? {
-        scale: Math.max(1, Math.min(4, Number(frameTransform.scale) || 1)),
-        translateX: Math.max(-1, Math.min(1, Number(frameTransform.translateX) || 0)),
-        translateY: Math.max(-1, Math.min(1, Number(frameTransform.translateY) || 0)),
-      }
-    : undefined;
+  const safeFrameTransform = sanitizeFrameTransform(frameTransform);
 
   if (safeRatio >= 1) {
     const width = Math.max(sourceWidth, Math.round(sourceHeight * safeRatio));
@@ -1004,7 +983,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationFetchingCurrent, setLocationFetchingCurrent] = useState(false);
   const [tagSheetVisible, setTagSheetVisible] = useState(false);
-  const [composerEditToolPanel, setComposerEditToolPanel] = useState<ComposerEditToolPanel>("layout");
+  const [composerEditToolPanel, setComposerEditToolPanel] = useState<ComposerEditToolPanel>(INITIAL_TOOL_PANEL);
   const [musicSheetVisible, setMusicSheetVisible] = useState(false);
   const [musicTrimSheetVisible, setMusicTrimSheetVisible] = useState(false);
   const [videoTrimSheetVisible, setVideoTrimSheetVisible] = useState(false);
@@ -3119,26 +3098,16 @@ function CreatePostScreen({ navigation, route }: any) {
     });
   }, []);
 
-  const toggleFitFullPhoto = useCallback(() => {
+  const resetCropPosition = useCallback(() => {
     composerMediaPan.setValue({ x: 0, y: 0 });
-    setComposerMediaTransform((current) => {
-      const isAlreadyFitted = current.scale < 0.95;
-      const nextScale = isAlreadyFitted ? 1.0 : 0.82;
-      const nextTransform = {
-        scale: nextScale,
-        translateX: 0,
-        translateY: 0,
-      };
-
-      if (selectedAsset?.id) {
-        setComposerMediaTransformsByAssetId((prev) => ({
-          ...prev,
-          [selectedAsset.id]: nextTransform,
-        }));
-      }
-
-      return nextTransform;
-    });
+    const nextTransform = { scale: 1.0, translateX: 0, translateY: 0 };
+    setComposerMediaTransform(nextTransform);
+    if (selectedAsset?.id) {
+      setComposerMediaTransformsByAssetId((prev) => ({
+        ...prev,
+        [selectedAsset.id]: nextTransform,
+      }));
+    }
   }, [composerMediaPan, selectedAsset?.id]);
 
   const persistComposerMediaTransform = useCallback(() => {
@@ -3146,10 +3115,13 @@ function CreatePostScreen({ navigation, route }: any) {
     const rawY = Number((composerMediaPan.y as any)._value || 0);
 
     setComposerMediaTransform((current) => {
+      const nextScale = clamp(current.scale, 1.0, 4);
+      // Max normalized translate = (scale-1)/2 ensures image always fills frame
+      const maxT = (nextScale - 1) / 2;
       const nextTransform = {
-        scale: clamp(current.scale, 0.2, 4),
-        translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -1.5, 1.5) : current.translateX,
-        translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -1.5, 1.5) : current.translateY,
+        scale: nextScale,
+        translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -maxT, maxT) : current.translateX,
+        translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -maxT, maxT) : current.translateY,
       };
 
       if (selectedAsset?.id) {
@@ -3194,22 +3166,36 @@ function CreatePostScreen({ navigation, route }: any) {
             const startDistance = composerMediaGestureRef.current.startDistance || distance || 1;
             const nextScale = clamp(
               composerMediaGestureRef.current.startScale * (distance / Math.max(1, startDistance)),
-              0.2,
+              1.0,
               4,
             );
+            // Re-clamp pan to keep image filling frame at new scale
+            const maxPanX = Math.max(0, (nextScale - 1) * composerCanvasSize.width / 2);
+            const maxPanY = Math.max(0, (nextScale - 1) * composerCanvasSize.height / 2);
+            const curPanX = Number((composerMediaPan.x as any)._value || 0);
+            const curPanY = Number((composerMediaPan.y as any)._value || 0);
+            composerMediaPan.setValue({
+              x: clamp(curPanX, -maxPanX, maxPanX),
+              y: clamp(curPanY, -maxPanY, maxPanY),
+            });
             setComposerMediaTransform((current) => ({ ...current, scale: nextScale }));
             return;
           }
 
+          // Pan bounded by current scale so image always fills frame
+          const maxPanX = Math.max(0, (composerMediaTransform.scale - 1) * composerCanvasSize.width / 2);
+          const maxPanY = Math.max(0, (composerMediaTransform.scale - 1) * composerCanvasSize.height / 2);
           composerMediaPan.setValue({
-            x: composerMediaGestureRef.current.startX + gestureState.dx,
-            y: composerMediaGestureRef.current.startY + gestureState.dy,
+            x: clamp(composerMediaGestureRef.current.startX + gestureState.dx, -maxPanX, maxPanX),
+            y: clamp(composerMediaGestureRef.current.startY + gestureState.dy, -maxPanY, maxPanY),
           });
         },
         onPanResponderRelease: persistComposerMediaTransform,
         onPanResponderTerminate: persistComposerMediaTransform,
       }),
     [
+      composerCanvasSize.height,
+      composerCanvasSize.width,
       composerMediaPan,
       composerMediaTransform.scale,
       persistComposerMediaTransform,
@@ -4304,9 +4290,7 @@ function CreatePostScreen({ navigation, route }: any) {
             <Text style={styles.videoBadgeText}>{MODE_COPY[mode].label}</Text>
           </View>
           {renderVideoSoundToggle()}
-          {interactive ? (
-            <View pointerEvents="none" style={styles.cropFrameGuide} />
-          ) : null}
+          {interactive ? renderCropGrid() : null}
           {interactive ? (
             <View pointerEvents="none" style={styles.cropHintPill}>
               <Icon name="move-outline" size={13} color="#fff" />
@@ -4341,24 +4325,16 @@ function CreatePostScreen({ navigation, route }: any) {
             />
           )}
         </Animated.View>
-        {interactive ? (
-          <View pointerEvents="none" style={styles.cropFrameGuide} />
-        ) : null}
+        {interactive ? renderCropGrid() : null}
         {interactive ? (
           <View pointerEvents="box-none" style={styles.cropControlRow}>
             <TouchableOpacity
               style={styles.fitTogglePill}
-              onPress={toggleFitFullPhoto}
+              onPress={resetCropPosition}
               activeOpacity={0.8}
             >
-              <Icon
-                name={composerMediaTransform.scale < 0.95 ? "scan-outline" : "expand-outline"}
-                size={13}
-                color="#fff"
-              />
-              <Text style={styles.cropHintText}>
-                {composerMediaTransform.scale < 0.95 ? "Fill frame" : "Fit full photo"}
-              </Text>
+              <Icon name="return-up-back-outline" size={13} color="#fff" />
+              <Text style={styles.cropHintText}>Reset</Text>
             </TouchableOpacity>
             <View pointerEvents="none" style={styles.cropHintPill}>
               <Icon name="move-outline" size={13} color="#fff" />
@@ -4542,6 +4518,18 @@ function CreatePostScreen({ navigation, route }: any) {
     </View>
     );
   };
+
+  // 3×3 rule-of-thirds grid overlay. Lines are absolutely positioned
+  // at exact 1/3 and 2/3 positions. pointerEvents="none" prevents
+  // any gesture interception.
+  const renderCropGrid = () => (
+    <View pointerEvents="none" style={styles.cropFrameGuide}>
+      <View pointerEvents="none" style={[styles.cropGridLineV, { left: "33.33%" }]} />
+      <View pointerEvents="none" style={[styles.cropGridLineV, { left: "66.67%" }]} />
+      <View pointerEvents="none" style={[styles.cropGridLineH, { top: "33.33%" }]} />
+      <View pointerEvents="none" style={[styles.cropGridLineH, { top: "66.67%" }]} />
+    </View>
+  );
 
   const renderAspectSelector = () => (
     <View style={styles.chipRow}>
@@ -4891,7 +4879,7 @@ function CreatePostScreen({ navigation, route }: any) {
               <Text style={[styles.sectionTitle, { color: textColor }]}>Aspect ratio</Text>
             </View>
             <Text style={[styles.sectionMeta, { color: mutedColor }]}>
-              {mode === "post" ? "1:1, 16:9, 4:5, 9:16" : "9:16, 4:5"}
+              {mode === "post" ? "1:1, 16:9" : "9:16, 4:5"}
             </Text>
           </View>
           {renderAspectSelector()}
@@ -6776,6 +6764,21 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "rgba(255,255,255,0.55)",
     borderRadius: 24,
+    overflow: "hidden",
+  },
+  cropGridLineV: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 1,
+    backgroundColor: "rgba(255,255,255,0.55)",
+  },
+  cropGridLineH: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.55)",
   },
   emptyPreview: {
     width: "100%",
