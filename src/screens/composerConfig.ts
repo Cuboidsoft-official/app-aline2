@@ -88,7 +88,12 @@ export const findAspectOption = (
 
 /**
  * Sanitizes a raw frameTransform from the composer state into the value
- * written into the post payload. Clamps scale to [1, 4] and translate to [-1, 1].
+ * written into the post payload.
+ *
+ * Scale range  [0.1, 4]   — preserves intentional sub-1 states such as the
+ *   "fit full photo" scale of 0.82 produced by toggleFitScale.
+ * Translate range  [-1.5, 1.5]  — matches the editor's PanResponder clamp.
+ *
  * Returns undefined when no transform is provided (no-op / default).
  */
 export const sanitizeFrameTransform = (
@@ -96,9 +101,9 @@ export const sanitizeFrameTransform = (
 ): { scale: number; translateX: number; translateY: number } | undefined => {
   if (!frameTransform) return undefined;
   return {
-    scale: Math.max(1, Math.min(4, Number(frameTransform.scale) || 1)),
-    translateX: Math.max(-1, Math.min(1, Number(frameTransform.translateX) || 0)),
-    translateY: Math.max(-1, Math.min(1, Number(frameTransform.translateY) || 0)),
+    scale: Math.max(0.1, Math.min(4, Number(frameTransform.scale) || 1)),
+    translateX: Math.max(-1.5, Math.min(1.5, Number(frameTransform.translateX) || 0)),
+    translateY: Math.max(-1.5, Math.min(1.5, Number(frameTransform.translateY) || 0)),
   };
 };
 

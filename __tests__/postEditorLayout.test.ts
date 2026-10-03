@@ -161,6 +161,8 @@ describe("findAspectOption", () => {
 });
 
 // ─── sanitizeFrameTransform ───────────────────────────────────────────────────
+// Scale range: [0.1, 4]  — preserves intentional sub-1 states (e.g. 0.82 fit)
+// Translate range: [-1.5, 1.5] — matches the editor PanResponder clamp
 
 describe("sanitizeFrameTransform", () => {
   it("returns undefined when no argument given", () => {
@@ -172,28 +174,46 @@ describe("sanitizeFrameTransform", () => {
       .toEqual({ scale: 2, translateX: 0.5, translateY: -0.3 });
   });
 
-  it("clamps scale below 1 up to 1", () => {
-    expect(sanitizeFrameTransform({ scale: 0.5, translateX: 0, translateY: 0 })!.scale).toBe(1);
+  // ── Regression: scale = 0.82 (fit-full-photo) must survive serialization ──
+  it("preserves scale = 0.82 (toggleFitScale fit state) — must NOT be clipped to 1", () => {
+    expect(sanitizeFrameTransform({ scale: 0.82, translateX: 0, translateY: 0 })!.scale).toBeCloseTo(0.82);
+  });
+
+  it("preserves scale = 0.5 (sub-1 pinch-out) — must NOT be clipped to 1", () => {
+    expect(sanitizeFrameTransform({ scale: 0.5, translateX: 0, translateY: 0 })!.scale).toBe(0.5);
+  });
+
+  it("clamps scale below 0.1 up to 0.1", () => {
+    expect(sanitizeFrameTransform({ scale: 0.01, translateX: 0, translateY: 0 })!.scale).toBe(0.1);
   });
 
   it("clamps scale above 4 down to 4", () => {
     expect(sanitizeFrameTransform({ scale: 10, translateX: 0, translateY: 0 })!.scale).toBe(4);
   });
 
-  it("clamps translateX below -1 up to -1", () => {
-    expect(sanitizeFrameTransform({ scale: 1, translateX: -2, translateY: 0 })!.translateX).toBe(-1);
+  // ── Regression: translate ±1.5 must survive serialization ─────────────────
+  it("preserves translateX = 1.2 (within editor range) — must NOT be clipped to 1", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: 1.2, translateY: 0 })!.translateX).toBeCloseTo(1.2);
   });
 
-  it("clamps translateX above 1 down to 1", () => {
-    expect(sanitizeFrameTransform({ scale: 1, translateX: 5, translateY: 0 })!.translateX).toBe(1);
+  it("preserves translateX = -1.2 (within editor range) — must NOT be clipped to -1", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: -1.2, translateY: 0 })!.translateX).toBeCloseTo(-1.2);
   });
 
-  it("clamps translateY below -1 up to -1", () => {
-    expect(sanitizeFrameTransform({ scale: 1, translateX: 0, translateY: -3 })!.translateY).toBe(-1);
+  it("clamps translateX below -1.5 up to -1.5", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: -2, translateY: 0 })!.translateX).toBe(-1.5);
   });
 
-  it("clamps translateY above 1 down to 1", () => {
-    expect(sanitizeFrameTransform({ scale: 1, translateX: 0, translateY: 99 })!.translateY).toBe(1);
+  it("clamps translateX above 1.5 down to 1.5", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: 5, translateY: 0 })!.translateX).toBe(1.5);
+  });
+
+  it("clamps translateY below -1.5 up to -1.5", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: 0, translateY: -3 })!.translateY).toBe(-1.5);
+  });
+
+  it("clamps translateY above 1.5 down to 1.5", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: 0, translateY: 99 })!.translateY).toBe(1.5);
   });
 
   it("treats NaN scale as 1", () => {
