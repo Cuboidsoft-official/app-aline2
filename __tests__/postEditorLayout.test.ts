@@ -116,8 +116,58 @@ describe("ASPECTS_BY_MODE", () => {
 // ─── INITIAL_TOOL_PANEL ───────────────────────────────────────────────────────
 
 describe("INITIAL_TOOL_PANEL", () => {
-  it("is null — layout sheet does NOT auto-open", () => {
+  it("is null — no sheet auto-opens on editor entry", () => {
     expect(INITIAL_TOOL_PANEL).toBeNull();
+  });
+});
+
+// ─── Aspect ratio inline toolbar invariants ───────────────────────────────────
+
+describe("inline aspect ratio toolbar", () => {
+  it("post mode exposes exactly 2 aspect options for the inline toolbar", () => {
+    expect(ASPECTS_BY_MODE.post).toHaveLength(2);
+  });
+
+  it("first post toolbar option is 1:1 square (ratio=1, no landscape shape)", () => {
+    const opt = ASPECTS_BY_MODE.post[0];
+    expect(opt.ratio).toBe(1);
+    expect(opt.ratio).toBeGreaterThanOrEqual(1); // renders as square, not portrait
+  });
+
+  it("second post toolbar option is 16:9 landscape (ratio > 1)", () => {
+    expect(ASPECTS_BY_MODE.post[1].ratio).toBeCloseTo(16 / 9, 5);
+  });
+
+  it("swipe mode exposes exactly 2 aspect options for the inline toolbar", () => {
+    expect(ASPECTS_BY_MODE.swipe).toHaveLength(2);
+  });
+
+  it("story mode exposes exactly 2 aspect options for the inline toolbar", () => {
+    expect(ASPECTS_BY_MODE.story).toHaveLength(2);
+  });
+
+  it("each mode has a valid default that resolves to a real option", () => {
+    (["post", "story", "swipe"] as const).forEach((m) => {
+      const def = findAspectOption(m, DEFAULT_ASPECT_BY_MODE[m]);
+      expect(def).toBeDefined();
+      expect(def.id).toBe(DEFAULT_ASPECT_BY_MODE[m]);
+    });
+  });
+
+  it("aspect shape width >= height for landscape ratio (renders wider shape)", () => {
+    const landscape = ASPECTS_BY_MODE.post.find((a) => a.ratio > 1)!;
+    const maxDim = 18;
+    const w = maxDim;
+    const h = Math.round(maxDim / landscape.ratio);
+    expect(w).toBeGreaterThan(h);
+  });
+
+  it("aspect shape height >= width for portrait ratio (renders taller shape)", () => {
+    const portrait = ASPECTS_BY_MODE.swipe.find((a) => a.ratio < 1)!;
+    const maxDim = 18;
+    const h = maxDim;
+    const w = Math.round(maxDim * portrait.ratio);
+    expect(h).toBeGreaterThan(w);
   });
 });
 

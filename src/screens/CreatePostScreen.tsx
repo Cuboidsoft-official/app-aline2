@@ -1335,9 +1335,11 @@ function CreatePostScreen({ navigation, route }: any) {
   }, [selectedAsset, stage]);
 
   useEffect(() => {
-    const nextTransform = selectedAsset?.id
+    const raw = selectedAsset?.id
       ? composerMediaTransformsByAssetId[selectedAsset.id] || DEFAULT_COMPOSER_MEDIA_TRANSFORM
       : DEFAULT_COMPOSER_MEDIA_TRANSFORM;
+    // Clamp scale to fill minimum on load so image always covers frame
+    const nextTransform = { ...raw, scale: Math.max(1.0, raw.scale) };
     setComposerMediaTransform(nextTransform);
     composerMediaPan.setValue({
       x: composerCanvasSize.width ? nextTransform.translateX * composerCanvasSize.width : 0,
@@ -3161,26 +3163,48 @@ function CreatePostScreen({ navigation, route }: any) {
           const firstTouch = touches[0];
           const secondTouch = touches[1];
 
-          if (firstTouch && secondTouch) {
-            const distance = Math.hypot(firstTouch.pageX - secondTouch.pageX, firstTouch.pageY - secondTouch.pageY);
-            const startDistance = composerMediaGestureRef.current.startDistance || distance || 1;
-            const nextScale = clamp(
-              composerMediaGestureRef.current.startScale * (distance / Math.max(1, startDistance)),
-              1.0,
-              4,
-            );
-            // Re-clamp pan to keep image filling frame at new scale
-            const maxPanX = Math.max(0, (nextScale - 1) * composerCanvasSize.width / 2);
-            const maxPanY = Math.max(0, (nextScale - 1) * composerCanvasSize.height / 2);
-            const curPanX = Number((composerMediaPan.x as any)._value || 0);
-            const curPanY = Number((composerMediaPan.y as any)._value || 0);
-            composerMediaPan.setValue({
-              x: clamp(curPanX, -maxPanX, maxPanX),
-              y: clamp(curPanY, -maxPanY, maxPanY),
-            });
-            setComposerMediaTransform((current) => ({ ...current, scale: nextScale }));
-            return;
-          }
+          if (firstTouch && secondTouch) {
+            const distance = Math.hypot(firstTouch.pageX - secondTouch.pageX, firstTouch.pageY - secondTouch.pageY);
+
+            // Grant fires on first finger only; startDistance=0 until second finger lands.
+            // Capture baseline on first two-finger frame and return - avoids ratio=1 no-op.
+            if (!composerMediaGestureRef.current.startDistance) {
+              composerMediaGestureRef.current = {
+                ...composerMediaGestureRef.current,
+                startDistance: distance,
+                startScale: composerMediaTransform.scale,
+              };
+              return;
+            }
+
+            const nextScale = clamp(
+              composerMediaGestureRef.current.startScale * (distance / composerMediaGestureRef.current.startDistance),
+              1.0,
+              4,
+            );
+            // Re-clamp pan to keep image filling frame at new scale
+            const maxPanX = Math.max(0, (nextScale - 1) * composerCanvasSize.width / 2);
+            const maxPanY = Math.max(0, (nextScale - 1) * composerCanvasSize.height / 2);
+            const curPanX = Number((composerMediaPan.x as any)._value || 0);
+            const curPanY = Number((composerMediaPan.y as any)._value || 0);
+            composerMediaPan.setValue({
+              x: clamp(curPanX, -maxPanX, maxPanX),
+              y: clamp(curPanY, -maxPanY, maxPanY),
+            });
+            setComposerMediaTransform((current) => ({ ...current, scale: nextScale }));
+            return;
+          }
+
+          // Reset pinch baseline when second finger lifts, so next gesture starts fresh.
+          if (composerMediaGestureRef.current.startDistance) {
+            composerMediaGestureRef.current = {
+              ...composerMediaGestureRef.current,
+              startDistance: 0,
+              startScale: composerMediaTransform.scale,
+              startX: Number((composerMediaPan.x as any)._value || 0),
+              startY: Number((composerMediaPan.y as any)._value || 0),
+            };
+          }
 
           // Pan bounded by current scale so image always fills frame
           const maxPanX = Math.max(0, (composerMediaTransform.scale - 1) * composerCanvasSize.width / 2);
@@ -4624,13 +4648,6 @@ function CreatePostScreen({ navigation, route }: any) {
       hidden?: boolean;
     }> = [
       {
-        id: "layout",
-        label: "Layout",
-        icon: "crop-outline",
-        active: composerEditToolPanel === "layout",
-        onPress: () => setComposerEditToolPanel("layout"),
-      },
-      {
         id: "text",
         label: "Text",
         icon: "text-outline",
@@ -4699,6 +4716,27 @@ function CreatePostScreen({ navigation, route }: any) {
         ]}
       >
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.storyToolRailScroll}>
+          {ASPECTS_BY_MODE[mode].map((option) => {
+            const active = option.id === activeAspect.id;
+            // Visual shape proportional to aspect ratio
+            const maxDim = 18;
+            const shapeW = option.ratio >= 1 ? maxDim : Math.round(maxDim * option.ratio);
+            const shapeH = option.ratio >= 1 ? Math.round(maxDim / option.ratio) : maxDim;
+            return (
+              <TouchableOpacity
+                key={option.id}
+                accessibilityLabel={option.detail}
+                style={[
+                  styles.storyRailButton,
+                  active ? { backgroundColor: accentSoft, borderColor: accentColor } : { backgroundColor: inputBackground, borderColor },
+                ]}
+                onPress={() => setAspectId((prev) => ({ ...prev, [mode]: option.id }))}
+              >
+                <View style={{ width: shapeW, height: shapeH, borderWidth: 1.5, borderColor: active ? accentColor : mutedColor, borderRadius: 2 }} />
+              </TouchableOpacity>
+            );
+          })}
+          <View style={[styles.railDivider, { backgroundColor: borderColor }]} />
           {railItems.filter((item) => !item.hidden).map((item) => (
             <TouchableOpacity
               key={item.id}
@@ -4870,23 +4908,6 @@ function CreatePostScreen({ navigation, route }: any) {
       );
     }
 
-    if (composerEditToolPanel === "layout") {
-      return (
-        <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
-          <View style={styles.sectionHeader}>
-            <View>
-              <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Layout</Text>
-              <Text style={[styles.sectionTitle, { color: textColor }]}>Aspect ratio</Text>
-            </View>
-            <Text style={[styles.sectionMeta, { color: mutedColor }]}>
-              {mode === "post" ? "1:1, 16:9" : "9:16, 4:5"}
-            </Text>
-          </View>
-          {renderAspectSelector()}
-        </View>
-      );
-    }
-
     if (composerEditToolPanel === "filters") {
       return (
         <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
@@ -4935,21 +4956,19 @@ function CreatePostScreen({ navigation, route }: any) {
     }
 
     const sheetTitle =
-      composerEditToolPanel === "layout"
-        ? "Layout"
-        : composerEditToolPanel === "filters"
-          ? "Filters"
-          : composerEditToolPanel === "tag"
-            ? "Tag people"
-            : composerEditToolPanel === "text"
-              ? "Text"
-              : composerEditToolPanel === "color"
-                ? "Color"
-                : composerEditToolPanel === "font"
-                  ? "Font"
-                  : composerEditToolPanel === "size"
-                    ? "Size"
-                    : "Edit";
+      composerEditToolPanel === "filters"
+        ? "Filters"
+        : composerEditToolPanel === "tag"
+          ? "Tag people"
+          : composerEditToolPanel === "text"
+            ? "Text"
+            : composerEditToolPanel === "color"
+              ? "Color"
+              : composerEditToolPanel === "font"
+                ? "Font"
+                : composerEditToolPanel === "size"
+                  ? "Size"
+                  : "Edit";
     const snapPoints = composerEditToolPanel === "filters" || composerEditToolPanel === "color" ? [0.42, 0.62] : [0.34, 0.52];
 
     return (
@@ -6765,6 +6784,12 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.55)",
     borderRadius: 24,
     overflow: "hidden",
+  },
+  railDivider: {
+    width: "60%",
+    height: StyleSheet.hairlineWidth,
+    alignSelf: "center",
+    marginVertical: 4,
   },
   cropGridLineV: {
     position: "absolute",
