@@ -125,6 +125,11 @@ type ComposerMediaTransform = { scale: number; translateX: number; translateY: n
 
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
 const POST_ASPECTS: AspectOption[] = [
+  { id: "square", label: "1:1", detail: "Square", ratio: 1 },
+  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
+];
+// Swipe/reel aspects are kept separate so changing post options doesn't affect the reel editor.
+const SWIPE_ASPECTS: AspectOption[] = [
   { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
   { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
 ];
@@ -135,10 +140,10 @@ const STORY_ASPECTS: AspectOption[] = [
 const ASPECTS_BY_MODE: Record<ComposerMode, AspectOption[]> = {
   post: POST_ASPECTS,
   story: STORY_ASPECTS,
-  swipe: POST_ASPECTS,
+  swipe: SWIPE_ASPECTS,
 };
 const DEFAULT_ASPECT_BY_MODE: Record<ComposerMode, string> = {
-  post: "portrait",
+  post: "square",
   story: "vertical",
   swipe: "portrait",
 };
@@ -1004,7 +1009,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationFetchingCurrent, setLocationFetchingCurrent] = useState(false);
   const [tagSheetVisible, setTagSheetVisible] = useState(false);
-  const [composerEditToolPanel, setComposerEditToolPanel] = useState<ComposerEditToolPanel>("layout");
+  const [composerEditToolPanel, setComposerEditToolPanel] = useState<ComposerEditToolPanel>(null);
   const [musicSheetVisible, setMusicSheetVisible] = useState(false);
   const [musicTrimSheetVisible, setMusicTrimSheetVisible] = useState(false);
   const [videoTrimSheetVisible, setVideoTrimSheetVisible] = useState(false);
@@ -4304,9 +4309,7 @@ function CreatePostScreen({ navigation, route }: any) {
             <Text style={styles.videoBadgeText}>{MODE_COPY[mode].label}</Text>
           </View>
           {renderVideoSoundToggle()}
-          {interactive ? (
-            <View pointerEvents="none" style={styles.cropFrameGuide} />
-          ) : null}
+          {interactive ? renderCropGrid() : null}
           {interactive ? (
             <View pointerEvents="none" style={styles.cropHintPill}>
               <Icon name="move-outline" size={13} color="#fff" />
@@ -4341,9 +4344,7 @@ function CreatePostScreen({ navigation, route }: any) {
             />
           )}
         </Animated.View>
-        {interactive ? (
-          <View pointerEvents="none" style={styles.cropFrameGuide} />
-        ) : null}
+        {interactive ? renderCropGrid() : null}
         {interactive ? (
           <View pointerEvents="box-none" style={styles.cropControlRow}>
             <TouchableOpacity
@@ -4542,6 +4543,21 @@ function CreatePostScreen({ navigation, route }: any) {
     </View>
     );
   };
+
+  // 3×3 rule-of-thirds grid overlay for the crop frame.
+  // pointerEvents="none" ensures it never intercepts gestures.
+  const renderCropGrid = () => (
+    <View pointerEvents="none" style={styles.cropFrameGuide}>
+      <View pointerEvents="none" style={styles.cropGridInner}>
+        <View pointerEvents="none" style={styles.cropGridRow}>
+          <View pointerEvents="none" style={styles.cropGridLineV} />
+          <View pointerEvents="none" style={styles.cropGridLineV} />
+        </View>
+        <View pointerEvents="none" style={styles.cropGridLineH} />
+        <View pointerEvents="none" style={styles.cropGridLineH} />
+      </View>
+    </View>
+  );
 
   const renderAspectSelector = () => (
     <View style={styles.chipRow}>
@@ -4891,7 +4907,7 @@ function CreatePostScreen({ navigation, route }: any) {
               <Text style={[styles.sectionTitle, { color: textColor }]}>Aspect ratio</Text>
             </View>
             <Text style={[styles.sectionMeta, { color: mutedColor }]}>
-              {mode === "post" ? "1:1, 16:9, 4:5, 9:16" : "9:16, 4:5"}
+              {mode === "post" ? "1:1, 16:9" : "9:16, 4:5"}
             </Text>
           </View>
           {renderAspectSelector()}
@@ -6776,6 +6792,25 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "rgba(255,255,255,0.55)",
     borderRadius: 24,
+    overflow: "hidden",
+  },
+  cropGridInner: {
+    flex: 1,
+  },
+  cropGridRow: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "space-evenly",
+  },
+  cropGridLineV: {
+    width: StyleSheet.hairlineWidth,
+    height: "100%",
+    backgroundColor: "rgba(255,255,255,0.35)",
+  },
+  cropGridLineH: {
+    height: StyleSheet.hairlineWidth,
+    width: "100%",
+    backgroundColor: "rgba(255,255,255,0.35)",
   },
   emptyPreview: {
     width: "100%",
