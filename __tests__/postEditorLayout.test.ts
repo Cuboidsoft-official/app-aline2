@@ -1,170 +1,281 @@
-/// <reference types="node" />
 /**
- * Tests for the post editor layout/crop feature changes.
- * All assertions are against pure-logic equivalents of the
- * constants and helpers changed in CreatePostScreen.tsx.
+ * Post editor layout/crop tests — imports real production values from composerConfig.ts.
  */
 
-// ─── Mirror the changed constants ────────────────────────────────────────────
+import {
+  POST_ASPECTS,
+  SWIPE_ASPECTS,
+  STORY_ASPECTS,
+  ASPECTS_BY_MODE,
+  DEFAULT_ASPECT_BY_MODE,
+  INITIAL_TOOL_PANEL,
+  DEFAULT_COMPOSER_MEDIA_TRANSFORM,
+  findAspectOption,
+  sanitizeFrameTransform,
+  normalizeTranslate,
+  computePinchScale,
+  toggleFitScale,
+} from "../src/screens/composerConfig";
 
-type AspectOption = { id: string; label: string; detail: string; ratio: number };
-type ComposerMode = "post" | "story" | "swipe";
+// ─── POST_ASPECTS ─────────────────────────────────────────────────────────────
 
-const POST_ASPECTS: AspectOption[] = [
-  { id: "square", label: "1:1", detail: "Square", ratio: 1 },
-  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
-];
-
-const SWIPE_ASPECTS: AspectOption[] = [
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
-];
-
-const STORY_ASPECTS: AspectOption[] = [
-  { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-];
-
-const ASPECTS_BY_MODE: Record<ComposerMode, AspectOption[]> = {
-  post: POST_ASPECTS,
-  story: STORY_ASPECTS,
-  swipe: SWIPE_ASPECTS,
-};
-
-const DEFAULT_ASPECT_BY_MODE: Record<ComposerMode, string> = {
-  post: "square",
-  story: "vertical",
-  swipe: "portrait",
-};
-
-// Initial composerEditToolPanel state (changed from "layout" to null)
-const INITIAL_TOOL_PANEL: string | null = null;
-
-// ─── Tests ────────────────────────────────────────────────────────────────────
-
-describe("PostEditorLayout — POST_ASPECTS", () => {
-  it("has exactly 2 options for post mode", () => {
+describe("POST_ASPECTS", () => {
+  it("has exactly 2 options", () => {
     expect(POST_ASPECTS).toHaveLength(2);
   });
 
-  it("first post option is 1:1 square", () => {
+  it("first option is 1:1 square", () => {
     expect(POST_ASPECTS[0].id).toBe("square");
     expect(POST_ASPECTS[0].label).toBe("1:1");
     expect(POST_ASPECTS[0].ratio).toBe(1);
   });
 
-  it("second post option is 16:9 landscape", () => {
+  it("second option is 16:9 landscape", () => {
     expect(POST_ASPECTS[1].id).toBe("landscape");
     expect(POST_ASPECTS[1].label).toBe("16:9");
     expect(POST_ASPECTS[1].ratio).toBeCloseTo(16 / 9, 5);
   });
 
-  it("does NOT contain 4:5 portrait in post mode", () => {
-    const ids = POST_ASPECTS.map((a) => a.id);
-    expect(ids).not.toContain("portrait");
+  it("does NOT include portrait (4:5)", () => {
+    expect(POST_ASPECTS.map((a) => a.id)).not.toContain("portrait");
   });
 
-  it("does NOT contain 9:16 vertical in post mode", () => {
-    const ids = POST_ASPECTS.map((a) => a.id);
-    expect(ids).not.toContain("vertical");
+  it("does NOT include vertical (9:16)", () => {
+    expect(POST_ASPECTS.map((a) => a.id)).not.toContain("vertical");
   });
 });
 
-describe("PostEditorLayout — DEFAULT_ASPECT_BY_MODE", () => {
-  it("default post aspect is square", () => {
+// ─── DEFAULT_ASPECT_BY_MODE ───────────────────────────────────────────────────
+
+describe("DEFAULT_ASPECT_BY_MODE", () => {
+  it("post defaults to square", () => {
     expect(DEFAULT_ASPECT_BY_MODE.post).toBe("square");
   });
 
-  it("default story aspect is unchanged (vertical 9:16)", () => {
+  it("story defaults to vertical (9:16)", () => {
     expect(DEFAULT_ASPECT_BY_MODE.story).toBe("vertical");
   });
 
-  it("default swipe aspect is unchanged (portrait 4:5)", () => {
+  it("swipe defaults to portrait (4:5)", () => {
     expect(DEFAULT_ASPECT_BY_MODE.swipe).toBe("portrait");
   });
 });
 
-describe("PostEditorLayout — SWIPE_ASPECTS (unchanged)", () => {
-  it("swipe mode retains portrait 4:5 option", () => {
-    const portrait = SWIPE_ASPECTS.find((a) => a.id === "portrait");
-    expect(portrait).toBeDefined();
-    expect(portrait?.ratio).toBeCloseTo(4 / 5, 5);
+// ─── SWIPE_ASPECTS ────────────────────────────────────────────────────────────
+
+describe("SWIPE_ASPECTS", () => {
+  it("includes portrait 4:5", () => {
+    const opt = SWIPE_ASPECTS.find((a) => a.id === "portrait");
+    expect(opt).toBeDefined();
+    expect(opt!.ratio).toBeCloseTo(4 / 5, 5);
   });
 
-  it("swipe mode retains landscape 16:9 option", () => {
-    const landscape = SWIPE_ASPECTS.find((a) => a.id === "landscape");
-    expect(landscape).toBeDefined();
-    expect(landscape?.ratio).toBeCloseTo(16 / 9, 5);
+  it("includes landscape 16:9", () => {
+    const opt = SWIPE_ASPECTS.find((a) => a.id === "landscape");
+    expect(opt).toBeDefined();
+    expect(opt!.ratio).toBeCloseTo(16 / 9, 5);
   });
 
-  it("swipe aspects are separate from post aspects (not same reference)", () => {
-    expect(ASPECTS_BY_MODE.swipe).not.toBe(ASPECTS_BY_MODE.post);
-  });
-});
-
-describe("PostEditorLayout — STORY_ASPECTS (unchanged)", () => {
-  it("story mode retains vertical 9:16", () => {
-    const vertical = STORY_ASPECTS.find((a) => a.id === "vertical");
-    expect(vertical).toBeDefined();
-    expect(vertical?.ratio).toBeCloseTo(9 / 16, 5);
-  });
-
-  it("story mode retains portrait 4:5", () => {
-    const portrait = STORY_ASPECTS.find((a) => a.id === "portrait");
-    expect(portrait).toBeDefined();
-    expect(portrait?.ratio).toBeCloseTo(4 / 5, 5);
+  it("is a different array reference from POST_ASPECTS", () => {
+    expect(SWIPE_ASPECTS).not.toBe(POST_ASPECTS);
   });
 });
 
-describe("PostEditorLayout — composerEditToolPanel initial state", () => {
-  it("initial panel is null — layout sheet does NOT auto-open", () => {
-    expect(INITIAL_TOOL_PANEL).toBeNull();
+// ─── STORY_ASPECTS ────────────────────────────────────────────────────────────
+
+describe("STORY_ASPECTS", () => {
+  it("includes vertical 9:16", () => {
+    const opt = STORY_ASPECTS.find((a) => a.id === "vertical");
+    expect(opt).toBeDefined();
+    expect(opt!.ratio).toBeCloseTo(9 / 16, 5);
+  });
+
+  it("includes portrait 4:5", () => {
+    const opt = STORY_ASPECTS.find((a) => a.id === "portrait");
+    expect(opt).toBeDefined();
+    expect(opt!.ratio).toBeCloseTo(4 / 5, 5);
   });
 });
 
-describe("PostEditorLayout — ASPECTS_BY_MODE mapping", () => {
-  it("post mode uses POST_ASPECTS", () => {
+// ─── ASPECTS_BY_MODE ─────────────────────────────────────────────────────────
+
+describe("ASPECTS_BY_MODE", () => {
+  it("post → POST_ASPECTS (same reference)", () => {
     expect(ASPECTS_BY_MODE.post).toBe(POST_ASPECTS);
   });
 
-  it("story mode uses STORY_ASPECTS", () => {
+  it("story → STORY_ASPECTS (same reference)", () => {
     expect(ASPECTS_BY_MODE.story).toBe(STORY_ASPECTS);
   });
 
-  it("swipe mode uses SWIPE_ASPECTS (not POST_ASPECTS)", () => {
+  it("swipe → SWIPE_ASPECTS, not POST_ASPECTS", () => {
     expect(ASPECTS_BY_MODE.swipe).toBe(SWIPE_ASPECTS);
     expect(ASPECTS_BY_MODE.swipe).not.toBe(POST_ASPECTS);
   });
 });
 
-describe("PostEditorLayout — aspect lookup helper", () => {
-  const findAspect = (mode: ComposerMode, aspectId: string | undefined) =>
-    ASPECTS_BY_MODE[mode].find((item) => item.id === aspectId) || ASPECTS_BY_MODE[mode][0];
+// ─── INITIAL_TOOL_PANEL ───────────────────────────────────────────────────────
 
-  it("resolves square for post mode by default", () => {
-    const aspect = findAspect("post", DEFAULT_ASPECT_BY_MODE.post);
-    expect(aspect.id).toBe("square");
-    expect(aspect.ratio).toBe(1);
+describe("INITIAL_TOOL_PANEL", () => {
+  it("is null — layout sheet does NOT auto-open", () => {
+    expect(INITIAL_TOOL_PANEL).toBeNull();
+  });
+});
+
+// ─── DEFAULT_COMPOSER_MEDIA_TRANSFORM ────────────────────────────────────────
+
+describe("DEFAULT_COMPOSER_MEDIA_TRANSFORM", () => {
+  it("has scale 1, translateX 0, translateY 0", () => {
+    expect(DEFAULT_COMPOSER_MEDIA_TRANSFORM).toEqual({ scale: 1, translateX: 0, translateY: 0 });
+  });
+});
+
+// ─── findAspectOption ─────────────────────────────────────────────────────────
+
+describe("findAspectOption", () => {
+  it("resolves square for post by default", () => {
+    expect(findAspectOption("post", "square").id).toBe("square");
   });
 
-  it("falls back to first post option (square) for unknown id", () => {
-    const aspect = findAspect("post", "unknown-id");
-    expect(aspect.id).toBe("square");
+  it("falls back to first option (square) for unknown id", () => {
+    expect(findAspectOption("post", "unknown").id).toBe("square");
   });
 
-  it("resolves landscape correctly for post", () => {
-    const aspect = findAspect("post", "landscape");
-    expect(aspect.id).toBe("landscape");
-    expect(aspect.ratio).toBeCloseTo(16 / 9);
+  it("falls back to first option when id is undefined", () => {
+    expect(findAspectOption("post", undefined).id).toBe("square");
   });
 
-  it("resolves vertical for story by default", () => {
-    const aspect = findAspect("story", DEFAULT_ASPECT_BY_MODE.story);
-    expect(aspect.id).toBe("vertical");
+  it("resolves landscape for post", () => {
+    const opt = findAspectOption("post", "landscape");
+    expect(opt.id).toBe("landscape");
+    expect(opt.ratio).toBeCloseTo(16 / 9);
   });
 
-  it("resolves portrait for swipe by default", () => {
-    const aspect = findAspect("swipe", DEFAULT_ASPECT_BY_MODE.swipe);
-    expect(aspect.id).toBe("portrait");
+  it("resolves vertical for story default", () => {
+    expect(findAspectOption("story", DEFAULT_ASPECT_BY_MODE.story).id).toBe("vertical");
+  });
+
+  it("resolves portrait for swipe default", () => {
+    expect(findAspectOption("swipe", DEFAULT_ASPECT_BY_MODE.swipe).id).toBe("portrait");
+  });
+});
+
+// ─── sanitizeFrameTransform ───────────────────────────────────────────────────
+
+describe("sanitizeFrameTransform", () => {
+  it("returns undefined when no argument given", () => {
+    expect(sanitizeFrameTransform(undefined)).toBeUndefined();
+  });
+
+  it("passes through a valid transform unchanged", () => {
+    expect(sanitizeFrameTransform({ scale: 2, translateX: 0.5, translateY: -0.3 }))
+      .toEqual({ scale: 2, translateX: 0.5, translateY: -0.3 });
+  });
+
+  it("clamps scale below 1 up to 1", () => {
+    expect(sanitizeFrameTransform({ scale: 0.5, translateX: 0, translateY: 0 })!.scale).toBe(1);
+  });
+
+  it("clamps scale above 4 down to 4", () => {
+    expect(sanitizeFrameTransform({ scale: 10, translateX: 0, translateY: 0 })!.scale).toBe(4);
+  });
+
+  it("clamps translateX below -1 up to -1", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: -2, translateY: 0 })!.translateX).toBe(-1);
+  });
+
+  it("clamps translateX above 1 down to 1", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: 5, translateY: 0 })!.translateX).toBe(1);
+  });
+
+  it("clamps translateY below -1 up to -1", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: 0, translateY: -3 })!.translateY).toBe(-1);
+  });
+
+  it("clamps translateY above 1 down to 1", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: 0, translateY: 99 })!.translateY).toBe(1);
+  });
+
+  it("treats NaN scale as 1", () => {
+    expect(sanitizeFrameTransform({ scale: NaN, translateX: 0, translateY: 0 })!.scale).toBe(1);
+  });
+
+  it("treats NaN translateX as 0", () => {
+    expect(sanitizeFrameTransform({ scale: 1, translateX: NaN, translateY: 0 })!.translateX).toBe(0);
+  });
+});
+
+// ─── normalizeTranslate ───────────────────────────────────────────────────────
+
+describe("normalizeTranslate", () => {
+  it("normalizes pixel pan to canvas-relative value", () => {
+    const result = normalizeTranslate(100, 50, 400, 400, 0, 0);
+    expect(result.translateX).toBeCloseTo(0.25);
+    expect(result.translateY).toBeCloseTo(0.125);
+  });
+
+  it("clamps to [-1.5, 1.5]", () => {
+    const result = normalizeTranslate(1000, -1000, 200, 200, 0, 0);
+    expect(result.translateX).toBe(1.5);
+    expect(result.translateY).toBe(-1.5);
+  });
+
+  it("returns current values when canvas width is zero", () => {
+    const result = normalizeTranslate(100, 100, 0, 400, 0.3, 0.4);
+    expect(result.translateX).toBe(0.3);
+  });
+
+  it("returns current values when canvas height is zero", () => {
+    const result = normalizeTranslate(100, 100, 400, 0, 0.3, 0.4);
+    expect(result.translateY).toBe(0.4);
+  });
+});
+
+// ─── computePinchScale ────────────────────────────────────────────────────────
+
+describe("computePinchScale", () => {
+  it("returns same scale when distance unchanged", () => {
+    expect(computePinchScale(1.5, 200, 200)).toBeCloseTo(1.5);
+  });
+
+  it("scales up proportionally", () => {
+    expect(computePinchScale(1.0, 100, 200)).toBeCloseTo(2.0);
+  });
+
+  it("scales down proportionally", () => {
+    expect(computePinchScale(2.0, 200, 100)).toBeCloseTo(1.0);
+  });
+
+  it("clamps to minimum 0.2", () => {
+    expect(computePinchScale(1.0, 1000, 1)).toBe(0.2);
+  });
+
+  it("clamps to maximum 4", () => {
+    expect(computePinchScale(1.0, 1, 1000)).toBe(4);
+  });
+
+  it("guards against zero start distance (avoids division by zero)", () => {
+    const result = computePinchScale(1.0, 0, 200);
+    expect(Number.isFinite(result)).toBe(true);
+  });
+});
+
+// ─── toggleFitScale ───────────────────────────────────────────────────────────
+
+describe("toggleFitScale", () => {
+  it("restores to fill (1.0) when currently fitted (scale < 0.95)", () => {
+    expect(toggleFitScale(0.82)).toBe(1.0);
+  });
+
+  it("switches to fitted (0.82) when currently filling (scale >= 0.95)", () => {
+    expect(toggleFitScale(1.0)).toBe(0.82);
+  });
+
+  it("treats scale exactly at 0.95 as filling → returns 0.82", () => {
+    expect(toggleFitScale(0.95)).toBe(0.82);
+  });
+
+  it("treats scale just below 0.95 as fitted → returns 1.0", () => {
+    expect(toggleFitScale(0.94)).toBe(1.0);
   });
 });

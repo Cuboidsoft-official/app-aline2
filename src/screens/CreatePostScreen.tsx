@@ -91,15 +91,23 @@ try {
   ColorMatrix = null;
 }
 
-type ComposerMode = "post" | "story" | "swipe";
-type ComposerStage = "launcher" | "edit" | "details";
+import {
+  type ComposerMode,
+  type AspectOption,
+  type ComposerMediaTransform,
+  type ComposerEditToolPanel,
+  POST_ASPECTS,
+  SWIPE_ASPECTS,
+  STORY_ASPECTS,
+  ASPECTS_BY_MODE,
+  DEFAULT_ASPECT_BY_MODE,
+  DEFAULT_COMPOSER_MEDIA_TRANSFORM,
+  INITIAL_TOOL_PANEL,
+  findAspectOption,
+  sanitizeFrameTransform,
+} from "./composerConfig";
 
-type AspectOption = {
-  id: string;
-  label: string;
-  detail: string;
-  ratio: number;
-};
+type ComposerStage = "launcher" | "edit" | "details";
 
 type AudienceCandidate = {
   id: string;
@@ -118,35 +126,10 @@ type MusicResultItem = SelectedMusicClip & {
 };
 
 type StoryToolPanel = "text" | "color" | "font" | "size" | "filters" | "sticker" | null;
-type ComposerEditToolPanel = "layout" | "filters" | "tag" | "trim" | "text" | "color" | "font" | "size" | null;
 type StoryTextFontVariant = "bold" | "italic" | "clean" | "soft";
 type MusicPreviewMode = "audio";
-type ComposerMediaTransform = { scale: number; translateX: number; translateY: number };
 
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
-const POST_ASPECTS: AspectOption[] = [
-  { id: "square", label: "1:1", detail: "Square", ratio: 1 },
-  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
-];
-// Swipe/reel aspects are kept separate so changing post options doesn't affect the reel editor.
-const SWIPE_ASPECTS: AspectOption[] = [
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
-];
-const STORY_ASPECTS: AspectOption[] = [
-  { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-];
-const ASPECTS_BY_MODE: Record<ComposerMode, AspectOption[]> = {
-  post: POST_ASPECTS,
-  story: STORY_ASPECTS,
-  swipe: SWIPE_ASPECTS,
-};
-const DEFAULT_ASPECT_BY_MODE: Record<ComposerMode, string> = {
-  post: "square",
-  story: "vertical",
-  swipe: "portrait",
-};
 const CREATE_DOCK_OFFSET = APP_BOTTOM_DOCK_BASE_HEIGHT + 4;
 const MODE_COPY: Record<
   ComposerMode,
@@ -193,7 +176,6 @@ const MUSIC_CLIP_MAX_SECONDS = 30;
 const MUSIC_DISCOVERY_FALLBACK_QUERIES = ["love", "party", "happy", "summer"];
 const PHOTO_PICKER_MAX_DIMENSION = 2160;
 const PHOTO_PICKER_QUALITY = 0.8;
-const DEFAULT_COMPOSER_MEDIA_TRANSFORM: ComposerMediaTransform = { scale: 1, translateX: 0, translateY: 0 };
 const STORY_TEXT_THEMES: Array<{
   id: StoryTextStickerTheme;
   label: string;
@@ -366,8 +348,6 @@ const defaultClipDuration = (mode: ComposerMode, trackDuration: number): number 
   return Math.min(MUSIC_CLIP_MAX_SECONDS, safe);
 };
 
-const findAspectOption = (mode: ComposerMode, aspectId: string | undefined) =>
-  ASPECTS_BY_MODE[mode].find((item) => item.id === aspectId) || ASPECTS_BY_MODE[mode][0];
 
 const buildMusicLabel = (music: SelectedMusicClip | null | undefined) =>
   [music?.title, music?.artist].filter(Boolean).join(" • ");
@@ -438,13 +418,7 @@ const buildAspectMetadata = (
   const safeRatio = Math.max(0.5, Math.min(2, Number(ratio) || 1));
   const sourceWidth = Math.max(720, Math.round(Number(sourceAsset?.width || uploadedMedia.width || 0) || 0));
   const sourceHeight = Math.max(720, Math.round(Number(sourceAsset?.height || uploadedMedia.height || 0) || 0));
-  const safeFrameTransform = frameTransform
-    ? {
-        scale: Math.max(1, Math.min(4, Number(frameTransform.scale) || 1)),
-        translateX: Math.max(-1, Math.min(1, Number(frameTransform.translateX) || 0)),
-        translateY: Math.max(-1, Math.min(1, Number(frameTransform.translateY) || 0)),
-      }
-    : undefined;
+  const safeFrameTransform = sanitizeFrameTransform(frameTransform);
 
   if (safeRatio >= 1) {
     const width = Math.max(sourceWidth, Math.round(sourceHeight * safeRatio));
@@ -1009,7 +983,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationFetchingCurrent, setLocationFetchingCurrent] = useState(false);
   const [tagSheetVisible, setTagSheetVisible] = useState(false);
-  const [composerEditToolPanel, setComposerEditToolPanel] = useState<ComposerEditToolPanel>(null);
+  const [composerEditToolPanel, setComposerEditToolPanel] = useState<ComposerEditToolPanel>(INITIAL_TOOL_PANEL);
   const [musicSheetVisible, setMusicSheetVisible] = useState(false);
   const [musicTrimSheetVisible, setMusicTrimSheetVisible] = useState(false);
   const [videoTrimSheetVisible, setVideoTrimSheetVisible] = useState(false);
