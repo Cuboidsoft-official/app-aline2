@@ -145,8 +145,8 @@ export const computeCoverDimensions = (
   canvasW: number,
   canvasH: number,
 ): { coverW: number; coverH: number } => {
-  const imgAspect = imgW / Math.max(1, imgH);
-  const canvasAspect = canvasW / Math.max(1, canvasH);
+  const imgAspect = Math.max(1, imgW) / Math.max(1, imgH);
+  const canvasAspect = Math.max(1, canvasW) / Math.max(1, canvasH);
   return imgAspect >= canvasAspect
     ? { coverW: canvasH * imgAspect, coverH: canvasH }
     : { coverW: canvasW, coverH: canvasW / imgAspect };
