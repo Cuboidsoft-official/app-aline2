@@ -62,6 +62,7 @@ import {
 } from "../utils/carouselGesture";
 import { performPremiumPurchase } from "../utils/premiumPurchase";
 import { openPostDetail as navigateToPostDetail } from "../utils/socialNavigation";
+import { computeCoverDimensions } from "./composerConfig";
 
 let ColorMatrix: any;
 try {
@@ -295,6 +296,23 @@ const getImageResizeMode = (
   return "cover";
 };
 
+// Returns the natural cover dimensions for a media asset in a container, so
+// the image fills the frame with no letterboxing just like the editor does.
+// Falls back to absoluteFillObject when dimensions are unknown (backward compat).
+const getMediaCoverStyle = (
+  asset: Post["media"][number] | undefined,
+  containerW: number,
+  containerH: number,
+): object => {
+  const imgW = Number(asset?.width || 0);
+  const imgH = Number(asset?.height || 0);
+  if (imgW <= 0 || imgH <= 0 || containerW <= 0 || containerH <= 0) {
+    return StyleSheet.absoluteFillObject;
+  }
+  const { coverW, coverH } = computeCoverDimensions(imgW, imgH, containerW, containerH);
+  return { width: coverW, height: coverH };
+};
+
 const getMediaFrameTransformStyle = (
   asset: Post["media"][number] | undefined,
   width: number,
@@ -304,7 +322,9 @@ const getMediaFrameTransformStyle = (
   if (!transform || (!transform.scale && !transform.translateX && !transform.translateY)) {
     return undefined;
   }
-  const scale = Math.max(0.1, Math.min(4, Number(transform?.scale || 1)));
+  // Clamp scale to min 1.0 in the feed — sub-1 scale makes content smaller than
+  // the cover container, creating visible gaps at the edges.
+  const scale = Math.max(1.0, Math.min(4, Number(transform?.scale || 1)));
   const translateX = Math.max(-1.5, Math.min(1.5, Number(transform?.translateX || 0))) * width;
   const translateY = Math.max(-1.5, Math.min(1.5, Number(transform?.translateY || 0))) * height;
 
@@ -1794,9 +1814,8 @@ function FeedScreen({ navigation, route }: any) {
       if (primaryMedia?.mediaType === 'video') {
         const shouldShowActiveVideo = shouldMountVideo(true);
         return (
-          <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden' }]}>
-
-            <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
+          <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }]}>
+            <View style={[getMediaCoverStyle(primaryMedia, postMediaWidth, mediaHeight), getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
               <SocialVideo
                 uri={normalizeMediaUrl(primaryMedia.url)}
                 posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || '')}
@@ -1811,7 +1830,7 @@ function FeedScreen({ navigation, route }: any) {
                 repeat
                 restartKey={post.id}
                 onLoad={(event) => handleFeedVideoLoaded(post.id, primaryMedia.id, event)}
-                resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
+                resizeMode="cover"
                 contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
                 showBufferingLoader={false}
               />
@@ -1821,16 +1840,14 @@ function FeedScreen({ navigation, route }: any) {
         );
       }
 
-      const imageResizeMode = getImageResizeMode(primaryMedia, frameAspectRatio);
       const rawImage = (
-        <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden' }]}>
-
-          <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
+        <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }]}>
+          <View style={[getMediaCoverStyle(primaryMedia, postMediaWidth, mediaHeight), getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
             <ProgressiveImage
               uri={normalizeMediaUrl(primaryMedia?.url)}
               previewUri={normalizeMediaUrl(primaryMedia?.thumbnailUrl || primaryMedia?.url)}
               style={StyleSheet.absoluteFill}
-              resizeMode={imageResizeMode}
+              resizeMode="cover"
               contentBlurRadius={primaryMedia?.sensitiveContent?.isSensitive ? 22 : 0}
             />
           </View>
@@ -1943,9 +1960,8 @@ function FeedScreen({ navigation, route }: any) {
             }
 
             return asset.mediaType === "video" ? (
-              <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
-
-                <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
+              <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden", alignItems: 'center', justifyContent: 'center' }]}>
+                <View style={[getMediaCoverStyle(asset, postMediaWidth, mediaHeight), getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
                   <SocialVideo
                     uri={normalizeMediaUrl(asset.url)}
                     posterUri={normalizeMediaUrl(asset.thumbnailUrl || "")}
@@ -1961,7 +1977,7 @@ function FeedScreen({ navigation, route }: any) {
                     repeat
                     restartKey={`${post.id}:${asset.id}`}
                     onLoad={(event) => handleFeedVideoLoaded(post.id, asset.id, event)}
-                    resizeMode={getImageResizeMode(asset, frameAspectRatio)}
+                    resizeMode="cover"
                     contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
                     showBufferingLoader={false}
                   />
@@ -1970,16 +1986,14 @@ function FeedScreen({ navigation, route }: any) {
               </View>
             ) : (
               (() => {
-                const imageResizeMode = getImageResizeMode(asset, frameAspectRatio);
                 const rawImage = (
-                  <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
-
-                    <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
+                  <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden", alignItems: 'center', justifyContent: 'center' }]}>
+                    <View style={[getMediaCoverStyle(asset, postMediaWidth, mediaHeight), getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
                       <ProgressiveImage
                         uri={normalizeMediaUrl(asset.url)}
                         previewUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
                         style={StyleSheet.absoluteFill}
-                        resizeMode={imageResizeMode}
+                        resizeMode="cover"
                         contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
                       />
                     </View>
