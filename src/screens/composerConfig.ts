@@ -129,6 +129,46 @@ export const normalizeTranslate = (
 });
 
 /**
+ * Computes the natural "cover" dimensions for a media asset inside a canvas
+ * so the asset fills the frame with no letterboxing (Instagram-style).
+ *
+ * - Wide asset  (imgAspect >= canvasAspect): height = canvas height, width overflows
+ * - Tall asset  (imgAspect <  canvasAspect): width  = canvas width,  height overflows
+ *
+ * The max pan freedom at scale=1 is then:
+ *   maxPanX = max(0, (coverW - canvasW) / 2)
+ *   maxPanY = max(0, (coverH - canvasH) / 2)
+ */
+export const computeCoverDimensions = (
+  imgW: number,
+  imgH: number,
+  canvasW: number,
+  canvasH: number,
+): { coverW: number; coverH: number } => {
+  const imgAspect = Math.max(1, imgW) / Math.max(1, imgH);
+  const canvasAspect = Math.max(1, canvasW) / Math.max(1, canvasH);
+  return imgAspect >= canvasAspect
+    ? { coverW: canvasH * imgAspect, coverH: canvasH }
+    : { coverW: canvasW, coverH: canvasW / imgAspect };
+};
+
+/**
+ * Computes the maximum pixel pan allowed in each axis for a given scale.
+ * At scale=1 with a wide image the horizontal overflow > 0 (free pan).
+ * At scale=1 with a perfectly matching aspect ratio both values are 0.
+ */
+export const computeMaxPan = (
+  coverW: number,
+  coverH: number,
+  canvasW: number,
+  canvasH: number,
+  scale: number,
+): { maxPanX: number; maxPanY: number } => ({
+  maxPanX: Math.max(0, (coverW * scale - canvasW) / 2),
+  maxPanY: Math.max(0, (coverH * scale - canvasH) / 2),
+});
+
+/**
  * Computes the next pinch scale from a two-finger gesture.
  * Clamped to [0.2, 4] matching the composer's pan responder.
  */

@@ -105,6 +105,8 @@ import {
   INITIAL_TOOL_PANEL,
   findAspectOption,
   sanitizeFrameTransform,
+  computeCoverDimensions,
+  computeMaxPan,
 } from "./composerConfig";
 
 type ComposerStage = "launcher" | "edit" | "details";
@@ -3123,16 +3125,15 @@ function CreatePostScreen({ navigation, route }: any) {
     const rawX = Number((composerMediaPan.x as any)._value || 0);
     const rawY = Number((composerMediaPan.y as any)._value || 0);
     const nextScale = clamp(composerMediaScaleRef.current, 1.0, 4);
-    // Cover-based clamping: the Animated.View is sized to the image's natural
-    // "cover" dimensions, so the max pan is half the overflow on each axis.
-    const iA = (selectedAsset?.width || 1) / (selectedAsset?.height || 1);
     const cW = composerCanvasSize.width;
     const cH = composerCanvasSize.height;
-    const cA = cW > 0 && cH > 0 ? cW / cH : 1;
-    const cvW = iA >= cA ? cH * iA : cW;
-    const cvH = iA < cA ? cW / iA : cH;
-    const maxPanXpx = cW > 0 ? Math.max(0, (cvW * nextScale - cW) / 2) : 0;
-    const maxPanYpx = cH > 0 ? Math.max(0, (cvH * nextScale - cH) / 2) : 0;
+    const { coverW: cvW, coverH: cvH } = computeCoverDimensions(
+      selectedAsset?.width || 1,
+      selectedAsset?.height || 1,
+      cW || 1,
+      cH || 1,
+    );
+    const { maxPanX: maxPanXpx, maxPanY: maxPanYpx } = computeMaxPan(cvW, cvH, cW || 1, cH || 1, nextScale);
     const nextTransform = {
       scale: nextScale,
       translateX: cW ? clamp(rawX / cW, -maxPanXpx / cW, maxPanXpx / cW) : 0,
@@ -3203,13 +3204,13 @@ function CreatePostScreen({ navigation, route }: any) {
             // Drive scale via Animated.Value — no setState, no re-render, stays on JS thread
             composerMediaScale.setValue(nextScale);
             composerMediaScaleRef.current = nextScale;
-            // Re-clamp pan using cover dimensions so image always fills frame
-            const _iA2 = (selectedAsset?.width || 1) / (selectedAsset?.height || 1);
-            const _cA2 = composerCanvasSize.width > 0 && composerCanvasSize.height > 0 ? composerCanvasSize.width / composerCanvasSize.height : 1;
-            const _cvW2 = _iA2 >= _cA2 ? composerCanvasSize.height * _iA2 : composerCanvasSize.width;
-            const _cvH2 = _iA2 < _cA2 ? composerCanvasSize.width / _iA2 : composerCanvasSize.height;
-            const maxPanX = Math.max(0, (_cvW2 * nextScale - composerCanvasSize.width) / 2);
-            const maxPanY = Math.max(0, (_cvH2 * nextScale - composerCanvasSize.height) / 2);
+            const { coverW: _cvW2, coverH: _cvH2 } = computeCoverDimensions(
+              selectedAsset?.width || 1,
+              selectedAsset?.height || 1,
+              composerCanvasSize.width || 1,
+              composerCanvasSize.height || 1,
+            );
+            const { maxPanX, maxPanY } = computeMaxPan(_cvW2, _cvH2, composerCanvasSize.width, composerCanvasSize.height, nextScale);
             const curPanX = Number((composerMediaPan.x as any)._value || 0);
             const curPanY = Number((composerMediaPan.y as any)._value || 0);
             composerMediaPan.setValue({
@@ -3230,13 +3231,13 @@ function CreatePostScreen({ navigation, route }: any) {
             };
           }
 
-          // Single-finger pan — clamp using cover dimensions (never stale via ref)
-          const _iA = (selectedAsset?.width || 1) / (selectedAsset?.height || 1);
-          const _cA = composerCanvasSize.width > 0 && composerCanvasSize.height > 0 ? composerCanvasSize.width / composerCanvasSize.height : 1;
-          const _cvW = _iA >= _cA ? composerCanvasSize.height * _iA : composerCanvasSize.width;
-          const _cvH = _iA < _cA ? composerCanvasSize.width / _iA : composerCanvasSize.height;
-          const maxPanX = Math.max(0, (_cvW * composerMediaScaleRef.current - composerCanvasSize.width) / 2);
-          const maxPanY = Math.max(0, (_cvH * composerMediaScaleRef.current - composerCanvasSize.height) / 2);
+          const { coverW: _cvW, coverH: _cvH } = computeCoverDimensions(
+            selectedAsset?.width || 1,
+            selectedAsset?.height || 1,
+            composerCanvasSize.width || 1,
+            composerCanvasSize.height || 1,
+          );
+          const { maxPanX, maxPanY } = computeMaxPan(_cvW, _cvH, composerCanvasSize.width, composerCanvasSize.height, composerMediaScaleRef.current);
           composerMediaPan.setValue({
             x: clamp(composerMediaGestureRef.current.startX + gestureState.dx, -maxPanX, maxPanX),
             y: clamp(composerMediaGestureRef.current.startY + gestureState.dy, -maxPanY, maxPanY),
@@ -4225,7 +4226,7 @@ function CreatePostScreen({ navigation, route }: any) {
     const normalizedText = storyText.trim();
 
     if (!normalizedText) {
-      return interactive ? (
+      return interactive && mode === "story" ? (
         <View pointerEvents="none" style={styles.storyCanvasHintWrap}>
           <Text style={styles.storyCanvasHintTitle}>Add draggable text</Text>
         </View>
@@ -4310,20 +4311,14 @@ function CreatePostScreen({ navigation, route }: any) {
     ];
     const interactive = !!options?.interactive;
 
-    // Compute the natural "cover" dimensions so the image always fills the
-    // canvas with no letterboxing, and the user can pan freely in the long axis.
     const imgW = selectedAsset?.width || 1;
     const imgH = selectedAsset?.height || 1;
-    const imgAspect = imgW / imgH;
     const cW = composerCanvasSize.width;
     const cH = composerCanvasSize.height;
-    const canvasAspect = cW > 0 && cH > 0 ? cW / cH : activeAspect.ratio;
-    const coverW = cW > 0 && cH > 0
-      ? (imgAspect >= canvasAspect ? cH * imgAspect : cW)
-      : undefined;
-    const coverH = cW > 0 && cH > 0
-      ? (imgAspect < canvasAspect ? cW / imgAspect : cH)
-      : undefined;
+    const measured = cW > 0 && cH > 0;
+    const { coverW, coverH } = measured
+      ? computeCoverDimensions(imgW, imgH, cW, cH)
+      : { coverW: undefined as number | undefined, coverH: undefined as number | undefined };
 
     const mediaTransformStyle = [
       coverW != null && coverH != null
@@ -4348,14 +4343,16 @@ function CreatePostScreen({ navigation, route }: any) {
           }}
         >
           <Animated.View style={mediaTransformStyle} {...(interactive ? composerMediaResponder.panHandlers : {})}>
-            <SocialVideo
-              uri={selectedAsset.uri}
-              posterUri={selectedAsset.thumbnailUrl}
-              style={StyleSheet.absoluteFill}
-              muted={isComposerVideoMuted}
-              repeat
-              paused={stage === "details"}
-            />
+            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+              <SocialVideo
+                uri={selectedAsset.uri}
+                posterUri={selectedAsset.thumbnailUrl}
+                style={{ width: "100%", height: "100%" }}
+                muted={isComposerVideoMuted}
+                repeat
+                paused={stage === "details"}
+              />
+            </View>
           </Animated.View>
           <View style={styles.videoBadge}>
             <Icon name="videocam" size={16} color="#fff" />
@@ -4363,12 +4360,6 @@ function CreatePostScreen({ navigation, route }: any) {
           </View>
           {renderVideoSoundToggle()}
           {interactive ? renderCropGrid() : null}
-          {interactive ? (
-            <View pointerEvents="none" style={styles.cropHintPill}>
-              <Icon name="move-outline" size={13} color="#fff" />
-              <Text style={styles.cropHintText}>Drag - pinch to zoom</Text>
-            </View>
-          ) : null}
           {renderComposerTextOverlay(interactive)}
         </View>
       );
@@ -4408,10 +4399,6 @@ function CreatePostScreen({ navigation, route }: any) {
               <Icon name="return-up-back-outline" size={13} color="#fff" />
               <Text style={styles.cropHintText}>Reset</Text>
             </TouchableOpacity>
-            <View pointerEvents="none" style={styles.cropHintPill}>
-              <Icon name="move-outline" size={13} color="#fff" />
-              <Text style={styles.cropHintText}>Drag - pinch to zoom</Text>
-            </View>
           </View>
         ) : null}
         {renderComposerTextOverlay(interactive)}

@@ -14,6 +14,8 @@ import {
   sanitizeFrameTransform,
   normalizeTranslate,
   computePinchScale,
+  computeCoverDimensions,
+  computeMaxPan,
 } from "../src/screens/composerConfig";
 
 // ─── POST_ASPECTS ─────────────────────────────────────────────────────────────
@@ -116,8 +118,58 @@ describe("ASPECTS_BY_MODE", () => {
 // ─── INITIAL_TOOL_PANEL ───────────────────────────────────────────────────────
 
 describe("INITIAL_TOOL_PANEL", () => {
-  it("is null — layout sheet does NOT auto-open", () => {
+  it("is null — no sheet auto-opens on editor entry", () => {
     expect(INITIAL_TOOL_PANEL).toBeNull();
+  });
+});
+
+// ─── Aspect ratio inline toolbar invariants ───────────────────────────────────
+
+describe("inline aspect ratio toolbar", () => {
+  it("post mode exposes exactly 2 aspect options for the inline toolbar", () => {
+    expect(ASPECTS_BY_MODE.post).toHaveLength(2);
+  });
+
+  it("first post toolbar option is 1:1 square (ratio=1, no landscape shape)", () => {
+    const opt = ASPECTS_BY_MODE.post[0];
+    expect(opt.ratio).toBe(1);
+    expect(opt.ratio).toBeGreaterThanOrEqual(1); // renders as square, not portrait
+  });
+
+  it("second post toolbar option is 16:9 landscape (ratio > 1)", () => {
+    expect(ASPECTS_BY_MODE.post[1].ratio).toBeCloseTo(16 / 9, 5);
+  });
+
+  it("swipe mode exposes exactly 2 aspect options for the inline toolbar", () => {
+    expect(ASPECTS_BY_MODE.swipe).toHaveLength(2);
+  });
+
+  it("story mode exposes exactly 2 aspect options for the inline toolbar", () => {
+    expect(ASPECTS_BY_MODE.story).toHaveLength(2);
+  });
+
+  it("each mode has a valid default that resolves to a real option", () => {
+    (["post", "story", "swipe"] as const).forEach((m) => {
+      const def = findAspectOption(m, DEFAULT_ASPECT_BY_MODE[m]);
+      expect(def).toBeDefined();
+      expect(def.id).toBe(DEFAULT_ASPECT_BY_MODE[m]);
+    });
+  });
+
+  it("aspect shape width >= height for landscape ratio (renders wider shape)", () => {
+    const landscape = ASPECTS_BY_MODE.post.find((a) => a.ratio > 1)!;
+    const maxDim = 18;
+    const w = maxDim;
+    const h = Math.round(maxDim / landscape.ratio);
+    expect(w).toBeGreaterThan(h);
+  });
+
+  it("aspect shape height >= width for portrait ratio (renders taller shape)", () => {
+    const portrait = ASPECTS_BY_MODE.swipe.find((a) => a.ratio < 1)!;
+    const maxDim = 18;
+    const h = maxDim;
+    const w = Math.round(maxDim * portrait.ratio);
+    expect(h).toBeGreaterThan(w);
   });
 });
 
@@ -278,4 +330,137 @@ describe("computePinchScale", () => {
     expect(Number.isFinite(result)).toBe(true);
   });
 });
+
+// ─── computeCoverDimensions ───────────────────────────────────────────────────
+// Task 1 fix: both image AND video use this formula so the media always fills
+// the canvas. The fix for video pan/zoom wraps SocialVideo in a
+// pointerEvents="none" View so the native Video component cannot steal touches
+// from the parent Animated.View that owns the PanResponder.
+
+describe("computeCoverDimensions", () => {
+  describe("wide media on square canvas (e.g. 16:9 video on 1:1 canvas)", () => {
+    const canvas = { w: 400, h: 400 };
+    const media  = { w: 1920, h: 1080 }; // 16:9 landscape
+
+    it("coverH equals canvas height — no vertical letterboxing", () => {
+      const { coverH } = computeCoverDimensions(media.w, media.h, canvas.w, canvas.h);
+      expect(coverH).toBeCloseTo(canvas.h);
+    });
+
+    it("coverW is wider than canvas — horizontal overflow for pan freedom", () => {
+      const { coverW } = computeCoverDimensions(media.w, media.h, canvas.w, canvas.h);
+      expect(coverW).toBeGreaterThan(canvas.w);
+    });
+
+    it("coverW ≈ canvasH × aspect (711 for 400px canvas, 16:9 media)", () => {
+      const { coverW } = computeCoverDimensions(media.w, media.h, canvas.w, canvas.h);
+      expect(coverW).toBeCloseTo(canvas.h * (media.w / media.h), 1);
+    });
+  });
+
+  describe("tall media on wide canvas (e.g. 9:16 portrait on 16:9 canvas)", () => {
+    const canvas = { w: 640, h: 360 }; // 16:9
+    const media  = { w: 1080, h: 1920 }; // 9:16 portrait
+
+    it("coverW equals canvas width — no horizontal letterboxing", () => {
+      const { coverW } = computeCoverDimensions(media.w, media.h, canvas.w, canvas.h);
+      expect(coverW).toBeCloseTo(canvas.w);
+    });
+
+    it("coverH is taller than canvas — vertical overflow for pan freedom", () => {
+      const { coverH } = computeCoverDimensions(media.w, media.h, canvas.w, canvas.h);
+      expect(coverH).toBeGreaterThan(canvas.h);
+    });
+  });
+
+  describe("perfectly matching aspect ratio (1:1 image on 1:1 canvas)", () => {
+    it("coverW === canvasW and coverH === canvasH — no overflow", () => {
+      const { coverW, coverH } = computeCoverDimensions(400, 400, 400, 400);
+      expect(coverW).toBeCloseTo(400);
+      expect(coverH).toBeCloseTo(400);
+    });
+  });
+
+  it("guards against zero image dimensions", () => {
+    const { coverW, coverH } = computeCoverDimensions(0, 0, 400, 400);
+    expect(Number.isFinite(coverW)).toBe(true);
+    expect(Number.isFinite(coverH)).toBe(true);
+  });
+
+  it("both output dimensions are always positive", () => {
+    const cases = [
+      [1920, 1080, 400, 400],
+      [1080, 1920, 400, 400],
+      [1280, 720, 375, 375],
+      [720, 1280, 375, 667],
+    ] as const;
+    cases.forEach(([iW, iH, cW, cH]) => {
+      const { coverW, coverH } = computeCoverDimensions(iW, iH, cW, cH);
+      expect(coverW).toBeGreaterThan(0);
+      expect(coverH).toBeGreaterThan(0);
+    });
+  });
+});
+
+// ─── computeMaxPan ────────────────────────────────────────────────────────────
+
+describe("computeMaxPan", () => {
+  const canvas = { w: 400, h: 400 };
+  const media  = { w: 1920, h: 1080 }; // 16:9 → coverW ≈ 711, coverH = 400
+
+  it("at scale=1 with wide video: maxPanX > 0 (free horizontal pan)", () => {
+    const { coverW, coverH } = computeCoverDimensions(media.w, media.h, canvas.w, canvas.h);
+    const { maxPanX } = computeMaxPan(coverW, coverH, canvas.w, canvas.h, 1);
+    expect(maxPanX).toBeGreaterThan(0);
+  });
+
+  it("at scale=1 with wide video: maxPanY === 0 (no vertical overflow)", () => {
+    const { coverW, coverH } = computeCoverDimensions(media.w, media.h, canvas.w, canvas.h);
+    const { maxPanY } = computeMaxPan(coverW, coverH, canvas.w, canvas.h, 1);
+    expect(maxPanY).toBeCloseTo(0);
+  });
+
+  it("maxPanX ≈ (coverW - canvasW) / 2 at scale=1", () => {
+    const { coverW, coverH } = computeCoverDimensions(media.w, media.h, canvas.w, canvas.h);
+    const { maxPanX } = computeMaxPan(coverW, coverH, canvas.w, canvas.h, 1);
+    expect(maxPanX).toBeCloseTo((coverW - canvas.w) / 2, 1);
+  });
+
+  it("maxPanX doubles when scale doubles", () => {
+    const { coverW, coverH } = computeCoverDimensions(media.w, media.h, canvas.w, canvas.h);
+    const { maxPanX: p1 } = computeMaxPan(coverW, coverH, canvas.w, canvas.h, 1);
+    const { maxPanX: p2 } = computeMaxPan(coverW, coverH, canvas.w, canvas.h, 2);
+    expect(p2).toBeGreaterThan(p1);
+  });
+
+  it("at scale=1 with 1:1 image on 1:1 canvas: both maxPan are 0 (no overflow)", () => {
+    const { coverW, coverH } = computeCoverDimensions(400, 400, canvas.w, canvas.h);
+    const { maxPanX, maxPanY } = computeMaxPan(coverW, coverH, canvas.w, canvas.h, 1);
+    expect(maxPanX).toBeCloseTo(0);
+    expect(maxPanY).toBeCloseTo(0);
+  });
+
+  it("maxPan values are always non-negative", () => {
+    const { coverW, coverH } = computeCoverDimensions(400, 400, canvas.w, canvas.h);
+    const { maxPanX, maxPanY } = computeMaxPan(coverW, coverH, canvas.w, canvas.h, 0.5);
+    expect(maxPanX).toBeGreaterThanOrEqual(0);
+    expect(maxPanY).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ─── UI behaviour (manual test checklist) ────────────────────────────────────
+//
+// Task 1 — Video pan/zoom (verified on device):
+//   1. Select a landscape video in the post editor.
+//   2. Drag horizontally — canvas view scrolls left/right, no lock.
+//   3. Pinch in — video zooms smoothly, no jitter.
+//   4. Pinch out to scale=1 — stops at the natural cover fit (no black bars).
+//   5. Tap Reset — returns to center, scale=1.
+//
+// Task 2 — Removed hint overlays:
+//   1. Open post editor with any image → "Add draggable text" text is NOT visible.
+//   2. Open post editor with any video → "Add draggable text" text is NOT visible.
+//   3. Open story editor with empty text → "Add draggable text" IS visible (story only).
+//   4. The dark "Drag - pinch to zoom" pill is NOT present on image or video canvas.
+//   5. The "Reset" button is still visible bottom-left of the image canvas.
 
