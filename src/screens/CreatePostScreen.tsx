@@ -3122,14 +3122,21 @@ function CreatePostScreen({ navigation, route }: any) {
   const persistComposerMediaTransform = useCallback(() => {
     const rawX = Number((composerMediaPan.x as any)._value || 0);
     const rawY = Number((composerMediaPan.y as any)._value || 0);
-    // Use the ref so we always read the current scale, not the stale closure value
     const nextScale = clamp(composerMediaScaleRef.current, 1.0, 4);
-    // Max normalized translate = (scale-1)/2 ensures image always fills frame
-    const maxT = (nextScale - 1) / 2;
+    // Cover-based clamping: the Animated.View is sized to the image's natural
+    // "cover" dimensions, so the max pan is half the overflow on each axis.
+    const iA = (selectedAsset?.width || 1) / (selectedAsset?.height || 1);
+    const cW = composerCanvasSize.width;
+    const cH = composerCanvasSize.height;
+    const cA = cW > 0 && cH > 0 ? cW / cH : 1;
+    const cvW = iA >= cA ? cH * iA : cW;
+    const cvH = iA < cA ? cW / iA : cH;
+    const maxPanXpx = cW > 0 ? Math.max(0, (cvW * nextScale - cW) / 2) : 0;
+    const maxPanYpx = cH > 0 ? Math.max(0, (cvH * nextScale - cH) / 2) : 0;
     const nextTransform = {
       scale: nextScale,
-      translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -maxT, maxT) : 0,
-      translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -maxT, maxT) : 0,
+      translateX: cW ? clamp(rawX / cW, -maxPanXpx / cW, maxPanXpx / cW) : 0,
+      translateY: cH ? clamp(rawY / cH, -maxPanYpx / cH, maxPanYpx / cH) : 0,
     };
     composerMediaScale.setValue(nextTransform.scale);
     composerMediaScaleRef.current = nextTransform.scale;
@@ -3145,7 +3152,7 @@ function CreatePostScreen({ navigation, route }: any) {
         [selectedAsset.id]: nextTransform,
       }));
     }
-  }, [composerCanvasSize.height, composerCanvasSize.width, composerMediaPan, composerMediaScale, selectedAsset?.id]);
+  }, [composerCanvasSize.height, composerCanvasSize.width, composerMediaPan, composerMediaScale, selectedAsset?.id, selectedAsset?.width, selectedAsset?.height]);
 
   const composerMediaResponder = useMemo(
     () =>
@@ -3196,9 +3203,13 @@ function CreatePostScreen({ navigation, route }: any) {
             // Drive scale via Animated.Value — no setState, no re-render, stays on JS thread
             composerMediaScale.setValue(nextScale);
             composerMediaScaleRef.current = nextScale;
-            // Re-clamp pan so image always fills frame at the new scale
-            const maxPanX = Math.max(0, (nextScale - 1) * composerCanvasSize.width / 2);
-            const maxPanY = Math.max(0, (nextScale - 1) * composerCanvasSize.height / 2);
+            // Re-clamp pan using cover dimensions so image always fills frame
+            const _iA2 = (selectedAsset?.width || 1) / (selectedAsset?.height || 1);
+            const _cA2 = composerCanvasSize.width > 0 && composerCanvasSize.height > 0 ? composerCanvasSize.width / composerCanvasSize.height : 1;
+            const _cvW2 = _iA2 >= _cA2 ? composerCanvasSize.height * _iA2 : composerCanvasSize.width;
+            const _cvH2 = _iA2 < _cA2 ? composerCanvasSize.width / _iA2 : composerCanvasSize.height;
+            const maxPanX = Math.max(0, (_cvW2 * nextScale - composerCanvasSize.width) / 2);
+            const maxPanY = Math.max(0, (_cvH2 * nextScale - composerCanvasSize.height) / 2);
             const curPanX = Number((composerMediaPan.x as any)._value || 0);
             const curPanY = Number((composerMediaPan.y as any)._value || 0);
             composerMediaPan.setValue({
@@ -3219,9 +3230,13 @@ function CreatePostScreen({ navigation, route }: any) {
             };
           }
 
-          // Single-finger pan — clamp using ref (never stale)
-          const maxPanX = Math.max(0, (composerMediaScaleRef.current - 1) * composerCanvasSize.width / 2);
-          const maxPanY = Math.max(0, (composerMediaScaleRef.current - 1) * composerCanvasSize.height / 2);
+          // Single-finger pan — clamp using cover dimensions (never stale via ref)
+          const _iA = (selectedAsset?.width || 1) / (selectedAsset?.height || 1);
+          const _cA = composerCanvasSize.width > 0 && composerCanvasSize.height > 0 ? composerCanvasSize.width / composerCanvasSize.height : 1;
+          const _cvW = _iA >= _cA ? composerCanvasSize.height * _iA : composerCanvasSize.width;
+          const _cvH = _iA < _cA ? composerCanvasSize.width / _iA : composerCanvasSize.height;
+          const maxPanX = Math.max(0, (_cvW * composerMediaScaleRef.current - composerCanvasSize.width) / 2);
+          const maxPanY = Math.max(0, (_cvH * composerMediaScaleRef.current - composerCanvasSize.height) / 2);
           composerMediaPan.setValue({
             x: clamp(composerMediaGestureRef.current.startX + gestureState.dx, -maxPanX, maxPanX),
             y: clamp(composerMediaGestureRef.current.startY + gestureState.dy, -maxPanY, maxPanY),
@@ -4289,11 +4304,31 @@ function CreatePostScreen({ navigation, route }: any) {
         backgroundColor: isDarkMode ? "#020617" : "#E5ECE7",
         borderColor,
         aspectRatio: activeAspect.ratio,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
       },
     ];
     const interactive = !!options?.interactive;
+
+    // Compute the natural "cover" dimensions so the image always fills the
+    // canvas with no letterboxing, and the user can pan freely in the long axis.
+    const imgW = selectedAsset?.width || 1;
+    const imgH = selectedAsset?.height || 1;
+    const imgAspect = imgW / imgH;
+    const cW = composerCanvasSize.width;
+    const cH = composerCanvasSize.height;
+    const canvasAspect = cW > 0 && cH > 0 ? cW / cH : activeAspect.ratio;
+    const coverW = cW > 0 && cH > 0
+      ? (imgAspect >= canvasAspect ? cH * imgAspect : cW)
+      : undefined;
+    const coverH = cW > 0 && cH > 0
+      ? (imgAspect < canvasAspect ? cW / imgAspect : cH)
+      : undefined;
+
     const mediaTransformStyle = [
-      styles.previewMedia,
+      coverW != null && coverH != null
+        ? { width: coverW, height: coverH }
+        : styles.previewMedia,
       {
         transform: [
           ...composerMediaPan.getTranslateTransform(),
@@ -4351,14 +4386,14 @@ function CreatePostScreen({ navigation, route }: any) {
         <Animated.View style={mediaTransformStyle} {...(interactive ? composerMediaResponder.panHandlers : {})}>
           {ColorMatrix && selectedFilterId !== "none" ? (
             <ColorMatrix matrix={(PHOTO_FILTER_LIST.find((item) => item.id === selectedFilterId) || PHOTO_FILTER_LIST[0]).matrix}>
-              <Image source={{ uri: selectedAsset.uri }} style={styles.previewMedia} resizeMode="contain" />
+              <Image source={{ uri: selectedAsset.uri }} style={styles.previewMedia} resizeMode="cover" />
             </ColorMatrix>
           ) : (
             <ProgressiveImage
               uri={selectedAsset.uri}
               previewUri={selectedAsset.thumbnailUrl}
               style={styles.previewMedia}
-              resizeMode="contain"
+              resizeMode="cover"
             />
           )}
         </Animated.View>
