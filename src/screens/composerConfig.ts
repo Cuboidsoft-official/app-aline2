@@ -97,14 +97,19 @@ export const findAspectOption = (
  * Returns undefined when no transform is provided (no-op / default).
  */
 export const sanitizeFrameTransform = (
-  frameTransform?: { scale: number; translateX: number; translateY: number },
-): { scale: number; translateX: number; translateY: number } | undefined => {
+  frameTransform?: { scale: number; translateX: number; translateY: number; sourceAspect?: number },
+): { scale: number; translateX: number; translateY: number; sourceAspect?: number } | undefined => {
   if (!frameTransform) return undefined;
-  return {
+  const result: { scale: number; translateX: number; translateY: number; sourceAspect?: number } = {
     scale: Math.max(0.1, Math.min(4, Number(frameTransform.scale) || 1)),
     translateX: Math.max(-1.5, Math.min(1.5, Number(frameTransform.translateX) || 0)),
     translateY: Math.max(-1.5, Math.min(1.5, Number(frameTransform.translateY) || 0)),
   };
+  const sa = Number(frameTransform.sourceAspect);
+  if (Number.isFinite(sa) && sa > 0) {
+    result.sourceAspect = sa;
+  }
+  return result;
 };
 
 /**

@@ -420,7 +420,12 @@ const buildAspectMetadata = (
   const safeRatio = Math.max(0.5, Math.min(2, Number(ratio) || 1));
   const sourceWidth = Math.max(720, Math.round(Number(sourceAsset?.width || uploadedMedia.width || 0) || 0));
   const sourceHeight = Math.max(720, Math.round(Number(sourceAsset?.height || uploadedMedia.height || 0) || 0));
-  const safeFrameTransform = sanitizeFrameTransform(frameTransform);
+  // Carry original aspect ratio so the feed can compute correct cover dimensions
+  // even though buildAspectMetadata remaps width/height to match the frame ratio.
+  const sourceAspect = sourceWidth / sourceHeight;
+  const safeFrameTransform = sanitizeFrameTransform(
+    frameTransform ? { ...frameTransform, sourceAspect } : undefined,
+  );
 
   if (safeRatio >= 1) {
     const width = Math.max(sourceWidth, Math.round(sourceHeight * safeRatio));

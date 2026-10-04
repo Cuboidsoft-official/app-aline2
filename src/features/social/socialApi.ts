@@ -605,6 +605,9 @@ class RemoteSocialApi implements SocialApi {
             scale: Math.max(0.1, Math.min(4, Number(item.frameTransform.scale || 1))),
             translateX: Math.max(-1.5, Math.min(1.5, Number(item.frameTransform.translateX || 0))),
             translateY: Math.max(-1.5, Math.min(1.5, Number(item.frameTransform.translateY || 0))),
+            ...(Number.isFinite(Number(item.frameTransform.sourceAspect)) && Number(item.frameTransform.sourceAspect) > 0
+              ? { sourceAspect: Number(item.frameTransform.sourceAspect) }
+              : {}),
           }
         : undefined,
       sensitiveContent: item?.sensitiveContent?.isSensitive || item?.mediaSensitivity?.isSensitive

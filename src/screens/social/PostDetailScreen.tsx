@@ -36,6 +36,7 @@ import { resolveMentionUserId } from "../../utils/mentionLinks";
 import { useAppTheme } from "../../theme/AppThemeContext";
 import { getCarouselGestureIntent } from "../../utils/carouselGesture";
 import { performPremiumPurchase } from "../../utils/premiumPurchase";
+import { computeCoverDimensions } from "../composerConfig";
 
 let ColorMatrix: any = null;
 try {
@@ -68,7 +69,7 @@ const getMediaFrameTransformStyle = (
   height: number,
 ) => {
   const transform = asset?.frameTransform;
-  const scale = Math.max(0.1, Math.min(4, Number(transform?.scale || 1)));
+  const scale = Math.max(1.0, Math.min(4, Number(transform?.scale || 1)));
   const translateX = Math.max(-1.5, Math.min(1.5, Number(transform?.translateX || 0))) * width;
   const translateY = Math.max(-1.5, Math.min(1.5, Number(transform?.translateY || 0))) * height;
 
@@ -79,6 +80,28 @@ const getMediaFrameTransformStyle = (
       { scale },
     ],
   };
+};
+
+const getMediaCoverStyle = (
+  asset: Post["media"][number] | undefined,
+  containerW: number,
+  containerH: number,
+): object => {
+  if (containerW <= 0 || containerH <= 0) {
+    return StyleSheet.absoluteFillObject;
+  }
+  const sourceAspect = Number(asset?.frameTransform?.sourceAspect);
+  if (Number.isFinite(sourceAspect) && sourceAspect > 0) {
+    const { coverW, coverH } = computeCoverDimensions(sourceAspect * 1000, 1000, containerW, containerH);
+    return { width: coverW, height: coverH };
+  }
+  const imgW = Number(asset?.width || 0);
+  const imgH = Number(asset?.height || 0);
+  if (imgW <= 0 || imgH <= 0) {
+    return StyleSheet.absoluteFillObject;
+  }
+  const { coverW, coverH } = computeCoverDimensions(imgW, imgH, containerW, containerH);
+  return { width: coverW, height: coverH };
 };
 
 function PostDetailScreen({ route, navigation }: any) {
@@ -357,8 +380,8 @@ function PostDetailScreen({ route, navigation }: any) {
 
     if (asset.mediaType === "video") {
       return (
-        <View key={key || asset.id} style={styles.image}>
-          <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, detailMediaWidth, detailMediaHeight)]}>
+        <View key={key || asset.id} style={[styles.image, { overflow: "hidden", alignItems: "center", justifyContent: "center" }]}>
+          <View style={[getMediaCoverStyle(asset, detailMediaWidth, detailMediaHeight), getMediaFrameTransformStyle(asset, detailMediaWidth, detailMediaHeight)]}>
             <SocialVideo
               uri={assetUrl}
               posterUri={posterUrl}
@@ -380,13 +403,13 @@ function PostDetailScreen({ route, navigation }: any) {
     }
 
     const rawImage = (
-      <View key={key || asset.id} style={styles.image}>
-        <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, detailMediaWidth, detailMediaHeight)]}>
+      <View key={key || asset.id} style={[styles.image, { overflow: "hidden", alignItems: "center", justifyContent: "center" }]}>
+        <View style={[getMediaCoverStyle(asset, detailMediaWidth, detailMediaHeight), getMediaFrameTransformStyle(asset, detailMediaWidth, detailMediaHeight)]}>
           <ProgressiveImage
             uri={assetUrl}
             previewUri={posterUrl}
             style={StyleSheet.absoluteFill}
-            resizeMode={imageResizeMode}
+            resizeMode="cover"
             contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
           />
         </View>
