@@ -63,6 +63,8 @@ export interface MediaAsset {
     scale: number;
     translateX: number;
     translateY: number;
+    /** Original image aspect ratio (w/h) before buildAspectMetadata remapped dimensions to the frame ratio. */
+    sourceAspect?: number;
   };
   sensitiveContent?: {
     isSensitive: boolean;

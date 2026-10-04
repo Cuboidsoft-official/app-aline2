@@ -298,15 +298,32 @@ const getImageResizeMode = (
 
 // Returns the natural cover dimensions for a media asset in a container, so
 // the image fills the frame with no letterboxing just like the editor does.
+// Uses frameTransform.sourceAspect (original image ratio before buildAspectMetadata
+// remapped width/height to the frame ratio) so cover overflow matches the editor.
 // Falls back to absoluteFillObject when dimensions are unknown (backward compat).
 const getMediaCoverStyle = (
   asset: Post["media"][number] | undefined,
   containerW: number,
   containerH: number,
 ): object => {
+  if (containerW <= 0 || containerH <= 0) {
+    return StyleSheet.absoluteFillObject;
+  }
+  // Prefer sourceAspect stored in frameTransform — it reflects the original image
+  // aspect ratio before buildAspectMetadata rewrote width/height to match the frame.
+  const sourceAspect = Number(asset?.frameTransform?.sourceAspect);
+  if (Number.isFinite(sourceAspect) && sourceAspect > 0) {
+    const { coverW, coverH } = computeCoverDimensions(
+      sourceAspect * 1000,
+      1000,
+      containerW,
+      containerH,
+    );
+    return { width: coverW, height: coverH };
+  }
   const imgW = Number(asset?.width || 0);
   const imgH = Number(asset?.height || 0);
-  if (imgW <= 0 || imgH <= 0 || containerW <= 0 || containerH <= 0) {
+  if (imgW <= 0 || imgH <= 0) {
     return StyleSheet.absoluteFillObject;
   }
   const { coverW, coverH } = computeCoverDimensions(imgW, imgH, containerW, containerH);
