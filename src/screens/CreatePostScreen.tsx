@@ -4351,14 +4351,14 @@ function CreatePostScreen({ navigation, route }: any) {
         <Animated.View style={mediaTransformStyle} {...(interactive ? composerMediaResponder.panHandlers : {})}>
           {ColorMatrix && selectedFilterId !== "none" ? (
             <ColorMatrix matrix={(PHOTO_FILTER_LIST.find((item) => item.id === selectedFilterId) || PHOTO_FILTER_LIST[0]).matrix}>
-              <Image source={{ uri: selectedAsset.uri }} style={styles.previewMedia} resizeMode="cover" />
+              <Image source={{ uri: selectedAsset.uri }} style={styles.previewMedia} resizeMode="contain" />
             </ColorMatrix>
           ) : (
             <ProgressiveImage
               uri={selectedAsset.uri}
               previewUri={selectedAsset.thumbnailUrl}
               style={styles.previewMedia}
-              resizeMode="cover"
+              resizeMode="contain"
             />
           )}
         </Animated.View>
