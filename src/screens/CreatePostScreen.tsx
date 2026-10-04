@@ -1098,6 +1098,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const storyEmojiPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const storyImagePan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const composerMediaPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const composerMediaScale = useRef(new Animated.Value(1)).current;
+  const composerMediaScaleRef = useRef(1);
   const composerMediaGestureRef = useRef({ startX: 0, startY: 0, startScale: 1, startDistance: 0 });
   const lastStoryAssetUriRef = useRef("");
   const {
@@ -1341,6 +1343,8 @@ function CreatePostScreen({ navigation, route }: any) {
     // Clamp scale to fill minimum on load so image always covers frame
     const nextTransform = { ...raw, scale: Math.max(1.0, raw.scale) };
     setComposerMediaTransform(nextTransform);
+    composerMediaScale.setValue(nextTransform.scale);
+    composerMediaScaleRef.current = nextTransform.scale;
     composerMediaPan.setValue({
       x: composerCanvasSize.width ? nextTransform.translateX * composerCanvasSize.width : 0,
       y: composerCanvasSize.height ? nextTransform.translateY * composerCanvasSize.height : 0,
@@ -1350,6 +1354,7 @@ function CreatePostScreen({ navigation, route }: any) {
     composerCanvasSize.height,
     composerCanvasSize.width,
     composerMediaPan,
+    composerMediaScale,
     composerMediaTransformsByAssetId,
     mode,
     selectedAsset?.id,
@@ -3104,38 +3109,50 @@ function CreatePostScreen({ navigation, route }: any) {
     composerMediaPan.setValue({ x: 0, y: 0 });
     const nextTransform = { scale: 1.0, translateX: 0, translateY: 0 };
     setComposerMediaTransform(nextTransform);
+    composerMediaScale.setValue(1.0);
+    composerMediaScaleRef.current = 1.0;
     if (selectedAsset?.id) {
       setComposerMediaTransformsByAssetId((prev) => ({
         ...prev,
         [selectedAsset.id]: nextTransform,
       }));
     }
-  }, [composerMediaPan, selectedAsset?.id]);
+  }, [composerMediaPan, composerMediaScale, selectedAsset?.id]);
 
   const persistComposerMediaTransform = useCallback(() => {
     const rawX = Number((composerMediaPan.x as any)._value || 0);
     const rawY = Number((composerMediaPan.y as any)._value || 0);
-
-    setComposerMediaTransform((current) => {
-      const nextScale = clamp(current.scale, 1.0, 4);
-      // Max normalized translate = (scale-1)/2 ensures image always fills frame
-      const maxT = (nextScale - 1) / 2;
-      const nextTransform = {
-        scale: nextScale,
-        translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -maxT, maxT) : current.translateX,
-        translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -maxT, maxT) : current.translateY,
-      };
-
-      if (selectedAsset?.id) {
-        setComposerMediaTransformsByAssetId((prev) => ({
-          ...prev,
-          [selectedAsset.id]: nextTransform,
-        }));
-      }
-
-      return nextTransform;
+    const nextScale = clamp(composerMediaScaleRef.current, 1.0, 4);
+    // Cover-based clamping: the Animated.View is sized to the image's natural
+    // "cover" dimensions, so the max pan is half the overflow on each axis.
+    const iA = (selectedAsset?.width || 1) / (selectedAsset?.height || 1);
+    const cW = composerCanvasSize.width;
+    const cH = composerCanvasSize.height;
+    const cA = cW > 0 && cH > 0 ? cW / cH : 1;
+    const cvW = iA >= cA ? cH * iA : cW;
+    const cvH = iA < cA ? cW / iA : cH;
+    const maxPanXpx = cW > 0 ? Math.max(0, (cvW * nextScale - cW) / 2) : 0;
+    const maxPanYpx = cH > 0 ? Math.max(0, (cvH * nextScale - cH) / 2) : 0;
+    const nextTransform = {
+      scale: nextScale,
+      translateX: cW ? clamp(rawX / cW, -maxPanXpx / cW, maxPanXpx / cW) : 0,
+      translateY: cH ? clamp(rawY / cH, -maxPanYpx / cH, maxPanYpx / cH) : 0,
+    };
+    composerMediaScale.setValue(nextTransform.scale);
+    composerMediaScaleRef.current = nextTransform.scale;
+    // Snap pan back to clamped pixel values so image snaps to valid bounds
+    composerMediaPan.setValue({
+      x: composerCanvasSize.width ? nextTransform.translateX * composerCanvasSize.width : 0,
+      y: composerCanvasSize.height ? nextTransform.translateY * composerCanvasSize.height : 0,
     });
-  }, [composerCanvasSize.height, composerCanvasSize.width, composerMediaPan, selectedAsset?.id]);
+    setComposerMediaTransform(nextTransform);
+    if (selectedAsset?.id) {
+      setComposerMediaTransformsByAssetId((prev) => ({
+        ...prev,
+        [selectedAsset.id]: nextTransform,
+      }));
+    }
+  }, [composerCanvasSize.height, composerCanvasSize.width, composerMediaPan, composerMediaScale, selectedAsset?.id, selectedAsset?.width, selectedAsset?.height]);
 
   const composerMediaResponder = useMemo(
     () =>
@@ -3154,7 +3171,8 @@ function CreatePostScreen({ navigation, route }: any) {
           composerMediaGestureRef.current = {
             startX: Number((composerMediaPan.x as any)._value || 0),
             startY: Number((composerMediaPan.y as any)._value || 0),
-            startScale: composerMediaTransform.scale,
+            // Use ref so we always get the latest scale, never a stale closure value
+            startScale: composerMediaScaleRef.current,
             startDistance: distance,
           };
         },
@@ -3163,52 +3181,62 @@ function CreatePostScreen({ navigation, route }: any) {
           const firstTouch = touches[0];
           const secondTouch = touches[1];
 
-          if (firstTouch && secondTouch) {
-            const distance = Math.hypot(firstTouch.pageX - secondTouch.pageX, firstTouch.pageY - secondTouch.pageY);
-
-            // Grant fires on first finger only; startDistance=0 until second finger lands.
-            // Capture baseline on first two-finger frame and return - avoids ratio=1 no-op.
-            if (!composerMediaGestureRef.current.startDistance) {
-              composerMediaGestureRef.current = {
-                ...composerMediaGestureRef.current,
-                startDistance: distance,
-                startScale: composerMediaTransform.scale,
-              };
-              return;
-            }
-
-            const nextScale = clamp(
-              composerMediaGestureRef.current.startScale * (distance / composerMediaGestureRef.current.startDistance),
-              1.0,
-              4,
-            );
-            // Re-clamp pan to keep image filling frame at new scale
-            const maxPanX = Math.max(0, (nextScale - 1) * composerCanvasSize.width / 2);
-            const maxPanY = Math.max(0, (nextScale - 1) * composerCanvasSize.height / 2);
-            const curPanX = Number((composerMediaPan.x as any)._value || 0);
-            const curPanY = Number((composerMediaPan.y as any)._value || 0);
-            composerMediaPan.setValue({
-              x: clamp(curPanX, -maxPanX, maxPanX),
-              y: clamp(curPanY, -maxPanY, maxPanY),
-            });
-            setComposerMediaTransform((current) => ({ ...current, scale: nextScale }));
-            return;
-          }
-
-          // Reset pinch baseline when second finger lifts, so next gesture starts fresh.
-          if (composerMediaGestureRef.current.startDistance) {
-            composerMediaGestureRef.current = {
-              ...composerMediaGestureRef.current,
-              startDistance: 0,
-              startScale: composerMediaTransform.scale,
-              startX: Number((composerMediaPan.x as any)._value || 0),
-              startY: Number((composerMediaPan.y as any)._value || 0),
-            };
-          }
+          if (firstTouch && secondTouch) {
+            const distance = Math.hypot(firstTouch.pageX - secondTouch.pageX, firstTouch.pageY - secondTouch.pageY);
 
-          // Pan bounded by current scale so image always fills frame
-          const maxPanX = Math.max(0, (composerMediaTransform.scale - 1) * composerCanvasSize.width / 2);
-          const maxPanY = Math.max(0, (composerMediaTransform.scale - 1) * composerCanvasSize.height / 2);
+            // Grant fires on first finger only; startDistance=0 until second finger lands.
+            // Capture baseline on first two-finger frame and return - avoids a ratio=1 no-op jump.
+            if (!composerMediaGestureRef.current.startDistance) {
+              composerMediaGestureRef.current = {
+                ...composerMediaGestureRef.current,
+                startDistance: distance,
+                startScale: composerMediaScaleRef.current,
+              };
+              return;
+            }
+
+            const nextScale = clamp(
+              composerMediaGestureRef.current.startScale * (distance / composerMediaGestureRef.current.startDistance),
+              1.0,
+              4,
+            );
+            // Drive scale via Animated.Value — no setState, no re-render, stays on JS thread
+            composerMediaScale.setValue(nextScale);
+            composerMediaScaleRef.current = nextScale;
+            // Re-clamp pan using cover dimensions so image always fills frame
+            const _iA2 = (selectedAsset?.width || 1) / (selectedAsset?.height || 1);
+            const _cA2 = composerCanvasSize.width > 0 && composerCanvasSize.height > 0 ? composerCanvasSize.width / composerCanvasSize.height : 1;
+            const _cvW2 = _iA2 >= _cA2 ? composerCanvasSize.height * _iA2 : composerCanvasSize.width;
+            const _cvH2 = _iA2 < _cA2 ? composerCanvasSize.width / _iA2 : composerCanvasSize.height;
+            const maxPanX = Math.max(0, (_cvW2 * nextScale - composerCanvasSize.width) / 2);
+            const maxPanY = Math.max(0, (_cvH2 * nextScale - composerCanvasSize.height) / 2);
+            const curPanX = Number((composerMediaPan.x as any)._value || 0);
+            const curPanY = Number((composerMediaPan.y as any)._value || 0);
+            composerMediaPan.setValue({
+              x: clamp(curPanX, -maxPanX, maxPanX),
+              y: clamp(curPanY, -maxPanY, maxPanY),
+            });
+            return;
+          }
+
+          // Second finger lifted — reset pinch baseline so next gesture starts fresh.
+          if (composerMediaGestureRef.current.startDistance) {
+            composerMediaGestureRef.current = {
+              ...composerMediaGestureRef.current,
+              startDistance: 0,
+              startScale: composerMediaScaleRef.current,
+              startX: Number((composerMediaPan.x as any)._value || 0),
+              startY: Number((composerMediaPan.y as any)._value || 0),
+            };
+          }
+
+          // Single-finger pan — clamp using cover dimensions (never stale via ref)
+          const _iA = (selectedAsset?.width || 1) / (selectedAsset?.height || 1);
+          const _cA = composerCanvasSize.width > 0 && composerCanvasSize.height > 0 ? composerCanvasSize.width / composerCanvasSize.height : 1;
+          const _cvW = _iA >= _cA ? composerCanvasSize.height * _iA : composerCanvasSize.width;
+          const _cvH = _iA < _cA ? composerCanvasSize.width / _iA : composerCanvasSize.height;
+          const maxPanX = Math.max(0, (_cvW * composerMediaScaleRef.current - composerCanvasSize.width) / 2);
+          const maxPanY = Math.max(0, (_cvH * composerMediaScaleRef.current - composerCanvasSize.height) / 2);
           composerMediaPan.setValue({
             x: clamp(composerMediaGestureRef.current.startX + gestureState.dx, -maxPanX, maxPanX),
             y: clamp(composerMediaGestureRef.current.startY + gestureState.dy, -maxPanY, maxPanY),
@@ -3221,7 +3249,7 @@ function CreatePostScreen({ navigation, route }: any) {
       composerCanvasSize.height,
       composerCanvasSize.width,
       composerMediaPan,
-      composerMediaTransform.scale,
+      composerMediaScale,
       persistComposerMediaTransform,
       selectedAsset,
     ],
@@ -4276,15 +4304,35 @@ function CreatePostScreen({ navigation, route }: any) {
         backgroundColor: isDarkMode ? "#020617" : "#E5ECE7",
         borderColor,
         aspectRatio: activeAspect.ratio,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
       },
     ];
     const interactive = !!options?.interactive;
+
+    // Compute the natural "cover" dimensions so the image always fills the
+    // canvas with no letterboxing, and the user can pan freely in the long axis.
+    const imgW = selectedAsset?.width || 1;
+    const imgH = selectedAsset?.height || 1;
+    const imgAspect = imgW / imgH;
+    const cW = composerCanvasSize.width;
+    const cH = composerCanvasSize.height;
+    const canvasAspect = cW > 0 && cH > 0 ? cW / cH : activeAspect.ratio;
+    const coverW = cW > 0 && cH > 0
+      ? (imgAspect >= canvasAspect ? cH * imgAspect : cW)
+      : undefined;
+    const coverH = cW > 0 && cH > 0
+      ? (imgAspect < canvasAspect ? cW / imgAspect : cH)
+      : undefined;
+
     const mediaTransformStyle = [
-      styles.previewMediaFill,
+      coverW != null && coverH != null
+        ? { width: coverW, height: coverH }
+        : styles.previewMedia,
       {
         transform: [
           ...composerMediaPan.getTranslateTransform(),
-          { scale: composerMediaTransform.scale },
+          { scale: composerMediaScale },
         ],
       },
     ];
@@ -4344,7 +4392,7 @@ function CreatePostScreen({ navigation, route }: any) {
             <ProgressiveImage
               uri={selectedAsset.uri}
               previewUri={selectedAsset.thumbnailUrl}
-              style={styles.previewMediaFill}
+              style={styles.previewMedia}
               resizeMode="cover"
             />
           )}
@@ -4648,6 +4696,13 @@ function CreatePostScreen({ navigation, route }: any) {
       hidden?: boolean;
     }> = [
       {
+        id: "layout",
+        label: "Crop",
+        icon: "crop-outline",
+        active: composerEditToolPanel === "layout",
+        onPress: () => setComposerEditToolPanel("layout"),
+      },
+      {
         id: "text",
         label: "Text",
         icon: "text-outline",
@@ -4756,6 +4811,40 @@ function CreatePostScreen({ navigation, route }: any) {
   };
 
   const renderComposerEditToolPanel = () => {
+    if (composerEditToolPanel === "layout") {
+      return (
+        <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
+          <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Frame</Text>
+          <Text style={[styles.sectionTitle, { color: textColor }]}>Crop & Zoom</Text>
+          <View style={[styles.composerSheetBlock, { gap: 10 }]}>
+            <TouchableOpacity
+              style={[styles.toolAction, styles.toolActionFullWidth, { backgroundColor: inputBackground, borderColor }]}
+              onPress={() => {
+                resetCropPosition();
+                setComposerEditToolPanel(null);
+              }}
+              activeOpacity={0.8}
+            >
+              <Icon name="return-up-back-outline" size={18} color={accentColor} />
+              <View style={styles.toolActionBody}>
+                <Text style={[styles.toolActionTitle, { color: textColor }]}>Reset position</Text>
+                <Text style={[styles.toolActionMeta, { color: mutedColor }]}>Centre the image at original zoom</Text>
+              </View>
+            </TouchableOpacity>
+            <View style={[styles.toolAction, styles.toolActionFullWidth, { backgroundColor: inputBackground, borderColor }]}>
+              <Icon name="information-circle-outline" size={18} color={mutedColor} />
+              <View style={styles.toolActionBody}>
+                <Text style={[styles.toolActionTitle, { color: textColor }]}>How to crop</Text>
+                <Text style={[styles.toolActionMeta, { color: mutedColor }]}>Pinch to zoom · Drag to reposition · The image always fills the frame</Text>
+              </View>
+            </View>
+            <Text style={[styles.sectionEyebrow, { color: accentColor, marginTop: 4 }]}>Aspect ratio</Text>
+            {renderAspectSelector()}
+          </View>
+        </View>
+      );
+    }
+
     if (composerEditToolPanel === "text") {
       return (
         <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
@@ -4956,19 +5045,21 @@ function CreatePostScreen({ navigation, route }: any) {
     }
 
     const sheetTitle =
-      composerEditToolPanel === "filters"
-        ? "Filters"
-        : composerEditToolPanel === "tag"
-          ? "Tag people"
-          : composerEditToolPanel === "text"
-            ? "Text"
-            : composerEditToolPanel === "color"
-              ? "Color"
-              : composerEditToolPanel === "font"
-                ? "Font"
-                : composerEditToolPanel === "size"
-                  ? "Size"
-                  : "Edit";
+      composerEditToolPanel === "layout"
+        ? "Crop & Zoom"
+        : composerEditToolPanel === "filters"
+          ? "Filters"
+          : composerEditToolPanel === "tag"
+            ? "Tag people"
+            : composerEditToolPanel === "text"
+              ? "Text"
+              : composerEditToolPanel === "color"
+                ? "Color"
+                : composerEditToolPanel === "font"
+                  ? "Font"
+                  : composerEditToolPanel === "size"
+                    ? "Size"
+                    : "Edit";
     const snapPoints = composerEditToolPanel === "filters" || composerEditToolPanel === "color" ? [0.42, 0.62] : [0.34, 0.52];
 
     return (
