@@ -41,16 +41,19 @@ export const POST_ASPECTS: AspectOption[] = [
   { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
 ];
 
-// Kept separate from POST_ASPECTS so swipe/reel options don't change
-// when post options are updated.
+// Story and swipe share the same three frame options.
+// "fullscreen" (9:16) is the tall portrait frame — image fits without cropping at default scale.
+// "landscape" (16:9) and "square" (1:1) work identically to the post options.
 export const SWIPE_ASPECTS: AspectOption[] = [
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
+  { id: "fullscreen", label: "Full", detail: "Full Screen", ratio: 9 / 16 },
+  { id: "landscape",  label: "16:9", detail: "Landscape",  ratio: 16 / 9 },
+  { id: "square",     label: "1:1",  detail: "Square",     ratio: 1 },
 ];
 
 export const STORY_ASPECTS: AspectOption[] = [
-  { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
+  { id: "fullscreen", label: "Full", detail: "Full Screen", ratio: 9 / 16 },
+  { id: "landscape",  label: "16:9", detail: "Landscape",  ratio: 16 / 9 },
+  { id: "square",     label: "1:1",  detail: "Square",     ratio: 1 },
 ];
 
 export const ASPECTS_BY_MODE: Record<ComposerMode, AspectOption[]> = {
@@ -61,9 +64,15 @@ export const ASPECTS_BY_MODE: Record<ComposerMode, AspectOption[]> = {
 
 export const DEFAULT_ASPECT_BY_MODE: Record<ComposerMode, string> = {
   post: "square",
-  story: "vertical",
-  swipe: "portrait",
+  story: "fullscreen",
+  swipe: "fullscreen",
 };
+
+/**
+ * Returns true for the "fullscreen" aspect which starts the image at fit-scale
+ * (entire image visible without cropping) rather than the default cover-fill scale.
+ */
+export const isFitAspect = (aspectId: string): boolean => aspectId === "fullscreen";
 
 /** The panel that is open when the editor first appears. null = none open. */
 export const INITIAL_TOOL_PANEL: ComposerEditToolPanel = null;
@@ -155,6 +164,23 @@ export const computeCoverDimensions = (
   return imgAspect >= canvasAspect
     ? { coverW: canvasH * imgAspect, coverH: canvasH }
     : { coverW: canvasW, coverH: canvasW / imgAspect };
+};
+
+/**
+ * Computes the minimum scale at which the entire image is visible inside the
+ * canvas without any cropping (the "fit" / contain scale). Used for the
+ * "Full Screen" frame option where the image should show completely by default.
+ * Returns 1.0 when the image matches or is smaller than the canvas in both axes.
+ */
+export const computeFitScale = (
+  imgW: number,
+  imgH: number,
+  canvasW: number,
+  canvasH: number,
+): number => {
+  const { coverW, coverH } = computeCoverDimensions(imgW, imgH, canvasW, canvasH);
+  if (coverW <= 0 || coverH <= 0) return 1;
+  return Math.min(canvasW / coverW, canvasH / coverH);
 };
 
 /**
