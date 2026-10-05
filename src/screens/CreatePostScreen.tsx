@@ -107,6 +107,8 @@ import {
   sanitizeFrameTransform,
   computeCoverDimensions,
   computeMaxPan,
+  computeFitScale,
+  isFitAspect,
 } from "./composerConfig";
 
 type ComposerStage = "launcher" | "edit" | "details";
@@ -127,7 +129,7 @@ type MusicResultItem = SelectedMusicClip & {
   channelTitle?: string;
 };
 
-type StoryToolPanel = "text" | "color" | "font" | "size" | "filters" | "sticker" | null;
+type StoryToolPanel = "text" | "color" | "font" | "size" | "filters" | "sticker" | "layout" | null;
 type StoryTextFontVariant = "bold" | "italic" | "clean" | "soft";
 type MusicPreviewMode = "audio";
 
@@ -1053,7 +1055,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [videoTrimPreviewLoading, setVideoTrimPreviewLoading] = useState(false);
   const [videoTrimPreviewPositionMs, setVideoTrimPreviewPositionMs] = useState(0);
   const [storyCreationMode, setStoryCreationMode] = useState<"media" | "text">("media");
-  const [storyToolPanel, setStoryToolPanel] = useState<StoryToolPanel>("filters");
+  const [storyToolPanel, setStoryToolPanel] = useState<StoryToolPanel>(null);
   const [storyCanvasSize, setStoryCanvasSize] = useState({ width: 0, height: 0 });
   const [composerCanvasSize, setComposerCanvasSize] = useState({ width: 0, height: 0 });
   const [composerMediaTransform, setComposerMediaTransform] = useState<ComposerMediaTransform>(DEFAULT_COMPOSER_MEDIA_TRANSFORM);
@@ -1295,7 +1297,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
   const resetStoryEditor = useCallback((nextCreationMode: "media" | "text" = "media") => {
     setStoryCreationMode(nextCreationMode);
-    setStoryToolPanel(nextCreationMode === "text" ? "text" : "filters");
+    setStoryToolPanel(nextCreationMode === "text" ? "text" : null);
       setStoryBackgroundColor(STORY_BACKGROUND_COLORS[Math.floor(Math.random() * STORY_BACKGROUND_COLORS.length)] || STORY_BACKGROUND_COLORS[0]);
       setStoryText("");
       setStoryTextColor(STORY_TEXT_COLOR_OPTIONS[0]);
@@ -1823,7 +1825,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
       if (mode === "story") {
         setStoryCreationMode("media");
-        setStoryToolPanel("filters");
+        setStoryToolPanel(null);
       }
       setSelectedAsset(asset);
       setSelectedAssets(mode === "post" ? pickedAssets : [asset]);
@@ -1911,7 +1913,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
       if (mode === "story") {
         setStoryCreationMode("media");
-        setStoryToolPanel("filters");
+        setStoryToolPanel(null);
       }
       setSelectedAsset(asset);
       setSelectedAssets([asset]);
@@ -2935,7 +2937,9 @@ function CreatePostScreen({ navigation, route }: any) {
       }
     } else {
       const [uploaded] = await uploadComposerAssets([selectedAsset!], uploadOptions);
-      uploadedMedia = uploaded;
+      uploadedMedia = uploaded
+        ? buildAspectMetadata(uploaded, selectedAsset!, activeAspect.ratio, composerMediaTransform)
+        : uploaded;
     }
 
     return {
@@ -2975,7 +2979,9 @@ function CreatePostScreen({ navigation, route }: any) {
       previewMedia: storyPreviewMedia,
     };
   }, [
+    activeAspect.ratio,
     caption,
+    composerMediaTransform,
     creatorPricing,
     isPremiumStory,
     location,
@@ -3113,23 +3119,33 @@ function CreatePostScreen({ navigation, route }: any) {
   }, []);
 
   const resetCropPosition = useCallback(() => {
+    const cW = composerCanvasSize.width;
+    const cH = composerCanvasSize.height;
+    const minS = isFitAspect(activeAspect.id) && cW > 0 && cH > 0
+      ? computeFitScale(selectedAsset?.width || 1, selectedAsset?.height || 1, cW, cH)
+      : 1.0;
     composerMediaPan.setValue({ x: 0, y: 0 });
-    const nextTransform = { scale: 1.0, translateX: 0, translateY: 0 };
+    const nextTransform = { scale: minS, translateX: 0, translateY: 0 };
     setComposerMediaTransform(nextTransform);
-    composerMediaScale.setValue(1.0);
-    composerMediaScaleRef.current = 1.0;
+    composerMediaScale.setValue(minS);
+    composerMediaScaleRef.current = minS;
     if (selectedAsset?.id) {
       setComposerMediaTransformsByAssetId((prev) => ({
         ...prev,
         [selectedAsset.id]: nextTransform,
       }));
     }
-  }, [composerMediaPan, composerMediaScale, selectedAsset?.id]);
+  }, [activeAspect.id, composerCanvasSize.height, composerCanvasSize.width, composerMediaPan, composerMediaScale, selectedAsset?.height, selectedAsset?.id, selectedAsset?.width]);
 
   const persistComposerMediaTransform = useCallback(() => {
     const rawX = Number((composerMediaPan.x as any)._value || 0);
     const rawY = Number((composerMediaPan.y as any)._value || 0);
-    const nextScale = clamp(composerMediaScaleRef.current, 1.0, 4);
+    const cW0 = composerCanvasSize.width;
+    const cH0 = composerCanvasSize.height;
+    const minS = isFitAspect(activeAspect.id) && cW0 > 0 && cH0 > 0
+      ? computeFitScale(selectedAsset?.width || 1, selectedAsset?.height || 1, cW0, cH0)
+      : 1.0;
+    const nextScale = clamp(composerMediaScaleRef.current, minS, 4);
     const cW = composerCanvasSize.width;
     const cH = composerCanvasSize.height;
     const { coverW: cvW, coverH: cvH } = computeCoverDimensions(
@@ -3201,9 +3217,12 @@ function CreatePostScreen({ navigation, route }: any) {
               return;
             }
 
+            const _pinchMinS = isFitAspect(activeAspect.id) && composerCanvasSize.width > 0 && composerCanvasSize.height > 0
+              ? computeFitScale(selectedAsset?.width || 1, selectedAsset?.height || 1, composerCanvasSize.width, composerCanvasSize.height)
+              : 1.0;
             const nextScale = clamp(
               composerMediaGestureRef.current.startScale * (distance / composerMediaGestureRef.current.startDistance),
-              1.0,
+              _pinchMinS,
               4,
             );
             // Drive scale via Animated.Value — no setState, no re-render, stays on JS thread
@@ -3252,6 +3271,7 @@ function CreatePostScreen({ navigation, route }: any) {
         onPanResponderTerminate: persistComposerMediaTransform,
       }),
     [
+      activeAspect,
       composerCanvasSize.height,
       composerCanvasSize.width,
       composerMediaPan,
@@ -3526,36 +3546,88 @@ function CreatePostScreen({ navigation, route }: any) {
 
           const { width, height } = event.nativeEvent.layout;
           if (width && height) {
-            setStoryCanvasSize({ width, height });
+            updateComposerCanvasSize(width, height);
           }
         }}
       >
-        {!selectedAsset ? (
-          <View style={[styles.storyCanvasMedia, { backgroundColor: storyBackgroundColor }]} />
-        ) : selectedAsset.mediaType === "video" ? (
-          <SocialVideo
-            uri={selectedAsset.uri}
-            posterUri={selectedAsset.thumbnailUrl}
-            style={StyleSheet.absoluteFill}
-            muted={isComposerVideoMuted}
-            repeat
-            paused={stage === "details"}
-          />
-        ) : (
-          <Image source={{ uri: selectedAsset.uri }} style={styles.storyCanvasMedia} resizeMode="cover" />
-        )}
-
-        {selectedAsset?.mediaType === "video" && storyOverlayTint ? (
-          <View pointerEvents="none" style={[styles.storyFilterOverlay, storyOverlayTint]} />
-        ) : null}
-        {storyBrightnessOverlay ? (
-          <View pointerEvents="none" style={[styles.storyFilterOverlay, storyBrightnessOverlay]} />
-        ) : null}
-        {selectedAsset?.mediaType === "video" ? renderVideoSoundToggle(styles.storyVideoSoundToggle) : null}
-        <View pointerEvents="none" style={styles.storyCanvasShade} />
+        {(() => {
+          const isCropMode = interactive && storyToolPanel === "layout" && !!selectedAsset;
+          const cW = composerCanvasSize.width;
+          const cH = composerCanvasSize.height;
+          const measured = cW > 0 && cH > 0;
+          const imgW = selectedAsset?.width || 1;
+          const imgH = selectedAsset?.height || 1;
+          const { coverW, coverH } = measured
+            ? computeCoverDimensions(imgW, imgH, cW, cH)
+            : { coverW: undefined as number | undefined, coverH: undefined as number | undefined };
+          const cropTransformStyle = [
+            coverW != null && coverH != null ? { width: coverW, height: coverH } : StyleSheet.absoluteFill,
+            { transform: [...composerMediaPan.getTranslateTransform(), { scale: composerMediaScale }] },
+          ];
+          return (
+            <>
+              {!selectedAsset ? (
+                <View style={[styles.storyCanvasMedia, { backgroundColor: storyBackgroundColor }]} />
+              ) : isCropMode ? (
+                selectedAsset.mediaType === "video" ? (
+                  <Animated.View style={cropTransformStyle} {...composerMediaResponder.panHandlers}>
+                    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+                      <SocialVideo
+                        uri={selectedAsset.uri}
+                        posterUri={selectedAsset.thumbnailUrl}
+                        style={{ width: "100%", height: "100%" }}
+                        muted={isComposerVideoMuted}
+                        repeat
+                        paused={stage === "details"}
+                      />
+                    </View>
+                  </Animated.View>
+                ) : (
+                  <Animated.View style={cropTransformStyle} {...composerMediaResponder.panHandlers}>
+                    <Image source={{ uri: selectedAsset.uri }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                  </Animated.View>
+                )
+              ) : selectedAsset.mediaType === "video" ? (
+                <SocialVideo
+                  uri={selectedAsset.uri}
+                  posterUri={selectedAsset.thumbnailUrl}
+                  style={StyleSheet.absoluteFill}
+                  muted={isComposerVideoMuted}
+                  repeat
+                  paused={stage === "details"}
+                />
+              ) : (
+                <Image source={{ uri: selectedAsset.uri }} style={styles.storyCanvasMedia} resizeMode="cover" />
+              )}
+              {!isCropMode ? (
+                <>
+                  {selectedAsset?.mediaType === "video" && storyOverlayTint ? (
+                    <View pointerEvents="none" style={[styles.storyFilterOverlay, storyOverlayTint]} />
+                  ) : null}
+                  {storyBrightnessOverlay ? (
+                    <View pointerEvents="none" style={[styles.storyFilterOverlay, storyBrightnessOverlay]} />
+                  ) : null}
+                  {selectedAsset?.mediaType === "video" ? renderVideoSoundToggle(styles.storyVideoSoundToggle) : null}
+                  <View pointerEvents="none" style={styles.storyCanvasShade} />
+                </>
+              ) : (
+                <>
+                  {renderCropGrid()}
+                  <View pointerEvents="box-none" style={styles.cropControlRow}>
+                    <TouchableOpacity style={styles.fitTogglePill} onPress={resetCropPosition} activeOpacity={0.8}>
+                      <Icon name="return-up-back-outline" size={13} color="#fff" />
+                      <Text style={styles.cropHintText}>Reset</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </>
+          );
+        })()}
 
         {storyText.trim() ? (
           <Animated.View
+            pointerEvents={storyToolPanel === "layout" ? "none" : undefined}
             style={[
               styles.storyLayer,
               storyCreationMode === "text" ? styles.storyLayerTextStory : null,
@@ -3568,7 +3640,7 @@ function CreatePostScreen({ navigation, route }: any) {
               },
               interactive && storyActiveLayer === "text" ? [styles.storyLayerActive, { borderColor: accentColor }] : null,
             ]}
-            {...(interactive ? storyTextResponder.panHandlers : {})}
+            {...(interactive && storyToolPanel !== "layout" ? storyTextResponder.panHandlers : {})}
           >
             <Text
               style={[
@@ -3594,6 +3666,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
         {storyEmojiSticker ? (
           <Animated.View
+            pointerEvents={storyToolPanel === "layout" ? "none" : undefined}
             style={[
               styles.storyEmojiLayer,
               {
@@ -3605,7 +3678,7 @@ function CreatePostScreen({ navigation, route }: any) {
               },
               interactive && storyActiveLayer === "emoji" ? [styles.storyLayerActive, { borderColor: accentColor }] : null,
             ]}
-            {...(interactive ? storyEmojiResponder.panHandlers : {})}
+            {...(interactive && storyToolPanel !== "layout" ? storyEmojiResponder.panHandlers : {})}
           >
             <Text style={styles.storyEmojiText}>{storyEmojiSticker}</Text>
           </Animated.View>
@@ -3613,6 +3686,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
         {storyImageSticker?.imageUrl ? (
           <Animated.View
+            pointerEvents={storyToolPanel === "layout" ? "none" : undefined}
             style={[
               styles.storyImageLayer,
               {
@@ -3624,7 +3698,7 @@ function CreatePostScreen({ navigation, route }: any) {
               },
               interactive && storyActiveLayer === "image" ? [styles.storyLayerActive, { borderColor: accentColor }] : null,
             ]}
-            {...(interactive ? storyImageResponder.panHandlers : {})}
+            {...(interactive && storyToolPanel !== "layout" ? storyImageResponder.panHandlers : {})}
           >
             <Image source={{ uri: storyImageSticker.imageUrl }} style={styles.storyImageAsset} resizeMode="contain" />
           </Animated.View>
@@ -3648,6 +3722,13 @@ function CreatePostScreen({ navigation, route }: any) {
       active?: boolean;
       onPress: () => void;
     }> = [
+      {
+        id: "layout",
+        label: "Crop",
+        icon: "crop-outline",
+        active: storyToolPanel === "layout",
+        onPress: () => setStoryToolPanel((prev) => (prev === "layout" ? null : "layout")),
+      },
       {
         id: "text",
         label: "Text",
@@ -3720,6 +3801,33 @@ function CreatePostScreen({ navigation, route }: any) {
           },
         ]}
       >
+        {storyToolPanel === "layout" ? (
+          <View style={styles.storyAspectChips}>
+            {STORY_ASPECTS.map((option) => {
+              const active = option.id === activeAspect.id;
+              return (
+                <TouchableOpacity
+                  key={option.id}
+                  style={[
+                    styles.storyAspectChip,
+                    {
+                      backgroundColor: active ? accentSoft : inputBackground,
+                      borderColor: active ? accentColor : borderColor,
+                    },
+                  ]}
+                  onPress={() =>
+                    setAspectId((current) => ({
+                      ...current,
+                      [mode]: option.id,
+                    }))
+                  }
+                >
+                  <Text style={[styles.choiceChipLabel, { color: active ? textColor : mutedColor, fontSize: 10 }]}>{option.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.storyToolRailScroll}>
           {railItems.map((item) => (
             <TouchableOpacity
@@ -6681,6 +6789,18 @@ const styles = StyleSheet.create({
   storyToolRailScroll: {
     gap: 6,
     paddingBottom: 2,
+  },
+  storyAspectChips: {
+    gap: 4,
+    marginBottom: 4,
+  },
+  storyAspectChip: {
+    width: 38,
+    minHeight: 28,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   storyRailButton: {
     width: 38,

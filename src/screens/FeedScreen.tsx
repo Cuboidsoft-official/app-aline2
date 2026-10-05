@@ -339,9 +339,10 @@ const getMediaFrameTransformStyle = (
   if (!transform || (!transform.scale && !transform.translateX && !transform.translateY)) {
     return undefined;
   }
-  // Clamp scale to min 1.0 in the feed — sub-1 scale makes content smaller than
-  // the cover container, creating visible gaps at the edges.
-  const scale = Math.max(1.0, Math.min(4, Number(transform?.scale || 1)));
+  // When sourceAspect is present the media was posted in fit/fullscreen mode;
+  // allow sub-1 scale so the image shows fully rather than being cropped back.
+  const hasSourceAspect = Number.isFinite(Number(transform.sourceAspect)) && Number(transform.sourceAspect) > 0;
+  const scale = Math.max(hasSourceAspect ? 0.1 : 1.0, Math.min(4, Number(transform?.scale || 1)));
   const translateX = Math.max(-1.5, Math.min(1.5, Number(transform?.translateX || 0))) * width;
   const translateY = Math.max(-1.5, Math.min(1.5, Number(transform?.translateY || 0))) * height;
 
