@@ -20,6 +20,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import ContentActionSheet from "../../features/social/components/ContentActionSheet";
 import InteractiveText from "../../features/social/components/InteractiveText";
 import PostCommentsSheet from "../../features/social/components/PostCommentsSheet";
+import PremiumContentOverlay from "../../features/social/components/PremiumContentOverlay";
 import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import PostShareSheet from "../../features/social/components/PostShareSheet";
 import SocialVideo from "../../features/social/components/SocialVideo";
@@ -34,6 +35,8 @@ import { normalizeMediaUrl } from "../../utils/mediaUrls";
 import { resolveMentionUserId } from "../../utils/mentionLinks";
 import { useAppTheme } from "../../theme/AppThemeContext";
 import { getCarouselGestureIntent } from "../../utils/carouselGesture";
+import { performPremiumPurchase } from "../../utils/premiumPurchase";
+import { computeCoverDimensions } from "../composerConfig";
 
 let ColorMatrix: any = null;
 try {
@@ -66,9 +69,9 @@ const getMediaFrameTransformStyle = (
   height: number,
 ) => {
   const transform = asset?.frameTransform;
-  const scale = Math.max(1, Math.min(4, Number(transform?.scale || 1)));
-  const translateX = Math.max(-1, Math.min(1, Number(transform?.translateX || 0))) * width;
-  const translateY = Math.max(-1, Math.min(1, Number(transform?.translateY || 0))) * height;
+  const scale = Math.max(1.0, Math.min(4, Number(transform?.scale || 1)));
+  const translateX = Math.max(-1.5, Math.min(1.5, Number(transform?.translateX || 0))) * width;
+  const translateY = Math.max(-1.5, Math.min(1.5, Number(transform?.translateY || 0))) * height;
 
   return {
     transform: [
@@ -77,6 +80,28 @@ const getMediaFrameTransformStyle = (
       { scale },
     ],
   };
+};
+
+const getMediaCoverStyle = (
+  asset: Post["media"][number] | undefined,
+  containerW: number,
+  containerH: number,
+): object => {
+  if (containerW <= 0 || containerH <= 0) {
+    return StyleSheet.absoluteFillObject;
+  }
+  const sourceAspect = Number(asset?.frameTransform?.sourceAspect);
+  if (Number.isFinite(sourceAspect) && sourceAspect > 0) {
+    const { coverW, coverH } = computeCoverDimensions(sourceAspect * 1000, 1000, containerW, containerH);
+    return { width: coverW, height: coverH };
+  }
+  const imgW = Number(asset?.width || 0);
+  const imgH = Number(asset?.height || 0);
+  if (imgW <= 0 || imgH <= 0) {
+    return StyleSheet.absoluteFillObject;
+  }
+  const { coverW, coverH } = computeCoverDimensions(imgW, imgH, containerW, containerH);
+  return { width: coverW, height: coverH };
 };
 
 function PostDetailScreen({ route, navigation }: any) {
@@ -100,6 +125,8 @@ function PostDetailScreen({ route, navigation }: any) {
   const [caption, setCaption] = useState("");
   const [hideLikeCount, setHideLikeCount] = useState(false);
   const [disableComments, setDisableComments] = useState(false);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const [purchaseVerified, setPurchaseVerified] = useState(false);
   const postTapRef = useRef<{ time: number; timeout: ReturnType<typeof setTimeout> | null }>({
     time: 0,
     timeout: null,
@@ -257,6 +284,27 @@ function PostDetailScreen({ route, navigation }: any) {
     }
   };
 
+  const handleUnlockPost = async () => {
+    if (purchaseLoading || purchaseVerified || !post) return;
+    setPurchaseLoading(true);
+    const result = await performPremiumPurchase({ contentType: "post", contentId: post.id });
+    if (result.outcome === "verified" || result.outcome === "already_purchased") {
+      // Phase 2E: re-fetch so entitlement-gated media is included in the response
+      try {
+        const refreshedPost = await socialApi.getPost(post.id);
+        if (refreshedPost?.premiumUnlocked) {
+          setPost(refreshedPost);
+          setPurchaseLoading(false);
+          return;
+        }
+      } catch {
+        // Re-fetch failed — fall back to verified state
+      }
+      setPurchaseVerified(true);
+    }
+    setPurchaseLoading(false);
+  };
+
   const handleDownload = async () => {
     if (!post || busyDownload) {
       return;
@@ -332,8 +380,8 @@ function PostDetailScreen({ route, navigation }: any) {
 
     if (asset.mediaType === "video") {
       return (
-        <View key={key || asset.id} style={styles.image}>
-          <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, detailMediaWidth, detailMediaHeight)]}>
+        <View key={key || asset.id} style={[styles.image, { overflow: "hidden", alignItems: "center", justifyContent: "center" }]}>
+          <View style={[getMediaCoverStyle(asset, detailMediaWidth, detailMediaHeight), getMediaFrameTransformStyle(asset, detailMediaWidth, detailMediaHeight)]}>
             <SocialVideo
               uri={assetUrl}
               posterUri={posterUrl}
@@ -355,13 +403,13 @@ function PostDetailScreen({ route, navigation }: any) {
     }
 
     const rawImage = (
-      <View key={key || asset.id} style={styles.image}>
-        <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, detailMediaWidth, detailMediaHeight)]}>
+      <View key={key || asset.id} style={[styles.image, { overflow: "hidden", alignItems: "center", justifyContent: "center" }]}>
+        <View style={[getMediaCoverStyle(asset, detailMediaWidth, detailMediaHeight), getMediaFrameTransformStyle(asset, detailMediaWidth, detailMediaHeight)]}>
           <ProgressiveImage
             uri={assetUrl}
             previewUri={posterUrl}
             style={StyleSheet.absoluteFill}
-            resizeMode={imageResizeMode}
+            resizeMode="cover"
             contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
           />
         </View>
@@ -477,6 +525,17 @@ function PostDetailScreen({ route, navigation }: any) {
         </View>
 
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+          <PremiumContentOverlay
+            isPremium={post.isPremium}
+            premiumPrice={post.premiumPrice}
+            premiumCurrency={post.premiumCurrency}
+            isOwner={!!currentUserId && post.user.id === currentUserId}
+            loading={purchaseLoading}
+            purchaseVerified={purchaseVerified}
+            premiumUnlocked={post.premiumUnlocked === true}
+            onUnlockPress={handleUnlockPost}
+            previewMode
+          >
           <Pressable style={[styles.mediaSurface, { backgroundColor: colors.card }]} onPress={handleMediaPress}>
             {post.type === "carousel" ? (
               <ScrollView
@@ -549,6 +608,7 @@ function PostDetailScreen({ route, navigation }: any) {
               </View>
             ) : null}
           </Pressable>
+          </PremiumContentOverlay>
 
           <View style={[styles.body, { backgroundColor: colors.card }]}>
             <View style={styles.userRow}>

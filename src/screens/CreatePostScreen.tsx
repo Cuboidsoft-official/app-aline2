@@ -41,6 +41,8 @@ import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBot
 import DraggableBottomSheet from "../components/DraggableBottomSheet";
 import MentionSuggestionList from "../components/MentionSuggestionList";
 import { Alert } from "../utils/appAlert";
+import { getStoredUser } from "../utils/authSession";
+import { countryFlag, currencySymbol } from "../utils/countryCurrency";
 import {
   captureComposerAssets,
   ComposerAsset,
@@ -48,6 +50,7 @@ import {
   pickComposerAssets,
   UploadComposerAssetsOptions,
   uploadComposerAssets,
+  uploadPremiumMedia,
 } from "../features/social/mediaUpload";
 import { socialApi } from "../features/social/socialApi";
 import {
@@ -88,15 +91,25 @@ try {
   ColorMatrix = null;
 }
 
-type ComposerMode = "post" | "story" | "swipe";
-type ComposerStage = "launcher" | "edit" | "details";
+import {
+  type ComposerMode,
+  type AspectOption,
+  type ComposerMediaTransform,
+  type ComposerEditToolPanel,
+  POST_ASPECTS,
+  SWIPE_ASPECTS,
+  STORY_ASPECTS,
+  ASPECTS_BY_MODE,
+  DEFAULT_ASPECT_BY_MODE,
+  DEFAULT_COMPOSER_MEDIA_TRANSFORM,
+  INITIAL_TOOL_PANEL,
+  findAspectOption,
+  sanitizeFrameTransform,
+  computeCoverDimensions,
+  computeMaxPan,
+} from "./composerConfig";
 
-type AspectOption = {
-  id: string;
-  label: string;
-  detail: string;
-  ratio: number;
-};
+type ComposerStage = "launcher" | "edit" | "details";
 
 type AudienceCandidate = {
   id: string;
@@ -115,30 +128,10 @@ type MusicResultItem = SelectedMusicClip & {
 };
 
 type StoryToolPanel = "text" | "color" | "font" | "size" | "filters" | "sticker" | null;
-type ComposerEditToolPanel = "layout" | "filters" | "tag" | "trim" | "text" | "color" | "font" | "size" | null;
 type StoryTextFontVariant = "bold" | "italic" | "clean" | "soft";
 type MusicPreviewMode = "audio";
-type ComposerMediaTransform = { scale: number; translateX: number; translateY: number };
 
 const MODE_ORDER: ComposerMode[] = ["post", "swipe", "story"];
-const POST_ASPECTS: AspectOption[] = [
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-  { id: "landscape", label: "16:9", detail: "Landscape", ratio: 16 / 9 },
-];
-const STORY_ASPECTS: AspectOption[] = [
-  { id: "vertical", label: "9:16", detail: "Vertical", ratio: 9 / 16 },
-  { id: "portrait", label: "4:5", detail: "Portrait", ratio: 4 / 5 },
-];
-const ASPECTS_BY_MODE: Record<ComposerMode, AspectOption[]> = {
-  post: POST_ASPECTS,
-  story: STORY_ASPECTS,
-  swipe: POST_ASPECTS,
-};
-const DEFAULT_ASPECT_BY_MODE: Record<ComposerMode, string> = {
-  post: "portrait",
-  story: "vertical",
-  swipe: "portrait",
-};
 const CREATE_DOCK_OFFSET = APP_BOTTOM_DOCK_BASE_HEIGHT + 4;
 const MODE_COPY: Record<
   ComposerMode,
@@ -185,7 +178,6 @@ const MUSIC_CLIP_MAX_SECONDS = 30;
 const MUSIC_DISCOVERY_FALLBACK_QUERIES = ["love", "party", "happy", "summer"];
 const PHOTO_PICKER_MAX_DIMENSION = 2160;
 const PHOTO_PICKER_QUALITY = 0.8;
-const DEFAULT_COMPOSER_MEDIA_TRANSFORM: ComposerMediaTransform = { scale: 1, translateX: 0, translateY: 0 };
 const STORY_TEXT_THEMES: Array<{
   id: StoryTextStickerTheme;
   label: string;
@@ -358,8 +350,6 @@ const defaultClipDuration = (mode: ComposerMode, trackDuration: number): number 
   return Math.min(MUSIC_CLIP_MAX_SECONDS, safe);
 };
 
-const findAspectOption = (mode: ComposerMode, aspectId: string | undefined) =>
-  ASPECTS_BY_MODE[mode].find((item) => item.id === aspectId) || ASPECTS_BY_MODE[mode][0];
 
 const buildMusicLabel = (music: SelectedMusicClip | null | undefined) =>
   [music?.title, music?.artist].filter(Boolean).join(" • ");
@@ -430,13 +420,12 @@ const buildAspectMetadata = (
   const safeRatio = Math.max(0.5, Math.min(2, Number(ratio) || 1));
   const sourceWidth = Math.max(720, Math.round(Number(sourceAsset?.width || uploadedMedia.width || 0) || 0));
   const sourceHeight = Math.max(720, Math.round(Number(sourceAsset?.height || uploadedMedia.height || 0) || 0));
-  const safeFrameTransform = frameTransform
-    ? {
-        scale: Math.max(1, Math.min(4, Number(frameTransform.scale) || 1)),
-        translateX: Math.max(-1, Math.min(1, Number(frameTransform.translateX) || 0)),
-        translateY: Math.max(-1, Math.min(1, Number(frameTransform.translateY) || 0)),
-      }
-    : undefined;
+  // Carry original aspect ratio so the feed can compute correct cover dimensions
+  // even though buildAspectMetadata remaps width/height to match the frame ratio.
+  const sourceAspect = sourceWidth / sourceHeight;
+  const safeFrameTransform = sanitizeFrameTransform(
+    frameTransform ? { ...frameTransform, sourceAspect } : undefined,
+  );
 
   if (safeRatio >= 1) {
     const width = Math.max(sourceWidth, Math.round(sourceHeight * safeRatio));
@@ -1001,7 +990,7 @@ function CreatePostScreen({ navigation, route }: any) {
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationFetchingCurrent, setLocationFetchingCurrent] = useState(false);
   const [tagSheetVisible, setTagSheetVisible] = useState(false);
-  const [composerEditToolPanel, setComposerEditToolPanel] = useState<ComposerEditToolPanel>("layout");
+  const [composerEditToolPanel, setComposerEditToolPanel] = useState<ComposerEditToolPanel>(INITIAL_TOOL_PANEL);
   const [musicSheetVisible, setMusicSheetVisible] = useState(false);
   const [musicTrimSheetVisible, setMusicTrimSheetVisible] = useState(false);
   const [videoTrimSheetVisible, setVideoTrimSheetVisible] = useState(false);
@@ -1014,6 +1003,25 @@ function CreatePostScreen({ navigation, route }: any) {
   const deferredTagQuery = useDeferredValue(tagQuery);
   const [disableComments, setDisableComments] = useState(false);
   const [hideLikeCount, setHideLikeCount] = useState(false);
+
+  // Premium content state
+  const [premiumSettings, setPremiumSettings] = useState<{
+    premiumContentEnabled: boolean;
+    countryPricing: Array<{ countryCode: string; currency: string; amount: number }>;
+    minPriceINR: number;
+    maxPriceINR: number;
+    defaultTier: string;
+  } | null>(null);
+  // Resolved pricing for the logged-in creator's country. null = country not configured.
+  const [creatorPricing, setCreatorPricing] = useState<{
+    countryCode: string;
+    currency: string;
+    amount: number;
+    currencySymbol: string;
+    flag: string;
+  } | null>(null);
+  const [isPremiumPost, setIsPremiumPost] = useState(false);
+  const [isPremiumStory, setIsPremiumStory] = useState(false);
   const [storyVisibility, setStoryVisibility] = useState<Visibility>("public");
   const [storyAllowReplies, setStoryAllowReplies] = useState(true);
   const [storyAllowSharing, setStoryAllowSharing] = useState(true);
@@ -1097,6 +1105,8 @@ function CreatePostScreen({ navigation, route }: any) {
   const storyEmojiPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const storyImagePan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const composerMediaPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const composerMediaScale = useRef(new Animated.Value(1)).current;
+  const composerMediaScaleRef = useRef(1);
   const composerMediaGestureRef = useRef({ startX: 0, startY: 0, startScale: 1, startDistance: 0 });
   const lastStoryAssetUriRef = useRef("");
   const {
@@ -1174,6 +1184,44 @@ function CreatePostScreen({ navigation, route }: any) {
       normalizedUrl: normalizeMediaUrl(rawUrl),
     }).catch(() => undefined);
   }, [resetSelectedMusicPreview, selectedMusic]);
+
+  // Fetch premium settings once on mount; resolve the creator's applicable country pricing.
+  useEffect(() => {
+    API.get("/premium-settings/mine")
+      .then(async (res: any) => {
+        const s = res?.data?.settings;
+        if (!s) return;
+        const enabledPricing = (s.countryPricing || []).filter((e: any) => e.enabled !== false);
+        setPremiumSettings({
+          premiumContentEnabled: Boolean(s.premiumContentEnabled),
+          countryPricing: enabledPricing.map((e: any) => ({
+            countryCode: String(e.countryCode || "").toUpperCase(),
+            currency: String(e.currency || "").toUpperCase(),
+            amount: Number(e.amount) || 0,
+          })),
+          minPriceINR: Number(s.minPriceINR) || 1,
+          maxPriceINR: Number(s.maxPriceINR) || 9999,
+          defaultTier: String(s.defaultTier || "one_time"),
+        });
+        if (!s.premiumContentEnabled) return;
+        // Match the logged-in user's country to an enabled countryPricing entry.
+        const storedUser = await getStoredUser();
+        const userCountry = String((storedUser as any)?.country || "").trim().toUpperCase();
+        const match = enabledPricing.find(
+          (e: any) => String(e.countryCode || "").toUpperCase() === userCountry
+        ) || enabledPricing[0];
+        if (match) {
+          setCreatorPricing({
+            countryCode: String(match.countryCode).toUpperCase(),
+            currency: String(match.currency).toUpperCase(),
+            amount: Number(match.amount),
+            currencySymbol: currencySymbol(String(match.currency).toUpperCase()),
+            flag: countryFlag(String(match.countryCode).toUpperCase()),
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
   const storyTextThemeStyle =
     STORY_TEXT_THEMES.find((item) => item.id === storyTextTheme) || STORY_TEXT_THEMES[0];
   const storyTextFontStyle =
@@ -1296,10 +1344,14 @@ function CreatePostScreen({ navigation, route }: any) {
   }, [selectedAsset, stage]);
 
   useEffect(() => {
-    const nextTransform = selectedAsset?.id
+    const raw = selectedAsset?.id
       ? composerMediaTransformsByAssetId[selectedAsset.id] || DEFAULT_COMPOSER_MEDIA_TRANSFORM
       : DEFAULT_COMPOSER_MEDIA_TRANSFORM;
+    // Clamp scale to fill minimum on load so image always covers frame
+    const nextTransform = { ...raw, scale: Math.max(1.0, raw.scale) };
     setComposerMediaTransform(nextTransform);
+    composerMediaScale.setValue(nextTransform.scale);
+    composerMediaScaleRef.current = nextTransform.scale;
     composerMediaPan.setValue({
       x: composerCanvasSize.width ? nextTransform.translateX * composerCanvasSize.width : 0,
       y: composerCanvasSize.height ? nextTransform.translateY * composerCanvasSize.height : 0,
@@ -1309,6 +1361,7 @@ function CreatePostScreen({ navigation, route }: any) {
     composerCanvasSize.height,
     composerCanvasSize.width,
     composerMediaPan,
+    composerMediaScale,
     composerMediaTransformsByAssetId,
     mode,
     selectedAsset?.id,
@@ -2164,6 +2217,8 @@ function CreatePostScreen({ navigation, route }: any) {
     setSelectedTagPeople([]);
     setDisableComments(false);
     setHideLikeCount(false);
+    setIsPremiumPost(false);
+    setIsPremiumStory(false);
     setPublishError("");
     setSelectedMusic(null);
     setPendingMusicSelection(null);
@@ -2699,24 +2754,70 @@ function CreatePostScreen({ navigation, route }: any) {
     const captionEntities = parseCaptionEntities(caption);
     const hashtags = Array.from(new Set(captionEntities.hashtags));
     const mentions = Array.from(new Set([...selectedMentions, ...captionEntities.mentions]));
-    const uploadedMedia = await uploadComposerAssets(postAssets, uploadOptions);
-    const framedMedia = uploadedMedia.map((media, index) => {
-      const sourceAsset = postAssets[index] || postAssets[0];
-      return buildAspectMetadata(
-        media,
-        sourceAsset,
-        activeAspect.ratio,
-        sourceAsset?.id
-          ? composerMediaTransformsByAssetId[sourceAsset.id]
-            || (sourceAsset.id === selectedAsset?.id ? composerMediaTransform : DEFAULT_COMPOSER_MEDIA_TRANSFORM)
-          : DEFAULT_COMPOSER_MEDIA_TRANSFORM,
-      );
-    });
+    // Phase 2E: for premium posts, upload originals to private R2 first.
+    // The public uploadComposerAssets call is skipped for premium — originals must not go to the public bucket.
+    let framedMedia: ReturnType<typeof buildAspectMetadata>[] = [];
+    let premiumOriginalMedia: import("../features/social/types").PremiumOriginalMediaItem[] | undefined;
+
+    let postPreviewMedia: import("../features/social/types").PostPreviewMediaItem[] | undefined;
+
+    if (isPremiumPost) {
+      const localAssets = postAssets.filter((a) => a.source === "local");
+      if (localAssets.length > 0) {
+        // Upload originals to private R2 (first half of progress budget)
+        premiumOriginalMedia = await Promise.all(
+          localAssets.map((asset, i) =>
+            uploadPremiumMedia(asset, "post", (p) => uploadOptions?.onProgress?.(p * 0.45))
+              .then((result) => ({ ...result, order: i }))
+          )
+        );
+        // Upload the first asset to public CDN for the teaser preview (second half of progress)
+        const firstLocalAsset = localAssets[0];
+        try {
+          const [previewUpload] = await uploadComposerAssets([firstLocalAsset], {
+            onProgress: (p) => uploadOptions?.onProgress?.(0.45 + p * 0.45),
+          });
+          if (previewUpload) {
+            postPreviewMedia = [{
+              url: firstLocalAsset.mediaType === "video"
+                ? (previewUpload.thumbnailUrl ?? previewUpload.url)
+                : previewUpload.url,
+              type: "image" as const,
+              thumbnailUrl: previewUpload.thumbnailUrl,
+              width: previewUpload.width,
+              height: previewUpload.height,
+              order: 0,
+            }];
+          }
+        } catch {
+          // Preview upload failure is non-fatal; post creation continues without preview
+        }
+      }
+      // media[] intentionally empty: originals are in private bucket, signed URLs served by getPost
+    } else {
+      const uploadedMedia = await uploadComposerAssets(postAssets, uploadOptions);
+      framedMedia = uploadedMedia.map((media, index) => {
+        const sourceAsset = postAssets[index] || postAssets[0];
+        return buildAspectMetadata(
+          media,
+          sourceAsset,
+          activeAspect.ratio,
+          sourceAsset?.id
+            ? composerMediaTransformsByAssetId[sourceAsset.id]
+              || (sourceAsset.id === selectedAsset?.id ? composerMediaTransform : DEFAULT_COMPOSER_MEDIA_TRANSFORM)
+            : DEFAULT_COMPOSER_MEDIA_TRANSFORM,
+        );
+      });
+    }
+
     const firstMedia = framedMedia[0];
-    const hasVideoMedia = framedMedia.some((media) => media.mediaType === "video");
+    const hasVideoMedia = framedMedia.some((media) => media.mediaType === "video") ||
+      (isPremiumPost && (premiumOriginalMedia ?? []).some((m) => m.type === "video"));
 
     return {
-      type: framedMedia.length > 1 ? "carousel" : firstMedia?.mediaType === "video" ? "video" : "photo",
+      type: isPremiumPost
+        ? ((premiumOriginalMedia ?? []).some((m) => m.type === "video") ? "video" : "photo")
+        : (framedMedia.length > 1 ? "carousel" : firstMedia?.mediaType === "video" ? "video" : "photo"),
       caption: caption.trim(),
       media: framedMedia,
       location: location.trim() || undefined,
@@ -2732,8 +2833,14 @@ function CreatePostScreen({ navigation, route }: any) {
       filterPreset: framedMedia.every((media) => media.mediaType === "image") && selectedFilterId !== "none" ? selectedFilterId : undefined,
       stickers: buildComposerTextStickers(),
       hasOriginalAudio: hasVideoMedia,
+      isPremium: isPremiumPost,
+      premiumPrice: isPremiumPost ? creatorPricing?.amount : undefined,
+      premiumCountryCode: isPremiumPost ? creatorPricing?.countryCode : undefined,
+      premiumCurrency: isPremiumPost ? creatorPricing?.currency : undefined,
+      premiumOriginalMedia,
+      previewMedia: postPreviewMedia,
     };
-  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, disableComments, hideLikeCount, location, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedTagPeople]);
+  }, [activeAspect.ratio, buildComposerTextStickers, caption, composerMediaTransform, composerMediaTransformsByAssetId, creatorPricing, disableComments, hideLikeCount, isPremiumPost, location, selectedAsset?.id, selectedAsset, selectedAssets, selectedFilterId, selectedMentions, selectedTagPeople]);
 
   const prepareStoryPayload = useCallback(async (
     uploadOptions?: UploadComposerAssetsOptions,
@@ -2792,10 +2899,44 @@ function CreatePostScreen({ navigation, route }: any) {
         visibility: storyVisibility,
         allowReplies: storyAllowReplies,
         allowSharing: storyAllowSharing,
+        isPremium: isPremiumStory,
+        premiumPrice: isPremiumStory ? creatorPricing?.amount : undefined,
+        premiumCountryCode: isPremiumStory ? creatorPricing?.countryCode : undefined,
+        premiumCurrency: isPremiumStory ? creatorPricing?.currency : undefined,
       };
     }
 
-    const [uploadedMedia] = await uploadComposerAssets([selectedAsset!], uploadOptions);
+    // Phase 2E: for premium stories, upload original to private R2; skip public bucket.
+    let uploadedMedia: import("../features/social/types").MediaAsset | undefined;
+    let storyPremiumOriginalMedia: import("../features/social/types").PremiumOriginalMediaItem[] | undefined;
+    let storyPreviewMedia: import("../features/social/types").StoryPreviewMediaInput | undefined;
+
+    if (isPremiumStory && selectedAsset?.source === "local") {
+      // Upload original to private R2 (half of progress budget)
+      const premiumItem = await uploadPremiumMedia(selectedAsset, "story", (p) => uploadOptions?.onProgress?.(p * 0.45));
+      storyPremiumOriginalMedia = [premiumItem];
+      // Upload a public version for the locked teaser shown to non-entitled viewers
+      try {
+        const [previewUpload] = await uploadComposerAssets([selectedAsset], {
+          onProgress: (p) => uploadOptions?.onProgress?.(0.45 + p * 0.45),
+        });
+        if (previewUpload) {
+          storyPreviewMedia = {
+            mediaUrl: selectedAsset.mediaType === "video"
+              ? (previewUpload.thumbnailUrl ?? previewUpload.url)
+              : previewUpload.url,
+            mediaType: "image",
+            thumbnailUrl: previewUpload.thumbnailUrl,
+            duration: 0,
+          };
+        }
+      } catch {
+        // Preview upload failure is non-fatal; story creation continues without preview
+      }
+    } else {
+      const [uploaded] = await uploadComposerAssets([selectedAsset!], uploadOptions);
+      uploadedMedia = uploaded;
+    }
 
     return {
       type: "media",
@@ -2826,9 +2967,17 @@ function CreatePostScreen({ navigation, route }: any) {
       visibility: storyVisibility,
       allowReplies: storyAllowReplies,
       allowSharing: storyAllowSharing,
+      isPremium: isPremiumStory,
+      premiumPrice: isPremiumStory ? creatorPricing?.amount : undefined,
+      premiumCountryCode: isPremiumStory ? creatorPricing?.countryCode : undefined,
+      premiumCurrency: isPremiumStory ? creatorPricing?.currency : undefined,
+      premiumOriginalMedia: storyPremiumOriginalMedia,
+      previewMedia: storyPreviewMedia,
     };
   }, [
     caption,
+    creatorPricing,
+    isPremiumStory,
     location,
     selectedAsset,
     selectedMentions,
@@ -2963,49 +3112,53 @@ function CreatePostScreen({ navigation, route }: any) {
     });
   }, []);
 
-  const toggleFitFullPhoto = useCallback(() => {
+  const resetCropPosition = useCallback(() => {
     composerMediaPan.setValue({ x: 0, y: 0 });
-    setComposerMediaTransform((current) => {
-      const isAlreadyFitted = current.scale < 0.95;
-      const nextScale = isAlreadyFitted ? 1.0 : 0.82;
-      const nextTransform = {
-        scale: nextScale,
-        translateX: 0,
-        translateY: 0,
-      };
-
-      if (selectedAsset?.id) {
-        setComposerMediaTransformsByAssetId((prev) => ({
-          ...prev,
-          [selectedAsset.id]: nextTransform,
-        }));
-      }
-
-      return nextTransform;
-    });
-  }, [composerMediaPan, selectedAsset?.id]);
+    const nextTransform = { scale: 1.0, translateX: 0, translateY: 0 };
+    setComposerMediaTransform(nextTransform);
+    composerMediaScale.setValue(1.0);
+    composerMediaScaleRef.current = 1.0;
+    if (selectedAsset?.id) {
+      setComposerMediaTransformsByAssetId((prev) => ({
+        ...prev,
+        [selectedAsset.id]: nextTransform,
+      }));
+    }
+  }, [composerMediaPan, composerMediaScale, selectedAsset?.id]);
 
   const persistComposerMediaTransform = useCallback(() => {
     const rawX = Number((composerMediaPan.x as any)._value || 0);
     const rawY = Number((composerMediaPan.y as any)._value || 0);
-
-    setComposerMediaTransform((current) => {
-      const nextTransform = {
-        scale: clamp(current.scale, 0.2, 4),
-        translateX: composerCanvasSize.width ? clamp(rawX / composerCanvasSize.width, -1.5, 1.5) : current.translateX,
-        translateY: composerCanvasSize.height ? clamp(rawY / composerCanvasSize.height, -1.5, 1.5) : current.translateY,
-      };
-
-      if (selectedAsset?.id) {
-        setComposerMediaTransformsByAssetId((prev) => ({
-          ...prev,
-          [selectedAsset.id]: nextTransform,
-        }));
-      }
-
-      return nextTransform;
+    const nextScale = clamp(composerMediaScaleRef.current, 1.0, 4);
+    const cW = composerCanvasSize.width;
+    const cH = composerCanvasSize.height;
+    const { coverW: cvW, coverH: cvH } = computeCoverDimensions(
+      selectedAsset?.width || 1,
+      selectedAsset?.height || 1,
+      cW || 1,
+      cH || 1,
+    );
+    const { maxPanX: maxPanXpx, maxPanY: maxPanYpx } = computeMaxPan(cvW, cvH, cW || 1, cH || 1, nextScale);
+    const nextTransform = {
+      scale: nextScale,
+      translateX: cW ? clamp(rawX / cW, -maxPanXpx / cW, maxPanXpx / cW) : 0,
+      translateY: cH ? clamp(rawY / cH, -maxPanYpx / cH, maxPanYpx / cH) : 0,
+    };
+    composerMediaScale.setValue(nextTransform.scale);
+    composerMediaScaleRef.current = nextTransform.scale;
+    // Snap pan back to clamped pixel values so image snaps to valid bounds
+    composerMediaPan.setValue({
+      x: composerCanvasSize.width ? nextTransform.translateX * composerCanvasSize.width : 0,
+      y: composerCanvasSize.height ? nextTransform.translateY * composerCanvasSize.height : 0,
     });
-  }, [composerCanvasSize.height, composerCanvasSize.width, composerMediaPan, selectedAsset?.id]);
+    setComposerMediaTransform(nextTransform);
+    if (selectedAsset?.id) {
+      setComposerMediaTransformsByAssetId((prev) => ({
+        ...prev,
+        [selectedAsset.id]: nextTransform,
+      }));
+    }
+  }, [composerCanvasSize.height, composerCanvasSize.width, composerMediaPan, composerMediaScale, selectedAsset?.id, selectedAsset?.width, selectedAsset?.height]);
 
   const composerMediaResponder = useMemo(
     () =>
@@ -3024,7 +3177,8 @@ function CreatePostScreen({ navigation, route }: any) {
           composerMediaGestureRef.current = {
             startX: Number((composerMediaPan.x as any)._value || 0),
             startY: Number((composerMediaPan.y as any)._value || 0),
-            startScale: composerMediaTransform.scale,
+            // Use ref so we always get the latest scale, never a stale closure value
+            startScale: composerMediaScaleRef.current,
             startDistance: distance,
           };
         },
@@ -3035,27 +3189,73 @@ function CreatePostScreen({ navigation, route }: any) {
 
           if (firstTouch && secondTouch) {
             const distance = Math.hypot(firstTouch.pageX - secondTouch.pageX, firstTouch.pageY - secondTouch.pageY);
-            const startDistance = composerMediaGestureRef.current.startDistance || distance || 1;
+
+            // Grant fires on first finger only; startDistance=0 until second finger lands.
+            // Capture baseline on first two-finger frame and return - avoids a ratio=1 no-op jump.
+            if (!composerMediaGestureRef.current.startDistance) {
+              composerMediaGestureRef.current = {
+                ...composerMediaGestureRef.current,
+                startDistance: distance,
+                startScale: composerMediaScaleRef.current,
+              };
+              return;
+            }
+
             const nextScale = clamp(
-              composerMediaGestureRef.current.startScale * (distance / Math.max(1, startDistance)),
-              0.2,
+              composerMediaGestureRef.current.startScale * (distance / composerMediaGestureRef.current.startDistance),
+              1.0,
               4,
             );
-            setComposerMediaTransform((current) => ({ ...current, scale: nextScale }));
+            // Drive scale via Animated.Value — no setState, no re-render, stays on JS thread
+            composerMediaScale.setValue(nextScale);
+            composerMediaScaleRef.current = nextScale;
+            const { coverW: _cvW2, coverH: _cvH2 } = computeCoverDimensions(
+              selectedAsset?.width || 1,
+              selectedAsset?.height || 1,
+              composerCanvasSize.width || 1,
+              composerCanvasSize.height || 1,
+            );
+            const { maxPanX, maxPanY } = computeMaxPan(_cvW2, _cvH2, composerCanvasSize.width, composerCanvasSize.height, nextScale);
+            const curPanX = Number((composerMediaPan.x as any)._value || 0);
+            const curPanY = Number((composerMediaPan.y as any)._value || 0);
+            composerMediaPan.setValue({
+              x: clamp(curPanX, -maxPanX, maxPanX),
+              y: clamp(curPanY, -maxPanY, maxPanY),
+            });
             return;
           }
 
+          // Second finger lifted — reset pinch baseline so next gesture starts fresh.
+          if (composerMediaGestureRef.current.startDistance) {
+            composerMediaGestureRef.current = {
+              ...composerMediaGestureRef.current,
+              startDistance: 0,
+              startScale: composerMediaScaleRef.current,
+              startX: Number((composerMediaPan.x as any)._value || 0),
+              startY: Number((composerMediaPan.y as any)._value || 0),
+            };
+          }
+
+          const { coverW: _cvW, coverH: _cvH } = computeCoverDimensions(
+            selectedAsset?.width || 1,
+            selectedAsset?.height || 1,
+            composerCanvasSize.width || 1,
+            composerCanvasSize.height || 1,
+          );
+          const { maxPanX, maxPanY } = computeMaxPan(_cvW, _cvH, composerCanvasSize.width, composerCanvasSize.height, composerMediaScaleRef.current);
           composerMediaPan.setValue({
-            x: composerMediaGestureRef.current.startX + gestureState.dx,
-            y: composerMediaGestureRef.current.startY + gestureState.dy,
+            x: clamp(composerMediaGestureRef.current.startX + gestureState.dx, -maxPanX, maxPanX),
+            y: clamp(composerMediaGestureRef.current.startY + gestureState.dy, -maxPanY, maxPanY),
           });
         },
         onPanResponderRelease: persistComposerMediaTransform,
         onPanResponderTerminate: persistComposerMediaTransform,
       }),
     [
+      composerCanvasSize.height,
+      composerCanvasSize.width,
       composerMediaPan,
-      composerMediaTransform.scale,
+      composerMediaScale,
       persistComposerMediaTransform,
       selectedAsset,
     ],
@@ -4031,7 +4231,7 @@ function CreatePostScreen({ navigation, route }: any) {
     const normalizedText = storyText.trim();
 
     if (!normalizedText) {
-      return interactive ? (
+      return interactive && mode === "story" ? (
         <View pointerEvents="none" style={styles.storyCanvasHintWrap}>
           <Text style={styles.storyCanvasHintTitle}>Add draggable text</Text>
         </View>
@@ -4110,15 +4310,29 @@ function CreatePostScreen({ navigation, route }: any) {
         backgroundColor: isDarkMode ? "#020617" : "#E5ECE7",
         borderColor,
         aspectRatio: activeAspect.ratio,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
       },
     ];
     const interactive = !!options?.interactive;
+
+    const imgW = selectedAsset?.width || 1;
+    const imgH = selectedAsset?.height || 1;
+    const cW = composerCanvasSize.width;
+    const cH = composerCanvasSize.height;
+    const measured = cW > 0 && cH > 0;
+    const { coverW, coverH } = measured
+      ? computeCoverDimensions(imgW, imgH, cW, cH)
+      : { coverW: undefined as number | undefined, coverH: undefined as number | undefined };
+
     const mediaTransformStyle = [
-      styles.previewMediaFill,
+      coverW != null && coverH != null
+        ? { width: coverW, height: coverH }
+        : styles.previewMedia,
       {
         transform: [
           ...composerMediaPan.getTranslateTransform(),
-          { scale: composerMediaTransform.scale },
+          { scale: composerMediaScale },
         ],
       },
     ];
@@ -4134,29 +4348,23 @@ function CreatePostScreen({ navigation, route }: any) {
           }}
         >
           <Animated.View style={mediaTransformStyle} {...(interactive ? composerMediaResponder.panHandlers : {})}>
-            <SocialVideo
-              uri={selectedAsset.uri}
-              posterUri={selectedAsset.thumbnailUrl}
-              style={StyleSheet.absoluteFill}
-              muted={isComposerVideoMuted}
-              repeat
-              paused={stage === "details"}
-            />
+            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+              <SocialVideo
+                uri={selectedAsset.uri}
+                posterUri={selectedAsset.thumbnailUrl}
+                style={{ width: "100%", height: "100%" }}
+                muted={isComposerVideoMuted}
+                repeat
+                paused={stage === "details"}
+              />
+            </View>
           </Animated.View>
           <View style={styles.videoBadge}>
             <Icon name="videocam" size={16} color="#fff" />
             <Text style={styles.videoBadgeText}>{MODE_COPY[mode].label}</Text>
           </View>
           {renderVideoSoundToggle()}
-          {interactive ? (
-            <View pointerEvents="none" style={styles.cropFrameGuide} />
-          ) : null}
-          {interactive ? (
-            <View pointerEvents="none" style={styles.cropHintPill}>
-              <Icon name="move-outline" size={13} color="#fff" />
-              <Text style={styles.cropHintText}>Drag - pinch to zoom</Text>
-            </View>
-          ) : null}
+          {interactive ? renderCropGrid() : null}
           {renderComposerTextOverlay(interactive)}
         </View>
       );
@@ -4180,34 +4388,22 @@ function CreatePostScreen({ navigation, route }: any) {
             <ProgressiveImage
               uri={selectedAsset.uri}
               previewUri={selectedAsset.thumbnailUrl}
-              style={styles.previewMediaFill}
+              style={styles.previewMedia}
               resizeMode="cover"
             />
           )}
         </Animated.View>
-        {interactive ? (
-          <View pointerEvents="none" style={styles.cropFrameGuide} />
-        ) : null}
+        {interactive ? renderCropGrid() : null}
         {interactive ? (
           <View pointerEvents="box-none" style={styles.cropControlRow}>
             <TouchableOpacity
               style={styles.fitTogglePill}
-              onPress={toggleFitFullPhoto}
+              onPress={resetCropPosition}
               activeOpacity={0.8}
             >
-              <Icon
-                name={composerMediaTransform.scale < 0.95 ? "scan-outline" : "expand-outline"}
-                size={13}
-                color="#fff"
-              />
-              <Text style={styles.cropHintText}>
-                {composerMediaTransform.scale < 0.95 ? "Fill frame" : "Fit full photo"}
-              </Text>
+              <Icon name="return-up-back-outline" size={13} color="#fff" />
+              <Text style={styles.cropHintText}>Reset</Text>
             </TouchableOpacity>
-            <View pointerEvents="none" style={styles.cropHintPill}>
-              <Icon name="move-outline" size={13} color="#fff" />
-              <Text style={styles.cropHintText}>Drag - pinch to zoom</Text>
-            </View>
           </View>
         ) : null}
         {renderComposerTextOverlay(interactive)}
@@ -4387,6 +4583,18 @@ function CreatePostScreen({ navigation, route }: any) {
     );
   };
 
+  // 3×3 rule-of-thirds grid overlay. Lines are absolutely positioned
+  // at exact 1/3 and 2/3 positions. pointerEvents="none" prevents
+  // any gesture interception.
+  const renderCropGrid = () => (
+    <View pointerEvents="none" style={styles.cropFrameGuide}>
+      <View pointerEvents="none" style={[styles.cropGridLineV, { left: "33.33%" }]} />
+      <View pointerEvents="none" style={[styles.cropGridLineV, { left: "66.67%" }]} />
+      <View pointerEvents="none" style={[styles.cropGridLineH, { top: "33.33%" }]} />
+      <View pointerEvents="none" style={[styles.cropGridLineH, { top: "66.67%" }]} />
+    </View>
+  );
+
   const renderAspectSelector = () => (
     <View style={styles.chipRow}>
       {ASPECTS_BY_MODE[mode].map((option) => {
@@ -4481,7 +4689,7 @@ function CreatePostScreen({ navigation, route }: any) {
     }> = [
       {
         id: "layout",
-        label: "Layout",
+        label: "Crop",
         icon: "crop-outline",
         active: composerEditToolPanel === "layout",
         onPress: () => setComposerEditToolPanel("layout"),
@@ -4555,6 +4763,27 @@ function CreatePostScreen({ navigation, route }: any) {
         ]}
       >
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.storyToolRailScroll}>
+          {ASPECTS_BY_MODE[mode].map((option) => {
+            const active = option.id === activeAspect.id;
+            // Visual shape proportional to aspect ratio
+            const maxDim = 18;
+            const shapeW = option.ratio >= 1 ? maxDim : Math.round(maxDim * option.ratio);
+            const shapeH = option.ratio >= 1 ? Math.round(maxDim / option.ratio) : maxDim;
+            return (
+              <TouchableOpacity
+                key={option.id}
+                accessibilityLabel={option.detail}
+                style={[
+                  styles.storyRailButton,
+                  active ? { backgroundColor: accentSoft, borderColor: accentColor } : { backgroundColor: inputBackground, borderColor },
+                ]}
+                onPress={() => setAspectId((prev) => ({ ...prev, [mode]: option.id }))}
+              >
+                <View style={{ width: shapeW, height: shapeH, borderWidth: 1.5, borderColor: active ? accentColor : mutedColor, borderRadius: 2 }} />
+              </TouchableOpacity>
+            );
+          })}
+          <View style={[styles.railDivider, { backgroundColor: borderColor }]} />
           {railItems.filter((item) => !item.hidden).map((item) => (
             <TouchableOpacity
               key={item.id}
@@ -4574,6 +4803,40 @@ function CreatePostScreen({ navigation, route }: any) {
   };
 
   const renderComposerEditToolPanel = () => {
+    if (composerEditToolPanel === "layout") {
+      return (
+        <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
+          <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Frame</Text>
+          <Text style={[styles.sectionTitle, { color: textColor }]}>Crop & Zoom</Text>
+          <View style={[styles.composerSheetBlock, { gap: 10 }]}>
+            <TouchableOpacity
+              style={[styles.toolAction, styles.toolActionFullWidth, { backgroundColor: inputBackground, borderColor }]}
+              onPress={() => {
+                resetCropPosition();
+                setComposerEditToolPanel(null);
+              }}
+              activeOpacity={0.8}
+            >
+              <Icon name="return-up-back-outline" size={18} color={accentColor} />
+              <View style={styles.toolActionBody}>
+                <Text style={[styles.toolActionTitle, { color: textColor }]}>Reset position</Text>
+                <Text style={[styles.toolActionMeta, { color: mutedColor }]}>Centre the image at original zoom</Text>
+              </View>
+            </TouchableOpacity>
+            <View style={[styles.toolAction, styles.toolActionFullWidth, { backgroundColor: inputBackground, borderColor }]}>
+              <Icon name="information-circle-outline" size={18} color={mutedColor} />
+              <View style={styles.toolActionBody}>
+                <Text style={[styles.toolActionTitle, { color: textColor }]}>How to crop</Text>
+                <Text style={[styles.toolActionMeta, { color: mutedColor }]}>Pinch to zoom · Drag to reposition · The image always fills the frame</Text>
+              </View>
+            </View>
+            <Text style={[styles.sectionEyebrow, { color: accentColor, marginTop: 4 }]}>Aspect ratio</Text>
+            {renderAspectSelector()}
+          </View>
+        </View>
+      );
+    }
+
     if (composerEditToolPanel === "text") {
       return (
         <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
@@ -4726,23 +4989,6 @@ function CreatePostScreen({ navigation, route }: any) {
       );
     }
 
-    if (composerEditToolPanel === "layout") {
-      return (
-        <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
-          <View style={styles.sectionHeader}>
-            <View>
-              <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Layout</Text>
-              <Text style={[styles.sectionTitle, { color: textColor }]}>Aspect ratio</Text>
-            </View>
-            <Text style={[styles.sectionMeta, { color: mutedColor }]}>
-              {mode === "post" ? "1:1, 16:9, 4:5, 9:16" : "9:16, 4:5"}
-            </Text>
-          </View>
-          {renderAspectSelector()}
-        </View>
-      );
-    }
-
     if (composerEditToolPanel === "filters") {
       return (
         <View style={[styles.storyToolPanelSheet, { backgroundColor: surfaceColor, borderColor }]}>
@@ -4792,7 +5038,7 @@ function CreatePostScreen({ navigation, route }: any) {
 
     const sheetTitle =
       composerEditToolPanel === "layout"
-        ? "Layout"
+        ? "Crop & Zoom"
         : composerEditToolPanel === "filters"
           ? "Filters"
           : composerEditToolPanel === "tag"
@@ -4973,6 +5219,49 @@ function CreatePostScreen({ navigation, route }: any) {
               <View style={styles.storyDetailsTags}>{renderMentionChips()}</View>
             </View>
 
+            {premiumSettings?.premiumContentEnabled ? (
+              <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
+                <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Monetise</Text>
+                <Text style={[styles.sectionTitle, { color: textColor }]}>Story type</Text>
+                <View style={styles.switchRow}>
+                  <TouchableOpacity
+                    style={[styles.premiumTypeOption, !isPremiumStory && { borderColor: accentColor }]}
+                    onPress={() => setIsPremiumStory(false)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.premiumTypeRadio, !isPremiumStory && { backgroundColor: accentColor, borderColor: accentColor }]} />
+                    <View style={styles.switchCopy}>
+                      <Text style={[styles.switchTitle, { color: textColor }]}>Normal story</Text>
+                      <Text style={[styles.switchMeta, { color: mutedColor }]}>Free for everyone to view.</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+                <View style={[styles.switchRow, styles.switchRowBorder, { borderTopColor: hairlineColor }]}>
+                  <TouchableOpacity
+                    style={[styles.premiumTypeOption, isPremiumStory && { borderColor: accentColor }]}
+                    onPress={() => setIsPremiumStory(true)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.premiumTypeRadio, isPremiumStory && { backgroundColor: accentColor, borderColor: accentColor }]} />
+                    <View style={styles.switchCopy}>
+                      <Text style={[styles.switchTitle, { color: textColor }]}>Premium story</Text>
+                      <Text style={[styles.switchMeta, { color: mutedColor }]}>Viewers pay to unlock this story.</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+                {isPremiumStory && creatorPricing ? (
+                  <View style={[styles.premiumPriceRow, { borderTopColor: hairlineColor }]}>
+                    <Text style={[styles.switchTitle, { color: textColor }]}>
+                      {creatorPricing.flag} {creatorPricing.currency}
+                    </Text>
+                    <Text style={[styles.premiumPriceDisplay, { color: accentColor }]}>
+                      {creatorPricing.currencySymbol}{creatorPricing.amount}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
             <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
               <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Replies</Text>
               <Text style={[styles.sectionTitle, { color: textColor }]}>Comments and replies</Text>
@@ -5119,6 +5408,49 @@ function CreatePostScreen({ navigation, route }: any) {
             </View>
             {renderMentionChips()}
           </View>
+
+          {mode === "post" && premiumSettings?.premiumContentEnabled ? (
+            <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
+              <Text style={[styles.sectionEyebrow, { color: accentColor }]}>Monetise</Text>
+              <Text style={[styles.sectionTitle, { color: textColor }]}>Post type</Text>
+              <View style={styles.switchRow}>
+                <TouchableOpacity
+                  style={[styles.premiumTypeOption, !isPremiumPost && { borderColor: accentColor }]}
+                  onPress={() => setIsPremiumPost(false)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.premiumTypeRadio, !isPremiumPost && { backgroundColor: accentColor, borderColor: accentColor }]} />
+                  <View style={styles.switchCopy}>
+                    <Text style={[styles.switchTitle, { color: textColor }]}>Normal post</Text>
+                    <Text style={[styles.switchMeta, { color: mutedColor }]}>Free for everyone to view.</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+              <View style={[styles.switchRow, styles.switchRowBorder, { borderTopColor: hairlineColor }]}>
+                <TouchableOpacity
+                  style={[styles.premiumTypeOption, isPremiumPost && { borderColor: accentColor }]}
+                  onPress={() => setIsPremiumPost(true)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.premiumTypeRadio, isPremiumPost && { backgroundColor: accentColor, borderColor: accentColor }]} />
+                  <View style={styles.switchCopy}>
+                    <Text style={[styles.switchTitle, { color: textColor }]}>Premium post</Text>
+                    <Text style={[styles.switchMeta, { color: mutedColor }]}>Viewers pay to unlock this post.</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+              {isPremiumPost && creatorPricing ? (
+                <View style={[styles.premiumPriceRow, { borderTopColor: hairlineColor }]}>
+                  <Text style={[styles.switchTitle, { color: textColor }]}>
+                    {creatorPricing.flag} {creatorPricing.currency}
+                  </Text>
+                  <Text style={[styles.premiumPriceDisplay, { color: accentColor }]}>
+                    {creatorPricing.currencySymbol}{creatorPricing.amount}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
 
           {mode === "post" ? (
             <View style={[styles.sectionCard, { backgroundColor: surfaceColor, borderColor }]}>
@@ -6534,6 +6866,27 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "rgba(255,255,255,0.55)",
     borderRadius: 24,
+    overflow: "hidden",
+  },
+  railDivider: {
+    width: "60%",
+    height: StyleSheet.hairlineWidth,
+    alignSelf: "center",
+    marginVertical: 4,
+  },
+  cropGridLineV: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 1,
+    backgroundColor: "rgba(255,255,255,0.55)",
+  },
+  cropGridLineH: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.55)",
   },
   emptyPreview: {
     width: "100%",
@@ -6920,6 +7273,37 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     fontFamily: appFonts.regular,
+  },
+  premiumTypeOption: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "transparent",
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+  },
+  premiumTypeRadio: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: "#9ca3af",
+  },
+  premiumPriceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 14,
+    marginTop: 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+  },
+  premiumPriceDisplay: {
+    fontSize: 18,
+    fontFamily: appFonts.semibold,
   },
   originalAudioPanel: {
     marginTop: 12,

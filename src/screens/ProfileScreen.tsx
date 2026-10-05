@@ -19,6 +19,8 @@ import { API } from '../api/api';
 import { getReadableApiErrorMessage } from "../api/networkErrors";
 import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/Ionicons";
+import { CountryPicker } from "react-native-country-codes-picker";
+import type { CountryItem } from "react-native-country-codes-picker";
 import { getStoredRefreshToken, getStoredSessionMeta, getStoredUser, getStoredToken, setStoredSession } from "../utils/authSession";
 import { uploadImageAsset } from "../utils/uploadMedia";
 import { useAppTheme } from "../theme/AppThemeContext";
@@ -44,6 +46,13 @@ const hasMainTabParent = (navigation: any) => {
   return false;
 };
 
+function flagEmoji(code: string): string {
+  if (!code || code.length !== 2) return '';
+  return [...code.toUpperCase()]
+    .map((c) => String.fromCodePoint(c.charCodeAt(0) + 127397))
+    .join('');
+}
+
 const ProfileScreen = ({ navigation }: any) => {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -63,6 +72,9 @@ const ProfileScreen = ({ navigation }: any) => {
   const [bankAccountNumber, setBankAccountNumber] = useState('');
   const [bankIfsc, setBankIfsc] = useState('');
   const [bankName, setBankName] = useState('');
+
+  const [country, setCountry] = useState('');
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
@@ -120,6 +132,7 @@ const ProfileScreen = ({ navigation }: any) => {
       setBankAccountNumber(user.bankAccountNumber || "");
       setBankIfsc(user.bankIfsc || "");
       setBankName(user.bankName || "");
+      setCountry(String(user.country || "").trim().toUpperCase());
 
     } catch (err) {
       console.log("Profile load error", err);
@@ -162,6 +175,7 @@ const ProfileScreen = ({ navigation }: any) => {
           pronouns,
           gender,
           link,
+          country: country.trim().toUpperCase(),
           bankAccountName: bankAccountName.trim(),
           bankAccountNumber: bankAccountNumber.trim(),
           bankIfsc: bankIfsc.trim().toUpperCase(),
@@ -194,6 +208,7 @@ const ProfileScreen = ({ navigation }: any) => {
             pronouns,
             gender,
             link,
+            country: country.trim().toUpperCase(),
             bankAccountName: bankAccountName.trim(),
             bankAccountNumber: bankAccountNumber.trim(),
             bankIfsc: bankIfsc.trim().toUpperCase(),
@@ -287,6 +302,26 @@ const ProfileScreen = ({ navigation }: any) => {
           {renderInput("Pronouns", pronouns, setPronouns, false, colors)}
           {renderInput("Gender", gender, setGender, false, colors)}
           {renderInput("Link", link, setLink, false, colors)}
+
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Location</Text>
+          <Text style={[styles.helperText, { color: colors.mutedText }]}>
+            Your country is used to determine premium content pricing. Select your 2-letter country code.
+          </Text>
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.text }]}>Country</Text>
+            <TouchableOpacity
+              style={[styles.input, styles.countrySelector, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => setShowCountryPicker(true)}
+              accessibilityRole="button"
+              accessibilityLabel={country ? `Country: ${country}` : "Select country"}
+            >
+              <Text style={{ color: country ? colors.text : colors.placeholder, fontSize: 15 }}>
+                {country ? `${flagEmoji(country)}  ${country}` : "Select country"}
+              </Text>
+              <Icon name="chevron-down-outline" size={18} color={colors.placeholder} />
+            </TouchableOpacity>
+          </View>
+
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Bank account setup</Text>
           <Text style={[styles.helperText, { color: colors.mutedText }]}>
             These payout details stay private and are only used for account setup and payments.
@@ -337,6 +372,32 @@ const ProfileScreen = ({ navigation }: any) => {
 
     </SafeAreaView>
     {!isInsideTabNavigator ? <AppBottomDock navigation={navigation} activeRouteName="ProfileView" /> : null}
+    <CountryPicker
+      show={showCountryPicker}
+      lang="en"
+      inputPlaceholder="Search country..."
+      searchMessage="No country found"
+      onBackdropPress={() => setShowCountryPicker(false)}
+      onRequestClose={() => setShowCountryPicker(false)}
+      pickerButtonOnPress={(item: CountryItem) => {
+        setCountry(item.code.toUpperCase());
+        setShowCountryPicker(false);
+      }}
+      style={{
+        textInput: {
+          height: 48,
+          borderWidth: 1,
+          borderColor: '#ddd',
+          borderRadius: 10,
+          paddingHorizontal: 14,
+          fontSize: 15,
+          backgroundColor: '#fafafa',
+          marginHorizontal: 12,
+          marginTop: 8,
+          marginBottom: 4,
+        },
+      }}
+    />
     </View>
   );
 };
@@ -519,6 +580,14 @@ const styles = StyleSheet.create({
 
   multilineInput: {
     height: 90
+  },
+
+  countrySelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    height: 50,
   },
 
   readonlyField: {

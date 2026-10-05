@@ -7,7 +7,7 @@ import {
   ensureMicrophonePermission,
   resolveCameraCaptureMediaType,
 } from "../../utils/permissions";
-import { MediaAsset } from "./types";
+import { MediaAsset, PremiumOriginalMediaItem } from "./types";
 
 export type ComposerAsset = {
   id: string;
@@ -295,6 +295,47 @@ const uploadSingleVideo = async (
       throw error;
     }
     throw new Error(getReadableApiErrorMessage(error, "Video upload failed."));
+  }
+};
+
+/**
+ * Upload a premium original media file to the private R2 bucket.
+ * Returns storageKey metadata — NEVER a public CDN URL.
+ * Must be called BEFORE createPost/createStory for premium content.
+ */
+export const uploadPremiumMedia = async (
+  asset: ComposerAsset,
+  contentType: "post" | "story",
+  onProgress?: UploadComposerAssetsOptions["onProgress"],
+): Promise<PremiumOriginalMediaItem> => {
+  try {
+    const body = new FormData();
+    body.append("media", toFormDataFile(asset) as never);
+
+    const res = await postMultipart({
+      path: `/upload/premium-media?contentType=${contentType}`,
+      body,
+      timeoutMs: 600000,
+    });
+    onProgress?.(0.94);
+
+    if (!res?.storageKey) {
+      throw new Error("Premium upload did not return a storage key.");
+    }
+
+    return {
+      storageKey: res.storageKey,
+      type: res.type === "video" ? "video" : "image",
+      mimeType: res.mimeType || (asset.mediaType === "video" ? "video/mp4" : "image/jpeg"),
+      width: typeof res.width === "number" ? res.width : asset.width,
+      height: typeof res.height === "number" ? res.height : asset.height,
+      duration: typeof res.duration === "number" ? res.duration : (
+        typeof asset.durationMs === "number" ? Math.round(asset.durationMs / 1000) : undefined
+      ),
+      order: 0,
+    };
+  } catch (error) {
+    throw new Error(getReadableApiErrorMessage(error, "Premium media upload failed."));
   }
 };
 

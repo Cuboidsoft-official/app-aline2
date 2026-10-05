@@ -102,3 +102,9 @@ yarn-error.log*
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Python bytecode from the release delivery checks. `python3 -m unittest`
+# and `py_compile` both write these next to the sources, and nothing in
+# this repository's tooling creates them, so they were never ignored.
+__pycache__/
+*.py[cod]

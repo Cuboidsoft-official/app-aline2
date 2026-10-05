@@ -25,6 +25,14 @@ allprojects {
         mavenCentral()
         maven { url "https://maven.zego.im" }
     }
+    // react-native-webrtc declares 'org.jitsi:webrtc:124.+' (dynamic range).
+    // Pin to the only available 124.x release so Gradle skips the metadata
+    // lookup that transiently fails in CI with --no-daemon (no shared cache).
+    configurations.all {
+        resolutionStrategy {
+            force 'org.jitsi:webrtc:124.0.0'
+        }
+    }
 }
 
 apply plugin: "com.facebook.react.rootproject"

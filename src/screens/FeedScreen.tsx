@@ -28,6 +28,7 @@ import ContentActionSheet from "../features/social/components/ContentActionSheet
 import InteractiveText from "../features/social/components/InteractiveText";
 import PostCommentsSheet from "../features/social/components/PostCommentsSheet";
 import PostShareSheet from "../features/social/components/PostShareSheet";
+import PremiumContentOverlay from "../features/social/components/PremiumContentOverlay";
 import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import SocialVideo from "../features/social/components/SocialVideo";
 import { socialApi } from "../features/social/socialApi";
@@ -59,6 +60,9 @@ import {
   getCarouselPageIndex,
   isCarouselTapGesture,
 } from "../utils/carouselGesture";
+import { performPremiumPurchase } from "../utils/premiumPurchase";
+import { openPostDetail as navigateToPostDetail } from "../utils/socialNavigation";
+import { computeCoverDimensions } from "./composerConfig";
 
 let ColorMatrix: any;
 try {
@@ -292,6 +296,40 @@ const getImageResizeMode = (
   return "cover";
 };
 
+// Returns the natural cover dimensions for a media asset in a container, so
+// the image fills the frame with no letterboxing just like the editor does.
+// Uses frameTransform.sourceAspect (original image ratio before buildAspectMetadata
+// remapped width/height to the frame ratio) so cover overflow matches the editor.
+// Falls back to absoluteFillObject when dimensions are unknown (backward compat).
+const getMediaCoverStyle = (
+  asset: Post["media"][number] | undefined,
+  containerW: number,
+  containerH: number,
+): object => {
+  if (containerW <= 0 || containerH <= 0) {
+    return StyleSheet.absoluteFillObject;
+  }
+  // Prefer sourceAspect stored in frameTransform — it reflects the original image
+  // aspect ratio before buildAspectMetadata rewrote width/height to match the frame.
+  const sourceAspect = Number(asset?.frameTransform?.sourceAspect);
+  if (Number.isFinite(sourceAspect) && sourceAspect > 0) {
+    const { coverW, coverH } = computeCoverDimensions(
+      sourceAspect * 1000,
+      1000,
+      containerW,
+      containerH,
+    );
+    return { width: coverW, height: coverH };
+  }
+  const imgW = Number(asset?.width || 0);
+  const imgH = Number(asset?.height || 0);
+  if (imgW <= 0 || imgH <= 0) {
+    return StyleSheet.absoluteFillObject;
+  }
+  const { coverW, coverH } = computeCoverDimensions(imgW, imgH, containerW, containerH);
+  return { width: coverW, height: coverH };
+};
+
 const getMediaFrameTransformStyle = (
   asset: Post["media"][number] | undefined,
   width: number,
@@ -301,7 +339,9 @@ const getMediaFrameTransformStyle = (
   if (!transform || (!transform.scale && !transform.translateX && !transform.translateY)) {
     return undefined;
   }
-  const scale = Math.max(0.1, Math.min(4, Number(transform?.scale || 1)));
+  // Clamp scale to min 1.0 in the feed — sub-1 scale makes content smaller than
+  // the cover container, creating visible gaps at the edges.
+  const scale = Math.max(1.0, Math.min(4, Number(transform?.scale || 1)));
   const translateX = Math.max(-1.5, Math.min(1.5, Number(transform?.translateX || 0))) * width;
   const translateY = Math.max(-1.5, Math.min(1.5, Number(transform?.translateY || 0))) * height;
 
@@ -364,6 +404,7 @@ type CurrentUserSummary = {
   name: string;
   email?: string;
   followingIds: string[];
+  category?: string;
 };
 
 type FeedRelationshipKind = "self" | "follow" | "follow_back" | "following" | "message";
@@ -409,6 +450,7 @@ function FeedScreen({ navigation, route }: any) {
   const [isVideoSoundEnabled, setIsVideoSoundEnabled] = useState(FEED_VIDEO_SOUND_DEFAULT);
   const [menuOpen, setMenuOpen] = useState(false);
   const [publishTasks, setPublishTasks] = useState<PublishQueueTask[]>(() => getPublishQueueSnapshot());
+  const [premiumStates, setPremiumStates] = useState<Record<string, "loading" | "verified">>({});
   const slideAnim = useRef(new Animated.Value(0)).current;
   const feedListRef = useRef<FlatList<any> | null>(null);
   const hasFeedContentRef = useRef(false);
@@ -539,39 +581,44 @@ function FeedScreen({ navigation, route }: any) {
   }, []);
 
   const menuSections = useMemo(
-    () => [
-      {
-        title: "Account",
-        data: [
-          { icon: "person-outline", label: "My Profile", screen: "ProfileView" },
-          { icon: "wallet-outline", label: "User Wallet", screen: "WalletScreen" },
-          { icon: "notifications-outline", label: "Notifications", screen: "NotificationScreen" },
-          { icon: "trophy-outline", label: "Leaderboard", screen: "LeaderboardScreen" },
-        ],
-      },
-      {
-        title: "Growth",
-        data: [
-          { icon: "star-outline", label: "Feature Your Profile", screen: "HowToEarnScreen", params: { section: "featureProfile" } },
-          { icon: "document-text-outline", label: "Brand Campaigns & Ads", screen: "HowToEarnScreen", params: { section: "listedAds" } },
-          { icon: "megaphone-outline", label: "Promotions", screen: "HowToEarnScreen", params: { section: "promotions" } },
-          { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen", params: { section: "howToEarn" } },
-          { icon: "gift-outline", label: "Refer and Earn", screen: "HowToEarnScreen", params: { section: "referral" } },
-          hasSellerAccount
-            ? { icon: "briefcase-outline", label: "Seller Workspace", screen: "SellerDashboardScreen" }
-            : { icon: "storefront-outline", label: "Become a Seller", screen: "SellerRegistration" },
-        ],
-      },
-      {
-        title: "Support",
-        data: [
-          { icon: "settings-outline", label: "Settings", screen: "SettingsScreen" },
-          { icon: "chatbox-ellipses-outline", label: "Suggestion / Feedback", screen: "FeedbackScreen" },
-          { icon: "shield-alert-outline", label: "Customer Support (Report Fraud)", screen: "CustomerSupportScreen" },
-          { icon: "help-circle-outline", label: "Help & Support", screen: "HelpSupportScreen" },
-        ],
-      },
-    ],
+    () => {
+      const sections: Array<{ title: string; data: any[] }> = [
+        {
+          title: "Account",
+          data: [
+            { icon: "person-outline", label: "My Profile", screen: "ProfileView" },
+            { icon: "wallet-outline", label: "User Wallet", screen: "WalletScreen" },
+            { icon: "notifications-outline", label: "Notifications", screen: "NotificationScreen" },
+            { icon: "trophy-outline", label: "Leaderboard", screen: "LeaderboardScreen" },
+          ],
+        },
+        {
+          title: "Growth",
+          data: [
+            { icon: "star-outline", label: "Feature Your Profile", screen: "HowToEarnScreen", params: { section: "featureProfile" } },
+            { icon: "document-text-outline", label: "Brand Campaigns & Ads", screen: "HowToEarnScreen", params: { section: "listedAds" } },
+            { icon: "megaphone-outline", label: "Promotions", screen: "HowToEarnScreen", params: { section: "promotions" } },
+            { icon: "cash-outline", label: "How to Earn", screen: "HowToEarnScreen", params: { section: "howToEarn" } },
+            { icon: "gift-outline", label: "Refer and Earn", screen: "HowToEarnScreen", params: { section: "referral" } },
+            hasSellerAccount
+              ? { icon: "briefcase-outline", label: "Seller Workspace", screen: "SellerDashboardScreen" }
+              : { icon: "storefront-outline", label: "Become a Seller", screen: "SellerRegistration" },
+            { icon: "diamond-outline", label: "Premium Feature Settings", screen: "PremiumSettingsScreen" },
+          ],
+        },
+        {
+          title: "Support",
+          data: [
+            { icon: "settings-outline", label: "Settings", screen: "SettingsScreen" },
+            { icon: "chatbox-ellipses-outline", label: "Suggestion / Feedback", screen: "FeedbackScreen" },
+            { icon: "shield-alert-outline", label: "Customer Support (Report Fraud)", screen: "CustomerSupportScreen" },
+            { icon: "help-circle-outline", label: "Help & Support", screen: "HelpSupportScreen" },
+          ],
+        },
+      ];
+
+      return sections;
+    },
     [hasSellerAccount],
   );
 
@@ -735,6 +782,7 @@ function FeedScreen({ navigation, route }: any) {
           username: String(storedUser.username || ""),
           name: String(storedUser.name || ""),
           email: String(storedUser.email || ""),
+          category: String(storedUser.category || ""),
           followingIds: Array.isArray(storedUser.following)
             ? storedUser.following.map((entry: any) => String(entry?._id || entry?.id || entry || "")).filter(Boolean)
             : [],
@@ -1685,35 +1733,42 @@ function FeedScreen({ navigation, route }: any) {
         style={[styles.storyItem, { width: storyItemWidth }]}
         onPress={() => navigation.navigate("StoryViewer", { storyId: item.id, storyUserId: item.user.id })}
       >
-        {item.viewed ? (
-          <View
-            style={[
-              styles.storyRing,
-              styles.storyRingSeen,
-              closeFriends && styles.storyRingCloseFriendsSeen,
-              ringSizeStyle,
-            ]}
-          >
-            <Image
-              source={{ uri: storyAvatar }}
-              style={[styles.storyAvatar, avatarStyle]}
-            />
-          </View>
-        ) : (
-          <LinearGradient
-            colors={storyRingColors}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.storyRingGradient, ringSizeStyle]}
-          >
-            <View style={[styles.storyRingInner, ringInnerStyle, { backgroundColor: colors.card }]}>
+        <View style={styles.storyRingWrap}>
+          {item.viewed ? (
+            <View
+              style={[
+                styles.storyRing,
+                styles.storyRingSeen,
+                closeFriends && styles.storyRingCloseFriendsSeen,
+                ringSizeStyle,
+              ]}
+            >
               <Image
                 source={{ uri: storyAvatar }}
                 style={[styles.storyAvatar, avatarStyle]}
               />
             </View>
-          </LinearGradient>
-        )}
+          ) : (
+            <LinearGradient
+              colors={storyRingColors}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.storyRingGradient, ringSizeStyle]}
+            >
+              <View style={[styles.storyRingInner, ringInnerStyle, { backgroundColor: colors.card }]}>
+                <Image
+                  source={{ uri: storyAvatar }}
+                  style={[styles.storyAvatar, avatarStyle]}
+                />
+              </View>
+            </LinearGradient>
+          )}
+          {item.isPremium && !item.premiumUnlocked ? (
+            <View style={styles.storyPremiumBadge}>
+              <Icon name="lock-closed" size={9} color="#fff" />
+            </View>
+          ) : null}
+        </View>
         <Text style={[styles.storyName, { color: colors.text }]} numberOfLines={1}>
           {item.user.name}
         </Text>
@@ -1724,6 +1779,19 @@ function FeedScreen({ navigation, route }: any) {
   const renderPostMedia = (post: Post, postIndex?: number) => {
     const mediaHeight = getPostMediaHeight(post);
     if (!Array.isArray(post.media) || !post.media.length) {
+      // Premium post already unlocked but signed URLs are only injected in getPost (detail view).
+      // Show a tap-to-view prompt so the user can navigate to the detail screen to see the content.
+      if (post.isPremium && post.premiumUnlocked === true) {
+        return (
+          <Pressable
+            style={[styles.postImage, styles.premiumUnlockedPlaceholder, { width: postMediaWidth, height: mediaHeight }]}
+            onPress={() => navigateToPostDetail(navigation, { postId: post.id })}
+          >
+            <Icon name="lock-open-outline" size={28} color="#fff" />
+            <Text style={styles.premiumUnlockedPlaceholderText}>Tap to view</Text>
+          </Pressable>
+        );
+      }
       return <View style={[styles.postImage, styles.mediaFallback, { width: postMediaWidth, height: mediaHeight }]} />;
     }
 
@@ -1763,9 +1831,8 @@ function FeedScreen({ navigation, route }: any) {
       if (primaryMedia?.mediaType === 'video') {
         const shouldShowActiveVideo = shouldMountVideo(true);
         return (
-          <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden' }]}>
-
-            <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
+          <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }]}>
+            <View style={[getMediaCoverStyle(primaryMedia, postMediaWidth, mediaHeight), getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
               <SocialVideo
                 uri={normalizeMediaUrl(primaryMedia.url)}
                 posterUri={normalizeMediaUrl(primaryMedia.thumbnailUrl || '')}
@@ -1780,7 +1847,7 @@ function FeedScreen({ navigation, route }: any) {
                 repeat
                 restartKey={post.id}
                 onLoad={(event) => handleFeedVideoLoaded(post.id, primaryMedia.id, event)}
-                resizeMode={getImageResizeMode(primaryMedia, frameAspectRatio)}
+                resizeMode="cover"
                 contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
                 showBufferingLoader={false}
               />
@@ -1790,16 +1857,14 @@ function FeedScreen({ navigation, route }: any) {
         );
       }
 
-      const imageResizeMode = getImageResizeMode(primaryMedia, frameAspectRatio);
       const rawImage = (
-        <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden' }]}>
-
-          <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
+        <View style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }]}>
+          <View style={[getMediaCoverStyle(primaryMedia, postMediaWidth, mediaHeight), getMediaFrameTransformStyle(primaryMedia, postMediaWidth, mediaHeight)]}>
             <ProgressiveImage
               uri={normalizeMediaUrl(primaryMedia?.url)}
               previewUri={normalizeMediaUrl(primaryMedia?.thumbnailUrl || primaryMedia?.url)}
               style={StyleSheet.absoluteFill}
-              resizeMode={imageResizeMode}
+              resizeMode="cover"
               contentBlurRadius={primaryMedia?.sensitiveContent?.isSensitive ? 22 : 0}
             />
           </View>
@@ -1912,9 +1977,8 @@ function FeedScreen({ navigation, route }: any) {
             }
 
             return asset.mediaType === "video" ? (
-              <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
-
-                <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
+              <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden", alignItems: 'center', justifyContent: 'center' }]}>
+                <View style={[getMediaCoverStyle(asset, postMediaWidth, mediaHeight), getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
                   <SocialVideo
                     uri={normalizeMediaUrl(asset.url)}
                     posterUri={normalizeMediaUrl(asset.thumbnailUrl || "")}
@@ -1930,7 +1994,7 @@ function FeedScreen({ navigation, route }: any) {
                     repeat
                     restartKey={`${post.id}:${asset.id}`}
                     onLoad={(event) => handleFeedVideoLoaded(post.id, asset.id, event)}
-                    resizeMode={getImageResizeMode(asset, frameAspectRatio)}
+                    resizeMode="cover"
                     contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
                     showBufferingLoader={false}
                   />
@@ -1939,16 +2003,14 @@ function FeedScreen({ navigation, route }: any) {
               </View>
             ) : (
               (() => {
-                const imageResizeMode = getImageResizeMode(asset, frameAspectRatio);
                 const rawImage = (
-                  <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden" }]}>
-
-                    <View style={[StyleSheet.absoluteFillObject, getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
+                  <View key={`${post.id}-${key}`} style={[styles.postImage, { width: postMediaWidth, height: mediaHeight, overflow: "hidden", alignItems: 'center', justifyContent: 'center' }]}>
+                    <View style={[getMediaCoverStyle(asset, postMediaWidth, mediaHeight), getMediaFrameTransformStyle(asset, postMediaWidth, mediaHeight)]}>
                       <ProgressiveImage
                         uri={normalizeMediaUrl(asset.url)}
                         previewUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
                         style={StyleSheet.absoluteFill}
-                        resizeMode={imageResizeMode}
+                        resizeMode="cover"
                         contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
                       />
                     </View>
@@ -2335,6 +2397,43 @@ function FeedScreen({ navigation, route }: any) {
     }
   }, [feed?.posts?.length, loadMoreFeed]);
 
+  const handleUnlockPost = useCallback(async (postId: string) => {
+    if (premiumStates[postId]) return;
+    setPremiumStates((prev) => ({ ...prev, [postId]: "loading" }));
+    const result = await performPremiumPurchase({ contentType: "post", contentId: postId });
+    if (result.outcome === "verified" || result.outcome === "already_purchased") {
+      // Phase 2E: re-fetch from server so the entitlement-gated media is included
+      try {
+        const refreshedPost = await socialApi.getPost(postId);
+        if (refreshedPost?.premiumUnlocked) {
+          setFeed((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              posts: prev.posts.map((p) => (p.id === postId ? refreshedPost : p)),
+            };
+          });
+          // Clear premium state so overlay is fully removed
+          setPremiumStates((prev) => {
+            const next = { ...prev };
+            delete next[postId];
+            return next;
+          });
+          return;
+        }
+      } catch {
+        // Re-fetch failed — fall back to verified state (overlay shows success message)
+      }
+      setPremiumStates((prev) => ({ ...prev, [postId]: "verified" }));
+    } else {
+      setPremiumStates((prev) => {
+        const next = { ...prev };
+        delete next[postId];
+        return next;
+      });
+    }
+  }, [premiumStates]);
+
   const renderPost = useCallback(({ item, index }: { item: any; index: number }) => {
     if (!item) {
       return null;
@@ -2383,7 +2482,8 @@ function FeedScreen({ navigation, route }: any) {
     const isCaptionExpanded = !!expandedCaptionIds[item.id];
     const isCaptionTruncatable = String(item.caption || "").length > 110 || String(item.caption || "").includes("\n");
     const isCarouselPost = media.length > 1;
-    const mediaSurface = (
+    const isPostOwner = !!currentUser?.id && String(currentUser.id) === String(user.id || "");
+    const rawMediaSurface = (
       <>
         {renderPostMedia(item, index)}
         {renderPostStickerOverlay(item)}
@@ -2392,7 +2492,7 @@ function FeedScreen({ navigation, route }: any) {
             <Icon name="heart" size={88} color="rgba(255,255,255,0.92)" />
           </View>
         ) : null}
-        {hasVideoMedia ? (
+        {hasVideoMedia && !item.isPremium ? (
           <View pointerEvents="none" style={[styles.mediaSoundHint, isCompactPhone && styles.mediaSoundHintCompact]}>
             <Icon
               name={isFeedVideoSoundOn({ isVideoSoundEnabled, isPostMuted: isMuted }) ? "volume-high-outline" : "volume-mute-outline"}
@@ -2406,6 +2506,21 @@ function FeedScreen({ navigation, route }: any) {
         ) : null}
       </>
     );
+    const mediaSurface = item.isPremium ? (
+      <PremiumContentOverlay
+        isPremium={item.isPremium}
+        premiumPrice={item.premiumPrice}
+        premiumCurrency={item.premiumCurrency}
+        isOwner={isPostOwner}
+        loading={premiumStates[item.id] === "loading"}
+        purchaseVerified={premiumStates[item.id] === "verified"}
+        premiumUnlocked={item.premiumUnlocked === true}
+        onUnlockPress={() => handleUnlockPost(item.id)}
+        previewMode
+      >
+        {rawMediaSurface}
+      </PremiumContentOverlay>
+    ) : rawMediaSurface;
 
     return (
       <View
@@ -2773,6 +2888,12 @@ function FeedScreen({ navigation, route }: any) {
         onEndReachedThreshold={0.45}
         onViewableItemsChanged={handleFeedViewableChange}
         viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 200 }}
+        onScrollToIndexFailed={({ index, averageItemLength }) => {
+          feedListRef.current?.scrollToOffset({
+            offset: Math.max(0, averageItemLength * index),
+            animated: false,
+          });
+        }}
         ListHeaderComponent={isFocusedPostFeed ? <View style={styles.feedHeaderSpacer} /> : renderHeader}
         ListFooterComponent={
           loadingMore ? (
@@ -3039,6 +3160,7 @@ const styles: any = {
     borderRadius: 11,
   },
   storyItem: { alignItems: "center", justifyContent: "center" },
+  storyRingWrap: { position: "relative" },
   storyRing: { alignItems: "center", justifyContent: "center" },
   storyRingSeen: { borderWidth: 1, borderColor: "transparent" },
   storyRingCloseFriendsSeen: {},
@@ -3046,8 +3168,33 @@ const styles: any = {
   storyRingInner: { alignItems: "center", justifyContent: "center" },
   storyAvatar: { resizeMode: "cover" },
   storyName: { marginTop: 6, fontSize: 11, textAlign: "center" },
+  storyPremiumBadge: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#9b4dff",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#fff",
+  },
   postImage: { overflow: "hidden" },
   mediaFallback: { backgroundColor: "#ececec" },
+  premiumUnlockedPlaceholder: {
+    backgroundColor: "#1a1a2e",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+  },
+  premiumUnlockedPlaceholderText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600" as const,
+    letterSpacing: 0.3,
+  },
   carouselWrap: { position: "relative" },
   carouselBadge: {
     position: "absolute",

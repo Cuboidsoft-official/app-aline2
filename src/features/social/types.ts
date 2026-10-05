@@ -63,6 +63,8 @@ export interface MediaAsset {
     scale: number;
     translateX: number;
     translateY: number;
+    /** Original image aspect ratio (w/h) before buildAspectMetadata remapped dimensions to the frame ratio. */
+    sourceAspect?: number;
   };
   sensitiveContent?: {
     isSensitive: boolean;
@@ -103,9 +105,32 @@ export interface Post {
   liked: boolean;
   saved: boolean;
   hasOriginalAudio?: boolean;
+  isPremium?: boolean;
+  premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
+  premiumUnlocked?: boolean;
+  premiumLocked?: boolean;
 }
 
 export type StoryType = "media" | "text" | "poll" | "question";
+
+export interface StorySegment {
+  order: number;
+  mediaType: string;
+  mediaUrl: string | null;
+  thumbnailUrl?: string | null;
+  duration?: number;
+  width?: number;
+  height?: number;
+}
+
+export interface StoryPreviewMedia {
+  mediaUrl: string | null;
+  mediaType: string;
+  thumbnailUrl?: string | null;
+  duration?: number;
+}
 
 export interface StoryPoll {
   question: string;
@@ -184,6 +209,14 @@ export interface Story {
   allowSharing?: boolean;
   isOwner?: boolean;
   music?: StoryMusic;
+  isPremium?: boolean;
+  premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
+  premiumUnlocked?: boolean;
+  premiumLocked?: boolean;
+  segments?: StorySegment[];
+  previewMedia?: StoryPreviewMedia;
 }
 
 export interface Reel {
@@ -293,6 +326,33 @@ export interface TaggedUserInput {
   username?: string;
 }
 
+export interface PremiumOriginalMediaItem {
+  storageKey: string;
+  type: "image" | "video";
+  mimeType: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+  order?: number;
+}
+
+export interface StoryPreviewMediaInput {
+  mediaUrl: string;
+  mediaType: "image" | "video";
+  thumbnailUrl?: string;
+  duration?: number;
+}
+
+export interface PostPreviewMediaItem {
+  url: string;
+  type: "image" | "video";
+  thumbnailUrl?: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+  order?: number;
+}
+
 export interface CreatePostInput {
   type: PostType;
   caption: string;
@@ -306,6 +366,12 @@ export interface CreatePostInput {
   filterPreset?: string;
   stickers?: StorySticker[];
   hasOriginalAudio?: boolean;
+  isPremium?: boolean;
+  premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
+  premiumOriginalMedia?: PremiumOriginalMediaItem[];
+  previewMedia?: PostPreviewMediaItem[];
 }
 
 export interface CreateStoryInput {
@@ -349,6 +415,12 @@ export interface CreateStoryInput {
   allowReplies?: boolean;
   allowSharing?: boolean;
   stickers?: any[];
+  isPremium?: boolean;
+  premiumPrice?: number;
+  premiumCountryCode?: string;
+  premiumCurrency?: string;
+  premiumOriginalMedia?: PremiumOriginalMediaItem[];
+  previewMedia?: StoryPreviewMediaInput;
 }
 
 export interface CreateReelInput {
@@ -402,6 +474,7 @@ export interface SocialApi {
   getStorySequence(storyId: string, options?: GetStorySequenceOptions): Promise<StorySequenceResponse>;
   getPost(postId: string): Promise<Post>;
   getStory(storyId: string): Promise<Story>;
+  invalidateStory(storyId: string): void;
   getStoryArchive(): Promise<Story[]>;
   getPostArchive(): Promise<Post[]>;
   getSavedPosts(): Promise<Post[]>;

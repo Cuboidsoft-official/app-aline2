@@ -25,7 +25,7 @@ import { useAppTheme } from "../theme/AppThemeContext";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
 import { shouldShowVerifiedBadge } from "../utils/verificationBadges";
 import AppBottomDock, { APP_BOTTOM_DOCK_BASE_HEIGHT } from "../components/AppBottomDock";
-import { openPostInFeed, openSwipeInSwipes } from "../utils/socialNavigation";
+import { openPostInFeed, openPostDetail, openSwipeInSwipes } from "../utils/socialNavigation";
 import ProgressiveImage from "../features/social/components/ProgressiveImage";
 import ProfilePictureViewer from "../components/ProfilePictureViewer";
 
@@ -33,6 +33,11 @@ interface ProfilePost {
  _id: string;
  image?: string;
  postType?: string;
+ isPremium?: boolean;
+ premiumUnlocked?: boolean;
+ premiumPrice?: number;
+ premiumCurrency?: string;
+ previewMedia?: Array<{ url?: string; type?: string; thumbnailUrl?: string }>;
  media?: Array<{
   url?: string;
   mediaUrl?: string;
@@ -70,7 +75,7 @@ interface ProfileUser {
  category?: string;
 }
 
-type ProfileTab = "posts" | "swipes" | "tagged";
+type ProfileTab = "posts" | "premium" | "swipes" | "tagged";
 
 const isReelPost = (post: ProfilePost) => post.postType === "reel";
 const MAIN_TAB_ROUTES = ["Feed", "Swipes", "Create", "Chats", "ProfileView"];
@@ -118,6 +123,7 @@ const ProfileScreen = ({navigation}: any) => {
  const [isPrivate, setIsPrivate] = useState(false);
  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
  const [avatarViewerVisible, setAvatarViewerVisible] = useState(false);
+ const [premiumEnabled, setPremiumEnabled] = useState(false);
 
  const fetchProfile = useCallback(async (showRefreshing = false) => {
 
@@ -134,9 +140,10 @@ const ProfileScreen = ({navigation}: any) => {
    setIsPrivate(!!profileUser?.isPrivate);
 
    if (profileUser?._id) {
-    const [postsRes, taggedRes] = await Promise.allSettled([
+    const [postsRes, taggedRes, settingsRes] = await Promise.allSettled([
       API.get(`/posts/user/${profileUser._id}`),
       API.get(`/posts/tagged/${profileUser._id}`),
+      API.get("/premium-settings/mine"),
     ]);
 
     setAllPosts(
@@ -145,9 +152,16 @@ const ProfileScreen = ({navigation}: any) => {
     setTaggedPosts(
       taggedRes.status === "fulfilled" ? ((taggedRes.value.data.posts || []) as ProfilePost[]) : [],
     );
+    if (settingsRes.status === "fulfilled") {
+     const s = settingsRes.value?.data?.settings;
+     setPremiumEnabled(!!s?.premiumContentEnabled);
+    } else {
+     setPremiumEnabled(false);
+    }
    } else {
     setAllPosts([]);
     setTaggedPosts([]);
+    setPremiumEnabled(false);
    }
 
    setErrorMessage("");
@@ -157,6 +171,7 @@ const ProfileScreen = ({navigation}: any) => {
    setUser(null);
    setAllPosts([]);
    setTaggedPosts([]);
+   setPremiumEnabled(false);
    setErrorMessage(getReadableApiErrorMessage(error, "Could not load your profile right now."));
   } finally {
    setLoading(false);
@@ -173,6 +188,12 @@ const ProfileScreen = ({navigation}: any) => {
   setAvatarLoadFailed(false);
  }, [user?.profilePic]);
 
+ useEffect(() => {
+  if (!premiumEnabled && activeTab === "premium") {
+   setActiveTab("posts");
+  }
+ }, [premiumEnabled, activeTab]);
+
  useFocusEffect(
   useCallback(() => {
    fetchProfile().catch(() => {});
@@ -187,12 +208,13 @@ const ProfileScreen = ({navigation}: any) => {
   if (activeTab === "swipes") {
    return allPosts.filter((post) => isReelPost(post));
   }
-
   if (activeTab === "tagged") {
    return taggedPosts;
   }
-
-  return allPosts.filter((post) => !isReelPost(post));
+  if (activeTab === "premium") {
+   return allPosts.filter((post) => !isReelPost(post) && post.postType !== "story" && !!post.isPremium);
+  }
+  return allPosts.filter((post) => !isReelPost(post) && !post.isPremium);
  }, [activeTab, allPosts, taggedPosts]);
 
  const totalPostCount = useMemo(
@@ -277,6 +299,8 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
    media?.location,
    media?.path,
    post.image,
+   post.previewMedia?.[0]?.thumbnailUrl,
+   post.previewMedia?.[0]?.url,
   ),
  );
 };
@@ -325,31 +349,50 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
   }
  };
 
- const renderPost = ({ item }: { item: ProfilePost }) => (
- <TouchableOpacity
-   activeOpacity={0.9}
-   style={styles.postCard}
-   onPress={() => {
-    if (isReelPost(item)) {
-     openSwipeInSwipes(navigation, { swipeId: item._id, userId: user?._id });
-     return;
-    }
-    openPostInFeed(navigation, { postId: item._id, userId: user?._id });
-   }}
-  >
-	   {getPostPreviewUrl(item) ? (
-	    <ProgressiveImage
-	     uri={getPostPreviewUrl(item)}
-	     previewUri={getPostPreviewUrl(item)}
-	     style={styles.postImage}
-	    />
-	   ) : (
-    <View style={[styles.postImage, styles.postFallback]}>
-      <Icon name="image-outline" size={22} color={colors.mutedText} />
+ const renderPost = ({ item }: { item: ProfilePost }) => {
+  const isLocked = !!item.isPremium && !item.premiumUnlocked;
+  const showPremiumOverlay = activeTab === "premium" && isLocked;
+  return (
+   <TouchableOpacity
+    activeOpacity={0.9}
+    style={styles.postCard}
+    onPress={() => {
+     if (isReelPost(item)) {
+      openSwipeInSwipes(navigation, { swipeId: item._id, userId: user?._id });
+      return;
+     }
+     if (item.isPremium) {
+      openPostDetail(navigation, { postId: item._id });
+      return;
+     }
+     openPostInFeed(navigation, { postId: item._id, userId: user?._id });
+    }}
+   >
+    <View style={styles.postCardInner}>
+     {getPostPreviewUrl(item) ? (
+      <ProgressiveImage
+       uri={getPostPreviewUrl(item)}
+       previewUri={getPostPreviewUrl(item)}
+       style={[styles.postImage, showPremiumOverlay && styles.postImageDimmed]}
+      />
+     ) : (
+      <View style={[styles.postImage, styles.postFallback]}>
+       <Icon name="image-outline" size={22} color={colors.mutedText} />
+      </View>
+     )}
+     {showPremiumOverlay ? (
+      <View style={styles.premiumGridOverlay} pointerEvents="none">
+       <Icon name="lock-closed" size={20} color="#fff" />
+      </View>
+     ) : isLocked ? (
+      <View style={styles.premiumLockBadge} pointerEvents="none">
+       <Icon name="lock-closed" size={11} color="#fff" />
+      </View>
+     ) : null}
     </View>
-   )}
-  </TouchableOpacity>
- );
+   </TouchableOpacity>
+  );
+ };
 
  const renderHeader = () => (
   <>
@@ -573,34 +616,45 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
     </View>
    </View>
 
-   <View style={[styles.tabs, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-    {[
+   {(() => {
+    const tabItems = [
      { key: "posts", label: "Posts", icon: "grid-outline" },
-    { key: "swipes", label: "Swipes", icon: "flame-outline" },
+     ...(premiumEnabled ? [{ key: "premium", label: "Premium", icon: "diamond" }] : []),
+     { key: "swipes", label: "Swipes", icon: "flame-outline" },
      { key: "tagged", label: "Tagged", icon: "pricetag-outline" },
-    ].map((tabItem) => {
-     const isActive = activeTab === tabItem.key;
-
-     return (
-      <TouchableOpacity
-       key={tabItem.key}
-       style={[
-        styles.tab,
-        {
-         backgroundColor: isActive ? (isDarkMode ? colors.surface : colors.card) : "transparent",
-         borderColor: isActive ? colors.border : "transparent",
-        },
-       ]}
-       onPress={() => setActiveTab(tabItem.key as ProfileTab)}
-      >
-       <Icon name={tabItem.icon} size={16} color={isActive ? colors.primary : colors.mutedText} />
-       <Text style={isActive ? [styles.activeTab, { color: colors.primary }] : [styles.tabText, { color: colors.mutedText }]}>
-        {tabItem.label}
-       </Text>
-      </TouchableOpacity>
-     );
-    })}
-   </View>
+    ];
+    const compact = tabItems.length > 3;
+    return (
+     <View style={[styles.tabs, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      {tabItems.map((tabItem) => {
+       const isActive = activeTab === tabItem.key;
+       return (
+        <TouchableOpacity
+         key={tabItem.key}
+         style={[
+          styles.tab,
+          compact && styles.tabCompact,
+          {
+           backgroundColor: isActive ? (isDarkMode ? colors.surface : colors.card) : "transparent",
+           borderColor: isActive ? colors.border : "transparent",
+          },
+         ]}
+         onPress={() => setActiveTab(tabItem.key as ProfileTab)}
+        >
+         <Icon name={tabItem.icon} size={compact ? 14 : 16} color={tabItem.key === "premium" ? "#5bc8f5" : (isActive ? colors.primary : colors.mutedText)} />
+         <Text style={[
+          isActive ? styles.activeTab : styles.tabText,
+          { color: isActive ? colors.primary : colors.mutedText },
+          compact && styles.tabTextCompact,
+         ]}>
+          {tabItem.label}
+         </Text>
+        </TouchableOpacity>
+       );
+      })}
+     </View>
+    );
+   })()}
   </>
  );
 
@@ -651,25 +705,50 @@ const getPostPreviewUrl = (post: ProfilePost): string => {
       },
     ]}
     ListHeaderComponent={renderHeader}
+    ListFooterComponent={
+     activeTab === "premium" && posts.length > 0 ? (
+      <View style={styles.premiumFooter}>
+       <Icon name="diamond" size={22} color="#5bc8f5" style={{ marginBottom: 10 }} />
+       <Text style={[styles.premiumFooterTitle, { color: colors.text }]}>Premium only</Text>
+       <Text style={[styles.premiumFooterText, { color: colors.mutedText }]}>
+        Access more exclusive content like this by purchasing this post.
+       </Text>
+      </View>
+     ) : null
+    }
     ListEmptyComponent={
      <View style={styles.emptyState}>
-      <Text style={[styles.emptyTitle, { color: colors.text }]}>
-       {activeTab === "tagged" ? "No tagged posts yet" : activeTab === "swipes" ? "No swipes yet" : "No posts yet"}
-      </Text>
-      <Text style={[styles.emptyText, { color: colors.mutedText }]}>
-       {errorMessage
-        ? errorMessage
-        : activeTab === "tagged"
-        ? "Posts where you are tagged will show up here."
-        : activeTab === "swipes"
-         ? "Your short video posts will appear here."
-         : "Share photos and videos to build your profile."}
-      </Text>
-      {errorMessage ? (
-        <TouchableOpacity style={[styles.retryButton, { backgroundColor: colors.primary }]} onPress={() => fetchProfile()}>
-         <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
-      ) : null}
+      {activeTab === "premium" && !errorMessage ? (
+       <>
+        <Icon name="diamond" size={38} color="#5bc8f5" style={{ marginBottom: 12 }} />
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>Premium Content</Text>
+        <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+         Exclusive premium content will appear here.
+        </Text>
+       </>
+      ) : (
+       <>
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>
+         {activeTab === "tagged" ? "No tagged posts yet" : activeTab === "swipes" ? "No swipes yet" : activeTab === "premium" ? "Premium Content" : "No posts yet"}
+        </Text>
+        <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+         {errorMessage
+          ? errorMessage
+          : activeTab === "tagged"
+          ? "Posts where you are tagged will show up here."
+          : activeTab === "swipes"
+           ? "Your short video posts will appear here."
+           : activeTab === "premium"
+           ? "Exclusive premium content will appear here."
+           : "Share photos and videos to build your profile."}
+        </Text>
+        {errorMessage ? (
+         <TouchableOpacity style={[styles.retryButton, { backgroundColor: colors.primary }]} onPress={() => fetchProfile()}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+         </TouchableOpacity>
+        ) : null}
+       </>
+      )}
      </View>
     }
     showsVerticalScrollIndicator={false}
@@ -996,17 +1075,24 @@ bioSection: {
   borderRadius:12,
   borderWidth:1
  },
+ tabCompact:{
+  paddingVertical:8,
+ },
 
  tabText:{
   color:"#888",
   marginLeft:6,
-  fontWeight:"600"
+  fontWeight:"600",
+ },
+ tabTextCompact:{
+  marginLeft:4,
+  fontSize:10,
  },
 
  activeTab:{
   color:"#000",
   marginLeft:6,
-  fontWeight:"700"
+  fontWeight:"700",
  },
 
  postImage:{
@@ -1052,6 +1138,51 @@ bioSection: {
   flex:1,
   justifyContent:"center",
   alignItems:"center"
- }
+ },
+
+ postCardInner:{
+  position:"relative"
+ },
+
+ premiumLockBadge:{
+  position:"absolute",
+  top:5,
+  right:5,
+  width:22,
+  height:22,
+  borderRadius:11,
+  backgroundColor:"rgba(155,77,255,0.92)",
+  alignItems:"center",
+  justifyContent:"center"
+ },
+
+ postImageDimmed:{
+  opacity:0.22,
+ },
+
+ premiumGridOverlay:{
+  ...StyleSheet.absoluteFillObject,
+  backgroundColor:"rgba(10,4,20,0.72)",
+  alignItems:"center",
+  justifyContent:"center",
+  borderRadius:6,
+ },
+
+ premiumFooter:{
+  alignItems:"center",
+  paddingHorizontal:28,
+  paddingVertical:28,
+  marginTop:4,
+ },
+ premiumFooterTitle:{
+  fontSize:17,
+  fontWeight:"700",
+  marginBottom:8,
+ },
+ premiumFooterText:{
+  fontSize:13,
+  lineHeight:20,
+  textAlign:"center",
+ },
 
 });
