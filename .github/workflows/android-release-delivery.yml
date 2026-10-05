@@ -58,7 +58,7 @@ jobs:
   # one workflow run, not a 25-minute rebuild and a new versionCode.
   redeliver:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'redeliver'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Without this, the production environment secrets below resolve to the empty
     # string: RELEASE_AWS_* are environment secrets, and an environment secret is
@@ -210,7 +210,7 @@ jobs:
   # during the one release of the month that has to go out.
   health:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'check')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: production
     env:
