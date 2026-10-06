@@ -56,6 +56,9 @@ jobs:
   # This is what makes the seven-day window a non-event: an expired link costs
   # one workflow run, not a 25-minute rebuild and a new versionCode.
   redeliver:
+    permissions:
+      contents: read
+      pull-requests: read
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'redeliver'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -137,6 +140,11 @@ jobs:
                   sys.exit(f"::error::release.json is missing {field}")
           for field in ("releaseName", "apkKey", "aabKey"):
               print(f"{field}={record[field]}")
+          for field in ("commit", "runUrl"):
+              if record.get(field):
+                  if "\n" in record[field] or "\r" in record[field]:
+                      sys.exit("Invalid release metadata")
+                  print(f"{field}={record[field]}")
           PY
 
       - name: Re-sign and verify the delivery links
@@ -204,6 +212,13 @@ jobs:
           AAB_DOWNLOAD_URL: ${{ steps.links.outputs.download_url }}
         run: |
           python3 ./scripts/ci/send_release_email.py
+
+      - name: Add refreshed download summary
+        env:
+          APK_URL: ${{ steps.links.outputs.apk_download_url }}
+          AAB_URL: ${{ steps.links.outputs.download_url }}
+          EXPIRES: ${{ steps.links.outputs.link_expires_at }}
+        run: python3 scripts/ci/download_summary.py
 
   # Proves the delivery credential still works, before a release needs it.
   # A revoked or half-rotated key is discovered here on a Monday rather than

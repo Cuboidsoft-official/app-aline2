@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from download_summary import download_link
 
 
 def command(*args):
@@ -19,7 +20,7 @@ def api(path):
 def main():
     repo, pr, sha = os.environ['REPO'], int(os.environ['PR']), os.environ['SHA']
     current = api(f'repos/{repo}/pulls/{pr}')
-    if current['state'] != 'open' or current['head']['sha'] != sha:
+    if current['state'] != 'open' or current['head']['sha'] != sha or 'build-test-apk' not in [label['name'] for label in current.get('labels', [])]:
         print('PR was merged or updated; obsolete preview not published.')
         return
     identity = json.loads(command('aws', 'sts', 'get-caller-identity'))
@@ -38,27 +39,18 @@ def main():
     if status not in ('200', '206'):
         raise ValueError('APK link failed its download check')
     current = api(f'repos/{repo}/pulls/{pr}')
-    if current['state'] != 'open' or current['head']['sha'] != sha:
+    if current['state'] != 'open' or current['head']['sha'] != sha or 'build-test-apk' not in [label['name'] for label in current.get('labels', [])]:
         print('PR changed during publication; stale link withheld.')
         return
     digest = hashlib.sha256(Path('preview/Aline2-PR-test.apk').read_bytes()).hexdigest()
     expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)).isoformat()
-    body = f'''<!-- aline2-pr-apk -->
-### PR test APK ready
-[Download APK directly from S3]({url}) · [GitHub artifact backup]({os.environ['ARTIFACT_URL']})
-
-Commit: `{sha}` · Android versionCode: `{os.environ['VERSION']}`
-S3 link and GitHub artifact retention: seven days (approximately until {expiry}). No per-developer email setup is needed.
-
-Release-mode test APK, ARM 32-bit + 64-bit, Android 7+. Uses production backend URLs; testing can affect live user data. Uses the same mobile runtime configuration as production; integration journeys still need manual testing.
-This APK uses the upload certificate and cannot update a Play-signed install. Do not uninstall an existing app to work around a signing mismatch; use a test device or Play test track.
-
-SHA-256: `{digest}`
-'''
-    Path(os.environ['GITHUB_STEP_SUMMARY']).write_text(body)
-    Path('/tmp/preview-comment.json').write_text(json.dumps({'body': body}))
-    # A new comment preserves provenance; never edits a developer's comment.
-    subprocess.run(['gh', 'api', '--method', 'POST', f'repos/{repo}/issues/{pr}/comments', '--input', '/tmp/preview-comment.json'], check=True, stdout=subprocess.DEVNULL)
+    # No PR comments are created or edited. Developers download from this run summary.
+    summary = f"## PR test APK ready\n{download_link('Download test APK from S3', url)}\n\n"
+    summary += f"Commit: `{sha}` · Android versionCode: `{os.environ['VERSION']}`\n\n"
+    summary += f"Expires: {expiry}. Seven-day S3 retention. SHA-256: `{digest}`\n\n"
+    summary += "ARM 32/64-bit, Android 7+. Production-configured test APK; testing can affect live data. "
+    summary += "Upload-key signed: cannot normally update Play-signed installations. Use a test device/profile or Play test track.\n"
+    Path(os.environ['GITHUB_STEP_SUMMARY']).write_text(summary)
 
 
 if __name__ == '__main__':

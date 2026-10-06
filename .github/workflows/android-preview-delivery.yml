@@ -188,7 +188,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-      pull-requests: write
+      pull-requests: read
     steps:
       # No PR scripts execute in this signing/delivery runner.
       - name: Check out trusted delivery tooling
@@ -239,16 +239,6 @@ jobs:
           python3 scripts/ci/verify_apk.py preview/Aline2-PR-test.apk --tools "$tools" --version-code "$VERSION"
           cd preview
           sha256sum Aline2-PR-test.apk > Aline2-PR-test.apk.sha256
-      - name: Save signed test APK
-        id: artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: Aline2-PR-${{ needs.resolve.outputs.pr }}-${{ needs.resolve.outputs.sha }}
-          path: |
-            preview/Aline2-PR-test.apk
-            preview/Aline2-PR-test.apk.sha256
-          retention-days: 7
-          if-no-files-found: error
       - name: Publish downloads in PR and run summary
         env:
           GH_TOKEN: ${{ github.token }}
@@ -256,7 +246,6 @@ jobs:
           PR: ${{ needs.resolve.outputs.pr }}
           SHA: ${{ needs.resolve.outputs.sha }}
           VERSION: ${{ needs.resolve.outputs.version }}
-          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
           AWS_REGION: ${{ vars.AWS_REGION }}
           PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_AWS_ACCESS_KEY_ID }}

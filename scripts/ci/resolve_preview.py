@@ -31,7 +31,7 @@ if __name__ == '__main__':
     repository = api(f'repos/{repo}')
     prs = api(f'repos/{repo}/commits/{run["head_sha"]}/pulls')
     pr = eligible(run, prs, repository['id'])
-    if not pr:
+    if not pr or 'build-test-apk' not in [label['name'] for label in pr.get('labels', [])]:
         print('No current eligible PR; nothing published.')
         sys.exit(0)
     permission = api(f'repos/{repo}/collaborators/{pr["user"]["login"]}/permission')['permission']

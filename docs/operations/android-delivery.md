@@ -4,20 +4,18 @@
 
 1. Open a PR targeting main. Fast `validate` checks run type checking, Jest,
    sensitive-file policy and delivery contracts; workflow lint runs separately.
-2. Android-input changes build one release-mode, standard ARM 32/64-bit PR APK.
-   The trusted Android Preview Delivery workflow builds with full production
-   mobile configuration, then verifies and signs the exact current head,
-   then posts a GitHub artifact download link on the PR. Download the ZIP and
-   extract the APK. No per-developer email or manual ARM64 rebuild is needed.
-   Documentation-only PRs skip the native build. Updated PRs cancel stale builds.
-   The exact-head `PR release APK` check reports build and delivery results.
-3. Test on a test device. This preview talks to production backend URLs; test
-   actions may affect production data. Full mobile integration configuration is
-   available; the APK still requires manual integration journey testing.
-4. Merge after checks and self-review. Main builds the fully configured signed
-   standard APK and Play AAB together, with one native build invocation. The
-   existing Cuboidsoft email receives private S3 links; the run summary includes
-   the GitHub artifact download. Play Console upload remains manual.
+   Opening/updating an ordinary PR does not build a native APK.
+2. When a test APK is needed, the developer adds the `build-test-apk` label.
+   The next PR event builds the current exact head. Leaving the label in place
+   requests another APK after each update; remove it to stop requesting builds.
+   This optional check is not required for every merge. Fork previews are refused.
+3. Download the signed standard ARM 32/64-bit APK from Android Preview Delivery's
+   run summary. No developer email mapping or automated PR comments are used.
+   The build uses production mobile configuration; testing can affect live data.
+4. The developer decides when to merge. App-input changes on main build one
+   production APK/AAB together, deliver direct S3 downloads in the run summary,
+   and email Cuboidsoft. CI/docs-only merges do not trigger a production release.
+   Manual standard release delivery defaults to enabled. Play upload is manual.
 
 `standard` is the normal release profile. `arm64` is diagnostic-only, excludes
 32-bit devices and does not produce a Play AAB or send the delivery email. Both
@@ -39,30 +37,33 @@ checked, but these checks do not replace an install test on a failing device.
 
 ## Downloads, retention and recovery
 
-The app repository is public. At the owner's explicit request, seven-day S3
-bearer URLs are posted in PRs and release summaries, as well as Cuboidsoft email.
-Anyone with a link can download until expiry. GitHub artifacts follow GitHub's
-access rules; neither channel is confidential distribution.
+At the owner's explicit request, S3 bearer download URLs are visible in Actions
+summaries and Cuboidsoft email. Anyone holding a link can download until expiry.
+`download_summary.py` accepts only non-session signed links to the release bucket.
+It represents Markdown link destinations as HTML character references. GitHub
+renders those references into the exact signed URL, avoiding corruption from
+short unrelated secret masks. Raw links remain masked in logs; AWS secret keys
+are never put in summaries. Render-and-download verification is required.
 
-New production APK/AAB objects live under `android/private/expiring/` and expire
-through S3 Lifecycle after seven days. S3 removes eligible objects asynchronously,
-not at the exact second a link expires. Existing objects retain their previous
-30-day policy; neither existing artifacts nor the health-check sentinel get the
-new rule. The bucket is unversioned; lifecycle expiration actually removes data.
+Final APK/AAB files are retained only in S3, under `android/private/expiring/`.
+The existing verified lifecycle rule expires that prefix after seven days; S3
+processes deletion asynchronously, so deletion is not exact to the second.
+Older releases retain their existing policy. No user-media bucket is involved.
+GitHub retains only a one-day temporary input for isolated PR signing, and
+one-day diagnostic/build-only artifacts when S3 delivery is deliberately off.
+After expiry, redelivery cannot resurrect deleted files: request a new build.
+Within the retention window, Android Release Delivery can refresh existing S3
+links without compiling again. Its date-based release record currently identifies
+only the most recently delivered release for a date; earlier runs require their
+exact object keys. Do not overwrite older live links during a cleanup.
 
-Production GitHub backup artifacts last 30 days; PR artifacts last seven days.
-The one-day disposable preview input is retained only for the trusted signing
-handoff. Legacy redelivery is also capped against the objects' 30-day lifetime. Redelivery supports one or seven days, capped by the recorded S3 retention
-deadline minus a safety margin. After that window, download the GitHub backup;
-rebuilding is necessary only if every retained copy has expired. The daily record
-still resolves the last release that day; exact artifact names remain in each run.
+The 500 MB private-repository allowance is shared with other organization private
+artifact/Package usage, not a per-release allowance. Keep npm/Gradle caches for
+speed; cache has a separate per-repository limit. Before converting private on
+GitHub Free, resolve environment secrets and branch-protection availability.
 
-The versioned lifecycle proposal is `deploy/android-artifact-lifecycle.json`.
-Before applying it, confirm AWS account 497172038254, the exact artifact bucket,
-unversioned status and an empty new prefix. Back up the existing policy. Apply
-without replacing unrelated rules, read it back, and retain the policy backup.
-Rollback removes the new rule and reverts this CI PR; objects already expired
-cannot be recovered, so never extend the rule to legacy or user-data prefixes.
+Rollback is a reviewed revert of this CI change. Main APK uploads and Play
+publishing remain separate; this change does not restart EC2 or deploy backend.
 
 ## Incident evidence (2026-10-06)
 
