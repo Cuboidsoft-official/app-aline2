@@ -25,6 +25,10 @@ on:
         description: 'Release folder to redeliver, e.g. 20260924 (mode: redeliver or verify)'
         required: false
         type: string
+      release_name:
+        description: Optional exact release name; leave empty for the latest release on that date
+        required: false
+        type: string
       expires_in_days:
         description: Link lifetime for the redelivered links
         required: false
@@ -84,6 +88,7 @@ jobs:
         id: target
         env:
           RELEASE_PREFIX: ${{ inputs.release_prefix }}
+          RELEASE_NAME: ${{ inputs.release_name }}
         run: |
           if [ -z "${RELEASE_PREFIX}" ]; then
             echo "::error::release_prefix is required. It is the date folder under android/private/, for example 20260924. Find it in the build summary of the original release run." >&2
@@ -99,7 +104,15 @@ jobs:
               exit 1
               ;;
           esac
+          if [ -n "$RELEASE_NAME" ]; then
+            if [[ ! "$RELEASE_NAME" =~ ^Aline2-v[0-9A-Za-z.+-]+-[0-9]{8}-[a-f0-9]{7}-r[0-9]+-a[0-9]+$ ]] || [[ "$RELEASE_NAME" != *"-${RELEASE_PREFIX}-"* ]]; then
+              echo "::error::Invalid release name or mismatched release date." >&2
+              exit 1
+            fi
+            echo "folder=android/private/expiring/records/${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+          else
           echo "folder=android/private/${RELEASE_PREFIX}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Configure AWS release credentials
         env:
@@ -287,6 +300,9 @@ jobs:
           esac
           cmp -s /tmp/sentinel.json /tmp/probe.out || {
             echo "::error::The signed fetch did not return the stored object." >&2; exit 1; }
+          # Refresh only after the signed byte-for-byte round trip succeeded.
+          # The weekly check must outlive the legacy 30-day artifact expiry.
+          aws s3 cp /tmp/sentinel.json "${sentinel}" --only-show-errors
           echo "probed=true" >> "$GITHUB_OUTPUT"
 
       # A silent green check is how this whole failure started, so a failure

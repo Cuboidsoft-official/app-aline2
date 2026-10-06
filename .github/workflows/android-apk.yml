@@ -635,6 +635,8 @@ jobs:
             "aabSha256": "$(sha256sum "${{ steps.collect.outputs.aab_path }}" | cut -d' ' -f1)"
           }
           JSON
+          # Preserve a seven-day record for each release; the date record stays a latest pointer.
+          aws s3 cp /tmp/release.json "s3://${PRIVATE_RELEASES_BUCKET}/android/private/expiring/records/${{ steps.meta.outputs.release_name }}/release.json" --only-show-errors
           aws s3 cp /tmp/release.json "s3://${PRIVATE_RELEASES_BUCKET}/android/private/${{ steps.meta.outputs.release_date }}/release.json" --only-show-errors
           rm -f /tmp/release.json
 

@@ -56,9 +56,11 @@ After expiry, redelivery cannot resurrect deleted files: request a new build.
 Within the retention window, Android Release Delivery can refresh existing S3
 links without compiling again. Choose `verify` to check APK/AAB links and publish
 a download summary without emailing anyone; choose `redeliver` to also email
-Cuboidsoft. `check` remains the lightweight credential health check. Its date-based release record currently identifies
-only the most recently delivered release for a date; earlier runs require their
-exact object keys. Do not overwrite older live links during a cleanup.
+Cuboidsoft. `check` remains the lightweight credential health check. The date identifies the latest delivered release for that day. For releases
+delivered after this fix, use optional `release_name` to select the exact
+per-release record, so multiple same-day deliveries do not overwrite recovery
+metadata. Per-release records expire with the seven-day artifacts. Older
+releases retain their existing date-only record. Do not overwrite older live links during a cleanup.
 
 The 500 MB private-repository allowance is shared with other organization private
 artifact/Package usage, not a per-release allowance. Keep npm/Gradle caches for
@@ -77,3 +79,7 @@ Manual #154 was ARM64-only and incorrectly retained source versionCode 32;
 this workflow fixes that verified downgrade defect. The #153 phone failure still
 needs the exact device/Android version, downloaded checksum and package-manager
 install error. Do not call that separate incident resolved without those checks.
+
+The scheduled signed-download probe refreshes its existing tiny sentinel only
+following a successful byte-for-byte fetch, preventing a quiet month from
+expiring the probe under the older 30-day rule. It does not change APK/AAB files.
