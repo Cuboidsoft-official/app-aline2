@@ -20,9 +20,8 @@ def api(path):
 def main():
     repo, pr, sha = os.environ['REPO'], int(os.environ['PR']), os.environ['SHA']
     current = api(f'repos/{repo}/pulls/{pr}')
-    if current['state'] != 'open' or current['head']['sha'] != sha or 'build-test-apk' not in [label['name'] for label in current.get('labels', [])]:
-        print('PR was merged or updated; obsolete preview not published.')
-        return
+    if current['state'] != 'open' or current['head']['sha'] != sha:
+        raise SystemExit('PR was merged or updated; obsolete preview not published.')
     identity = json.loads(command('aws', 'sts', 'get-caller-identity'))
     if identity['Account'] != '497172038254' or identity['Arn'] != 'arn:aws:iam::497172038254:user/aline2-android-release-ci':
         raise ValueError('Unexpected AWS release identity')
@@ -39,9 +38,8 @@ def main():
     if status not in ('200', '206'):
         raise ValueError('APK link failed its download check')
     current = api(f'repos/{repo}/pulls/{pr}')
-    if current['state'] != 'open' or current['head']['sha'] != sha or 'build-test-apk' not in [label['name'] for label in current.get('labels', [])]:
-        print('PR changed during publication; stale link withheld.')
-        return
+    if current['state'] != 'open' or current['head']['sha'] != sha:
+        raise SystemExit('PR changed during publication; stale link withheld.')
     digest = hashlib.sha256(Path('preview/Aline2-PR-test.apk').read_bytes()).hexdigest()
     expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)).isoformat()
     # No PR comments are created or edited. Developers download from this run summary.

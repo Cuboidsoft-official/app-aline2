@@ -1,29 +1,51 @@
-name: Android Preview Delivery
+name: Android PR Test APK
 
-# This pipeline is exercised through a controlled PR before its APK check is required.
+# Called only from the manually dispatched Android Release workflow. Keeping
+# this as a reusable workflow shares the release run number/versionCode while
+# keeping PR source code isolated from the production signing and delivery job.
 
 on:
-  workflow_run:
-    workflows: [Android Release]
-    types: [completed]
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Open pull request to build after its required checks pass
+        required: true
+        type: string
+    secrets:
+      GEMINI_API_KEY:
+        required: false
+      YOUTUBE_DATA_API_KEY:
+        required: false
+      ZEGO_CLOUD_APP_SIGN:
+        required: false
+      ANDROID_UPLOAD_KEYSTORE_BASE64:
+        required: false
+      ANDROID_UPLOAD_STORE_PASSWORD:
+        required: false
+      ANDROID_UPLOAD_KEY_PASSWORD:
+        required: false
+      ANDROID_UPLOAD_KEY_ALIAS:
+        required: false
+      RELEASE_AWS_ACCESS_KEY_ID:
+        required: false
+      RELEASE_AWS_SECRET_ACCESS_KEY:
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: preview-delivery-${{ github.event.workflow_run.head_branch }}
+  group: preview-delivery-${{ inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
   resolve:
-    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.id == github.event.repository.id
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
-      actions: read
-      pull-requests: read
       checks: write
+      pull-requests: read
     outputs:
       eligible: ${{ steps.target.outputs.eligible }}
       pr: ${{ steps.target.outputs.pr }}
@@ -41,7 +63,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          ACTOR: ${{ github.actor }}
+          RUN_NUMBER: ${{ github.run_number }}
+          REF: ${{ github.ref }}
         run: python3 scripts/ci/resolve_preview.py
 
   build-preview:
@@ -49,9 +74,9 @@ jobs:
     if: needs.resolve.outputs.eligible == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 75
-    environment: production
-    # Untrusted build scripts get only mobile runtime config already shipped
-    # in the APK, and a disposable signing key. No AWS, SMTP or upload key.
+    # This job runs PR-controlled app/build scripts. It has no production
+    # environment, upload certificate, AWS credentials or SMTP credentials.
+    # Mobile runtime values are already distributed in the shipped app.
     permissions:
       contents: read
     steps:
@@ -65,11 +90,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Install dependencies and validate
-        run: |
-          npm ci
-          npm run typecheck
-          npm test -- --runInBand
+      - name: Install dependencies
+        run: npm ci
       - name: Free runner disk space
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
       - name: Set up Java 17
@@ -93,18 +115,16 @@ jobs:
         id: prepare_env
         env:
           SELECTED_ENVFILE: .env.production
-          BACKEND_ORIGIN_VALUE: ${{ vars.BACKEND_ORIGIN != '' && vars.BACKEND_ORIGIN || secrets.BACKEND_ORIGIN }}
-          API_BASE_URL_VALUE: ${{ vars.API_BASE_URL != '' && vars.API_BASE_URL || secrets.API_BASE_URL }}
-          SOCKET_URL_VALUE: ${{ vars.SOCKET_URL != '' && vars.SOCKET_URL || secrets.SOCKET_URL }}
-          SHARE_BASE_URL_VALUE: ${{ vars.SHARE_BASE_URL != '' && vars.SHARE_BASE_URL || secrets.SHARE_BASE_URL }}
-          GOOGLE_WEB_CLIENT_ID_VALUE: ${{ vars.GOOGLE_WEB_CLIENT_ID != '' && vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID
-            }}
-          GOOGLE_IOS_CLIENT_ID_VALUE: ${{ vars.GOOGLE_IOS_CLIENT_ID != '' && vars.GOOGLE_IOS_CLIENT_ID || secrets.GOOGLE_IOS_CLIENT_ID
-            }}
+          BACKEND_ORIGIN_VALUE: ${{ vars.BACKEND_ORIGIN }}
+          API_BASE_URL_VALUE: ${{ vars.API_BASE_URL }}
+          SOCKET_URL_VALUE: ${{ vars.SOCKET_URL }}
+          SHARE_BASE_URL_VALUE: ${{ vars.SHARE_BASE_URL }}
+          GOOGLE_WEB_CLIENT_ID_VALUE: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+          GOOGLE_IOS_CLIENT_ID_VALUE: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
           YOUTUBE_DATA_API_KEY_VALUE: ${{ vars.YOUTUBE_DATA_API_KEY != '' && vars.YOUTUBE_DATA_API_KEY || secrets.YOUTUBE_DATA_API_KEY
             }}
           GEMINI_API_KEY_VALUE: ${{ secrets.GEMINI_API_KEY }}
-          ZEGO_CLOUD_APP_ID_VALUE: ${{ vars.ZEGO_CLOUD_APP_ID != '' && vars.ZEGO_CLOUD_APP_ID || secrets.ZEGO_CLOUD_APP_ID }}
+          ZEGO_CLOUD_APP_ID_VALUE: ${{ vars.ZEGO_CLOUD_APP_ID }}
           ZEGO_CLOUD_APP_SIGN_VALUE: ${{ secrets.ZEGO_CLOUD_APP_SIGN }}
         run: "fallback_example=\"${SELECTED_ENVFILE}.example\"\n\nif [ -f \"$SELECTED_ENVFILE\" ]; then\n  cp \"$SELECTED_ENVFILE\"\
           \ .env.ci\nelif [ -f \"$fallback_example\" ]; then\n  cp \"$fallback_example\" .env.ci\nelse\n  : > .env.ci\nfi\n\nupsert_env()\

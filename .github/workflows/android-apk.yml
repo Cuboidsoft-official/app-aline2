@@ -1,9 +1,6 @@
 name: Android Release
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, labeled]
   push:
     branches:
       - main
@@ -25,8 +22,20 @@ on:
       - 'scripts/patch-*.js'
   workflow_dispatch:
     inputs:
+      target:
+        description: Choose a production release or a manually requested PR test APK
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - pr-test
+      pr_number:
+        description: Required only when target is pr-test; enter the open PR number
+        required: false
+        type: string
       release_profile:
-        description: standard = compatible APK + Play AAB; arm64 = 64-bit diagnostic APK only
+        description: Production target only. standard = compatible APK + Play AAB; arm64 = 64-bit diagnostic APK only. PR test APKs are standard.
         required: true
         default: standard
         type: choice
@@ -34,29 +43,58 @@ on:
           - standard
           - arm64
       deliver:
-        description: Email secure APK/AAB delivery links to Cuboidsoft
+        description: Production target only; PR test APKs never send email
         required: true
         default: true
         type: boolean
 
 permissions:
   contents: read
-  pull-requests: read
   # No id-token: write. The release delivery step is the only thing that ever
   # needed an AWS OIDC token, and it now signs with a resource-scoped IAM
   # credential instead, so the workflow no longer requests the ability to
   # mint itself a cloud identity.
 
 concurrency:
-  group: android-${{ github.event.pull_request.number || 'production' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: android-production-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release-android:
-    if: github.event_name != 'pull_request'
+  reject-non-main-dispatch:
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
     permissions:
       contents: read
+    steps:
+      - name: Require the trusted main workflow definition
+        run: |
+          echo "Android release and PR-test actions must be dispatched from main." >&2
+          exit 1
+
+  pr-test-apk:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.target == 'pr-test'
+    uses: ./.github/workflows/android-preview-delivery.yml
+    with:
+      pr_number: ${{ inputs.pr_number }}
+    permissions:
+      actions: write
+      checks: write
+      contents: read
       pull-requests: read
+    secrets:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
+      ZEGO_CLOUD_APP_SIGN: ${{ secrets.ZEGO_CLOUD_APP_SIGN }}
+      ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+      ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+      ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+      ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+
+  release-android:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.target == 'production')
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment: production
@@ -747,11 +785,3 @@ jobs:
               fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-
-  preview-request:
-    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'build-test-apk')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Request exact-head PR APK
-        run: echo 'The trusted Android Preview Delivery workflow validates, builds, signs and publishes the requested exact-head PR test APK.' >> "$GITHUB_STEP_SUMMARY"
