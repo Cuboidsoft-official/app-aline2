@@ -22,16 +22,35 @@ def main():
     if current['state'] != 'open' or current['head']['sha'] != sha:
         print('PR was merged or updated; obsolete preview not published.')
         return
+    identity = json.loads(command('aws', 'sts', 'get-caller-identity'))
+    if identity['Account'] != '497172038254' or identity['Arn'] != 'arn:aws:iam::497172038254:user/aline2-android-release-ci':
+        raise ValueError('Unexpected AWS release identity')
+    bucket = os.environ['PRIVATE_RELEASES_BUCKET']
+    if bucket != 'aline2-release-artifacts-497172038254':
+        raise ValueError('Unexpected release bucket')
+    key = f'android/private/expiring/pr/{pr}/{sha}/r{os.environ["GITHUB_RUN_ID"]}-a{os.environ["GITHUB_RUN_ATTEMPT"]}.apk'
+    subprocess.run(['aws', 's3', 'cp', 'preview/Aline2-PR-test.apk', f's3://{bucket}/{key}', '--only-show-errors'], check=True)
+    url = command('aws', 's3', 'presign', f's3://{bucket}/{key}', '--expires-in', '604800')
+    if 'X-Amz-Security-Token' in url:
+        raise ValueError('Session-bound download links are not permitted')
+    print(f'::add-mask::{url}')
+    status = command('curl', '--silent', '--show-error', '--fail', '--range', '0-0', '--max-time', '60', '--output', '/dev/null', '--write-out', '%{http_code}', url)
+    if status not in ('200', '206'):
+        raise ValueError('APK link failed its download check')
+    current = api(f'repos/{repo}/pulls/{pr}')
+    if current['state'] != 'open' or current['head']['sha'] != sha:
+        print('PR changed during publication; stale link withheld.')
+        return
     digest = hashlib.sha256(Path('preview/Aline2-PR-test.apk').read_bytes()).hexdigest()
     expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)).isoformat()
     body = f'''<!-- aline2-pr-apk -->
 ### PR test APK ready
-[Download verified test APK from GitHub]({os.environ['ARTIFACT_URL']})
+[Download APK directly from S3]({url}) · [GitHub artifact backup]({os.environ['ARTIFACT_URL']})
 
 Commit: `{sha}` · Android versionCode: `{os.environ['VERSION']}`
-GitHub artifact retention: seven days (approximately until {expiry}). No per-developer email setup is needed.
+S3 link and GitHub artifact retention: seven days (approximately until {expiry}). No per-developer email setup is needed.
 
-Release-mode test APK, ARM 32-bit + 64-bit, Android 7+. Uses production backend URLs; testing can affect live user data. Secret-dependent integrations are validated in the production build after merge.
+Release-mode test APK, ARM 32-bit + 64-bit, Android 7+. Uses production backend URLs; testing can affect live user data. Uses the same mobile runtime configuration as production; integration journeys still need manual testing.
 This APK uses the upload certificate and cannot update a Play-signed install. Do not uninstall an existing app to work around a signing mismatch; use a test device or Play test track.
 
 SHA-256: `{digest}`

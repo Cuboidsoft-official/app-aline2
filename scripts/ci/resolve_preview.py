@@ -2,6 +2,7 @@
 """Resolve an eligible same-repository PR from a successful build run."""
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -36,11 +37,20 @@ if __name__ == '__main__':
     permission = api(f'repos/{repo}/collaborators/{pr["user"]["login"]}/permission')['permission']
     if permission not in ('admin', 'write', 'maintain'):
         sys.exit('PR APK publication requires a repository collaborator with write access')
-    artifacts = api(f'repos/{repo}/actions/runs/{run["id"]}/artifacts')['artifacts']
-    matches = [a for a in artifacts if a['name'] == 'pr-preview-input' and not a['expired']]
-    if len(matches) != 1 or matches[0]['size_in_bytes'] > 700 * 1024 * 1024:
-        sys.exit('Missing, ambiguous or oversized preview artifact')
+    files = json.loads(subprocess.check_output(['gh', 'api', '--paginate', '--slurp',
+                                               f'repos/{repo}/pulls/{pr["number"]}/files'], text=True))
+    pattern = re.compile(r'^(src/|android/|scripts/|\.github/workflows/|App\.tsx$|app\.json$|index\.js$|package.*\.json$|.*config\.js$|google-services\.json$|\.env\.production\.example$)')
+    build = any(pattern.search(f['filename']) for page in files for f in page)
+    payload = {'name': 'PR release APK', 'head_sha': run['head_sha'],
+               'status': 'in_progress' if build else 'completed',
+               'details_url': f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}'}
+    if not build:
+        payload['conclusion'] = 'success'
+    with open('/tmp/preview-check.json', 'w') as out:
+        json.dump(payload, out)
+    check = json.loads(subprocess.check_output(['gh', 'api', '--method', 'POST',
+                                               f'repos/{repo}/check-runs', '--input', '/tmp/preview-check.json'], text=True))
     with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-        for key, value in {'eligible': 'true', 'pr': pr['number'], 'sha': run['head_sha'],
-                           'version': 100000 + run['run_number'], 'artifact': matches[0]['id']}.items():
+        for key, value in {'eligible': 'true' if build else 'false', 'pr': pr['number'], 'sha': run['head_sha'],
+                           'version': 100000 + run['run_number'], 'check': check['id']}.items():
             out.write(f'{key}={value}\n')

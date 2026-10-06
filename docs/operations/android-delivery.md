@@ -5,13 +5,15 @@
 1. Open a PR targeting main. Fast `validate` checks run type checking, Jest,
    sensitive-file policy and delivery contracts; workflow lint runs separately.
 2. Android-input changes build one release-mode, standard ARM 32/64-bit PR APK.
-   The Android Preview Delivery job verifies and signs the exact current head,
+   The trusted Android Preview Delivery workflow builds with full production
+   mobile configuration, then verifies and signs the exact current head,
    then posts a GitHub artifact download link on the PR. Download the ZIP and
    extract the APK. No per-developer email or manual ARM64 rebuild is needed.
    Documentation-only PRs skip the native build. Updated PRs cancel stale builds.
+   The exact-head `PR release APK` check reports build and delivery results.
 3. Test on a test device. This preview talks to production backend URLs; test
-   actions may affect production data. Production API secrets are deliberately
-   absent, so secret-dependent third-party features need post-merge verification.
+   actions may affect production data. Full mobile integration configuration is
+   available; the APK still requires manual integration journey testing.
 4. Merge after checks and self-review. Main builds the fully configured signed
    standard APK and Play AAB together, with one native build invocation. The
    existing Cuboidsoft email receives private S3 links; the run summary includes
@@ -25,7 +27,8 @@ Do not run an older commit and treat its higher code as the latest source.
 
 PR APK signing happens in a default-branch workflow after an exact-head,
 same-repository, successful-run and collaborator-permission check. PR scripts
-never execute with production signing credentials. Fork PRs cannot receive the
+never execute with production signing or AWS credentials. The authorized build
+job does receive mobile runtime configuration already distributed in the app. Fork PRs cannot receive the
 production signature. The temporary input artifact is not the delivered APK.
 
 CI APKs use the upload certificate. A Play installation uses Google's app
@@ -36,9 +39,10 @@ checked, but these checks do not replace an install test on a failing device.
 
 ## Downloads, retention and recovery
 
-The app repository is public. S3 bearer URLs stay in Cuboidsoft email; they are
-not posted publicly in summaries or PRs. GitHub artifacts follow GitHub's access
-rules and must not be treated as a confidential distribution channel.
+The app repository is public. At the owner's explicit request, seven-day S3
+bearer URLs are posted in PRs and release summaries, as well as Cuboidsoft email.
+Anyone with a link can download until expiry. GitHub artifacts follow GitHub's
+access rules; neither channel is confidential distribution.
 
 New production APK/AAB objects live under `android/private/expiring/` and expire
 through S3 Lifecycle after seven days. S3 removes eligible objects asynchronously,
@@ -48,7 +52,7 @@ new rule. The bucket is unversioned; lifecycle expiration actually removes data.
 
 Production GitHub backup artifacts last 30 days; PR artifacts last seven days.
 The one-day disposable preview input is retained only for the trusted signing
-handoff. Redelivery supports one or seven days, capped by the recorded S3 retention
+handoff. Legacy redelivery is also capped against the objects' 30-day lifetime. Redelivery supports one or seven days, capped by the recorded S3 retention
 deadline minus a safety margin. After that window, download the GitHub backup;
 rebuilding is necessary only if every retained copy has expired. The daily record
 still resolves the last release that day; exact artifact names remain in each run.

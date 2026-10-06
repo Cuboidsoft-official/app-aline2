@@ -30,24 +30,26 @@ class PreviewProvenance(unittest.TestCase):
             if change == 'fork': pr['head']['repo']['id'] = 2
             self.assertIsNone(eligible(self.run, [pr], 1))
 
-    def test_pr_build_has_no_production_credentials(self):
-        text = (Path(__file__).resolve().parents[2] / '.github/workflows/android-apk.yml').read_text()
-        data = yaml.safe_load(text)
-        preview = data['jobs']['preview-android']
-        self.assertNotIn('environment', preview)
-        self.assertNotIn('secrets.', yaml.safe_dump(preview))
-        self.assertIn("github.event_name != 'pull_request'", data['jobs']['release-android']['if'])
+    def test_build_gets_mobile_config_but_no_infrastructure_keys(self):
+        root = Path(__file__).resolve().parents[2]
+        jobs = yaml.safe_load((root / '.github/workflows/android-preview-delivery.yml').read_text())['jobs']
+        build = yaml.safe_dump(jobs['build-preview'])
+        self.assertIn('GEMINI_API_KEY', build)
+        self.assertIn('ZEGO_CLOUD_APP_SIGN', build)
+        for forbidden in ('RELEASE_AWS_SECRET_ACCESS_KEY', 'ANDROID_UPLOAD_KEYSTORE_BASE64', 'SMTP_PASSWORD'):
+            self.assertNotIn(forbidden, build)
+        self.assertEqual(jobs['build-preview']['permissions'], {'contents': 'read'})
+        main = yaml.safe_load((root / '.github/workflows/android-apk.yml').read_text())['jobs']['release-android']
+        self.assertIn("github.event_name != 'pull_request'", main['if'])
 
-    def test_publisher_never_checks_out_pr_code(self):
-        text = (Path(__file__).resolve().parents[2] / '.github/workflows/android-preview-delivery.yml').read_text()
-        data = yaml.safe_load(text)
-        steps = data['jobs']['deliver']['steps']
-        checkout = steps[0]
-        self.assertEqual(checkout['with']['ref'], '${{ github.sha }}')
-        self.assertFalse(checkout['with']['persist-credentials'])
-        self.assertNotIn('npm ci', text)
-        self.assertNotIn('build-android-release.sh', text)
-        self.assertNotIn('RELEASE_AWS_SECRET_ACCESS_KEY', text)
+    def test_signer_never_checks_out_pr_code(self):
+        root = Path(__file__).resolve().parents[2]
+        jobs = yaml.safe_load((root / '.github/workflows/android-preview-delivery.yml').read_text())['jobs']
+        deliver = jobs['deliver']
+        self.assertEqual(deliver['steps'][0]['with']['ref'], '${{ github.sha }}')
+        self.assertFalse(deliver['steps'][0]['with']['persist-credentials'])
+        self.assertNotIn('npm ci', yaml.safe_dump(deliver))
+        self.assertNotIn('build-android-release.sh', yaml.safe_dump(deliver))
 
     def test_delivery_env_preserves_both_email_links(self):
         root = Path(__file__).resolve().parents[2]
