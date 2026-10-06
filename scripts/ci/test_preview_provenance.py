@@ -34,6 +34,7 @@ class PreviewProvenance(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         jobs = yaml.safe_load((root / '.github/workflows/android-preview-delivery.yml').read_text())['jobs']
         build = yaml.safe_dump(jobs['build-preview'])
+        self.assertIn('chmod +x android/gradlew', build)
         self.assertIn('GEMINI_API_KEY', build)
         self.assertIn('ZEGO_CLOUD_APP_SIGN', build)
         for forbidden in ('RELEASE_AWS_SECRET_ACCESS_KEY', 'ANDROID_UPLOAD_KEYSTORE_BASE64', 'SMTP_PASSWORD'):

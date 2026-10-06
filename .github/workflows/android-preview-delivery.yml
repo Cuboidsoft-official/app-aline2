@@ -136,6 +136,7 @@ jobs:
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
         run: |
+          chmod +x android/gradlew
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
           printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > android/local.properties
           python3 - <<'VERSION'
