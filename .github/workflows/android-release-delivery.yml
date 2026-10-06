@@ -32,7 +32,6 @@ on:
         options:
           - '1'
           - '7'
-          - '30'
       reason:
         description: Why a fresh link is needed (included in the email)
         required: false
@@ -148,7 +147,8 @@ jobs:
           DAYS: ${{ inputs.expires_in_days }}
         run: |
           set -euo pipefail
-          expires_in=$(( DAYS * 86400 ))
+          case "$DAYS" in 1|7) ;; *) echo "Invalid link lifetime" >&2; exit 1 ;; esac
+          expires_in="$(python3 scripts/ci/artifact_retention.py /tmp/release.json "$DAYS" "$PRIVATE_RELEASES_BUCKET")"
           apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${APK_KEY}" --expires-in "${expires_in}")"
           download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${AAB_KEY}" --expires-in "${expires_in}")"
           # Same refusal as the build workflow: a URL carrying a session token
@@ -180,7 +180,7 @@ jobs:
           {
             echo "apk_download_url=${apk_download_url}"
             echo "download_url=${download_url}"
-            echo "link_expires_at=$(date -u -d "+${DAYS} days" '+%Y-%m-%d %H:%M UTC')"
+            echo "link_expires_at=$(date -u -d "+${expires_in} seconds" '+%Y-%m-%d %H:%M UTC')"
           } >> "$GITHUB_OUTPUT"
 
       - name: Email the fresh delivery links
