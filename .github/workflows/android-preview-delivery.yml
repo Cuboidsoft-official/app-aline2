@@ -1,5 +1,7 @@
 name: Android Preview Delivery
 
+# This pipeline is exercised through a controlled PR before its APK check is required.
+
 on:
   workflow_run:
     workflows: [Android Release]
