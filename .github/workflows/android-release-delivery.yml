@@ -56,6 +56,9 @@ jobs:
   # This is what makes the seven-day window a non-event: an expired link costs
   # one workflow run, not a 25-minute rebuild and a new versionCode.
   redeliver:
+    permissions:
+      contents: read
+      pull-requests: write
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'redeliver'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -137,6 +140,11 @@ jobs:
                   sys.exit(f"::error::release.json is missing {field}")
           for field in ("releaseName", "apkKey", "aabKey"):
               print(f"{field}={record[field]}")
+          for field in ("commit", "runUrl"):
+              if record.get(field):
+                  if "\n" in record[field] or "\r" in record[field]:
+                      sys.exit("Invalid release metadata")
+                  print(f"{field}={record[field]}")
           PY
 
       - name: Re-sign and verify the delivery links
@@ -204,6 +212,31 @@ jobs:
           AAB_DOWNLOAD_URL: ${{ steps.links.outputs.download_url }}
         run: |
           python3 ./scripts/ci/send_release_email.py
+
+      - name: Publish refreshed production downloads
+        id: downloads
+        if: steps.record.outputs.commit != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.record.outputs.commit }}
+          RELEASE_NAME: ${{ steps.record.outputs.releaseName }}
+          APK_URL: ${{ steps.links.outputs.apk_download_url }}
+          AAB_URL: ${{ steps.links.outputs.download_url }}
+          EXPIRES: ${{ steps.links.outputs.link_expires_at }}
+          ARTIFACT_URL: ${{ steps.record.outputs.runUrl }}
+        run: python3 scripts/ci/publish_production_links.py
+
+      - name: Add refreshed download summary
+        env:
+          COMMENT_URL: ${{ steps.downloads.outputs.comment_url }}
+          RUN_URL: ${{ steps.record.outputs.runUrl }}
+        run: |
+          {
+            echo '## Release links refreshed (no rebuild)'
+            if [ -n "$COMMENT_URL" ]; then echo "[APK and Play AAB S3 downloads]($COMMENT_URL)"; fi
+            echo "[Original build and GitHub backup artifacts]($RUN_URL)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Proves the delivery credential still works, before a release needs it.
   # A revoked or half-rotated key is discovered here on a Monday rather than

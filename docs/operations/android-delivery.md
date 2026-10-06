@@ -41,7 +41,9 @@ checked, but these checks do not replace an install test on a failing device.
 
 The app repository is public. At the owner's explicit request, seven-day S3
 bearer URLs are posted in PRs and release summaries, as well as Cuboidsoft email.
-Anyone with a link can download until expiry. GitHub artifacts follow GitHub's
+Anyone with a link can download until expiry. CI summaries link to the PR
+download comment because GitHub redacts credential-bearing URLs in job summaries.
+This keeps masking intact while providing working download buttons. GitHub artifacts follow GitHub's
 access rules; neither channel is confidential distribution.
 
 New production APK/AAB objects live under `android/private/expiring/` and expire

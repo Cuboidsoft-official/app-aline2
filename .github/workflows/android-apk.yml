@@ -53,6 +53,9 @@ concurrency:
 jobs:
   release-android:
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment: production
@@ -704,13 +707,26 @@ jobs:
         run: |
           python3 ./scripts/ci/send_release_email.py
 
+      - name: Publish release downloads on merged PR
+        id: downloads
+        if: steps.meta.outputs.deliver_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
+          APK_URL: ${{ steps.private_aab.outputs.apk_download_url }}
+          AAB_URL: ${{ steps.private_aab.outputs.download_url }}
+          EXPIRES: ${{ steps.private_aab.outputs.link_expires_at }}
+          ARTIFACT_URL: ${{ steps.upload_release.outputs.artifact-url }}
+        run: python3 scripts/ci/publish_production_links.py
+
       - name: Add build summary
         if: success()
         env:
           APK_NAME: ${{ steps.meta.outputs.apk_name }}
           AAB_NAME: ${{ steps.meta.outputs.aab_name }}
-          APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
-          AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
+          DOWNLOAD_COMMENT_URL: ${{ steps.downloads.outputs.comment_url }}
           ARTIFACT_URL: ${{ steps.upload_release.outputs.artifact-url || steps.upload_release_arm64.outputs.artifact-url }}
         run: |
           {
@@ -728,7 +744,9 @@ jobs:
             echo "- APK checksum:"
             cat "${APK_NAME}.sha256"
             if [ "${{ steps.meta.outputs.deliver_release }}" = "true" ]; then
-              echo "- [Direct APK download](${APK_DOWNLOAD_URL}) | [Play AAB download](${AAB_DOWNLOAD_URL})"
+              if [ -n "$DOWNLOAD_COMMENT_URL" ]; then
+                echo "- [Production APK and Play AAB: S3 download links](${DOWNLOAD_COMMENT_URL})"
+              fi
               echo "- S3 artifacts expire automatically after seven days; GitHub backup artifacts remain for 30 days."
               echo "- Private APK/AAB delivery email sent to \`cuboidsoft@gmail.com\`"
               echo "- Delivery links verified reachable before sending; expire ${{ steps.private_aab.outputs.link_expires_at }}"

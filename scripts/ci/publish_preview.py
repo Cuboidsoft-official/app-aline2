@@ -55,10 +55,14 @@ This APK uses the upload certificate and cannot update a Play-signed install. Do
 
 SHA-256: `{digest}`
 '''
-    Path(os.environ['GITHUB_STEP_SUMMARY']).write_text(body)
     Path('/tmp/preview-comment.json').write_text(json.dumps({'body': body}))
     # A new comment preserves provenance; never edits a developer's comment.
-    subprocess.run(['gh', 'api', '--method', 'POST', f'repos/{repo}/issues/{pr}/comments', '--input', '/tmp/preview-comment.json'], check=True, stdout=subprocess.DEVNULL)
+    result = json.loads(command('gh', 'api', '--method', 'POST', f'repos/{repo}/issues/{pr}/comments', '--input', '/tmp/preview-comment.json'))
+    # Keep credential masking intact. Link to the public download comment,
+    # rather than rendering a signed URL that GitHub will redact.
+    Path(os.environ['GITHUB_STEP_SUMMARY']).write_text(
+        f"## PR test APK ready\n[Direct S3 APK download link]({result['html_url']}) · "
+        f"[GitHub backup artifact]({os.environ['ARTIFACT_URL']})\nCommit: `{sha}`\n")
 
 
 if __name__ == '__main__':
