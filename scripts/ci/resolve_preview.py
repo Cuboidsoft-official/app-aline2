@@ -12,9 +12,11 @@ REQUIRED_CHECKS = {"validate", "workflows"}
 ACCEPTED_OPTIONAL_CONCLUSIONS = {"success", "skipped", "neutral"}
 GENERATED_PREVIEW_CHECKS = {"PR test APK", "PR release APK"}
 APP_FILES = re.compile(
-    r"^(src/|android/|scripts/|\.github/workflows/|App\.tsx$|app\.json$|"
-    r"index\.js$|package.*\.json$|.*config\.js$|google-services\.json$|"
-    r"\.env\.production\.example$)"
+    r"^(src/|android/|patches/|App\.tsx$|app\.json$|index\.js$|package.*\.json$|"
+    r"(babel|metro|react-native)\.config\.js$|google-services\.json$|"
+    r"\.env\.production\.example$|scripts/build-android-release\.sh$|"
+    r"scripts/ci/(filter_android_autolinking|list_android_codegen_prewarm_tasks)\.js$|"
+    r"scripts/patch-[^/]+\.js$)"
 )
 
 

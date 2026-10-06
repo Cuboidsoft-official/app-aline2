@@ -67,7 +67,13 @@ class PreviewEligibility(unittest.TestCase):
     def test_only_app_relevant_changes_offer_a_test_build(self):
         self.assertTrue(has_app_changes([{"filename": "src/screens/Profile.tsx"}]))
         self.assertTrue(has_app_changes([{"filename": "android/app/build.gradle"}]))
+        self.assertTrue(has_app_changes([{"filename": "patches/react-native+camera+1.0.0.patch"}]))
+        self.assertTrue(has_app_changes([{"filename": "scripts/patch-build.js"}]))
+        self.assertTrue(has_app_changes([{"filename": "scripts/build-android-release.sh"}]))
+        self.assertTrue(has_app_changes([{"filename": "scripts/ci/filter_android_autolinking.js"}]))
         self.assertFalse(has_app_changes([{"filename": "docs/operations/android-delivery.md"}]))
+        self.assertFalse(has_app_changes([{"filename": "scripts/ci/resolve_preview.py"}]))
+        self.assertFalse(has_app_changes([{"filename": ".github/workflows/android-apk.yml"}]))
 
     def test_preview_check_does_not_block_its_own_retry(self):
         runs = [check("validate"), check("workflows"), check("PR test APK", status="in_progress")]
@@ -98,6 +104,11 @@ class PreviewWorkflowContract(unittest.TestCase):
         self.assertIn("inputs.target == 'production'", jobs["release-android"]["if"])
         self.assertIn("github.event_name == 'push'", jobs["release-android"]["if"])
         self.assertNotIn("pull_request", triggers)
+        paths = triggers["push"]["paths"]
+        self.assertNotIn("scripts/**", paths)
+        self.assertIn("patches/**", paths)
+        self.assertIn("scripts/build-android-release.sh", paths)
+        self.assertIn("scripts/patch-*.js", paths)
 
     def test_reusable_preview_is_manual_request_and_shares_release_sequence(self):
         triggers = self.preview.get("on", self.preview.get(True))
