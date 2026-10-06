@@ -4188,7 +4188,7 @@ function CreatePostScreen({ navigation, route }: any) {
   };
 
   const renderStoryToolSheet = () => {
-    if (!storyToolPanel) {
+    if (!storyToolPanel || storyToolPanel === "layout") {
       return null;
     }
 
