@@ -3,6 +3,7 @@
 import argparse
 import re
 import subprocess
+import struct
 import zipfile
 from pathlib import Path
 
@@ -17,6 +18,22 @@ def verify(path, tools, version_code, profile):
         expected = {'arm64-v8a'} if profile == 'arm64' else {'armeabi-v7a', 'arm64-v8a'}
         if abis != expected:
             raise ValueError(f"APK ABIs {sorted(abis)} do not match {sorted(expected)}")
+        for name in archive.namelist():
+            if name.startswith('lib/arm64-v8a/') and name.endswith('.so'):
+                data = archive.read(name)
+                if len(data) < 64 or data[:6] != b'\x7fELF\x02\x01':
+                    raise ValueError(f'Invalid ARM64 ELF library: {name}')
+                offset = struct.unpack_from('<Q', data, 32)[0]
+                size, count = struct.unpack_from('<HH', data, 54)
+                if size < 56 or offset + size * count > len(data):
+                    raise ValueError(f'Invalid ELF program headers: {name}')
+                loads = []
+                for index in range(count):
+                    header = offset + index * size
+                    if struct.unpack_from('<I', data, header)[0] == 1:
+                        loads.append(struct.unpack_from('<Q', data, header + 48)[0])
+                if not loads or any(alignment < 16384 for alignment in loads):
+                    raise ValueError(f'ARM64 library lacks 16 KiB LOAD alignment: {name}')
         if archive.getinfo('resources.arsc').compress_type != zipfile.ZIP_STORED:
             raise ValueError('resources.arsc must be stored uncompressed')
     subprocess.run([str(tools / 'apksigner'), 'verify', '--verbose', str(path)], check=True)
