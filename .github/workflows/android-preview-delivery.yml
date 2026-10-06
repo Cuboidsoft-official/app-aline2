@@ -116,19 +116,19 @@ jobs:
           BACKEND_ORIGIN_EXPECTED: https://api.aline2.com
           SHARE_BASE_URL_EXPECTED: https://aline2.com
         run: 'test -f "$ENVFILE_VALUE"
-      
+
           grep -q "^BACKEND_ORIGIN=${BACKEND_ORIGIN_EXPECTED}$" "$ENVFILE_VALUE"
-      
+
           grep -q "^SHARE_BASE_URL=${SHARE_BASE_URL_EXPECTED}$" "$ENVFILE_VALUE"
-      
+
           grep -Eq ''^YOUTUBE_DATA_API_KEY=.{10,}$'' "$ENVFILE_VALUE"
-      
+
           grep -Eq ''^GEMINI_API_KEY=.{10,}$'' "$ENVFILE_VALUE"
-      
+
           grep -Eq ''^ZEGO_CLOUD_APP_ID=.{3,}$'' "$ENVFILE_VALUE"
-      
+
           grep -Eq ''^ZEGO_CLOUD_APP_SIGN=.{10,}$'' "$ENVFILE_VALUE"
-      
+
           '
       - name: Prepare disposable signing and version
         env:
