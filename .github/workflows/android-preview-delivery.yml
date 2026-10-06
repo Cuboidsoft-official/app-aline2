@@ -1,6 +1,6 @@
 name: Android Preview Delivery
 
-# This pipeline is exercised through a controlled PR before its APK check is required.
+# Controlled PR verification covers full mobile config, isolated signing and public seven-day downloads.
 
 on:
   workflow_run:
