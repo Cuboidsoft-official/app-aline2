@@ -1,6 +1,8 @@
 name: Android Release
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches:
       - main
@@ -23,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       release_profile:
-        description: Release profile to build
+        description: standard = compatible APK + Play AAB; arm64 = 64-bit diagnostic APK only
         required: true
         default: standard
         type: choice
@@ -38,17 +40,19 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
   # No id-token: write. The release delivery step is the only thing that ever
   # needed an AWS OIDC token, and it now signs with a resource-scoped IAM
   # credential instead, so the workflow no longer requests the ability to
   # mint itself a cloud identity.
 
 concurrency:
-  group: android-production
-  cancel-in-progress: false
+  group: android-${{ github.event.pull_request.number || 'production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   release-android:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment: production
@@ -122,7 +126,7 @@ jobs:
             *)
               release_name="Aline2-v${app_version}-${release_date}-${short_sha}-r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
               apk_name="${release_name}.apk"
-              apk_mode="apk"
+              apk_mode="apk-aab"
               build_aab="true"
               ;;
           esac
@@ -314,7 +318,6 @@ jobs:
           grep -Eq '^ZEGO_CLOUD_APP_SIGN=.{10,}$' "$ENVFILE_VALUE"
 
       - name: Calculate Android version code
-        if: steps.meta.outputs.build_aab == 'true'
         id: android_version
         run: |
           set -euo pipefail
@@ -334,7 +337,6 @@ jobs:
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
 
       - name: Apply Android version code
-        if: steps.meta.outputs.build_aab == 'true'
         env:
           VERSION_CODE: ${{ steps.android_version.outputs.version_code }}
         run: |
@@ -426,17 +428,6 @@ jobs:
           echo "Building Android release APK with ${ENVFILE_VALUE} using mode ${{ steps.meta.outputs.apk_mode }}"
           ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh "${{ steps.meta.outputs.apk_mode }}"
 
-      - name: Build release AAB
-        if: steps.meta.outputs.build_aab == 'true'
-        env:
-          ENVFILE_VALUE: ${{ steps.prepare_env.outputs.envfile }}
-          ANDROID_UPLOAD_STORE_FILE: ${{ steps.keystore.outputs.keystore_path }}
-          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
-          ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS != '' && vars.ANDROID_UPLOAD_KEY_ALIAS || secrets.ANDROID_UPLOAD_KEY_ALIAS }}
-          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
-        run: |
-          echo "Building Android release AAB with ${ENVFILE_VALUE}"
-          ENVFILE="$ENVFILE_VALUE" ./scripts/build-android-release.sh aab
       - name: Clean intermediate build files to reclaim disk space
         run: |
           rm -rf android/app/build/intermediates/transforms || true
@@ -524,6 +515,16 @@ jobs:
             fi
           fi
 
+      - name: Verify APK install metadata and ZIP alignment
+        env:
+          APK_PATH: ${{ steps.collect.outputs.apk_path }}
+          VERSION_CODE: ${{ steps.android_version.outputs.version_code }}
+          PROFILE: ${{ steps.meta.outputs.release_profile }}
+        run: |
+          python3 scripts/ci/verify_apk.py "$APK_PATH" \
+            --tools "$ANDROID_SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION" \
+            --version-code "$VERSION_CODE" --profile "$PROFILE"
+
       - name: Upload standard release artifacts
         if: steps.meta.outputs.build_aab == 'true'
         id: upload_release
@@ -589,8 +590,9 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ env.AWS_REGION }}
         run: |
-          apk_key="android/private/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.apk_name }}"
-          s3_key="android/private/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.aab_name }}"
+          retention_expires_at="$(date -u -d '+7 days' +%s)"
+          apk_key="android/private/expiring/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.apk_name }}"
+          s3_key="android/private/expiring/${{ steps.meta.outputs.release_date }}/${{ steps.meta.outputs.aab_name }}"
           aws s3 cp "${APK_PATH}" "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --only-show-errors
           aws s3 cp "${{ steps.collect.outputs.aab_path }}" "s3://${PRIVATE_RELEASES_BUCKET}/${s3_key}" --only-show-errors
           apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${apk_key}" --expires-in 604800)"
@@ -621,6 +623,8 @@ jobs:
             "commit": "${{ github.sha }}",
             "runUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
             "versionName": "${{ steps.meta.outputs.app_version }}",
+            "versionCode": ${{ steps.android_version.outputs.version_code }},
+            "retentionExpiresAt": ${retention_expires_at},
             "apkKey": "${apk_key}",
             "aabKey": "${s3_key}",
             "apkSha256": "$(sha256sum "${APK_PATH}" | cut -d' ' -f1)",
@@ -691,12 +695,12 @@ jobs:
 
             Use the private AAB link for the manual Google Play Console upload.
             The APK and AAB links below expire at ${{ steps.private_aab.outputs.link_expires_at }} UTC.
-            If a link has expired, ask for a fresh one and a new signed build can be delivered without a rebuild.
+            Within the retention window, ask for a fresh one using Android Release Delivery; no rebuild is needed. After seven days use the GitHub artifact backup (30-day retention).
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
-          APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
-          AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
           APK_ATTACHMENT_PATH: ${{ steps.collect.outputs.apk_path }}
           AAB_ATTACHMENT_PATH: ${{ steps.collect.outputs.aab_path }}
+          APK_DOWNLOAD_URL: ${{ steps.private_aab.outputs.apk_download_url }}
+          AAB_DOWNLOAD_URL: ${{ steps.private_aab.outputs.download_url }}
         run: |
           python3 ./scripts/ci/send_release_email.py
 
@@ -705,6 +709,7 @@ jobs:
         env:
           APK_NAME: ${{ steps.meta.outputs.apk_name }}
           AAB_NAME: ${{ steps.meta.outputs.aab_name }}
+          ARTIFACT_URL: ${{ steps.upload_release.outputs.artifact-url || steps.upload_release_arm64.outputs.artifact-url }}
         run: |
           {
             echo "## Android Release"
@@ -714,10 +719,14 @@ jobs:
             echo "- Commit: \`${{ github.sha }}\`"
             echo "- Release profile: \`${{ steps.meta.outputs.release_profile }}\`"
             echo "- Release: \`${{ steps.meta.outputs.release_name }}\`"
-            echo "- GitHub Actions artifacts: available in this run while signed in to GitHub"
+            echo "- [Download from GitHub (sign-in required)](${ARTIFACT_URL})"
+            echo "- Android version code: ${{ steps.android_version.outputs.version_code }}"
+            echo "- Standard supports ARM 32-bit and 64-bit on Android 7+. ARM64 is diagnostic only."
+            echo "- CI APKs use the upload certificate; Play installs require Play-signed updates."
             echo "- APK checksum:"
             cat "${APK_NAME}.sha256"
             if [ "${{ steps.meta.outputs.deliver_release }}" = "true" ]; then
+              echo "- S3 artifacts expire automatically after seven days; GitHub backup artifacts remain for 30 days."
               echo "- Private APK/AAB delivery email sent to \`cuboidsoft@gmail.com\`"
               echo "- Delivery links verified reachable before sending; expire ${{ steps.private_aab.outputs.link_expires_at }}"
               echo "- Signed with the resource-scoped \`aline2-android-release-ci\` credential, not a cloud session"
@@ -733,4 +742,125 @@ jobs:
                 cat "${AAB_NAME}.sha256"
               fi
             fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  preview-inputs:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.changed.outputs.build }}
+    steps:
+      - name: Detect Android build inputs
+        id: changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' > /tmp/changed.txt
+          if grep -Eq '^(src/|android/|scripts/|\.github/workflows/|App\.tsx$|app\.json$|index\.js$|package.*\.json$|.*config\.js$|google-services\.json$|\.env\.production\.example$)' /tmp/changed.txt; then
+            echo 'build=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'build=false' >> "$GITHUB_OUTPUT"
+          fi
+
+  preview-android:
+    needs: preview-inputs
+    if: needs.preview-inputs.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    # No environment, production secrets, cloud credentials, or write token.
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies and validate
+        run: |
+          npm ci
+          npm run typecheck
+          npm test -- --runInBand
+      - name: Free runner disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
+      - name: Set up Java 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+      - name: Prepare release-mode preview
+        env:
+          BACKEND_ORIGIN: ${{ vars.BACKEND_ORIGIN }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          SOCKET_URL: ${{ vars.SOCKET_URL }}
+          SHARE_BASE_URL: ${{ vars.SHARE_BASE_URL }}
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > android/local.properties
+          cp .env.production.example .env.ci
+          python3 - <<'ENV'
+          import os
+          from pathlib import Path
+          p = Path('.env.ci')
+          values = dict(line.split('=', 1) for line in p.read_text().splitlines() if '=' in line and not line.startswith('#'))
+          for key in ('BACKEND_ORIGIN', 'API_BASE_URL', 'SOCKET_URL', 'SHARE_BASE_URL', 'GOOGLE_WEB_CLIENT_ID'):
+              if os.environ.get(key):
+                  values[key] = os.environ[key]
+          p.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
+          ENV
+          python3 - <<'VERSION'
+          import os, re
+          from pathlib import Path
+          p = Path('android/app/build.gradle')
+          version = 100000 + int(os.environ['GITHUB_RUN_NUMBER'])
+          text, count = re.subn(r'(\bversionCode\s+)\d+', lambda m: m[1] + str(version), p.read_text(), count=1)
+          assert count == 1
+          p.write_text(text)
+          VERSION
+          # This disposable signing key is not a production credential.
+          keytool -genkeypair -keystore "$RUNNER_TEMP/preview.keystore" -storepass preview-only \
+            -keypass preview-only -alias preview -keyalg RSA -keysize 2048 -validity 2 \
+            -dname 'CN=Aline2 disposable PR build'
+          plugin_file=node_modules/@react-native/gradle-plugin/settings.gradle.kts
+          sed -i '/org.gradle.toolchains.foojay-resolver-convention/s/^/\/\/ /' "$plugin_file"
+      - name: Build standard release-mode PR APK
+        env:
+          ENVFILE: .env.ci
+          ANDROID_UPLOAD_CREDENTIALS_FILE: /nonexistent/preview-credentials
+          ANDROID_UPLOAD_STORE_FILE: ${{ runner.temp }}/preview.keystore
+          ANDROID_UPLOAD_STORE_PASSWORD: preview-only
+          ANDROID_UPLOAD_KEY_PASSWORD: preview-only
+          ANDROID_UPLOAD_KEY_ALIAS: preview
+        run: bash scripts/build-android-release.sh apk
+      - name: Collect APK for trusted signing
+        run: |
+          mkdir preview
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$apk"
+          cp "$apk" preview/input.apk
+      - name: Upload preview build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-preview-input
+          path: preview/input.apk
+          retention-days: 1
+          if-no-files-found: error
+      - name: Preview status
+        run: |
+          {
+            echo '## PR APK build complete'
+            echo 'The trusted Android Preview Delivery workflow will verify, sign and publish this exact PR APK. Use its download link, not the disposable input artifact.'
+            echo 'Production URLs are used. Secret-dependent third-party integrations are checked in the main production release.'
           } >> "$GITHUB_STEP_SUMMARY"
