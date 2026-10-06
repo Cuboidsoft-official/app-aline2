@@ -19,9 +19,10 @@ on:
         type: choice
         options:
           - redeliver
+          - verify
           - check
       release_prefix:
-        description: 'Release folder to redeliver, e.g. 20260924 (mode: redeliver)'
+        description: 'Release folder to redeliver, e.g. 20260924 (mode: redeliver or verify)'
         required: false
         type: string
       expires_in_days:
@@ -59,7 +60,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'redeliver'
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'redeliver' || inputs.mode == 'verify')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Without this, the production environment secrets below resolve to the empty
@@ -192,6 +193,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Email the fresh delivery links
+        if: inputs.mode == 'redeliver'
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}

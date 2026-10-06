@@ -60,3 +60,20 @@ class WorkflowDecisions(unittest.TestCase):
         self.assertEqual(steps['Build production-configured PR APK']['run'], 'bash scripts/build-android-release.sh apk')
         self.assertNotIn('bundleRelease', yaml.safe_dump(jobs['build-preview']))
         self.assertNotIn('apk-aab', yaml.safe_dump(jobs['build-preview']))
+
+    def test_verification_never_builds_or_emails(self):
+        from pathlib import Path
+        import yaml
+        root=Path(__file__).resolve().parents[2]
+        workflow=yaml.safe_load((root/'.github/workflows/android-release-delivery.yml').read_text())
+        triggers=workflow.get('on',workflow.get(True))
+        self.assertIn('verify',triggers['workflow_dispatch']['inputs']['mode']['options'])
+        job=workflow['jobs']['redeliver']
+        self.assertIn("inputs.mode == 'verify'",job['if'])
+        steps={s['name']:s for s in job['steps']}
+        self.assertEqual(steps['Email the fresh delivery links']['if'],"inputs.mode == 'redeliver'")
+        self.assertIn('Add refreshed download summary',steps)
+        text=yaml.safe_dump(job)
+        self.assertNotIn('gradlew',text)
+        self.assertNotIn('build-android-release.sh',text)
+        self.assertNotIn('aws s3 cp /tmp/release',text)

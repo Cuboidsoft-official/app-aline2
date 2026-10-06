@@ -49,11 +49,14 @@ Final APK/AAB files are retained only in S3, under `android/private/expiring/`.
 The existing verified lifecycle rule expires that prefix after seven days; S3
 processes deletion asynchronously, so deletion is not exact to the second.
 Older releases retain their existing policy. No user-media bucket is involved.
-GitHub retains only a one-day temporary input for isolated PR signing, and
+After successful PR delivery, the isolated signer removes only its own temporary
+input artifact. On failure, one-day retention is the fallback. GitHub retains
 one-day diagnostic/build-only artifacts when S3 delivery is deliberately off.
 After expiry, redelivery cannot resurrect deleted files: request a new build.
 Within the retention window, Android Release Delivery can refresh existing S3
-links without compiling again. Its date-based release record currently identifies
+links without compiling again. Choose `verify` to check APK/AAB links and publish
+a download summary without emailing anyone; choose `redeliver` to also email
+Cuboidsoft. `check` remains the lightweight credential health check. Its date-based release record currently identifies
 only the most recently delivered release for a date; earlier runs require their
 exact object keys. Do not overwrite older live links during a cleanup.
 
