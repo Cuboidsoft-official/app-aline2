@@ -77,7 +77,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
+      - name: Restore trusted Gradle dependency cache without saving PR state
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: preview-gradle-readonly-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: setup-java-${{ runner.os }}-x64-gradle-
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
