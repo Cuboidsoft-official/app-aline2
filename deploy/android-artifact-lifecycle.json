@@ -1,0 +1,27 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-android-release-artifacts",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "android/"
+      },
+      "Expiration": {
+        "Days": 30
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 1
+      }
+    },
+    {
+      "ID": "expire-new-android-downloads-seven-days",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "android/private/expiring/"
+      },
+      "Expiration": {
+        "Days": 7
+      }
+    }
+  ]
+}

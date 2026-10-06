@@ -19,9 +19,14 @@ on:
         type: choice
         options:
           - redeliver
+          - verify
           - check
       release_prefix:
-        description: 'Release folder to redeliver, e.g. 20260924 (mode: redeliver)'
+        description: 'Release folder to redeliver, e.g. 20260924 (mode: redeliver or verify)'
+        required: false
+        type: string
+      release_name:
+        description: Optional exact release name; leave empty for the latest release on that date
         required: false
         type: string
       expires_in_days:
@@ -32,7 +37,6 @@ on:
         options:
           - '1'
           - '7'
-          - '30'
       reason:
         description: Why a fresh link is needed (included in the email)
         required: false
@@ -57,7 +61,10 @@ jobs:
   # This is what makes the seven-day window a non-event: an expired link costs
   # one workflow run, not a 25-minute rebuild and a new versionCode.
   redeliver:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'redeliver'
+    permissions:
+      contents: read
+      pull-requests: read
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'redeliver' || inputs.mode == 'verify')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Without this, the production environment secrets below resolve to the empty
@@ -81,6 +88,7 @@ jobs:
         id: target
         env:
           RELEASE_PREFIX: ${{ inputs.release_prefix }}
+          RELEASE_NAME: ${{ inputs.release_name }}
         run: |
           if [ -z "${RELEASE_PREFIX}" ]; then
             echo "::error::release_prefix is required. It is the date folder under android/private/, for example 20260924. Find it in the build summary of the original release run." >&2
@@ -96,7 +104,15 @@ jobs:
               exit 1
               ;;
           esac
+          if [ -n "$RELEASE_NAME" ]; then
+            if [[ ! "$RELEASE_NAME" =~ ^Aline2-v[0-9A-Za-z.+-]+-[0-9]{8}-[a-f0-9]{7}-r[0-9]+-a[0-9]+$ ]] || [[ "$RELEASE_NAME" != *"-${RELEASE_PREFIX}-"* ]]; then
+              echo "::error::Invalid release name or mismatched release date." >&2
+              exit 1
+            fi
+            echo "folder=android/private/expiring/records/${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+          else
           echo "folder=android/private/${RELEASE_PREFIX}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Configure AWS release credentials
         env:
@@ -138,6 +154,11 @@ jobs:
                   sys.exit(f"::error::release.json is missing {field}")
           for field in ("releaseName", "apkKey", "aabKey"):
               print(f"{field}={record[field]}")
+          for field in ("commit", "runUrl"):
+              if record.get(field):
+                  if "\n" in record[field] or "\r" in record[field]:
+                      sys.exit("Invalid release metadata")
+                  print(f"{field}={record[field]}")
           PY
 
       - name: Re-sign and verify the delivery links
@@ -148,7 +169,8 @@ jobs:
           DAYS: ${{ inputs.expires_in_days }}
         run: |
           set -euo pipefail
-          expires_in=$(( DAYS * 86400 ))
+          case "$DAYS" in 1|7) ;; *) echo "Invalid link lifetime" >&2; exit 1 ;; esac
+          expires_in="$(python3 scripts/ci/artifact_retention.py /tmp/release.json "$DAYS" "$PRIVATE_RELEASES_BUCKET")"
           apk_download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${APK_KEY}" --expires-in "${expires_in}")"
           download_url="$(aws s3 presign "s3://${PRIVATE_RELEASES_BUCKET}/${AAB_KEY}" --expires-in "${expires_in}")"
           # Same refusal as the build workflow: a URL carrying a session token
@@ -180,10 +202,11 @@ jobs:
           {
             echo "apk_download_url=${apk_download_url}"
             echo "download_url=${download_url}"
-            echo "link_expires_at=$(date -u -d "+${DAYS} days" '+%Y-%m-%d %H:%M UTC')"
+            echo "link_expires_at=$(date -u -d "+${expires_in} seconds" '+%Y-%m-%d %H:%M UTC')"
           } >> "$GITHUB_OUTPUT"
 
       - name: Email the fresh delivery links
+        if: inputs.mode == 'redeliver'
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -204,6 +227,13 @@ jobs:
           AAB_DOWNLOAD_URL: ${{ steps.links.outputs.download_url }}
         run: |
           python3 ./scripts/ci/send_release_email.py
+
+      - name: Add refreshed download summary
+        env:
+          APK_URL: ${{ steps.links.outputs.apk_download_url }}
+          AAB_URL: ${{ steps.links.outputs.download_url }}
+          EXPIRES: ${{ steps.links.outputs.link_expires_at }}
+        run: python3 scripts/ci/download_summary.py
 
   # Proves the delivery credential still works, before a release needs it.
   # A revoked or half-rotated key is discovered here on a Monday rather than
@@ -270,6 +300,9 @@ jobs:
           esac
           cmp -s /tmp/sentinel.json /tmp/probe.out || {
             echo "::error::The signed fetch did not return the stored object." >&2; exit 1; }
+          # Refresh only after the signed byte-for-byte round trip succeeded.
+          # The weekly check must outlive the legacy 30-day artifact expiry.
+          aws s3 cp /tmp/sentinel.json "${sentinel}" --only-show-errors
           echo "probed=true" >> "$GITHUB_OUTPUT"
 
       # A silent green check is how this whole failure started, so a failure
