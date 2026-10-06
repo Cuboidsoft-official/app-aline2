@@ -3137,6 +3137,15 @@ function CreatePostScreen({ navigation, route }: any) {
     }
   }, [activeAspect.id, composerCanvasSize.height, composerCanvasSize.width, composerMediaPan, composerMediaScale, selectedAsset?.height, selectedAsset?.id, selectedAsset?.width]);
 
+  // When the user switches aspect while in story/swipe crop mode, reset to the
+  // correct default scale for the new aspect so the image starts correctly framed.
+  useEffect(() => {
+    if (storyToolPanel === "layout" && (mode === "story" || mode === "swipe")) {
+      resetCropPosition();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAspect.id]);
+
   const persistComposerMediaTransform = useCallback(() => {
     const rawX = Number((composerMediaPan.x as any)._value || 0);
     const rawY = Number((composerMediaPan.y as any)._value || 0);
@@ -3801,33 +3810,6 @@ function CreatePostScreen({ navigation, route }: any) {
           },
         ]}
       >
-        {storyToolPanel === "layout" ? (
-          <View style={styles.storyAspectChips}>
-            {STORY_ASPECTS.map((option) => {
-              const active = option.id === activeAspect.id;
-              return (
-                <TouchableOpacity
-                  key={option.id}
-                  style={[
-                    styles.storyAspectChip,
-                    {
-                      backgroundColor: active ? accentSoft : inputBackground,
-                      borderColor: active ? accentColor : borderColor,
-                    },
-                  ]}
-                  onPress={() =>
-                    setAspectId((current) => ({
-                      ...current,
-                      [mode]: option.id,
-                    }))
-                  }
-                >
-                  <Text style={[styles.choiceChipLabel, { color: active ? textColor : mutedColor, fontSize: 10 }]}>{option.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ) : null}
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.storyToolRailScroll}>
           {railItems.map((item) => (
             <TouchableOpacity
@@ -4188,8 +4170,56 @@ function CreatePostScreen({ navigation, route }: any) {
   };
 
   const renderStoryToolSheet = () => {
-    if (!storyToolPanel || storyToolPanel === "layout") {
+    if (!storyToolPanel) {
       return null;
+    }
+
+    if (storyToolPanel === "layout") {
+      return (
+        <DraggableBottomSheet
+          visible
+          onClose={() => setStoryToolPanel(null)}
+          snapPoints={[0.44, 0.62]}
+          initialSnapIndex={1}
+        >
+          <View style={styles.sheetContent}>
+            <View style={styles.sheetHeader}>
+              <View>
+                <Text style={[styles.sheetEyebrow, { color: accentColor }]}>Story</Text>
+                <Text style={[styles.sheetTitle, { color: textColor }]}>Crop & Zoom</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.iconButton, { backgroundColor: inputBackground, borderColor }]}
+                onPress={() => setStoryToolPanel(null)}
+              >
+                <Icon name="close" size={18} color={textColor} />
+              </TouchableOpacity>
+            </View>
+            <View style={[styles.composerSheetBlock, { gap: 10 }]}>
+              <TouchableOpacity
+                style={[styles.toolAction, styles.toolActionFullWidth, { backgroundColor: inputBackground, borderColor }]}
+                onPress={resetCropPosition}
+                activeOpacity={0.8}
+              >
+                <Icon name="return-up-back-outline" size={18} color={accentColor} />
+                <View style={styles.toolActionBody}>
+                  <Text style={[styles.toolActionTitle, { color: textColor }]}>Reset position</Text>
+                  <Text style={[styles.toolActionMeta, { color: mutedColor }]}>Centre the image at original zoom</Text>
+                </View>
+              </TouchableOpacity>
+              <View style={[styles.toolAction, styles.toolActionFullWidth, { backgroundColor: inputBackground, borderColor }]}>
+                <Icon name="information-circle-outline" size={18} color={mutedColor} />
+                <View style={styles.toolActionBody}>
+                  <Text style={[styles.toolActionTitle, { color: textColor }]}>How to crop</Text>
+                  <Text style={[styles.toolActionMeta, { color: mutedColor }]}>Pinch to zoom · Drag to reposition · The image always fills the frame</Text>
+                </View>
+              </View>
+              <Text style={[styles.sectionEyebrow, { color: accentColor, marginTop: 4 }]}>Aspect ratio</Text>
+              {renderAspectSelector()}
+            </View>
+          </View>
+        </DraggableBottomSheet>
+      );
     }
 
     const sheetTitle =
