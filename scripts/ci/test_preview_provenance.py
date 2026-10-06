@@ -131,6 +131,9 @@ class PreviewWorkflowContract(unittest.TestCase):
         self.assertEqual(self.preview["jobs"]["build-preview"]["permissions"], {"contents": "read"})
         self.assertIn("ANDROID_UPLOAD_KEYSTORE_BASE64", caller["secrets"])
         self.assertIn("ZEGO_CLOUD_APP_ID", caller["secrets"])
+        called_triggers = self.preview.get("on", self.preview.get(True))
+        called_secrets = called_triggers["workflow_call"]["secrets"]
+        self.assertIn("ZEGO_CLOUD_APP_ID", called_secrets)
         build_steps = {step.get("name"): step for step in self.preview["jobs"]["build-preview"]["steps"]}
         zego_app_id = build_steps["Prepare CI env file"]["env"]["ZEGO_CLOUD_APP_ID_VALUE"]
         self.assertIn("vars.ZEGO_CLOUD_APP_ID", zego_app_id)

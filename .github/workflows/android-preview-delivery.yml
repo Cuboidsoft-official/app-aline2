@@ -16,6 +16,8 @@ on:
         required: false
       YOUTUBE_DATA_API_KEY:
         required: false
+      ZEGO_CLOUD_APP_ID:
+        required: false
       ZEGO_CLOUD_APP_SIGN:
         required: false
       ANDROID_UPLOAD_KEYSTORE_BASE64:
