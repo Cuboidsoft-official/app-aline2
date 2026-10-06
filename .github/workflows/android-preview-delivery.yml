@@ -124,7 +124,7 @@ jobs:
           YOUTUBE_DATA_API_KEY_VALUE: ${{ vars.YOUTUBE_DATA_API_KEY != '' && vars.YOUTUBE_DATA_API_KEY || secrets.YOUTUBE_DATA_API_KEY
             }}
           GEMINI_API_KEY_VALUE: ${{ secrets.GEMINI_API_KEY }}
-          ZEGO_CLOUD_APP_ID_VALUE: ${{ vars.ZEGO_CLOUD_APP_ID }}
+          ZEGO_CLOUD_APP_ID_VALUE: ${{ vars.ZEGO_CLOUD_APP_ID != '' && vars.ZEGO_CLOUD_APP_ID || secrets.ZEGO_CLOUD_APP_ID }}
           ZEGO_CLOUD_APP_SIGN_VALUE: ${{ secrets.ZEGO_CLOUD_APP_SIGN }}
         run: "fallback_example=\"${SELECTED_ENVFILE}.example\"\n\nif [ -f \"$SELECTED_ENVFILE\" ]; then\n  cp \"$SELECTED_ENVFILE\"\
           \ .env.ci\nelif [ -f \"$fallback_example\" ]; then\n  cp \"$fallback_example\" .env.ci\nelse\n  : > .env.ci\nfi\n\nupsert_env()\

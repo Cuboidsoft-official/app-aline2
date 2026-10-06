@@ -130,6 +130,11 @@ class PreviewWorkflowContract(unittest.TestCase):
         self.assertNotIn("environment", self.preview["jobs"]["build-preview"])
         self.assertEqual(self.preview["jobs"]["build-preview"]["permissions"], {"contents": "read"})
         self.assertIn("ANDROID_UPLOAD_KEYSTORE_BASE64", caller["secrets"])
+        self.assertIn("ZEGO_CLOUD_APP_ID", caller["secrets"])
+        build_steps = {step.get("name"): step for step in self.preview["jobs"]["build-preview"]["steps"]}
+        zego_app_id = build_steps["Prepare CI env file"]["env"]["ZEGO_CLOUD_APP_ID_VALUE"]
+        self.assertIn("vars.ZEGO_CLOUD_APP_ID", zego_app_id)
+        self.assertIn("secrets.ZEGO_CLOUD_APP_ID", zego_app_id)
         self.assertIn("RELEASE_AWS_SECRET_ACCESS_KEY", yaml.safe_dump(self.preview["jobs"]["deliver"]))
         self.assertEqual(self.preview["jobs"]["deliver"]["environment"], "production")
 
