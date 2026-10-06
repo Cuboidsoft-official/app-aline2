@@ -750,22 +750,7 @@ jobs:
   preview-request:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - name: Check out exact PR head
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Validate before requesting test APK
-        run: |
-          npm ci
-          npm run typecheck
-          npm test -- --runInBand
-      - name: Explain delivery handoff
-        run: echo 'The trusted Android Preview Delivery workflow builds, signs and posts the production-configured PR test APK.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Request exact-head PR APK
+        run: echo 'The trusted Android Preview Delivery workflow validates, builds, signs and posts the production-configured PR test APK.' >> "$GITHUB_STEP_SUMMARY"
