@@ -3,6 +3,7 @@ name: Android Release
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches:
       - main
@@ -35,7 +36,7 @@ on:
       deliver:
         description: Email secure APK/AAB delivery links to Cuboidsoft
         required: true
-        default: false
+        default: true
         type: boolean
 
 permissions:
@@ -55,7 +56,7 @@ jobs:
     if: github.event_name != 'pull_request'
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment: production
@@ -529,7 +530,7 @@ jobs:
             --version-code "$VERSION_CODE" --profile "$PROFILE"
 
       - name: Upload standard release artifacts
-        if: steps.meta.outputs.build_aab == 'true'
+        if: steps.meta.outputs.build_aab == 'true' && steps.meta.outputs.deliver_release != 'true'
         id: upload_release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -540,7 +541,7 @@ jobs:
             ${{ steps.collect.outputs.apk_path }}.sha256
             ${{ steps.collect.outputs.aab_path }}.sha256
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
 
       - name: Upload arm64 release artifact
         if: steps.meta.outputs.build_aab != 'true'
@@ -552,7 +553,7 @@ jobs:
             ${{ steps.collect.outputs.apk_path }}
             ${{ steps.collect.outputs.apk_path }}.sha256
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
 
       # Presigning is done with a long-lived, resource-scoped IAM credential
       # rather than the OIDC role, because a SigV4 presigned URL can never
@@ -707,26 +708,19 @@ jobs:
         run: |
           python3 ./scripts/ci/send_release_email.py
 
-      - name: Publish release downloads on merged PR
-        id: downloads
+      - name: Publish direct S3 downloads in summary
         if: steps.meta.outputs.deliver_release == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
           APK_URL: ${{ steps.private_aab.outputs.apk_download_url }}
           AAB_URL: ${{ steps.private_aab.outputs.download_url }}
           EXPIRES: ${{ steps.private_aab.outputs.link_expires_at }}
-          ARTIFACT_URL: ${{ steps.upload_release.outputs.artifact-url }}
-        run: python3 scripts/ci/publish_production_links.py
+        run: python3 scripts/ci/download_summary.py
 
       - name: Add build summary
         if: success()
         env:
           APK_NAME: ${{ steps.meta.outputs.apk_name }}
           AAB_NAME: ${{ steps.meta.outputs.aab_name }}
-          DOWNLOAD_COMMENT_URL: ${{ steps.downloads.outputs.comment_url }}
           ARTIFACT_URL: ${{ steps.upload_release.outputs.artifact-url || steps.upload_release_arm64.outputs.artifact-url }}
         run: |
           {
@@ -737,17 +731,14 @@ jobs:
             echo "- Commit: \`${{ github.sha }}\`"
             echo "- Release profile: \`${{ steps.meta.outputs.release_profile }}\`"
             echo "- Release: \`${{ steps.meta.outputs.release_name }}\`"
-            echo "- [Download from GitHub (sign-in required)](${ARTIFACT_URL})"
+            if [ -n "$ARTIFACT_URL" ]; then echo "- Diagnostic/build-only artifact retained for one day."; fi
             echo "- Android version code: ${{ steps.android_version.outputs.version_code }}"
             echo "- Standard supports ARM 32-bit and 64-bit on Android 7+. ARM64 is diagnostic only."
             echo "- CI APKs use the upload certificate; Play installs require Play-signed updates."
             echo "- APK checksum:"
             cat "${APK_NAME}.sha256"
             if [ "${{ steps.meta.outputs.deliver_release }}" = "true" ]; then
-              if [ -n "$DOWNLOAD_COMMENT_URL" ]; then
-                echo "- [Production APK and Play AAB: S3 download links](${DOWNLOAD_COMMENT_URL})"
-              fi
-              echo "- S3 artifacts expire automatically after seven days; GitHub backup artifacts remain for 30 days."
+              echo "- S3 artifacts expire automatically after seven days; No duplicate final GitHub artifact is retained."
               echo "- Private APK/AAB delivery email sent to \`cuboidsoft@gmail.com\`"
               echo "- Delivery links verified reachable before sending; expire ${{ steps.private_aab.outputs.link_expires_at }}"
               echo "- Signed with the resource-scoped \`aline2-android-release-ci\` credential, not a cloud session"
@@ -766,9 +757,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   preview-request:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'build-test-apk')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Request exact-head PR APK
-        run: echo 'The trusted Android Preview Delivery workflow validates, builds, signs and posts the production-configured PR test APK.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'The trusted Android Preview Delivery workflow validates, builds, signs and publishes the requested exact-head PR test APK.' >> "$GITHUB_STEP_SUMMARY"
