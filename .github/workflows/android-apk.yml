@@ -230,16 +230,6 @@ jobs:
         continue-on-error: true
         run: npm run lint
 
-      - name: Record existing lint debt
-        if: always() && steps.lint.outcome == 'failure'
-        run: |
-          {
-            echo "## Lint debt"
-            echo
-            echo "Lint remains advisory until the existing application errors are resolved."
-            echo "Type checking, tests, signing validation, and artifact verification remain blocking."
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Run tests
         run: npm test -- --runInBand
 
