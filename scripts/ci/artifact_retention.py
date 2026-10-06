@@ -17,7 +17,7 @@ def link_seconds(record, days, now=None):
             raise ValueError("Invalid artifact retention deadline")
         seconds = min(seconds, deadline - int(time.time() if now is None else now) - 60)
     if seconds < 60:
-        raise ValueError("S3 retention window has ended; download the GitHub backup artifact instead")
+        raise ValueError("S3 retention window has ended; request a new approved release build")
     return seconds
 
 
