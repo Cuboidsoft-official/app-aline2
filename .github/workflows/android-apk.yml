@@ -32,7 +32,7 @@ on:
           - production
           - pr-test
       pr_number:
-        description: Required only when target is pr-test; enter the open PR number
+        description: Required only for pr-test; enter a same-repository PR targeting main (open or merged)
         required: false
         type: string
       release_profile:
