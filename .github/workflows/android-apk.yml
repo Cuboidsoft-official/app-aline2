@@ -56,10 +56,6 @@ permissions:
   # credential instead, so the workflow no longer requests the ability to
   # mint itself a cloud identity.
 
-concurrency:
-  group: android-production-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   reject-non-main-dispatch:
     if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
@@ -76,6 +72,9 @@ jobs:
   pr-test-apk:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.target == 'pr-test'
     uses: ./.github/workflows/android-preview-delivery.yml
+    concurrency:
+      group: android-pr-test-${{ github.event.inputs.pr_number || github.run_id }}
+      cancel-in-progress: false
     with:
       pr_number: ${{ inputs.pr_number }}
     permissions:
@@ -94,6 +93,9 @@ jobs:
 
   release-android:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.target == 'production')
+    concurrency:
+      group: android-production-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
     runs-on: ubuntu-24.04

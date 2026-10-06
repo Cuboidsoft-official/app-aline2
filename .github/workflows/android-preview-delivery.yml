@@ -36,7 +36,7 @@ permissions:
 
 concurrency:
   group: preview-delivery-${{ inputs.pr_number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   resolve:

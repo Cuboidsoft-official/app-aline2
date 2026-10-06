@@ -101,7 +101,11 @@ class PreviewWorkflowContract(unittest.TestCase):
         jobs = self.main["jobs"]
         self.assertIn("android-preview-delivery.yml", jobs["pr-test-apk"]["uses"])
         self.assertIn("inputs.target == 'pr-test'", jobs["pr-test-apk"]["if"])
+        self.assertIn("android-pr-test-", jobs["pr-test-apk"]["concurrency"]["group"])
+        self.assertFalse(jobs["pr-test-apk"]["concurrency"]["cancel-in-progress"])
         self.assertIn("inputs.target == 'production'", jobs["release-android"]["if"])
+        self.assertIn("android-production-", jobs["release-android"]["concurrency"]["group"])
+        self.assertFalse(jobs["release-android"]["concurrency"]["cancel-in-progress"])
         self.assertIn("github.event_name == 'push'", jobs["release-android"]["if"])
         self.assertNotIn("pull_request", triggers)
         paths = triggers["push"]["paths"]
@@ -122,6 +126,7 @@ class PreviewWorkflowContract(unittest.TestCase):
     def test_pr_build_is_a_separate_unprivileged_workflow_path(self):
         caller = self.main["jobs"]["pr-test-apk"]
         self.assertIn("android-preview-delivery.yml", caller["uses"])
+        self.assertFalse(self.preview["concurrency"]["cancel-in-progress"])
         self.assertNotIn("environment", self.preview["jobs"]["build-preview"])
         self.assertEqual(self.preview["jobs"]["build-preview"]["permissions"], {"contents": "read"})
         self.assertIn("ANDROID_UPLOAD_KEYSTORE_BASE64", caller["secrets"])
