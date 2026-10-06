@@ -84,19 +84,8 @@ jobs:
         run: npm run typecheck
 
       - name: Run lint baseline
-        id: lint
         continue-on-error: true
         run: npm run lint
-
-      - name: Record existing lint debt
-        if: always() && steps.lint.outcome == 'failure'
-        run: |
-          {
-            echo "## Lint debt"
-            echo
-            echo "Lint remains advisory until the existing application errors are resolved."
-            echo "Type checking and tests remain blocking. Add the build-test-apk label only when a release-mode PR test APK is needed."
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run tests
         run: npm test -- --runInBand
