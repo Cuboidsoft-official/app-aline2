@@ -25,8 +25,8 @@ const CANVAS_H = 693; // ≈ 9:16
 // ─── isFitAspect ─────────────────────────────────────────────────────────────
 
 describe("isFitAspect", () => {
-  it("returns true only for 'fullscreen'", () => {
-    expect(isFitAspect("fullscreen")).toBe(true);
+  it("returns false for 'fullscreen' — all story frames use cover mode", () => {
+    expect(isFitAspect("fullscreen")).toBe(false);
   });
 
   it("returns false for 'landscape'", () => {
@@ -37,76 +37,57 @@ describe("isFitAspect", () => {
     expect(isFitAspect("square")).toBe(false);
   });
 
-  it("returns false for 'post-square' or any unknown id", () => {
+  it("returns false for any id — cover mode is universal for stories", () => {
     expect(isFitAspect("portrait")).toBe(false);
     expect(isFitAspect("")).toBe(false);
-    expect(isFitAspect("FULLSCREEN")).toBe(false); // case-sensitive
+    expect(isFitAspect("FULLSCREEN")).toBe(false);
   });
 });
 
-// ─── Full Screen frame ────────────────────────────────────────────────────────
+// ─── Full Screen frame — always cover mode ───────────────────────────────────
 
-describe("Full Screen frame — computeFitScale", () => {
-  it("landscape source image (16:9) on 9:16 canvas → fitScale < 1 (letterboxed)", () => {
-    const imgW = 1920; const imgH = 1080; // 16:9
-    const scale = computeFitScale(imgW, imgH, CANVAS_W, CANVAS_H);
-    expect(scale).toBeLessThan(1);
+describe("Full Screen frame — cover mode (isFitAspect returns false)", () => {
+  it("fullscreen minScale = 1.0 (no letterboxing, image always fills frame)", () => {
+    // isFitAspect("fullscreen") === false → minScale = 1.0
+    const minScale = isFitAspect("fullscreen") ? computeFitScale(1920, 1080, CANVAS_W, CANVAS_H) : 1.0;
+    expect(minScale).toBe(1.0);
   });
 
-  it("landscape source: image fills full canvas WIDTH at fitScale", () => {
+  it("landscape source at scale=1: coverH = canvasH, image fills portrait canvas by height", () => {
     const imgW = 1920; const imgH = 1080;
-    const { coverW } = computeCoverDimensions(imgW, imgH, CANVAS_W, CANVAS_H);
-    const scale = computeFitScale(imgW, imgH, CANVAS_W, CANVAS_H);
-    expect(coverW * scale).toBeCloseTo(CANVAS_W, 0);
+    const { coverH } = computeCoverDimensions(imgW, imgH, CANVAS_W, CANVAS_H);
+    expect(coverH).toBeCloseTo(CANVAS_H, 0);
   });
 
-  it("portrait source image (9:16) on 9:16 canvas → fitScale ≈ 1 (very close to exact fit)", () => {
-    // 1080/1920 ≈ 0.5625 vs 390/693 ≈ 0.5627 — not exactly equal, within 0.1%
+  it("landscape source at scale=1: horizontal pan available (image overflows width)", () => {
+    const imgW = 1920; const imgH = 1080;
+    const { coverW, coverH } = computeCoverDimensions(imgW, imgH, CANVAS_W, CANVAS_H);
+    const { maxPanX } = computeMaxPan(coverW, coverH, CANVAS_W, CANVAS_H, 1);
+    expect(maxPanX).toBeGreaterThan(0);
+  });
+
+  it("portrait source at scale=1: nearly fills canvas exactly — minimal or no pan", () => {
+    // 1080:1920 ≈ 390:693 — ratios are close but not pixel-perfect, so pan is ~0
     const imgW = 1080; const imgH = 1920;
-    const scale = computeFitScale(imgW, imgH, CANVAS_W, CANVAS_H);
-    expect(scale).toBeCloseTo(1, 2); // ≤0.5% tolerance
+    const { coverW, coverH } = computeCoverDimensions(imgW, imgH, CANVAS_W, CANVAS_H);
+    const { maxPanX, maxPanY } = computeMaxPan(coverW, coverH, CANVAS_W, CANVAS_H, 1);
+    expect(maxPanX).toBeCloseTo(0, 0); // < 0.5 px
+    expect(maxPanY).toBeCloseTo(0, 0); // < 0.5 px
   });
 
-  it("square source image (1:1) on 9:16 canvas → fitScale < 1 (letterboxed)", () => {
-    const imgW = 1080; const imgH = 1080; // 1:1
-    const scale = computeFitScale(imgW, imgH, CANVAS_W, CANVAS_H);
-    expect(scale).toBeLessThan(1);
-  });
-
-  it("square source: image fills full canvas WIDTH at fitScale", () => {
+  it("square source at scale=1: fills canvas by height, horizontal overflow", () => {
+    // Same as square frame: square image covers by height on portrait canvas
     const imgW = 1080; const imgH = 1080;
-    const { coverW } = computeCoverDimensions(imgW, imgH, CANVAS_W, CANVAS_H);
-    const scale = computeFitScale(imgW, imgH, CANVAS_W, CANVAS_H);
-    expect(coverW * scale).toBeCloseTo(CANVAS_W, 0);
+    const { coverW, coverH } = computeCoverDimensions(imgW, imgH, CANVAS_W, CANVAS_H);
+    const { maxPanX } = computeMaxPan(coverW, coverH, CANVAS_W, CANVAS_H, 1);
+    expect(coverH).toBeCloseTo(CANVAS_H, 0); // fills height
+    expect(maxPanX).toBeGreaterThan(0); // overflows width → can pan horizontally
   });
 
-  it("tall portrait (3:4) on 9:16 canvas → fitScale < 1 (overflows horizontally when covering)", () => {
-    // 3:4 is wider than 9:16 — cover scale fills by HEIGHT, leaving horizontal overflow
-    // so fitScale (fit) < 1 to pull it back
-    const imgW = 900; const imgH = 1200; // 3:4 ratio
-    const scale = computeFitScale(imgW, imgH, CANVAS_W, CANVAS_H);
-    expect(scale).toBeLessThan(1);
-    expect(scale).toBeGreaterThan(0);
-  });
-
-  it("zero image dimensions → result is a number (function does not throw)", () => {
-    // Function computes without crashing; the calling code guards with canvas size checks
-    const result = computeFitScale(0, 0, CANVAS_W, CANVAS_H);
-    expect(typeof result).toBe("number");
-  });
-
-  it("fitScale is always > 0", () => {
+  it("computeFitScale helper still works correctly even though it is not used for minScale", () => {
+    // computeFitScale is still a valid utility; just not used for minScale since isFitAspect = false
     expect(computeFitScale(1920, 1080, CANVAS_W, CANVAS_H)).toBeGreaterThan(0);
-    expect(computeFitScale(1080, 1920, CANVAS_W, CANVAS_H)).toBeGreaterThan(0);
-    expect(computeFitScale(1080, 1080, CANVAS_W, CANVAS_H)).toBeGreaterThan(0);
-  });
-
-  it("fitScale is always <= 1 (never zooms in beyond cover)", () => {
-    [
-      [1920, 1080], [1080, 1920], [1080, 1080], [400, 300], [300, 400],
-    ].forEach(([w, h]) => {
-      expect(computeFitScale(w, h, CANVAS_W, CANVAS_H)).toBeLessThanOrEqual(1 + 1e-9);
-    });
+    expect(computeFitScale(1920, 1080, CANVAS_W, CANVAS_H)).toBeLessThanOrEqual(1);
   });
 });
 
@@ -184,24 +165,17 @@ describe("Square frame (1:1)", () => {
 // ─── Zoom in / zoom out ───────────────────────────────────────────────────────
 
 describe("Zoom in / zoom out — pinch clamp logic", () => {
-  // Full Screen: minScale = fitScale (may be < 1)
-  it("fullscreen + landscape image: pinch can zoom OUT below 1 down to fitScale", () => {
-    const imgW = 1920; const imgH = 1080;
-    const fitScale = computeFitScale(imgW, imgH, CANVAS_W, CANVAS_H);
-    expect(fitScale).toBeLessThan(1);
-
-    // Simulate clamping the pinch scale
+  // All frames (including fullscreen): minScale = 1.0 — cannot zoom out below cover
+  it("fullscreen: pinch cannot zoom out below 1.0 (cover mode, no letterboxing)", () => {
     const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-    const pinchMinS = fitScale; // isFitAspect === true
-    const attemptedScale = 0.1; // user tries to zoom way out
-    const result = clamp(attemptedScale, pinchMinS, 4);
-    expect(result).toBe(pinchMinS); // clamped to fitScale, not below
+    const pinchMinS = isFitAspect("fullscreen") ? computeFitScale(1920, 1080, CANVAS_W, CANVAS_H) : 1.0;
+    expect(pinchMinS).toBe(1.0); // isFitAspect is false → 1.0
+    expect(clamp(0.1, pinchMinS, 4)).toBe(1.0);
   });
 
-  // Landscape / Square: minScale = 1.0 — cannot zoom out below cover
   it("landscape/square: pinch cannot zoom out below 1.0 (cover always fills frame)", () => {
     const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-    const pinchMinS = 1.0; // isFitAspect === false
+    const pinchMinS = 1.0; // isFitAspect === false for all aspects
     const attemptedScale = 0.5;
     expect(clamp(attemptedScale, pinchMinS, 4)).toBe(1.0);
   });
@@ -256,13 +230,12 @@ describe("Pan bounds during zoom", () => {
     expect(y2).toBeGreaterThan(y1);
   });
 
-  it("at fitScale with landscape source: maxPanX ≈ 0 (image fits exactly horizontally)", () => {
+  it("landscape source at scale=1: maxPanX > 0 (image overflows width in cover mode)", () => {
     const imgW = 1920; const imgH = 1080;
     const { coverW, coverH } = computeCoverDimensions(imgW, imgH, CANVAS_W, CANVAS_H);
-    const fitScale = computeFitScale(imgW, imgH, CANVAS_W, CANVAS_H);
-    const { maxPanX } = computeMaxPan(coverW, coverH, CANVAS_W, CANVAS_H, fitScale);
-    // At fitScale the image fits exactly within the canvas in at least one axis
-    expect(maxPanX).toBeCloseTo(0, 0);
+    const { maxPanX, maxPanY } = computeMaxPan(coverW, coverH, CANVAS_W, CANVAS_H, 1);
+    expect(maxPanX).toBeGreaterThan(0); // image wider than canvas → can pan
+    expect(maxPanY).toBe(0); // fills height exactly
   });
 
   it("maxPanX and maxPanY are never negative", () => {
@@ -274,23 +247,24 @@ describe("Pan bounds during zoom", () => {
   });
 });
 
-// ─── sanitizeFrameTransform — fullscreen sub-1 scale must survive ────────────
+// ─── sanitizeFrameTransform — cover mode (scale >= 1) ───────────────────────
 
-describe("sanitizeFrameTransform — fullscreen fit scale preservation", () => {
-  it("sub-1 scale from fullscreen mode is NOT clipped to 1", () => {
-    const fitScale = computeFitScale(1920, 1080, CANVAS_W, CANVAS_H); // ~0.316
-    const result = sanitizeFrameTransform({ scale: fitScale, translateX: 0, translateY: 0 });
-    expect(result!.scale).toBeCloseTo(fitScale, 4);
+describe("sanitizeFrameTransform — cover mode transforms", () => {
+  it("scale=1 (reset position) round-trips correctly", () => {
+    const result = sanitizeFrameTransform({ scale: 1, translateX: 0, translateY: 0 });
+    expect(result!.scale).toBe(1);
+  });
+
+  it("zoomed-in scale (> 1) round-trips correctly", () => {
+    const result = sanitizeFrameTransform({ scale: 2.5, translateX: 0.1, translateY: -0.05 });
+    expect(result!.scale).toBeCloseTo(2.5, 4);
+    expect(result!.translateX).toBeCloseTo(0.1, 5);
+    expect(result!.translateY).toBeCloseTo(-0.05, 5);
   });
 
   it("sourceAspect (landscape image ratio) is stored and retrieved", () => {
     const sourceAspect = 1920 / 1080; // 16:9
-    const result = sanitizeFrameTransform({
-      scale: 0.5,
-      translateX: 0,
-      translateY: 0,
-      sourceAspect,
-    });
+    const result = sanitizeFrameTransform({ scale: 1.5, translateX: 0, translateY: 0, sourceAspect });
     expect(result!.sourceAspect).toBeCloseTo(sourceAspect, 5);
   });
 
@@ -299,11 +273,10 @@ describe("sanitizeFrameTransform — fullscreen fit scale preservation", () => {
     expect(result!.sourceAspect).toBeUndefined();
   });
 
-  it("valid full-screen transform (sub-1 scale + sourceAspect) round-trips correctly", () => {
-    const fitScale = computeFitScale(1920, 1080, CANVAS_W, CANVAS_H);
-    const transform = { scale: fitScale, translateX: 0.1, translateY: -0.05, sourceAspect: 16 / 9 };
+  it("valid cover transform with sourceAspect round-trips correctly", () => {
+    const transform = { scale: 1.8, translateX: 0.1, translateY: -0.05, sourceAspect: 16 / 9 };
     const result = sanitizeFrameTransform(transform);
-    expect(result!.scale).toBeCloseTo(fitScale, 4);
+    expect(result!.scale).toBeCloseTo(1.8, 4);
     expect(result!.translateX).toBeCloseTo(0.1, 5);
     expect(result!.translateY).toBeCloseTo(-0.05, 5);
     expect(result!.sourceAspect).toBeCloseTo(16 / 9, 5);
@@ -371,15 +344,14 @@ describe("Reset position scale (resetCropPosition logic)", () => {
       ? computeFitScale(imgW, imgH, CANVAS_W, CANVAS_H)
       : 1.0;
 
-  it("fullscreen + landscape image: reset scale = fitScale (< 1)", () => {
+  it("fullscreen + landscape image: reset scale = 1.0 (cover mode, no fit)", () => {
     const s = minScale("fullscreen", 1920, 1080);
-    expect(s).toBeLessThan(1);
-    expect(s).toBeCloseTo(computeFitScale(1920, 1080, CANVAS_W, CANVAS_H), 5);
+    expect(s).toBe(1.0); // isFitAspect always false → 1.0
   });
 
-  it("fullscreen + portrait image: reset scale ≈ 1.0 (fills canvas, within 0.1%)", () => {
+  it("fullscreen + portrait image: reset scale = 1.0", () => {
     const s = minScale("fullscreen", 1080, 1920);
-    expect(s).toBeCloseTo(1, 2); // 1080/1920 ≈ 390/693 — close but not pixel-perfect
+    expect(s).toBe(1.0);
   });
 
   it("landscape: reset scale = 1.0 (cover always)", () => {

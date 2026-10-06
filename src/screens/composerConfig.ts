@@ -72,7 +72,8 @@ export const DEFAULT_ASPECT_BY_MODE: Record<ComposerMode, string> = {
  * Returns true for the "fullscreen" aspect which starts the image at fit-scale
  * (entire image visible without cropping) rather than the default cover-fill scale.
  */
-export const isFitAspect = (aspectId: string): boolean => aspectId === "fullscreen";
+// All story frames use cover mode (image always fills the frame, no letterboxing).
+export const isFitAspect = (_aspectId: string): boolean => false;
 
 /** The panel that is open when the editor first appears. null = none open. */
 export const INITIAL_TOOL_PANEL: ComposerEditToolPanel = null;
