@@ -517,8 +517,8 @@ class TheChecksAreActuallyWiredIn(unittest.TestCase):
         ci = self.CI_WORKFLOW.read_text(encoding="utf-8")
         self.assertLess(
             ci.index("name: Assert release delivery contract"),
-            ci.index("name: Set up Android SDK"),
-            "the delivery contract must run before the Android toolchain is installed",
+            ci.index("name: Install dependencies"),
+            "the delivery contract must run before dependency installation",
         )
 
     def test_ci_lints_the_workflows(self):

@@ -69,7 +69,8 @@ const getMediaFrameTransformStyle = (
   height: number,
 ) => {
   const transform = asset?.frameTransform;
-  const scale = Math.max(1.0, Math.min(4, Number(transform?.scale || 1)));
+  const hasSourceAspect = Number.isFinite(Number(transform?.sourceAspect)) && Number(transform?.sourceAspect ?? 0) > 0;
+  const scale = Math.max(hasSourceAspect ? 0.1 : 1.0, Math.min(4, Number(transform?.scale || 1)));
   const translateX = Math.max(-1.5, Math.min(1.5, Number(transform?.translateX || 0))) * width;
   const translateY = Math.max(-1.5, Math.min(1.5, Number(transform?.translateY || 0))) * height;
 
