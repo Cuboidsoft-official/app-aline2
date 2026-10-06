@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 
 import yaml
-from resolve_preview import check_gate, eligible_pr, has_app_changes, latest_by_name
+from resolve_preview import check_gate, eligible_pr, has_app_changes, latest_by_name, target_is_ancestor
 
 
 def check(name, conclusion="success", status="completed", app_id=15368, app_slug="github-actions", run_id=1):
@@ -53,16 +53,26 @@ class PreviewEligibility(unittest.TestCase):
             "head": {"sha": "abc", "repo": {"id": 42}},
         }
 
-    def test_only_open_same_repository_prs_targeting_main_are_eligible(self):
+    def test_open_and_merged_same_repository_prs_targeting_main_are_eligible(self):
         self.assertTrue(eligible_pr(self.pr, 42))
+        merged = {**self.pr, "state": "closed", "merged": True, "merge_commit_sha": "def"}
+        self.assertTrue(eligible_pr(merged, 42))
         for edit in (
             {"state": "closed"},
+            {"state": "closed", "merged": False},
             {"base": {"ref": "dev", "repo": {"id": 42}}},
             {"head": {"sha": "abc", "repo": {"id": 7}}},
             {"head": {"sha": "abc", "repo": None}},
         ):
             pr = {**self.pr, **edit}
             self.assertFalse(eligible_pr(pr, 42))
+
+    def test_merged_target_must_be_ancestor_of_trusted_revision(self):
+        self.assertTrue(target_is_ancestor({"status": "ahead", "behind_by": 0}))
+        self.assertTrue(target_is_ancestor({"status": "identical", "behind_by": 0}))
+        self.assertFalse(target_is_ancestor({"status": "behind", "behind_by": 1}))
+        self.assertFalse(target_is_ancestor({"status": "diverged", "behind_by": 1}))
+        self.assertFalse(target_is_ancestor({"status": "ahead", "behind_by": 1}))
 
     def test_only_app_relevant_changes_offer_a_test_build(self):
         self.assertTrue(has_app_changes([{"filename": "src/screens/Profile.tsx"}]))
@@ -78,6 +88,65 @@ class PreviewEligibility(unittest.TestCase):
     def test_preview_check_does_not_block_its_own_retry(self):
         runs = [check("validate"), check("workflows"), check("PR test APK", status="in_progress")]
         self.assertTrue(check_gate(runs)[0])
+
+
+class PublishPreviewProvenance(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import patch
+        import publish_preview
+        self.patch_api = patch.object(publish_preview, "api")
+        self.api = self.patch_api.start()
+        self.addCleanup(self.patch_api.stop)
+        self.module = publish_preview
+
+    def pr(self, **overrides):
+        result = {
+            "state": "closed",
+            "merged": True,
+            "merge_commit_sha": "merge-sha",
+            "head": {"sha": "reviewed-head", "repo": {"full_name": "Cuboidsoft-official/app-aline2"}},
+            "base": {"ref": "main", "repo": {"full_name": "Cuboidsoft-official/app-aline2"}},
+        }
+        result.update(overrides)
+        return result
+
+    def test_merged_pr_is_publishable_only_while_same_merge_commit_is_on_main(self):
+        self.api.side_effect = [
+            self.pr(),
+            {"object": {"sha": "current-main"}},
+            {"status": "ahead", "behind_by": 0},
+        ]
+        self.assertTrue(self.module.provenance_is_current(
+            "Cuboidsoft-official/app-aline2", 72, "merge-sha", "reviewed-head", True
+        ))
+
+    def test_rejects_changed_pr_merge_commit_or_removed_main_ancestor(self):
+        for pr in (
+            self.pr(merge_commit_sha="different-merge"),
+            self.pr(head={"sha": "changed-head"}),
+        ):
+            with self.subTest(pr=pr):
+                self.api.reset_mock()
+                self.api.return_value = pr
+                self.assertFalse(self.module.provenance_is_current(
+                    "Cuboidsoft-official/app-aline2", 72, "merge-sha", "reviewed-head", True
+                ))
+        self.api.reset_mock()
+        self.api.side_effect = [self.pr(), {"object": {"sha": "current-main"}}, {"status": "diverged", "behind_by": 1}]
+        self.assertFalse(self.module.provenance_is_current(
+            "Cuboidsoft-official/app-aline2", 72, "merge-sha", "reviewed-head", True
+        ))
+
+    def test_open_pr_still_requires_exact_current_head(self):
+        pr = self.pr(state="open", merged=False, head={"sha": "reviewed-head", "repo": {"full_name": "Cuboidsoft-official/app-aline2"}})
+        self.api.return_value = pr
+        self.assertTrue(self.module.provenance_is_current(
+            "Cuboidsoft-official/app-aline2", 72, "reviewed-head", "reviewed-head", False
+        ))
+        self.api.return_value = self.pr(state="open", merged=False, head={"sha": "changed-head", "repo": {"full_name": "Cuboidsoft-official/app-aline2"}})
+        self.assertFalse(self.module.provenance_is_current(
+            "Cuboidsoft-official/app-aline2", 72, "reviewed-head", "reviewed-head", False
+        ))
 
 
 class PreviewWorkflowContract(unittest.TestCase):

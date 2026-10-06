@@ -8,7 +8,7 @@ on:
   workflow_call:
     inputs:
       pr_number:
-        description: Open pull request to build after its required checks pass
+        description: Same-repository PR targeting main; open PR builds its head, merged PR builds its merge commit
         required: true
         type: string
     secrets:
@@ -52,6 +52,8 @@ jobs:
       eligible: ${{ steps.target.outputs.eligible }}
       pr: ${{ steps.target.outputs.pr }}
       sha: ${{ steps.target.outputs.sha }}
+      pr_head_sha: ${{ steps.target.outputs.pr_head_sha }}
+      merged: ${{ steps.target.outputs.merged }}
       version: ${{ steps.target.outputs.version }}
       check: ${{ steps.target.outputs.check }}
     steps:
@@ -69,6 +71,7 @@ jobs:
           ACTOR: ${{ github.actor }}
           RUN_NUMBER: ${{ github.run_number }}
           REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
         run: python3 scripts/ci/resolve_preview.py
 
   build-preview:
@@ -267,6 +270,8 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ needs.resolve.outputs.pr }}
           SHA: ${{ needs.resolve.outputs.sha }}
+          PR_HEAD_SHA: ${{ needs.resolve.outputs.pr_head_sha }}
+          MERGED: ${{ needs.resolve.outputs.merged }}
           VERSION: ${{ needs.resolve.outputs.version }}
           AWS_REGION: ${{ vars.AWS_REGION }}
           PRIVATE_RELEASES_BUCKET: ${{ vars.PRIVATE_RELEASES_BUCKET }}
@@ -287,7 +292,7 @@ jobs:
     permissions:
       checks: write
     steps:
-      - name: Report exact-head APK result
+      - name: Report PR APK result
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
