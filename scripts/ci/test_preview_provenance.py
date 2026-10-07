@@ -207,8 +207,16 @@ class PreviewWorkflowContract(unittest.TestCase):
         zego_app_id = build_steps["Prepare CI env file"]["env"]["ZEGO_CLOUD_APP_ID_VALUE"]
         self.assertIn("vars.ZEGO_CLOUD_APP_ID", zego_app_id)
         self.assertIn("secrets.ZEGO_CLOUD_APP_ID", zego_app_id)
-        self.assertIn("RELEASE_AWS_SECRET_ACCESS_KEY", yaml.safe_dump(self.preview["jobs"]["deliver"]))
-        self.assertEqual(self.preview["jobs"]["deliver"]["environment"], "production")
+        # Run 175 signed the APK and then failed with NoCredentialsError:
+        # RELEASE_AWS_* resolves to an empty string for a job inside a called
+        # workflow, however valid the reference looks. Publication therefore
+        # runs in a top-level job bound to the production environment.
+        self.assertNotIn("RELEASE_AWS_", yaml.safe_dump(self.preview))
+        self.assertNotIn("deliver", self.preview["jobs"])
+        self.assertNotIn("report", self.preview["jobs"])
+        deliver = self.main["jobs"]["deliver-pr-test-apk"]
+        self.assertIn("RELEASE_AWS_SECRET_ACCESS_KEY", yaml.safe_dump(deliver))
+        self.assertEqual(deliver["environment"], "production")
 
     def test_build_rechecks_preflight_but_does_not_repeat_tests_or_handle_release_keys(self):
         jobs = self.preview["jobs"]
@@ -225,12 +233,36 @@ class PreviewWorkflowContract(unittest.TestCase):
         self.assertEqual(build["permissions"], {"contents": "read"})
 
     def test_signing_job_uses_trusted_workflow_code_and_never_builds_pr_source(self):
-        deliver = self.preview["jobs"]["deliver"]
+        deliver = self.main["jobs"]["deliver-pr-test-apk"]
         text = yaml.safe_dump(deliver)
         self.assertEqual(deliver["steps"][0]["with"]["ref"], "${{ github.sha }}")
         self.assertFalse(deliver["steps"][0]["with"]["persist-credentials"])
         self.assertNotIn("npm ci", text)
         self.assertNotIn("build-android-release.sh", text)
+
+    def test_publication_and_check_reporting_run_top_level_after_the_called_workflow(self):
+        """The caller must receive the resolve outputs and gate on publication.
+
+        Without the workflow_call outputs the report job never runs at all —
+        its `check != ''` condition evaluates false at runtime and no linter
+        catches that — leaving the PR test APK check stuck in progress. And
+        without deliver in the report's needs chain, the check could complete
+        green inside the called workflow while top-level publication still
+        fails, which is the premature success this split would otherwise
+        introduce.
+        """
+        called_triggers = self.preview.get("on", self.preview.get(True))
+        outputs = called_triggers["workflow_call"]["outputs"]
+        for name in ("eligible", "pr", "sha", "pr_head_sha", "merged", "version", "check"):
+            self.assertIn(name, outputs)
+        jobs = self.main["jobs"]
+        self.assertEqual(jobs["deliver-pr-test-apk"]["needs"], ["pr-test-apk"])
+        report = jobs["report-pr-test-apk"]
+        self.assertEqual(report["needs"], ["pr-test-apk", "deliver-pr-test-apk"])
+        self.assertIn("always()", report["if"])
+        report_env = report["steps"][0]["env"]
+        self.assertEqual(report_env["CHECK"], "${{ needs.pr-test-apk.outputs.check }}")
+        self.assertEqual(report_env["DELIVERY_RESULT"], "${{ needs.deliver-pr-test-apk.result }}")
 
     def test_preview_produces_only_standard_apk_and_no_email(self):
         build = self.preview["jobs"]["build-preview"]
@@ -238,4 +270,4 @@ class PreviewWorkflowContract(unittest.TestCase):
         self.assertEqual(steps["Build production-configured PR APK"]["run"], "bash scripts/build-android-release.sh apk")
         self.assertNotIn("bundleRelease", yaml.safe_dump(build))
         self.assertNotIn("apk-aab", yaml.safe_dump(build))
-        self.assertNotIn("send_release_email", yaml.safe_dump(self.preview["jobs"]["deliver"]))
+        self.assertNotIn("send_release_email", yaml.safe_dump(self.main["jobs"]["deliver-pr-test-apk"]))

@@ -67,10 +67,11 @@ class WorkflowDecisions(unittest.TestCase):
         resolver=(root/'scripts/ci/resolve_preview.py').read_text()
         self.assertIn('REQUIRED_CHECKS',resolver)
         self.assertNotIn('build-test-apk',resolver)
-        workflow=yaml.safe_load((root/'.github/workflows/android-preview-delivery.yml').read_text())
-        steps=workflow['jobs']['deliver']['steps']
+        called=yaml.safe_load((root/'.github/workflows/android-preview-delivery.yml').read_text())
+        workflow=yaml.safe_load((root/'.github/workflows/android-apk.yml').read_text())
+        steps=workflow['jobs']['deliver-pr-test-apk']['steps']
         self.assertFalse(any('actions/upload-artifact@' in s.get('uses','') for s in steps))
-        self.assertTrue(any('actions/upload-artifact@' in s.get('uses','') for s in workflow['jobs']['build-preview']['steps']))
+        self.assertTrue(any('actions/upload-artifact@' in s.get('uses','') for s in called['jobs']['build-preview']['steps']))
 
     def test_preview_build_is_apk_only(self):
         from pathlib import Path
