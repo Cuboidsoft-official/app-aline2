@@ -214,6 +214,141 @@ export const computePinchScale = (
     Math.min(4, startScale * (currentDistance / Math.max(1, startDistance))),
   );
 
+// ─── Story / swipe frame helpers ──────────────────────────────────────────────
+
+/**
+ * Frames narrower than this ratio (Full Screen 9:16 and taller) are shown
+ * edge-to-edge in the full-screen story and swipe viewers. Wider frames
+ * (1:1, 16:9) are shown as a centred box at their real size.
+ */
+export const TALL_FRAME_RATIO = 0.7;
+
+const isPositiveNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
+/**
+ * Largest box with the given width/height ratio that fits inside the
+ * container. Falls back to the container's own ratio when ratio is invalid.
+ */
+export const fitFrameInContainer = (
+  containerW: number,
+  containerH: number,
+  ratio: number,
+): { width: number; height: number } => {
+  if (!isPositiveNumber(containerW) || !isPositiveNumber(containerH)) {
+    return { width: 0, height: 0 };
+  }
+  const safeRatio = isPositiveNumber(ratio) ? ratio : containerW / containerH;
+  if (containerW / containerH > safeRatio) {
+    return { width: containerH * safeRatio, height: containerH };
+  }
+  return { width: containerW, height: containerW / safeRatio };
+};
+
+/**
+ * Ratio of the story crop frame. "Full Screen" uses the whole editor canvas
+ * so the story fills the phone like Instagram; other frames use their preset.
+ */
+export const resolveStoryFrameRatio = (
+  aspectId: string,
+  canvasW: number,
+  canvasH: number,
+  presetRatio: number,
+): number =>
+  aspectId === "fullscreen" && isPositiveNumber(canvasW) && isPositiveNumber(canvasH)
+    ? canvasW / canvasH
+    : presetRatio;
+
+/**
+ * Output pixel size for an exported crop: the short edge is 1080px (the
+ * resolution the editor renders at on most phones) and the long edge follows
+ * the frame ratio, e.g. 16:9 → 1920×1080, 1:1 → 1080×1080, 9:16 → 1080×1920.
+ */
+export const computeCropExportSize = (
+  ratio: number,
+  shortEdge = 1080,
+): { width: number; height: number } => {
+  const safeRatio = isPositiveNumber(ratio) ? ratio : 9 / 16;
+  return safeRatio >= 1
+    ? { width: Math.round(shortEdge * safeRatio), height: shortEdge }
+    : { width: shortEdge, height: Math.round(shortEdge / safeRatio) };
+};
+
+export type FramedMediaLayout = {
+  /** Visible frame, positioned inside the container. */
+  frame: { left: number; top: number; width: number; height: number };
+  /**
+   * Media box inside the frame with the creator's pan/zoom applied, or null
+   * when no transform was saved (the media then simply covers the frame).
+   */
+  content: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    translateX: number;
+    translateY: number;
+    scale: number;
+  } | null;
+};
+
+/**
+ * Lays out published story/swipe media the same way the editor showed it:
+ * a frame with the saved width/height ratio, and the media covering that
+ * frame with the saved pan/zoom. The media always fills the frame, so there
+ * is never empty space inside it.
+ */
+export const computeFramedMediaLayout = ({
+  containerWidth,
+  containerHeight,
+  mediaWidth,
+  mediaHeight,
+  frameTransform,
+  fillTallFrames = true,
+}: {
+  containerWidth: number;
+  containerHeight: number;
+  mediaWidth?: number;
+  mediaHeight?: number;
+  frameTransform?: { scale?: number; translateX?: number; translateY?: number; sourceAspect?: number };
+  fillTallFrames?: boolean;
+}): FramedMediaLayout => {
+  const ratio = isPositiveNumber(mediaWidth) && isPositiveNumber(mediaHeight) ? mediaWidth / mediaHeight : 0;
+  const fillContainer = !ratio || (fillTallFrames && ratio < TALL_FRAME_RATIO);
+  const { width: frameW, height: frameH } = fillContainer
+    ? { width: Math.max(0, containerWidth || 0), height: Math.max(0, containerHeight || 0) }
+    : fitFrameInContainer(containerWidth, containerHeight, ratio);
+  const frame = {
+    left: (Math.max(0, containerWidth || 0) - frameW) / 2,
+    top: (Math.max(0, containerHeight || 0) - frameH) / 2,
+    width: frameW,
+    height: frameH,
+  };
+
+  if (!frameTransform || frameW <= 0 || frameH <= 0) {
+    return { frame, content: null };
+  }
+
+  const sourceAspect = isPositiveNumber(frameTransform.sourceAspect) ? frameTransform.sourceAspect : ratio || 1;
+  const { coverW, coverH } = computeCoverDimensions(sourceAspect * 1000, 1000, frameW, frameH);
+  const scale = Math.max(1, Math.min(4, Number(frameTransform.scale) || 1));
+  const { maxPanX, maxPanY } = computeMaxPan(coverW, coverH, frameW, frameH, scale);
+  const clampPan = (value: number, max: number) => Math.max(-max, Math.min(max, value));
+
+  return {
+    frame,
+    content: {
+      left: (frameW - coverW) / 2,
+      top: (frameH - coverH) / 2,
+      width: coverW,
+      height: coverH,
+      translateX: clampPan((Number(frameTransform.translateX) || 0) * frameW, maxPanX),
+      translateY: clampPan((Number(frameTransform.translateY) || 0) * frameH, maxPanY),
+      scale,
+    },
+  };
+};
+
 /**
  * Determines the next scale when the "Fit full photo / Fill frame" button
  * is tapped. Mirrors the toggleFitFullPhoto logic in the component.
