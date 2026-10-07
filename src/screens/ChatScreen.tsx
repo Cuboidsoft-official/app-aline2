@@ -1136,7 +1136,7 @@ const ChatScreen = ({ navigation, route }: any) => {
   const scrollToLatestMessage = useCallback((animated = true) => {
     const scroll = () => {
       if (!messageListRef.current) return;
-      messageListRef.current.scrollToEnd?.({ animated });
+      messageListRef.current.scrollToOffset?.({ offset: 0, animated });
     };
 
     requestAnimationFrame(scroll);
@@ -1252,13 +1252,15 @@ const ChatScreen = ({ navigation, route }: any) => {
       return;
     }
 
+    const requestedLimit = options.limit || 50;
+
     try {
       const data = await fetchConversationMessages(targetConversationId, {
         cursor: options.cursor,
-        limit: options.limit || 30,
+        limit: requestedLimit,
       });
       const nextMessages = dedupeMessages(normalizeMediaFieldsDeep(data?.messages || []));
-      setPagination(data?.pagination || { nextCursor: null, hasMore: false, limit: 30 });
+      setPagination(data?.pagination || { nextCursor: null, hasMore: false, limit: requestedLimit });
       setMessages((prev) => (options.append ? dedupeMessages([...nextMessages, ...prev]) : nextMessages));
       setErrorMessage("");
     } catch (err: any) {
@@ -1269,6 +1271,24 @@ const ChatScreen = ({ navigation, route }: any) => {
       }
     }
   }, [currentConversationId]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingMore || !pagination?.hasMore || !pagination?.nextCursor || !currentConversationId) {
+      return;
+    }
+
+    try {
+      setLoadingMore(true);
+      await fetchMessages(currentConversationId, {
+        cursor: pagination.nextCursor,
+        limit: 50,
+        append: true,
+      });
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [currentConversationId, fetchMessages, loadingMore, pagination]);
+
 
   const fetchConversationMeta = useCallback(async (targetConversationId: string | null = currentConversationId) => {
     if (!targetConversationId) {
@@ -2067,6 +2087,10 @@ const ChatScreen = ({ navigation, route }: any) => {
       }),
     [currentUserId, isGroupConversation, messages, user?.name, user?.username],
   );
+  const invertedMessages = useMemo(() => {
+    return [...messages].reverse();
+  }, [messages]);
+
   const messageMap = useMemo(() => {
     const nextMap = new Map<string, ChatMessage>();
     messages.forEach((message) => {
@@ -2079,14 +2103,14 @@ const ChatScreen = ({ navigation, route }: any) => {
   }, [messages]);
   const messageIndexMap = useMemo(() => {
     const nextMap = new Map<string, number>();
-    messages.forEach((message, index) => {
+    invertedMessages.forEach((message, index) => {
       const identity = getMessageIdentity(message);
       if (identity) {
         nextMap.set(identity, index);
       }
     });
     return nextMap;
-  }, [messages]);
+  }, [invertedMessages]);
 
   const buildReplyPreview = useCallback((message: ChatMessage | null): ReplyPreviewState | null => {
     if (!message) {
@@ -2164,21 +2188,22 @@ const ChatScreen = ({ navigation, route }: any) => {
     while (!targetMessage && hasMore && nextCursor) {
       const data = await fetchConversationMessages(currentConversationId, {
         cursor: nextCursor,
-        limit: pagination?.limit || 30,
+        limit: 50,
       });
       const nextMessages = dedupeMessages(normalizeMediaFieldsDeep(data?.messages || [])) as ChatMessage[];
       workingMessages = dedupeMessages([...nextMessages, ...workingMessages]) as ChatMessage[];
 
       setMessages((prev) => dedupeMessages([...nextMessages, ...prev]) as ChatMessage[]);
       nextPagination = data?.pagination || nextPagination;
-      setPagination(nextPagination || { nextCursor: null, hasMore: false, limit: pagination?.limit || 30 });
+      setPagination(nextPagination || { nextCursor: null, hasMore: false, limit: 50 });
 
       targetMessage = nextMessages.find((message) => getMessageIdentity(message) === normalizedMessageId) || null;
       hasMore = Boolean(nextPagination?.hasMore);
       nextCursor = nextPagination?.nextCursor || null;
     }
 
-    const targetIndex = workingMessages.findIndex((message) => getMessageIdentity(message) === normalizedMessageId);
+    const workingInverted = [...workingMessages].reverse();
+    const targetIndex = workingInverted.findIndex((message) => getMessageIdentity(message) === normalizedMessageId);
     if (targetIndex < 0) {
       Alert.alert("Message not found", "We could not find the original replied message in this chat.");
       return;
@@ -3105,12 +3130,13 @@ const ChatScreen = ({ navigation, route }: any) => {
 
   const renderMessage = ({ item, index }: { item: ChatMessage, index: number; }) => {
     const currentDateLabel = getMessageDateLabel(item?.createdAt);
-    const previousMessage = index > 0 ? messages[index - 1] : null;
+    const previousMessage = index + 1 < invertedMessages.length ? invertedMessages[index + 1] : null;
     const previousDateLabel = previousMessage
       ? getMessageDateLabel(previousMessage?.createdAt)
       : null;
     const shouldShowDateSeparator =
-      index === 0 || currentDateLabel !== previousDateLabel;
+      !previousMessage || currentDateLabel !== previousDateLabel;
+
     const isMine = String(getMessageSenderId(item)) === String(currentUserId || "");
     const isSystemMessage = String(item?.messageType || "") === "system";
     const senderId = String(getMessageSenderId(item) || "");
@@ -3935,32 +3961,20 @@ const ChatScreen = ({ navigation, route }: any) => {
           />
           <FlatList
             ref={messageListRef}
-            data={messages}
+            data={invertedMessages}
+            inverted={true}
             keyExtractor={(item) => getMessageRenderKey(item)}
             renderItem={renderMessage}
+            onEndReached={loadOlderMessages}
+            onEndReachedThreshold={0.35}
             onScrollToIndexFailed={handleScrollToIndexFailed}
             contentContainerStyle={[styles.listContent, { paddingHorizontal: Math.max(8, chatMetrics.listPadding - 3), paddingTop: chatMetrics.listPadding, paddingBottom: listBottomPadding }]}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={Platform.OS === "android"}
-            initialNumToRender={30}
-            maxToRenderPerBatch={20}
-            onScroll={handleMessagesScroll}
-            scrollEventThrottle={100}
-            updateCellsBatchingPeriod={50}
+            initialNumToRender={20}
+            maxToRenderPerBatch={15}
             windowSize={7}
             keyboardShouldPersistTaps="handled"
-            onLayout={() => {
-              if (messages.length > 0 && !initialLatestScrollDoneRef.current) {
-                initialLatestScrollDoneRef.current = true;
-                scrollToLatestMessage(false);
-              }
-            }}
-            onContentSizeChange={() => {
-              if (!initialLatestScrollDoneRef.current && messages.length) {
-                initialLatestScrollDoneRef.current = true;
-                scrollToLatestMessage(false);
-              }
-            }}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -3972,22 +3986,22 @@ const ChatScreen = ({ navigation, route }: any) => {
                 tintColor={colors.primary}
               />
             }
-            ListHeaderComponent={
+            ListFooterComponent={
               pagination?.hasMore && loadingMore ? (
                 <View
                   style={{
                     alignItems: "center",
                     justifyContent: "center",
-                    paddingVertical: 8,
+                    paddingVertical: 12,
                   }}
                 >
-                  <ActivityIndicator color={PRIMARY} />
+                  <ActivityIndicator color={primaryThemeColor} size="small" />
                 </View>
               ) : null
             }
             ListEmptyComponent={
               loading ? null : (
-                <View style={styles.emptyWrap}>
+                <View style={[styles.emptyWrap, { transform: [{ scaleY: -1 }] }]}>
                   <View style={[styles.emptyIconWrap, { backgroundColor: alpha(primaryThemeColor, "14") }]}>
                     <Icon name="chatbubble-ellipses-outline" size={24} color={primaryThemeColor} />
                   </View>
