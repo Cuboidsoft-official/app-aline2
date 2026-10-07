@@ -22,4 +22,5 @@ def cleanup(repo, run_id):
 
 
 if __name__ == '__main__':
-    print(f"Temporary inputs removed: {cleanup(os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])}")
+    run_id = os.environ.get('ARTIFACT_RUN_ID', os.environ['GITHUB_RUN_ID'])
+    print(f"Temporary inputs removed: {cleanup(os.environ['GITHUB_REPOSITORY'], run_id)}")
