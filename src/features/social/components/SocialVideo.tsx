@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ActivityIndicator, Animated, Image, PanResponder, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 import Video from "react-native-video";
 import { stripBackgroundColorFromStyle } from "./mediaSurfaceStyle";
+import type { FramedMediaStyles } from "../framedMedia";
 
 type SocialVideoProps = {
   uri?: string;
@@ -26,6 +27,11 @@ type SocialVideoProps = {
   progressBarTrackColor?: string;
   progressBarFillColor?: string;
   progressBarThumbColor?: string;
+  /**
+   * Shows the video inside a clipped frame with the creator's pan/zoom
+   * applied, while the progress bar stays on the full container.
+   */
+  mediaFrame?: FramedMediaStyles;
 };
 
 const isLikelyVideoUri = (value: string): boolean =>
@@ -57,6 +63,7 @@ function SocialVideo({
   progressBarTrackColor = "rgba(255, 255, 255, 0.35)",
   progressBarFillColor = "#ffffff",
   progressBarThumbColor = "#ffffff",
+  mediaFrame,
 }: SocialVideoProps) {
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
   const videoRef = useRef<any>(null);
@@ -149,8 +156,8 @@ function SocialVideo({
     return <View style={[styles.fallback, containerStyle, { backgroundColor: fallbackColor }]} />;
   }
 
-  return (
-    <View style={[styles.container, containerStyle, { backgroundColor: fallbackColor }]}>
+  const mediaLayer = (
+    <>
       {shouldShowPoster ? (
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: placeholderOpacity }]}>
           <Image
@@ -167,105 +174,119 @@ function SocialVideo({
         </Animated.View>
       ) : null}
       {shouldMountVideo ? (
-        <>
-          <Video
-            ref={videoRef}
-            source={{ uri: resolvedUri }}
+        <Video
+          ref={videoRef}
+          source={{ uri: resolvedUri }}
+          style={StyleSheet.absoluteFill}
+          resizeMode={resizeMode}
+          paused={effectivePaused}
+          muted={muted || preload}
+          volume={safeVolume}
+          repeat={repeat}
+          controls={controls}
+          useTextureView={true}
+          onEnd={() => {
+            setVideoProgress(0);
+            onEnd?.();
+          }}
+          progressUpdateInterval={100}
+          preferredForwardBufferDuration={preload ? 2 : 4}
+          automaticallyWaitsToMinimizeStalling
+          bufferConfig={{
+            minBufferMs: 1000,
+            maxBufferMs: 15000,
+            bufferForPlaybackMs: 250,
+            bufferForPlaybackAfterRebufferMs: 500,
+          }}
+          onLoadStart={() => {
+            setIsBuffering(false);
+          }}
+          onLoad={(event) => {
+            setIsBuffering(false);
+            setIsVideoReady(true);
+            if (event?.duration && Number(event.duration) > 0) {
+              durationRef.current = Number(event.duration);
+            }
+            if (preload) {
+              videoRef.current?.seek?.(0);
+              setVideoProgress(0);
+            } else if (!paused) {
+              fadeOutPoster();
+            }
+            onLoad?.(event);
+          }}
+          onReadyForDisplay={() => {
+            setIsBuffering(false);
+            setIsVideoReady(true);
+            if (preload) {
+              videoRef.current?.seek?.(0);
+              setVideoProgress(0);
+            } else if (!paused) {
+              fadeOutPoster();
+            }
+          }}
+          onProgress={(data) => {
+            if (!preload && !paused) {
+              setIsBuffering(false);
+              setIsVideoReady(true);
+              fadeOutPoster();
+            }
+            const current = Number(data?.currentTime || 0);
+            const total = Number(
+              data?.seekableDuration || data?.playableDuration || durationRef.current || 0
+            );
+            if (total > 0) {
+              const ratio = Math.max(0, Math.min(1, current / total));
+              setVideoProgress(ratio);
+            }
+            onProgress?.(data);
+          }}
+          onBuffer={({ isBuffering: nextIsBuffering }) => {
+            if (!nextIsBuffering) {
+              setIsBuffering(false);
+              if (!preload && !paused) {
+                fadeOutPoster();
+              }
+            }
+          }}
+          onError={() => {
+            placeholderOpacity.stopAnimation();
+            placeholderOpacity.setValue(1);
+            setIsBuffering(false);
+            setVideoProgress(0);
+            setVideoFailed(true);
+          }}
+          playWhenInactive={false}
+          ignoreSilentSwitch="ignore"
+        />
+      ) : null}
+      {shouldMountVideo && contentBlurRadius > 0 && usablePosterUri ? (
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <Image
+            source={{ uri: usablePosterUri }}
             style={StyleSheet.absoluteFill}
             resizeMode={resizeMode}
-            paused={effectivePaused}
-            muted={muted || preload}
-            volume={safeVolume}
-            repeat={repeat}
-            controls={controls}
-            useTextureView={true}
-            onEnd={() => {
-              setVideoProgress(0);
-              onEnd?.();
-            }}
-            progressUpdateInterval={100}
-            preferredForwardBufferDuration={preload ? 2 : 4}
-            automaticallyWaitsToMinimizeStalling
-            bufferConfig={{
-              minBufferMs: 1000,
-              maxBufferMs: 15000,
-              bufferForPlaybackMs: 250,
-              bufferForPlaybackAfterRebufferMs: 500,
-            }}
-            onLoadStart={() => {
-              setIsBuffering(false);
-            }}
-            onLoad={(event) => {
-              setIsBuffering(false);
-              setIsVideoReady(true);
-              if (event?.duration && Number(event.duration) > 0) {
-                durationRef.current = Number(event.duration);
-              }
-              if (preload) {
-                videoRef.current?.seek?.(0);
-                setVideoProgress(0);
-              } else if (!paused) {
-                fadeOutPoster();
-              }
-              onLoad?.(event);
-            }}
-            onReadyForDisplay={() => {
-              setIsBuffering(false);
-              setIsVideoReady(true);
-              if (preload) {
-                videoRef.current?.seek?.(0);
-                setVideoProgress(0);
-              } else if (!paused) {
-                fadeOutPoster();
-              }
-            }}
-            onProgress={(data) => {
-              if (!preload && !paused) {
-                setIsBuffering(false);
-                setIsVideoReady(true);
-                fadeOutPoster();
-              }
-              const current = Number(data?.currentTime || 0);
-              const total = Number(
-                data?.seekableDuration || data?.playableDuration || durationRef.current || 0
-              );
-              if (total > 0) {
-                const ratio = Math.max(0, Math.min(1, current / total));
-                setVideoProgress(ratio);
-              }
-              onProgress?.(data);
-            }}
-            onBuffer={({ isBuffering: nextIsBuffering }) => {
-              if (!nextIsBuffering) {
-                setIsBuffering(false);
-                if (!preload && !paused) {
-                  fadeOutPoster();
-                }
-              }
-            }}
-            onError={() => {
-              placeholderOpacity.stopAnimation();
-              placeholderOpacity.setValue(1);
-              setIsBuffering(false);
-              setVideoProgress(0);
-              setVideoFailed(true);
-            }}
-            playWhenInactive={false}
-            ignoreSilentSwitch="ignore"
+            blurRadius={contentBlurRadius}
           />
+        </View>
+      ) : null}
+    </>
+  );
+
+  return (
+    <View style={[styles.container, containerStyle, { backgroundColor: fallbackColor }]}>
+      {mediaFrame ? (
+        <View pointerEvents="none" style={mediaFrame.frame}>
+          <View style={mediaFrame.content || StyleSheet.absoluteFill}>{mediaLayer}</View>
+        </View>
+      ) : (
+        mediaLayer
+      )}
+      {shouldMountVideo ? (
+        <>
           {showBufferingLoader && isBuffering && !preload ? (
             <View pointerEvents="none" style={styles.loaderOverlay}>
               <ActivityIndicator size="small" color="#fff" />
-            </View>
-          ) : null}
-          {contentBlurRadius > 0 && usablePosterUri ? (
-            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-              <Image
-                source={{ uri: usablePosterUri }}
-                style={StyleSheet.absoluteFill}
-                resizeMode={resizeMode}
-                blurRadius={contentBlurRadius}
-              />
             </View>
           ) : null}
           {showProgressBar && !preload ? (

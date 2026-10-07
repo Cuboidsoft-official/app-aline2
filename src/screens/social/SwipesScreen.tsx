@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
-  Easing,
   LayoutChangeEvent,
   FlatList,
   Image,
@@ -35,6 +34,8 @@ import CommentAudioBubble from "../../features/social/components/CommentAudioBub
 import InteractiveText from "../../features/social/components/InteractiveText";
 import ShareTargetsList, { ShareTarget } from "../../features/social/components/ShareTargetsList";
 import SocialVideo from "../../features/social/components/SocialVideo";
+import { toFramedMediaStyles } from "../../features/social/framedMedia";
+import { computeFramedMediaLayout } from "../composerConfig";
 import { createSwipeViewTracker } from "../../features/telemetry/swipeTelemetry";
 import MentionSuggestionList from "../../components/MentionSuggestionList";
 import VoiceRecorderButton from "../../components/chat/VoiceRecorderButton";
@@ -52,7 +53,7 @@ import { API } from "../../api/api";
 import { getStoredUser, getStoredUserId } from "../../utils/authSession";
 import { getActiveMentionQuery, insertMentionAtCursorEnd, mapMentionCandidate, MentionCandidate } from "../../utils/mentionComposer";
 
-const { height } = Dimensions.get("window");
+const { height, width: windowWidth } = Dimensions.get("window");
 const SWIPE_PAGE_SIZE = 10;
 const SWIPE_LOAD_MORE_THROTTLE_MS = 1200;
 const reportReasons: ReportReason[] = [
@@ -1001,7 +1002,7 @@ function SwipesScreen({ navigation, route }: any) {
     setIsUserPaused(false);
   }, [activeSwipeIndex]);
 
-    const animateLike = useCallback(() => {
+  const animateLike = useCallback(() => {
     likeScaleAnim.setValue(0.7);
     Animated.spring(likeScaleAnim, {
       toValue: 1,
@@ -1017,7 +1018,7 @@ function SwipesScreen({ navigation, route }: any) {
     setTimeout(() => {
       setLikeBurstSwipeId((current) => (current === swipeId ? "" : current));
     }, 720);
-  }, []);
+  }, [animateLike]);
 
   const handleSwipeMediaTap = (swipe: Swipe) => {
     if (holdPauseTriggeredRef.current) {
@@ -1146,6 +1147,17 @@ function SwipesScreen({ navigation, route }: any) {
     const shouldTruncateCaption = item.caption.length > 38 || item.caption.includes("\n");
     const relationship = getSwipeRelationship(item.user);
     const followBusy = !!busyActions[`follow_${item.user.id}`];
+    // Swipes framed in the editor play in that frame (Full fills the screen,
+    // 1:1 and 16:9 are a centred box) with the creator's pan/zoom applied.
+    const framedStyles = item.media.frameTransform
+      ? toFramedMediaStyles(computeFramedMediaLayout({
+        containerWidth: windowWidth,
+        containerHeight: viewportHeight,
+        mediaWidth: item.media.width,
+        mediaHeight: item.media.height,
+        frameTransform: item.media.frameTransform,
+      }))
+      : undefined;
 
     return (
       <View style={[styles.swipeItem, { height: viewportHeight }]}>
@@ -1181,7 +1193,8 @@ function SwipesScreen({ navigation, route }: any) {
                 }
               }}
               preload={isPreloadTarget}
-              resizeMode="contain"
+              resizeMode={framedStyles ? "cover" : "contain"}
+              mediaFrame={framedStyles}
               contentBlurRadius={item.media.sensitiveContent?.isSensitive ? 22 : 0}
               showBufferingLoader={false}
               showProgressBar={isActive}
