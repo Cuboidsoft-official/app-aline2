@@ -1,5 +1,5 @@
-export const APP_VERSION = "2.2.1";
-export const APP_RELEASE_DATE = "August 6, 2026";
+export const APP_VERSION = "2.2.5";
+export const APP_RELEASE_DATE = "October 9, 2026";
 export const APP_RELEASE_TITLE = "Referral Leaderboard, Fraud Reporting, Performance & UI Polish";
 
 export const APP_RELEASE_HIGHLIGHTS = [
