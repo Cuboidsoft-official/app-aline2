@@ -6,6 +6,9 @@ declare module 'react-native-view-shot' {
     options?: {
       format?: 'png' | 'jpg' | 'webm' | 'raw';
       quality?: number;
+      /** Output size in pixels; the capture is resized from the view bounds. */
+      width?: number;
+      height?: number;
       result?: 'tmpfile' | 'base64' | 'data-uri' | 'zip-base64';
       snapshotContentContainer?: boolean;
     };

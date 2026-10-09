@@ -53,28 +53,34 @@ describe("DEFAULT_ASPECT_BY_MODE", () => {
     expect(DEFAULT_ASPECT_BY_MODE.post).toBe("square");
   });
 
-  it("story defaults to vertical (9:16)", () => {
-    expect(DEFAULT_ASPECT_BY_MODE.story).toBe("vertical");
+  it("story defaults to fullscreen (9:16)", () => {
+    expect(DEFAULT_ASPECT_BY_MODE.story).toBe("fullscreen");
   });
 
-  it("swipe defaults to portrait (4:5)", () => {
-    expect(DEFAULT_ASPECT_BY_MODE.swipe).toBe("portrait");
+  it("swipe defaults to fullscreen (9:16)", () => {
+    expect(DEFAULT_ASPECT_BY_MODE.swipe).toBe("fullscreen");
   });
 });
 
 // ─── SWIPE_ASPECTS ────────────────────────────────────────────────────────────
 
 describe("SWIPE_ASPECTS", () => {
-  it("includes portrait 4:5", () => {
-    const opt = SWIPE_ASPECTS.find((a) => a.id === "portrait");
+  it("includes fullscreen 9:16", () => {
+    const opt = SWIPE_ASPECTS.find((a) => a.id === "fullscreen");
     expect(opt).toBeDefined();
-    expect(opt!.ratio).toBeCloseTo(4 / 5, 5);
+    expect(opt!.ratio).toBeCloseTo(9 / 16, 5);
   });
 
   it("includes landscape 16:9", () => {
     const opt = SWIPE_ASPECTS.find((a) => a.id === "landscape");
     expect(opt).toBeDefined();
     expect(opt!.ratio).toBeCloseTo(16 / 9, 5);
+  });
+
+  it("includes square 1:1", () => {
+    const opt = SWIPE_ASPECTS.find((a) => a.id === "square");
+    expect(opt).toBeDefined();
+    expect(opt!.ratio).toBe(1);
   });
 
   it("is a different array reference from POST_ASPECTS", () => {
@@ -85,16 +91,22 @@ describe("SWIPE_ASPECTS", () => {
 // ─── STORY_ASPECTS ────────────────────────────────────────────────────────────
 
 describe("STORY_ASPECTS", () => {
-  it("includes vertical 9:16", () => {
-    const opt = STORY_ASPECTS.find((a) => a.id === "vertical");
+  it("includes fullscreen 9:16", () => {
+    const opt = STORY_ASPECTS.find((a) => a.id === "fullscreen");
     expect(opt).toBeDefined();
     expect(opt!.ratio).toBeCloseTo(9 / 16, 5);
   });
 
-  it("includes portrait 4:5", () => {
-    const opt = STORY_ASPECTS.find((a) => a.id === "portrait");
+  it("includes landscape 16:9", () => {
+    const opt = STORY_ASPECTS.find((a) => a.id === "landscape");
     expect(opt).toBeDefined();
-    expect(opt!.ratio).toBeCloseTo(4 / 5, 5);
+    expect(opt!.ratio).toBeCloseTo(16 / 9, 5);
+  });
+
+  it("includes square 1:1", () => {
+    const opt = STORY_ASPECTS.find((a) => a.id === "square");
+    expect(opt).toBeDefined();
+    expect(opt!.ratio).toBe(1);
   });
 });
 
@@ -140,12 +152,12 @@ describe("inline aspect ratio toolbar", () => {
     expect(ASPECTS_BY_MODE.post[1].ratio).toBeCloseTo(16 / 9, 5);
   });
 
-  it("swipe mode exposes exactly 2 aspect options for the inline toolbar", () => {
-    expect(ASPECTS_BY_MODE.swipe).toHaveLength(2);
+  it("swipe mode exposes exactly 3 aspect options for the inline toolbar", () => {
+    expect(ASPECTS_BY_MODE.swipe).toHaveLength(3);
   });
 
-  it("story mode exposes exactly 2 aspect options for the inline toolbar", () => {
-    expect(ASPECTS_BY_MODE.story).toHaveLength(2);
+  it("story mode exposes exactly 3 aspect options for the inline toolbar", () => {
+    expect(ASPECTS_BY_MODE.story).toHaveLength(3);
   });
 
   it("each mode has a valid default that resolves to a real option", () => {
@@ -202,12 +214,12 @@ describe("findAspectOption", () => {
     expect(opt.ratio).toBeCloseTo(16 / 9);
   });
 
-  it("resolves vertical for story default", () => {
-    expect(findAspectOption("story", DEFAULT_ASPECT_BY_MODE.story).id).toBe("vertical");
+  it("resolves fullscreen for story default", () => {
+    expect(findAspectOption("story", DEFAULT_ASPECT_BY_MODE.story).id).toBe("fullscreen");
   });
 
-  it("resolves portrait for swipe default", () => {
-    expect(findAspectOption("swipe", DEFAULT_ASPECT_BY_MODE.swipe).id).toBe("portrait");
+  it("resolves fullscreen for swipe default", () => {
+    expect(findAspectOption("swipe", DEFAULT_ASPECT_BY_MODE.swipe).id).toBe("fullscreen");
   });
 });
 

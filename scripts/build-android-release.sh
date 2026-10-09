@@ -51,10 +51,12 @@ if [[ ! -f "$ANDROID_UPLOAD_STORE_FILE" ]]; then
 fi
 
 GRADLE_PROPS=()
+EXTRA_TASKS=()
 
 case "$MODE" in
-  apk)
+  apk|apk-aab)
     TASK=assembleRelease
+    if [[ "$MODE" == "apk-aab" ]]; then EXTRA_TASKS=(bundleRelease); fi
     GRADLE_PROPS=(
       -Paline2DisableAbiSplits=true
       -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
@@ -74,7 +76,7 @@ case "$MODE" in
     )
     ;;
   *)
-    printf 'Unknown build mode: %s (expected apk, apk-arm64, or aab)
+    printf 'Unknown build mode: %s (expected apk, apk-aab, apk-arm64, or aab)
 ' "$MODE" >&2
     exit 1
     ;;
@@ -135,7 +137,7 @@ ENVFILE="$ENVFILE_PATH" ./gradlew \
 node "$ROOT_DIR/scripts/ci/filter_android_autolinking.js"
 
 ENVFILE="$ENVFILE_PATH" ./gradlew \
-  "$TASK" \
+  "$TASK" "${EXTRA_TASKS[@]}" \
   --no-daemon \
   --console=plain \
   --max-workers=1 \

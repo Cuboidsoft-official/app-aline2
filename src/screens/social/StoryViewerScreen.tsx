@@ -24,6 +24,8 @@ import ContentActionSheet from "../../features/social/components/ContentActionSh
 import PremiumContentOverlay from "../../features/social/components/PremiumContentOverlay";
 import ProgressiveImage from "../../features/social/components/ProgressiveImage";
 import SocialVideo from "../../features/social/components/SocialVideo";
+import { toFramedMediaStyles } from "../../features/social/framedMedia";
+import { computeFramedMediaLayout } from "../composerConfig";
 import StoryActivitySheet from "../../features/social/components/StoryActivitySheet";
 import { stopAllSegmentedMusicPlayback, useSegmentedMusicPlayback, useSegmentedMusicWarmup } from "../../hooks/useSegmentedMusicPlayback";
 import { socialApi } from "../../features/social/socialApi";
@@ -107,7 +109,10 @@ function StoryViewerScreen({ route, navigation }: any) {
   const storyUserId = typeof route?.params?.storyUserId === "string" ? route.params.storyUserId : undefined;
   const isScreenFocused = useIsFocused();
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  const stageWidth = stageSize.width || windowWidth;
+  const stageHeight = stageSize.height || windowHeight;
 
   const [stories, setStories] = useState<Story[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -755,7 +760,21 @@ function StoryViewerScreen({ route, navigation }: any) {
       );
     }
 
-    // Legacy / single-media story (existing behavior unchanged)
+    // Single-media story. 1:1 and 16:9 stories are shown as a centred box at
+    // their real size; Full Screen stories fill the screen. Any pan/zoom the
+    // creator saved is applied inside the frame.
+    const framedLayout = computeFramedMediaLayout({
+      containerWidth: stageWidth,
+      containerHeight: stageHeight,
+      mediaWidth: currentStory.media?.width,
+      mediaHeight: currentStory.media?.height,
+      frameTransform: currentStory.media?.frameTransform,
+    });
+    const isFramed = !!framedLayout.content
+      || framedLayout.frame.width < stageWidth - 0.5
+      || framedLayout.frame.height < stageHeight - 0.5;
+    const framedStyles = isFramed ? toFramedMediaStyles(framedLayout) : undefined;
+
     if (currentStory.media?.mediaType === "video") {
       if (!currentStory.media?.url) {
         return <View style={[styles.storyImage, styles.storyFallback]} />;
@@ -771,6 +790,7 @@ function StoryViewerScreen({ route, navigation }: any) {
             muted={!isScreenFocused || !isMusicEnabled || hasStoryAttachedMusic}
             onEnd={next}
             contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}
+            mediaFrame={framedStyles}
           />
           {currentStory.media?.sensitiveContent?.isSensitive ? (
             <View style={styles.sensitiveBadge}>
@@ -787,12 +807,25 @@ function StoryViewerScreen({ route, navigation }: any) {
     const previewUri = normalizeMediaUrl(currentStory.media?.thumbnailUrl || currentStory.media?.url);
     return imageUri ? (
       <View style={styles.storyImage}>
-        <ProgressiveImage
-          uri={imageUri}
-          previewUri={previewUri}
-          style={styles.storyImage}
-          contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}
-        />
+        {framedStyles ? (
+          <View pointerEvents="none" style={framedStyles.frame}>
+            <View style={framedStyles.content || StyleSheet.absoluteFill}>
+              <ProgressiveImage
+                uri={imageUri}
+                previewUri={previewUri}
+                style={styles.storyImage}
+                contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}
+              />
+            </View>
+          </View>
+        ) : (
+          <ProgressiveImage
+            uri={imageUri}
+            previewUri={previewUri}
+            style={styles.storyImage}
+            contentBlurRadius={currentStory.media?.sensitiveContent?.isSensitive ? 22 : 0}
+          />
+        )}
         {currentStory.media?.sensitiveContent?.isSensitive ? (
           <View style={styles.sensitiveBadge}>
             <Text style={styles.sensitiveBadgeText}>
@@ -1007,7 +1040,15 @@ function StoryViewerScreen({ route, navigation }: any) {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={styles.container}
+      onLayout={(event) => {
+        const { width, height } = event.nativeEvent.layout;
+        if (width && height && (width !== stageSize.width || height !== stageSize.height)) {
+          setStageSize({ width, height });
+        }
+      }}
+    >
       <PremiumContentOverlay
         isPremium={currentStory?.isPremium}
         premiumPrice={currentStory?.premiumPrice}

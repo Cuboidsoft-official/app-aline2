@@ -3250,11 +3250,12 @@ const ChatScreen = ({ navigation, route }: any) => {
         ref={(instance) => {
           swipeableRef = instance;
         }}
-        friction={1.4}
+        friction={2}
         overshootLeft={false}
         overshootRight={false}
-        leftThreshold={18}
-        rightThreshold={18}
+        leftThreshold={40}
+        rightThreshold={40}
+        animationOptions={{ speed: 5, bounciness: 2 }}
         renderLeftActions={isMine ? undefined : () => (
           <View style={styles.swipeReplyAction}>
             <Icon name="return-up-back-outline" size={18} color="#fff" />
