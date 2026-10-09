@@ -3984,6 +3984,9 @@ const ChatScreen = ({ navigation, route }: any) => {
                   });
                 }}
                 tintColor={colors.primary}
+                colors={[colors.primary]}
+                progressViewOffset={30}
+                style={{ transform: [{ scaleY: -1 }] }}
               />
             }
             ListFooterComponent={

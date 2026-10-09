@@ -1222,28 +1222,7 @@ function SwipesScreen({ navigation, route }: any) {
               </LinearGradient>
             </TouchableOpacity>
           </View>
-          {isActive ? (
-            <View pointerEvents="box-none" style={styles.reelNavigationControls}>
-              <TouchableOpacity
-                accessibilityLabel="Previous swipe"
-                accessibilityRole="button"
-                disabled={activeSwipeIndex <= 0}
-                onPress={() => navigateToAdjacentSwipe("previous")}
-                style={[styles.reelNavigationButton, activeSwipeIndex <= 0 && styles.reelNavigationButtonDisabled]}
-              >
-                <Icon name="chevron-up" size={22} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                accessibilityLabel="Next swipe"
-                accessibilityRole="button"
-                disabled={activeSwipeIndex >= swipes.length - 1}
-                onPress={() => navigateToAdjacentSwipe("next")}
-                style={[styles.reelNavigationButton, activeSwipeIndex >= swipes.length - 1 && styles.reelNavigationButtonDisabled]}
-              >
-                <Icon name="chevron-down" size={22} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          ) : null}
+
           <View pointerEvents="box-none" style={styles.bottomRow}>
             <View pointerEvents="box-none" style={styles.bottomTextBlock}>
               <View style={styles.userMetaBlock}>
