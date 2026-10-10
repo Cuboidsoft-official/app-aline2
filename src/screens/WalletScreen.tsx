@@ -27,6 +27,7 @@ type WalletTxn = {
   amount?: number;
   type?: string;
   source?: string;
+  status?: string;
   note?: string;
 };
 
@@ -279,8 +280,8 @@ function WalletScreen({ navigation }: any) {
       }
     } catch (error: any) {
       const serverMsg = error?.response?.data?.message || "";
-      const readableMsg = getReadableApiErrorMessage(error, "Check Razorpay API, payment failed or check API provider.");
-      const finalErrorMessage = serverMsg || readableMsg || "Check Razorpay API, payment failed or check API provider.";
+      const readableMsg = getReadableApiErrorMessage(error, "Unable to process withdrawal request right now. Please try again.");
+      const finalErrorMessage = serverMsg || readableMsg || "Unable to process withdrawal request right now. Please try again.";
 
       setShowWithdrawModal(false);
       setWithdrawalErrorMsg(finalErrorMessage);
@@ -642,7 +643,18 @@ function WalletScreen({ navigation }: any) {
               </View>
               <View style={styles.listCopy}>
                 <Text style={[styles.listTitle, { color: colors.text }]}>{entry.note || entry.source || "Wallet activity"}</Text>
-                <Text style={[styles.listMeta, { color: textSecondary }]}>{String(entry.type || "credit").toUpperCase()}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                  <Text style={[styles.listMeta, { color: textSecondary }]}>{String(entry.type || "credit").toUpperCase()}</Text>
+                  {entry.status === "pending" ? (
+                    <View style={{ backgroundColor: isDarkMode ? "rgba(245,158,11,0.2)" : "#FEF3C7", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#D97706" }}>PENDING</Text>
+                    </View>
+                  ) : entry.status === "rejected" ? (
+                    <View style={{ backgroundColor: isDarkMode ? "rgba(239,68,68,0.2)" : "#FEE2E2", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#DC2626" }}>REJECTED</Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
               <Text style={[styles.listAmount, { color: entry.type === "debit" ? "#F97316" : "#22C55E" }]}>
                 {entry.type === "debit" ? "-" : "+"}{formatCurrencyAmount(entry.amount || 0, walletData?.currency || "INR")}
@@ -724,12 +736,12 @@ function WalletScreen({ navigation }: any) {
               <Icon name="warning-outline" size={32} color="#EF4444" />
             </View>
 
-            <Text style={[styles.errorModalTitle, { color: colors.text }]}>Withdrawal Payment Failed</Text>
-            <Text style={styles.errorModalSubtitle}>Check Razorpay API or API Provider</Text>
+            <Text style={[styles.errorModalTitle, { color: colors.text }]}>Withdrawal Request Error</Text>
+            <Text style={styles.errorModalSubtitle}>Payout Notice</Text>
 
             <View style={[styles.errorDetailsBox, { backgroundColor: isDarkMode ? "#1F1315" : "#FFF5F5", borderColor: isDarkMode ? "#3D1E22" : "#FEE2E2" }]}>
               <Text style={[styles.errorDetailsText, { color: colors.text }]}>
-                {withdrawalErrorMsg || "Check Razorpay API, payment failed or check API provider."}
+                {withdrawalErrorMsg || "Unable to process withdrawal request right now. Please try again."}
               </Text>
             </View>
 
@@ -780,7 +792,7 @@ function WalletScreen({ navigation }: any) {
               style={styles.withdrawModalScroll}
             >
               <Text style={[styles.withdrawModalSubtitle, { color: textSecondary }]}>
-                {withdrawalConfig?.notice || "Withdrawal funds will be transferred automatically to your saved bank account."}
+                {withdrawalConfig?.notice || "Withdrawal funds will be processed and transferred to your saved bank account."}
               </Text>
 
               <View style={[styles.withdrawBalanceBanner, { backgroundColor: panelAlt, borderColor: border }]}>
