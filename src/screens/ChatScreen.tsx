@@ -3975,22 +3975,8 @@ const ChatScreen = ({ navigation, route }: any) => {
             maxToRenderPerBatch={15}
             windowSize={7}
             keyboardShouldPersistTaps="handled"
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={() => {
-                  initializeChat({ refresh: true }).catch((error) => {
-                    console.log("Chat refresh error:", error);
-                  });
-                }}
-                tintColor={colors.primary}
-                colors={[colors.primary]}
-                progressViewOffset={30}
-                style={{ transform: [{ scaleY: -1 }] }}
-              />
-            }
             ListFooterComponent={
-              pagination?.hasMore && loadingMore ? (
+              (pagination?.hasMore && loadingMore) || refreshing ? (
                 <View
                   style={{
                     alignItems: "center",
