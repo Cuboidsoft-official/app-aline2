@@ -27,6 +27,7 @@ type WalletTxn = {
   amount?: number;
   type?: string;
   source?: string;
+  status?: string;
   note?: string;
 };
 
@@ -642,7 +643,18 @@ function WalletScreen({ navigation }: any) {
               </View>
               <View style={styles.listCopy}>
                 <Text style={[styles.listTitle, { color: colors.text }]}>{entry.note || entry.source || "Wallet activity"}</Text>
-                <Text style={[styles.listMeta, { color: textSecondary }]}>{String(entry.type || "credit").toUpperCase()}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                  <Text style={[styles.listMeta, { color: textSecondary }]}>{String(entry.type || "credit").toUpperCase()}</Text>
+                  {entry.status === "pending" ? (
+                    <View style={{ backgroundColor: isDarkMode ? "rgba(245,158,11,0.2)" : "#FEF3C7", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#D97706" }}>PENDING</Text>
+                    </View>
+                  ) : entry.status === "rejected" ? (
+                    <View style={{ backgroundColor: isDarkMode ? "rgba(239,68,68,0.2)" : "#FEE2E2", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#DC2626" }}>REJECTED</Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
               <Text style={[styles.listAmount, { color: entry.type === "debit" ? "#F97316" : "#22C55E" }]}>
                 {entry.type === "debit" ? "-" : "+"}{formatCurrencyAmount(entry.amount || 0, walletData?.currency || "INR")}
