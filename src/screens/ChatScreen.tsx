@@ -1015,8 +1015,8 @@ const ChatScreen = ({ navigation, route }: any) => {
     const showSubscription = Keyboard.addListener(showEvent, () => {
       setIsKeyboardVisible(true);
       setTimeout(() => {
-        messageListRef.current?.scrollToEnd?.({ animated: false });
-      }, 100);
+        messageListRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+      }, 50);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       setIsKeyboardVisible(false);
