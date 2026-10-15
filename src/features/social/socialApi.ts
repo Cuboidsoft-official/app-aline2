@@ -610,19 +610,22 @@ class RemoteSocialApi implements SocialApi {
               : {}),
           }
         : undefined,
-      sensitiveContent: item?.sensitiveContent?.isSensitive || item?.mediaSensitivity?.isSensitive
-        ? {
-            isSensitive: true,
-            blur: item?.sensitiveContent?.blur !== false && item?.mediaSensitivity?.blur !== false,
-            label: item?.sensitiveContent?.label || item?.mediaSensitivity?.label,
-            confidence:
-              typeof item?.sensitiveContent?.confidence === "number"
-                ? item.sensitiveContent.confidence
-                : typeof item?.mediaSensitivity?.confidence === "number"
-                  ? item.mediaSensitivity.confidence
-                  : undefined,
-          }
-        : undefined,
+      sensitiveContent:
+        prefix === "post_media"
+          ? undefined
+          : item?.sensitiveContent?.isSensitive || item?.mediaSensitivity?.isSensitive
+          ? {
+              isSensitive: true,
+              blur: item?.sensitiveContent?.blur !== false && item?.mediaSensitivity?.blur !== false,
+              label: item?.sensitiveContent?.label || item?.mediaSensitivity?.label,
+              confidence:
+                typeof item?.sensitiveContent?.confidence === "number"
+                  ? item.sensitiveContent.confidence
+                  : typeof item?.mediaSensitivity?.confidence === "number"
+                    ? item.mediaSensitivity.confidence
+                    : undefined,
+            }
+          : undefined,
     };
   }
 

@@ -26,29 +26,8 @@ export type UploadComposerAssetsOptions = {
   onProgress?: (progress: number) => void;
 };
 
-const mapSensitiveContent = (moderation: any) => {
-  const status = String(moderation?.status || "").trim().toLowerCase();
-  const topLabel = String(moderation?.topLabel || moderation?.reason || "").trim().toLowerCase();
-  const confidence = Number(moderation?.confidence);
-  const isSensitive =
-    moderation?.isSensitive === true
-    || status === "blocked"
-    || status === "review"
-    || topLabel === "porn"
-    || topLabel === "hentai"
-    || topLabel === "sexy"
-    || topLabel === "nudity";
-
-  if (!isSensitive) {
-    return undefined;
-  }
-
-  return {
-    isSensitive: true,
-    blur: true,
-    label: topLabel || "sensitive",
-    confidence: Number.isFinite(confidence) ? confidence : undefined,
-  };
+const mapSensitiveContent = (_moderation: any) => {
+  return undefined;
 };
 
 const HTTP_URL_PATTERN = /^https?:\/\//i;
