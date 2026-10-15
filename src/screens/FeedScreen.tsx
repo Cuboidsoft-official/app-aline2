@@ -1849,11 +1849,10 @@ function FeedScreen({ navigation, route }: any) {
                 restartKey={post.id}
                 onLoad={(event) => handleFeedVideoLoaded(post.id, primaryMedia.id, event)}
                 resizeMode="cover"
-                contentBlurRadius={primaryMedia.sensitiveContent?.isSensitive ? 22 : 0}
+                contentBlurRadius={0}
                 showBufferingLoader={false}
               />
             </View>
-            {primaryMedia.sensitiveContent?.isSensitive ? renderSensitiveBadge(primaryMedia.sensitiveContent.label) : null}
           </View>
         );
       }
@@ -1866,10 +1865,9 @@ function FeedScreen({ navigation, route }: any) {
               previewUri={normalizeMediaUrl(primaryMedia?.thumbnailUrl || primaryMedia?.url)}
               style={StyleSheet.absoluteFill}
               resizeMode="cover"
-              contentBlurRadius={primaryMedia?.sensitiveContent?.isSensitive ? 22 : 0}
+              contentBlurRadius={0}
             />
           </View>
-          {primaryMedia?.sensitiveContent?.isSensitive ? renderSensitiveBadge(primaryMedia.sensitiveContent.label) : null}
         </View>
       );
 
@@ -1996,11 +1994,10 @@ function FeedScreen({ navigation, route }: any) {
                     restartKey={`${post.id}:${asset.id}`}
                     onLoad={(event) => handleFeedVideoLoaded(post.id, asset.id, event)}
                     resizeMode="cover"
-                    contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+                    contentBlurRadius={0}
                     showBufferingLoader={false}
                   />
                 </View>
-                {asset.sensitiveContent?.isSensitive ? renderSensitiveBadge(asset.sensitiveContent.label) : null}
               </View>
             ) : (
               (() => {
@@ -2012,10 +2009,9 @@ function FeedScreen({ navigation, route }: any) {
                         previewUri={normalizeMediaUrl(asset.thumbnailUrl || asset.url)}
                         style={StyleSheet.absoluteFill}
                         resizeMode="cover"
-                        contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+                        contentBlurRadius={0}
                       />
                     </View>
-                    {asset.sensitiveContent?.isSensitive ? renderSensitiveBadge(asset.sensitiveContent.label) : null}
                   </View>
                 );
 

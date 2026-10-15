@@ -389,16 +389,9 @@ function PostDetailScreen({ route, navigation }: any) {
               style={StyleSheet.absoluteFill}
               muted={!isMediaSoundEnabled}
               repeat
-              contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+              contentBlurRadius={0}
             />
           </View>
-          {asset.sensitiveContent?.isSensitive ? (
-            <View style={styles.sensitiveBadge}>
-              <Text style={styles.sensitiveBadgeText}>
-                {asset.sensitiveContent.label ? `${asset.sensitiveContent.label} sensitive content` : "Sensitive content"}
-              </Text>
-            </View>
-          ) : null}
         </View>
       );
     }
@@ -411,16 +404,9 @@ function PostDetailScreen({ route, navigation }: any) {
             previewUri={posterUrl}
             style={StyleSheet.absoluteFill}
             resizeMode="cover"
-            contentBlurRadius={asset.sensitiveContent?.isSensitive ? 22 : 0}
+            contentBlurRadius={0}
           />
         </View>
-        {asset.sensitiveContent?.isSensitive ? (
-          <View style={styles.sensitiveBadge}>
-            <Text style={styles.sensitiveBadgeText}>
-              {asset.sensitiveContent.label ? `${asset.sensitiveContent.label} sensitive content` : "Sensitive content"}
-            </Text>
-          </View>
-        ) : null}
       </View>
     );
 

@@ -2833,7 +2833,7 @@ function CreatePostScreen({ navigation, route }: any) {
         ? ((premiumOriginalMedia ?? []).some((m) => m.type === "video") ? "video" : "photo")
         : (framedMedia.length > 1 ? "carousel" : firstMedia?.mediaType === "video" ? "video" : "photo"),
       caption: caption.trim(),
-      media: framedMedia,
+      media: framedMedia.map(({ sensitiveContent: _sc, ...rest }) => rest),
       location: location.trim() || undefined,
       hashtags,
       mentions,
