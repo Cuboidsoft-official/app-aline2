@@ -102,7 +102,12 @@ const SplashScreen = ({ navigation }: any) => {
   }, []);
 
   const checkLaunchState = useCallback(async () => {
-    const token = await getStoredToken();
+    let token: string | null = null;
+    try {
+      token = await getStoredToken();
+    } catch (e) {
+      console.log("[Splash] Failed to read stored token:", e);
+    }
 
     if (!token) {
       const hasSeenGuestIntro = (await AsyncStorage.getItem(GUEST_ONBOARDING_KEY).catch(() => null)) === "true";
@@ -123,20 +128,26 @@ const SplashScreen = ({ navigation }: any) => {
 
     const authHandle = setTimeout(async () => {
       try {
-        await API.get("/auth/profile", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        await API.get("/auth/profile");
 
         navigation.reset({
           index: 0,
           routes: [{ name: "MainApp" }],
         });
       } catch (error: any) {
-        console.log("Session validation failed:", error);
-        await clearStoredSession();
-        navigation.replace("Login");
+        console.log("Session validation failed:", error?.message);
+        const isAuthError = error?.response?.status === 401 || error?.response?.status === 403;
+
+        if (isAuthError) {
+          await clearStoredSession();
+          navigation.replace("Login");
+        } else {
+          // Network drop, timeout, or server unavailable. Keep session and proceed to MainApp.
+          navigation.reset({
+            index: 0,
+            routes: [{ name: "MainApp" }],
+          });
+        }
       }
     }, 1200);
 

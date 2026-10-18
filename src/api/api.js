@@ -139,17 +139,29 @@ const attachConnectionFailover = (client, kind) => {
       ) {
         try {
           const nextAccessToken = await refreshAccessToken();
+          const retryHeaders = {
+            ...(originalConfig.headers || {}),
+            Authorization: `Bearer ${nextAccessToken}`,
+          };
+          if (retryHeaders.authorization) {
+            delete retryHeaders.authorization;
+          }
+
           return client.request({
             ...originalConfig,
             __isRetryAfterRefresh: true,
-            headers: {
-              ...originalConfig.headers,
-              Authorization: `Bearer ${nextAccessToken}`,
-            },
+            headers: retryHeaders,
           });
         } catch (refreshError) {
-          await clearStoredSession();
-          notifySessionInvalidation();
+          const isAuthFailure =
+            refreshError?.response?.status === 401 ||
+            refreshError?.response?.status === 403 ||
+            refreshError?.message === "No refresh token available";
+
+          if (isAuthFailure) {
+            await clearStoredSession();
+            notifySessionInvalidation();
+          }
           return Promise.reject(refreshError);
         }
       }
