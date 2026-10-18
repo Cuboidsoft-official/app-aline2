@@ -3,6 +3,7 @@ import * as Keychain from "react-native-keychain";
 import { normalizeMediaFieldsDeep } from "./mediaUrls";
 
 const SESSION_SERVICE = "aline2.auth.session";
+const SESSION_DATA_KEY = "aline2_session_data";
 const LEGACY_TOKEN_KEY = "token";
 const USER_KEY = "user";
 const USER_ID_KEY = "userId";
@@ -30,20 +31,47 @@ const parseJson = (value) => {
 };
 
 const getSecureSession = async () => {
-  const credentials = await Keychain.getGenericPassword({ service: SESSION_SERVICE });
+  try {
+    const credentials = await Keychain.getGenericPassword({ service: SESSION_SERVICE });
 
-  if (!credentials) {
+    if (!credentials) {
+      return null;
+    }
+
+    return parseJson(credentials.password);
+  } catch (error) {
+    console.log("[authSession] Keychain read error, falling back to AsyncStorage:", error?.message);
     return null;
   }
-
-  return parseJson(credentials.password);
 };
 
-const setSecureSession = async (session) =>
-  Keychain.setGenericPassword("aline2-session", JSON.stringify(session), {
-    service: SESSION_SERVICE,
-    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-  });
+const setSecureSession = async (session) => {
+  try {
+    await Keychain.setGenericPassword("aline2-session", JSON.stringify(session), {
+      service: SESSION_SERVICE,
+      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    });
+  } catch (error) {
+    console.log("[authSession] Keychain write error (non-fatal):", error?.message);
+  }
+};
+
+const clearSecureSession = async () => {
+  try {
+    await Keychain.resetGenericPassword({ service: SESSION_SERVICE });
+  } catch (error) {
+    console.log("[authSession] Keychain reset error (non-fatal):", error?.message);
+  }
+};
+
+const getAsyncSessionData = async () => {
+  try {
+    const raw = await AsyncStorage.getItem(SESSION_DATA_KEY);
+    return parseJson(raw);
+  } catch {
+    return null;
+  }
+};
 
 const notifySessionChanged = () => {
   sessionChangeListeners.forEach((listener) => {
@@ -56,32 +84,59 @@ const notifySessionChanged = () => {
 };
 
 export const getStoredToken = async () => {
-  const secureSession = await getSecureSession();
+  try {
+    const secureSession = await getSecureSession();
 
-  if (secureSession?.accessToken) {
-    return secureSession.accessToken;
+    if (secureSession?.accessToken) {
+      return secureSession.accessToken;
+    }
+
+    const asyncSession = await getAsyncSessionData();
+    if (asyncSession?.accessToken) {
+      return asyncSession.accessToken;
+    }
+
+    return (await AsyncStorage.getItem(LEGACY_TOKEN_KEY).catch(() => null)) || null;
+  } catch {
+    return null;
   }
-
-  return AsyncStorage.getItem(LEGACY_TOKEN_KEY);
 };
 
 export const getStoredRefreshToken = async () => {
-  const secureSession = await getSecureSession();
-  return secureSession?.refreshToken || null;
+  try {
+    const secureSession = await getSecureSession();
+    if (secureSession?.refreshToken) {
+      return secureSession.refreshToken;
+    }
+
+    const asyncSession = await getAsyncSessionData();
+    return asyncSession?.refreshToken || null;
+  } catch {
+    return null;
+  }
 };
 
 export const getStoredSessionMeta = async () => {
-  const secureSession = await getSecureSession();
-  return secureSession?.session || null;
+  try {
+    const secureSession = await getSecureSession();
+    if (secureSession?.session) {
+      return secureSession.session;
+    }
+
+    const asyncSession = await getAsyncSessionData();
+    return asyncSession?.session || null;
+  } catch {
+    return null;
+  }
 };
 
 export const getStoredUser = async () => {
-  const rawUser = await AsyncStorage.getItem(USER_KEY);
+  const rawUser = await AsyncStorage.getItem(USER_KEY).catch(() => null);
   return parseJson(rawUser);
 };
 
 export const getStoredUserId = async () => {
-  const rawUserId = await AsyncStorage.getItem(USER_ID_KEY);
+  const rawUserId = await AsyncStorage.getItem(USER_ID_KEY).catch(() => null);
   if (rawUserId) {
     return rawUserId;
   }
@@ -99,15 +154,23 @@ export const setStoredSession = async (payload = {}) => {
       ? normalizeMediaFieldsDeep(user)
       : user;
 
+  const sessionObj = {
+    accessToken: nextAccessToken || null,
+    refreshToken: nextRefreshToken || null,
+    session: session || null,
+  };
+
   if (nextAccessToken || nextRefreshToken || session) {
-    await setSecureSession({
-      accessToken: nextAccessToken || null,
-      refreshToken: nextRefreshToken || null,
-      session: session || null,
-    });
+    await setSecureSession(sessionObj);
   }
 
-  const writes = [AsyncStorage.removeItem(LEGACY_TOKEN_KEY)];
+  const writes = [
+    AsyncStorage.setItem(SESSION_DATA_KEY, JSON.stringify(sessionObj)),
+  ];
+
+  if (nextAccessToken) {
+    writes.push(AsyncStorage.setItem(LEGACY_TOKEN_KEY, nextAccessToken));
+  }
 
   if (normalizedUser && typeof normalizedUser === "object") {
     writes.push(AsyncStorage.setItem(USER_KEY, JSON.stringify(normalizedUser)));
@@ -118,14 +181,14 @@ export const setStoredSession = async (payload = {}) => {
     }
   }
 
-  await Promise.all(writes);
+  await Promise.all(writes.map((w) => w.catch(() => {})));
   notifySessionChanged();
 };
 
 export const clearStoredSession = async () => {
   await Promise.all([
-    Keychain.resetGenericPassword({ service: SESSION_SERVICE }),
-    AsyncStorage.multiRemove([LEGACY_TOKEN_KEY, USER_KEY, USER_ID_KEY]),
+    clearSecureSession(),
+    AsyncStorage.multiRemove([SESSION_DATA_KEY, LEGACY_TOKEN_KEY, USER_KEY, USER_ID_KEY]).catch(() => {}),
   ]);
   notifySessionChanged();
 };
