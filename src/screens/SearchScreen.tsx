@@ -25,6 +25,7 @@ import AppAvatar from "../components/AppAvatar";
 import DraggableBottomSheet from "../components/DraggableBottomSheet";
 import FeaturedProfilesCarousel, { type FeaturedProfileItem } from "../components/FeaturedProfilesCarousel";
 import { normalizeMediaUrl } from "../utils/mediaUrls";
+import { searchPublicChannels } from "../features/search/channelSearch";
 
 type UserItem = {
   _id: string;
@@ -330,10 +331,7 @@ const isVerifiedSellerOnly = (seller: any): boolean => {
         }
 
         if (activeTab === "channels") {
-          const res = await API.get("/search/all", {
-            params: { query: trimmedQuery || "a", type: "channels" }
-          });
-          setChannels(res.data?.results?.channels || []);
+          setChannels(await searchPublicChannels(trimmedQuery || "a"));
           setErrorMessage("");
           return;
         }

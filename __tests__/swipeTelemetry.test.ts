@@ -1,16 +1,18 @@
-import { createSwipeViewTracker } from "../src/features/telemetry/swipeTelemetry";
+import { createSwipeViewTracker, refreshSwipeTelemetryGate } from "../src/features/telemetry/swipeTelemetry";
 
 jest.mock("../src/api/api", () => ({
-  API: { post: jest.fn() },
+  API: { get: jest.fn(), post: jest.fn() },
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { API } = require("../src/api/api");
 
 describe("createSwipeViewTracker (Phase 10C engagement telemetry)", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    (API.get as jest.Mock).mockReset();
     (API.post as jest.Mock).mockReset();
+    (API.get as jest.Mock).mockResolvedValue({ data: { success: true, enabled: true } });
     (API.post as jest.Mock).mockResolvedValue({ data: { success: true } });
+    await refreshSwipeTelemetryGate(true);
   });
 
   it("does not throw when the telemetry request fails -- playback must never be interrupted", () => {
@@ -98,8 +100,54 @@ describe("createSwipeViewTracker (Phase 10C engagement telemetry)", () => {
     const tracker = createSwipeViewTracker({ userId: "u42", postId: "postABC", viewSeq: 9 });
     tracker.handleImpression();
     const [, payload] = (API.post as jest.Mock).mock.calls[0];
-    expect(payload.eventId).toBe("swipe:u42:postABC:9:impression");
+    expect(payload.eventId).toMatch(/^swipe:u42:postABC:[^:]+:9:impression$/);
     expect(payload.userId).toBeUndefined(); // userId is not in the body; backend derives it from the auth token
+  });
+
+  it("uses different event IDs for identical views in separate app sessions", () => {
+    createSwipeViewTracker({ userId: "u42", postId: "postABC", viewSeq: 1, sessionId: "session-one" }).handleImpression();
+    createSwipeViewTracker({ userId: "u42", postId: "postABC", viewSeq: 1, sessionId: "session-two" }).handleImpression();
+
+    const ids = (API.post as jest.Mock).mock.calls.map((call) => call[1].eventId);
+    expect(ids).toEqual([
+      "swipe:u42:postABC:session-one:1:impression",
+      "swipe:u42:postABC:session-two:1:impression",
+    ]);
+  });
+
+  it("emits nothing when operations disable telemetry", async () => {
+    (API.get as jest.Mock).mockResolvedValue({ data: { success: true, enabled: false } });
+    await refreshSwipeTelemetryGate(true);
+    const tracker = createSwipeViewTracker({ userId: "u42", postId: "postABC", viewSeq: 11 });
+    tracker.handleImpression();
+    tracker.handleLoad(10000);
+    tracker.handleProgress(8, 10);
+    tracker.finalize();
+    expect(API.post).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the config request fails", async () => {
+    (API.get as jest.Mock).mockRejectedValue(new Error("offline"));
+    await refreshSwipeTelemetryGate(true);
+    createSwipeViewTracker({ userId: "u42", postId: "postABC", viewSeq: 12 }).handleImpression();
+    expect(API.post).not.toHaveBeenCalled();
+  });
+
+  it("shares one config request across a cold set of events before posting", async () => {
+    const now = Date.now();
+    const clock = jest.spyOn(Date, "now").mockReturnValue(now + 61_000);
+    (API.get as jest.Mock).mockClear();
+    try {
+      const tracker = createSwipeViewTracker({ userId: "u42", postId: "postABC", viewSeq: 13 });
+      tracker.handleImpression();
+      tracker.handleLoad(10000);
+      expect(API.post).not.toHaveBeenCalled();
+      await refreshSwipeTelemetryGate();
+      expect(API.get).toHaveBeenCalledTimes(1);
+      expect(API.post).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("does not call the network at all without a userId or postId", () => {
